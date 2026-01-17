@@ -254,6 +254,13 @@
   export function triggerRedo() {
     redo(view);
   }
+  export function selectAll() {
+    if (!view) return;
+    view.dispatch({
+      selection: { anchor: 0, head: view.state.doc.length },
+    });
+    view.focus();
+  }
 
   function handleTouch(e: TouchEvent) {
     if (e.touches.length === 2) {

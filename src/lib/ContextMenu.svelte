@@ -33,7 +33,8 @@
           ) {
             activeEl.select();
           } else {
-            document.execCommand("selectAll");
+            // 派发自定义事件让父组件处理
+            window.dispatchEvent(new CustomEvent("editor-select-all"));
           }
           break;
       }

@@ -1,24 +1,24 @@
+use chardetng::EncodingDetector;
+use fancy_regex::Regex;
+use md5;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::process; // 引入进程控制
-use chardetng::EncodingDetector;
-use fancy_regex::Regex;
-use serde::{Serialize, Deserialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 use zip::write::FileOptions;
-use md5; 
 
 // --- 静态资源: 整理后的 CSS ---
 
 const CSS_FONT: &str = r#"@charset "utf-8";
-/*筑紫A丸+sleek+液晶数字 日标*/
+/*正文字体*/
 @font-face {
     font-family: "Maintext";
     src: url("../Fonts/Maintext.ttf");
 }
 
-/*哥特式字体*/
+/*标题字体*/
 @font-face {
     font-family: "Title";
     src: url("../Fonts/Title.ttf"); 
@@ -480,8 +480,12 @@ div.roundsolid2 {
 
 // --- 数据结构 ---
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)] 
-enum TocType { Volume, Chapter, Meta }
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+enum TocType {
+    Volume,
+    Chapter,
+    Meta,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct ChapterInfo {
@@ -492,13 +496,27 @@ struct ChapterInfo {
 }
 
 #[derive(Serialize, Clone, Copy)]
-struct MatchLocation { line: usize, start_char: usize, end_char: usize }
+struct MatchLocation {
+    line: usize,
+    start_char: usize,
+    end_char: usize,
+}
 
 #[derive(Serialize)]
-struct SearchResult { found: bool, count: usize, matches: Vec<MatchLocation> }
+struct SearchResult {
+    found: bool,
+    count: usize,
+    matches: Vec<MatchLocation>,
+}
 
 #[derive(Serialize)]
-struct HistoryMeta { filename: String, path: String, timestamp: u64, size: u64, date_str: String }
+struct HistoryMeta {
+    filename: String,
+    path: String,
+    timestamp: u64,
+    size: u64,
+    date_str: String,
+}
 
 #[derive(Deserialize, Debug)]
 struct EpubMetadata {
@@ -513,11 +531,12 @@ struct EpubMetadata {
 // --- 辅助函数 ---
 
 fn escape_xml(input: &str) -> String {
-    input.replace("&", "&amp;")
-         .replace("<", "&lt;")
-         .replace(">", "&gt;")
-         .replace("\"", "&quot;")
-         .replace("'", "&apos;")
+    input
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
 }
 
 fn format_vertical_volume(text: &str) -> String {
@@ -528,11 +547,15 @@ fn format_vertical_volume(text: &str) -> String {
 }
 
 fn split_title(full_title: &str) -> (String, String) {
-    let strict_re = Regex::new(r"^\s*(第[0-9零一二三四五六七八九十百千万]+[卷章回]|Chapter\s*\d+)\s*(.*)$").unwrap();
+    let strict_re =
+        Regex::new(r"^\s*(第[0-9零一二三四五六七八九十百千万]+[卷章回]|Chapter\s*\d+)\s*(.*)$")
+            .unwrap();
     if let Ok(Some(caps)) = strict_re.captures(full_title) {
         let num = caps.get(1).map_or("", |m| m.as_str()).trim().to_string();
         let name = caps.get(2).map_or("", |m| m.as_str()).trim().to_string();
-        if !num.is_empty() { return (num, name); }
+        if !num.is_empty() {
+            return (num, name);
+        }
     }
     let loose_re = Regex::new(r"^(.*?)\s+(.*)$").unwrap();
     if let Ok(Some(caps)) = loose_re.captures(full_title) {
@@ -554,7 +577,8 @@ fn exit_app() {
 fn read_text_file(path: String) -> Result<String, String> {
     let mut file = fs::File::open(&path).map_err(|e| format!("无法打开: {}", e))?;
     let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).map_err(|e| format!("读取失败: {}", e))?;
+    file.read_to_end(&mut buffer)
+        .map_err(|e| format!("读取失败: {}", e))?;
     let mut detector = EncodingDetector::new();
     detector.feed(&buffer, true);
     let encoding = detector.guess(None, true);
@@ -565,7 +589,8 @@ fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 async fn save_text_file(path: String, content: String) -> Result<(), String> {
     let mut file = fs::File::create(&path).map_err(|e| format!("无法创建: {}", e))?;
-    file.write_all(content.as_bytes()).map_err(|e| format!("写入失败: {}", e))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("写入失败: {}", e))?;
     Ok(())
 }
 
@@ -580,17 +605,31 @@ async fn save_history(original_path: String, content: String) -> Result<(), Stri
     let parent = path.parent().unwrap_or(Path::new("."));
     let file_stem = path.file_stem().unwrap().to_string_lossy();
     let history_dir = parent.join(".history");
-    if !history_dir.exists() { fs::create_dir_all(&history_dir).map_err(|e| e.to_string())?; }
+    if !history_dir.exists() {
+        fs::create_dir_all(&history_dir).map_err(|e| e.to_string())?;
+    }
     let now = SystemTime::now();
     let timestamp = now.duration_since(UNIX_EPOCH).unwrap().as_secs();
     let backup_name = format!("{}.{}.bak", file_stem, timestamp);
     let backup_path = history_dir.join(backup_name);
     let mut file = fs::File::create(&backup_path).map_err(|e| e.to_string())?;
-    file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())?;
     if let Ok(entries) = fs::read_dir(&history_dir) {
-        let mut backups: Vec<_> = entries.filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().starts_with(&*file_stem)).collect();
-        backups.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH));
-        if backups.len() > 10 { for entry in backups.iter().take(backups.len() - 10) { let _ = fs::remove_file(entry.path()); } }
+        let mut backups: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&*file_stem))
+            .collect();
+        backups.sort_by_key(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+        });
+        if backups.len() > 10 {
+            for entry in backups.iter().take(backups.len() - 10) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
     }
     Ok(())
 }
@@ -610,7 +649,12 @@ async fn get_history_list(original_path: String) -> Vec<HistoryMeta> {
                     list.push(HistoryMeta {
                         filename: fname,
                         path: entry.path().to_string_lossy().to_string(),
-                        timestamp: meta.modified().unwrap_or(SystemTime::now()).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+                        timestamp: meta
+                            .modified()
+                            .unwrap_or(SystemTime::now())
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
                         size: meta.len(),
                         date_str: "".to_string(),
                     });
@@ -623,43 +667,85 @@ async fn get_history_list(original_path: String) -> Vec<HistoryMeta> {
 }
 
 #[tauri::command]
-async fn scan_chapters(content: String, volreg: String, chapreg: String, metareg: String) -> Vec<ChapterInfo> {
+async fn scan_chapters(
+    content: String,
+    volreg: String,
+    chapreg: String,
+    metareg: String,
+) -> Vec<ChapterInfo> {
     let mut chapters = Vec::new();
-    let re_volume = Regex::new(&volreg).unwrap_or_else(|_| Regex::new(r"^\s*第[零一二三四五六七八九十百千万0-9]+[卷部].*").unwrap());
-    let re_chapter = Regex::new(&chapreg).unwrap_or_else(|_| Regex::new(r"^\s*(第[一二三四五六七八九十百千万0-9]+[章回]|Chapter\s*\d+).*").unwrap());
-    let re_meta = Regex::new(&metareg).unwrap_or_else(|_| Regex::new(r"^\s*(内容)?(简介|序[章言]?|前言|楔子|后记|完本感言).*").unwrap());
+    let re_volume = Regex::new(&volreg).unwrap_or_else(|_| {
+        Regex::new(r"^\s*第[零一二三四五六七八九十百千万0-9]+[卷部].*").unwrap()
+    });
+    let re_chapter = Regex::new(&chapreg).unwrap_or_else(|_| {
+        Regex::new(r"^\s*(第[一二三四五六七八九十百千万0-9]+[章回]|Chapter\s*\d+).*").unwrap()
+    });
+    let re_meta = Regex::new(&metareg).unwrap_or_else(|_| {
+        Regex::new(r"^\s*(内容)?(简介|序[章言]?|前言|楔子|后记|完本感言).*").unwrap()
+    });
     let mut current_chapter: Option<ChapterInfo> = None;
     for (index, line) in content.lines().enumerate() {
         let line_trim = line.trim();
         let char_count = line_trim.chars().count();
         let is_empty = line_trim.is_empty();
-        let toc_type = if !is_empty && char_count <= 60 { 
-            if re_volume.is_match(line).unwrap_or(false) { Some(TocType::Volume) }
-            else if re_meta.is_match(line).unwrap_or(false) { Some(TocType::Meta) }
-            else if re_chapter.is_match(line).unwrap_or(false) { Some(TocType::Chapter) }
-            else { None }
-        } else { None };
-        if let Some(t) = toc_type {
-            if let Some(prev) = current_chapter.take() { chapters.push(prev); }
-            current_chapter = Some(ChapterInfo { title: line_trim.to_string(), line_number: index + 1, toc_type: t, word_count: 0 });
+        let toc_type = if !is_empty && char_count <= 60 {
+            if re_volume.is_match(line).unwrap_or(false) {
+                Some(TocType::Volume)
+            } else if re_meta.is_match(line).unwrap_or(false) {
+                Some(TocType::Meta)
+            } else if re_chapter.is_match(line).unwrap_or(false) {
+                Some(TocType::Chapter)
+            } else {
+                None
+            }
         } else {
-            if let Some(ref mut chapter) = current_chapter { if !is_empty { chapter.word_count += char_count; } }
+            None
+        };
+        if let Some(t) = toc_type {
+            if let Some(prev) = current_chapter.take() {
+                chapters.push(prev);
+            }
+            current_chapter = Some(ChapterInfo {
+                title: line_trim.to_string(),
+                line_number: index + 1,
+                toc_type: t,
+                word_count: 0,
+            });
+        } else {
+            if let Some(ref mut chapter) = current_chapter {
+                if !is_empty {
+                    chapter.word_count += char_count;
+                }
+            }
         }
     }
-    if let Some(last) = current_chapter { chapters.push(last); }
+    if let Some(last) = current_chapter {
+        chapters.push(last);
+    }
     chapters
 }
 
 #[tauri::command]
 async fn advanced_search(content: String, pattern: String, is_regex: bool) -> SearchResult {
-    if pattern.is_empty() { return SearchResult { found: false, count: 0, matches: vec![] }; }
+    if pattern.is_empty() {
+        return SearchResult {
+            found: false,
+            count: 0,
+            matches: vec![],
+        };
+    }
     let mut matches_vec = Vec::new();
     if is_regex {
         if let Ok(re) = Regex::new(&pattern) {
             for (i, line) in content.lines().enumerate() {
                 for m in re.find_iter(line) {
                     if let Ok(match_obj) = m {
-                        matches_vec.push(MatchLocation { line: i + 1, start_char: line[..match_obj.start()].chars().count(), end_char: line[..match_obj.start()].chars().count() + line[match_obj.start()..match_obj.end()].chars().count() });
+                        matches_vec.push(MatchLocation {
+                            line: i + 1,
+                            start_char: line[..match_obj.start()].chars().count(),
+                            end_char: line[..match_obj.start()].chars().count()
+                                + line[match_obj.start()..match_obj.end()].chars().count(),
+                        });
                     }
                 }
             }
@@ -667,16 +753,29 @@ async fn advanced_search(content: String, pattern: String, is_regex: bool) -> Se
     } else {
         for (i, line) in content.lines().enumerate() {
             for (byte_idx, part) in line.match_indices(&pattern) {
-                matches_vec.push(MatchLocation { line: i + 1, start_char: line[..byte_idx].chars().count(), end_char: line[..byte_idx].chars().count() + part.chars().count() });
+                matches_vec.push(MatchLocation {
+                    line: i + 1,
+                    start_char: line[..byte_idx].chars().count(),
+                    end_char: line[..byte_idx].chars().count() + part.chars().count(),
+                });
             }
         }
     }
     let count = matches_vec.len();
-    SearchResult { found: count > 0, count, matches: matches_vec }
+    SearchResult {
+        found: count > 0,
+        count,
+        matches: matches_vec,
+    }
 }
 
 #[tauri::command]
-async fn advanced_replace(content: String, pattern: String, replacement: String, is_regex: bool) -> Result<String, String> {
+async fn advanced_replace(
+    content: String,
+    pattern: String,
+    replacement: String,
+    is_regex: bool,
+) -> Result<String, String> {
     if is_regex {
         let re = Regex::new(&pattern).map_err(|e| format!("Regex Error: {}", e))?;
         Ok(re.replace_all(&content, &replacement).to_string())
@@ -692,7 +791,7 @@ async fn export_epub(
     save_path: String,
     content: String,
     chapters: Vec<ChapterInfo>,
-    metadata: EpubMetadata
+    metadata: EpubMetadata,
 ) -> Result<(), String> {
     let path = Path::new(&save_path);
     let file = fs::File::create(&path).map_err(|e| e.to_string())?;
@@ -700,29 +799,45 @@ async fn export_epub(
     let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let options_store = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
-    zip.start_file("mimetype", options_store).map_err(|e| e.to_string())?;
-    zip.write_all(b"application/epub+zip").map_err(|e| e.to_string())?;
+    zip.start_file("mimetype", options_store)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(b"application/epub+zip")
+        .map_err(|e| e.to_string())?;
 
-    zip.start_file("META-INF/container.xml", options).map_err(|e| e.to_string())?;
-    zip.write_all(r#"<?xml version="1.0"?>
+    zip.start_file("META-INF/container.xml", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(
+        r#"<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
    <rootfiles>
       <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
    </rootfiles>
-</container>"#.as_bytes()).map_err(|e| e.to_string())?;
+</container>"#
+            .as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
 
-    zip.start_file("OEBPS/Styles/font.css", options).map_err(|e| e.to_string())?;
-    zip.write_all(CSS_FONT.as_bytes()).map_err(|e| e.to_string())?;
-    zip.start_file("OEBPS/Styles/main.css", options).map_err(|e| e.to_string())?;
-    zip.write_all(CSS_MAIN.as_bytes()).map_err(|e| e.to_string())?;
+    zip.start_file("OEBPS/Styles/font.css", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(CSS_FONT.as_bytes())
+        .map_err(|e| e.to_string())?;
+    zip.start_file("OEBPS/Styles/main.css", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(CSS_MAIN.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     let mut has_cover = false;
     let mut cover_ext = "jpg".to_string();
     if !metadata.cover_path.is_empty() {
         if let Ok(img_bytes) = fs::read(&metadata.cover_path) {
-            cover_ext = Path::new(&metadata.cover_path).extension().and_then(|s| s.to_str()).unwrap_or("jpg").to_lowercase();
+            cover_ext = Path::new(&metadata.cover_path)
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("jpg")
+                .to_lowercase();
             let cover_filename = format!("OEBPS/Images/cover.{}", cover_ext);
-            zip.start_file(&cover_filename, options).map_err(|e| e.to_string())?;
+            zip.start_file(&cover_filename, options)
+                .map_err(|e| e.to_string())?;
             zip.write_all(&img_bytes).map_err(|e| e.to_string())?;
             has_cover = true;
         }
@@ -736,29 +851,47 @@ async fn export_epub(
     let mut open_volume = false;
 
     if has_cover {
-        let mime = if cover_ext == "png" { "image/png" } else { "image/jpeg" };
+        let mime = if cover_ext == "png" {
+            "image/png"
+        } else {
+            "image/jpeg"
+        };
         manifest_items.push_str(&format!(r#"<item id="cover-image" href="Images/cover.{}" media-type="{}" properties="cover-image"/>"#, cover_ext, mime));
     }
-    manifest_items.push_str(r#"<item id="font.css" href="Styles/font.css" media-type="text/css"/>"#);
-    manifest_items.push_str(r#"<item id="main.css" href="Styles/main.css" media-type="text/css"/>"#);
+    manifest_items
+        .push_str(r#"<item id="font.css" href="Styles/font.css" media-type="text/css"/>"#);
+    manifest_items
+        .push_str(r#"<item id="main.css" href="Styles/main.css" media-type="text/css"/>"#);
 
     for (i, chapter) in chapters.iter().enumerate() {
         let file_name_in_zip = format!("OEBPS/Text/chapter{}.xhtml", i);
         let href_in_opf = format!("Text/chapter{}.xhtml", i);
         let id = format!("chapter{}", i);
-        
+
         let start_line = chapter.line_number;
-        let end_line = if i + 1 < chapters.len() { chapters[i+1].line_number } else { lines.len() };
+        let end_line = if i + 1 < chapters.len() {
+            chapters[i + 1].line_number
+        } else {
+            lines.len()
+        };
         let safe_end = end_line.min(lines.len());
         let safe_start = start_line.min(safe_end);
-        let body_lines = if safe_start + 1 < safe_end { &lines[safe_start + 1..safe_end] } else { &[] };
+        let body_lines = if safe_start + 1 < safe_end {
+            &lines[safe_start + 1..safe_end]
+        } else {
+            &[]
+        };
 
         let mut html_body = String::new();
         let mut class_attr = "";
-        
+
         let (chap_num_raw, chap_name_raw) = split_title(&chapter.title);
         let safe_display_title = if !chap_num_raw.is_empty() && !chap_name_raw.is_empty() {
-            format!("{} {}", escape_xml(&chap_num_raw), escape_xml(&chap_name_raw))
+            format!(
+                "{} {}",
+                escape_xml(&chap_num_raw),
+                escape_xml(&chap_name_raw)
+            )
         } else {
             escape_xml(&chapter.title)
         };
@@ -769,12 +902,15 @@ async fn export_epub(
                 let safe_vol_num = escape_xml(&chap_num_raw);
                 let safe_vol_name = escape_xml(&chap_name_raw);
                 let vertical_num = format_vertical_volume(&safe_vol_num);
-                let formatted_name = safe_vol_name.chars().map(|c| format!("{} ", c)).collect::<String>();
+                let formatted_name = safe_vol_name
+                    .chars()
+                    .map(|c| format!("{} ", c))
+                    .collect::<String>();
                 html_body.push_str(&format!(
                     "  <h1 class=\"PrefacehA1\" title=\"{}\"><br /><br />\n  {}</h1>\n  <p class=\"PrefacepA1\">{}</p>\n", 
                     safe_display_title, vertical_num, formatted_name.trim()
                 ));
-            },
+            }
             TocType::Chapter => {
                 let safe_chap_num = escape_xml(&chap_num_raw);
                 let safe_chap_name = escape_xml(&chap_name_raw);
@@ -788,9 +924,12 @@ async fn export_epub(
                         html_body.push_str(&format!("  <p>{}</p>\n", escape_xml(trim)));
                     }
                 }
-            },
+            }
             TocType::Meta => {
-                html_body.push_str(&format!("  <h1 class=\"nrjj-title\">{}</h1>\n", safe_display_title));
+                html_body.push_str(&format!(
+                    "  <h1 class=\"nrjj-title\">{}</h1>\n",
+                    safe_display_title
+                ));
                 for line in body_lines {
                     let trim = line.trim();
                     if !trim.is_empty() {
@@ -801,7 +940,7 @@ async fn export_epub(
         }
 
         let full_html = format!(
-r#"<?xml version="1.0" encoding="utf-8"?>
+            r#"<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -812,20 +951,31 @@ r#"<?xml version="1.0" encoding="utf-8"?>
 <body{}>
 {}
 </body>
-</html>"#, 
-            safe_display_title, 
-            if class_attr.is_empty() { String::new() } else { format!(" class=\"{}\"", class_attr) },
+</html>"#,
+            safe_display_title,
+            if class_attr.is_empty() {
+                String::new()
+            } else {
+                format!(" class=\"{}\"", class_attr)
+            },
             html_body
         );
 
-        zip.start_file(&file_name_in_zip, options).map_err(|e| e.to_string())?;
-        zip.write_all(full_html.as_bytes()).map_err(|e| e.to_string())?;
+        zip.start_file(&file_name_in_zip, options)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(full_html.as_bytes())
+            .map_err(|e| e.to_string())?;
 
-        manifest_items.push_str(&format!(r#"<item id="{}" href="{}" media-type="application/xhtml+xml"/>"#, id, href_in_opf));
+        manifest_items.push_str(&format!(
+            r#"<item id="{}" href="{}" media-type="application/xhtml+xml"/>"#,
+            id, href_in_opf
+        ));
         spine_refs.push_str(&format!(r#"<itemref idref="{}"/>"#, id));
-        
+
         if chapter.toc_type == TocType::Volume {
-            if open_volume { ncx_navpoints.push_str("</navPoint>\n"); }
+            if open_volume {
+                ncx_navpoints.push_str("</navPoint>\n");
+            }
             ncx_navpoints.push_str(&format!(
                 r#"<navPoint id="navPoint-{}" playOrder="{}"><navLabel><text>{}</text></navLabel><content src="{}"/>"#,
                 play_order, play_order, safe_display_title, href_in_opf
@@ -852,13 +1002,19 @@ r#"<?xml version="1.0" encoding="utf-8"?>
         play_order += 1;
     }
 
-    if open_volume { ncx_navpoints.push_str("</navPoint>\n"); }
+    if open_volume {
+        ncx_navpoints.push_str("</navPoint>\n");
+    }
 
     let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let full_uuid = if metadata.uuid.starts_with("urn:uuid:") { metadata.uuid.clone() } else { format!("urn:uuid:{}", metadata.uuid) };
+    let full_uuid = if metadata.uuid.starts_with("urn:uuid:") {
+        metadata.uuid.clone()
+    } else {
+        format!("urn:uuid:{}", metadata.uuid)
+    };
 
     let opf_content = format!(
-r#"<?xml version="1.0" encoding="utf-8"?>
+        r#"<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
     <dc:title id="t1">{}</dc:title>
@@ -877,15 +1033,23 @@ r#"<?xml version="1.0" encoding="utf-8"?>
     {}
   </spine>
 </package>"#,
-        escape_xml(&metadata.title), escape_xml(&metadata.creator), date_str, escape_xml(&metadata.publisher), 
-        full_uuid, metadata.md5, manifest_items, spine_refs
+        escape_xml(&metadata.title),
+        escape_xml(&metadata.creator),
+        date_str,
+        escape_xml(&metadata.publisher),
+        full_uuid,
+        metadata.md5,
+        manifest_items,
+        spine_refs
     );
 
-    zip.start_file("OEBPS/content.opf", options).map_err(|e| e.to_string())?;
-    zip.write_all(opf_content.as_bytes()).map_err(|e| e.to_string())?;
+    zip.start_file("OEBPS/content.opf", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(opf_content.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     let ncx_content = format!(
-r#"<?xml version="1.0" encoding="UTF-8"?>
+        r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
   <head>
@@ -899,11 +1063,15 @@ r#"<?xml version="1.0" encoding="UTF-8"?>
     {}
   </navMap>
 </ncx>"#,
-        full_uuid, escape_xml(&metadata.title), ncx_navpoints
+        full_uuid,
+        escape_xml(&metadata.title),
+        ncx_navpoints
     );
 
-    zip.start_file("OEBPS/toc.ncx", options).map_err(|e| e.to_string())?;
-    zip.write_all(ncx_content.as_bytes()).map_err(|e| e.to_string())?;
+    zip.start_file("OEBPS/toc.ncx", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(ncx_content.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     zip.finish().map_err(|e| e.to_string())?;
     Ok(())
@@ -916,8 +1084,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
-            read_text_file, save_text_file, save_history, get_history_list, calculate_md5,
-            scan_chapters, advanced_search, advanced_replace, export_epub,
+            read_text_file,
+            save_text_file,
+            save_history,
+            get_history_list,
+            calculate_md5,
+            scan_chapters,
+            advanced_search,
+            advanced_replace,
+            export_epub,
             exit_app // 注册新指令
         ])
         .run(tauri::generate_context!())

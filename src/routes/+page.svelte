@@ -252,8 +252,15 @@
 
         init();
 
+        // 监听全选事件
+        const handleSelectAll = () => {
+            editorComponent?.selectAll();
+        };
+        window.addEventListener("editor-select-all", handleSelectAll);
+
         return () => {
             if (unlisten) unlisten();
+            window.removeEventListener("editor-select-all", handleSelectAll);
         };
     });
 
