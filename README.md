@@ -46,7 +46,7 @@ pnpm install
 # 启动 PC 端开发预览
 pnpm tauri dev
 编译正式版
-# 编译 Windows 绿色版 (.exe)
+# 编译 Windows 版
 pnpm tauri build
 
 ⚖️ 许可
