@@ -41,12 +41,12 @@ Node.js (推荐 v18+)
 Rust
 pnpm
 开发环境
-# 安装依赖
+安装依赖
 pnpm install
-# 启动 PC 端开发预览
+启动 PC 端开发预览
 pnpm tauri dev
 编译正式版
-# 编译 Windows 版
+编译 Windows 版
 pnpm tauri build
 
 ⚖️ 许可
