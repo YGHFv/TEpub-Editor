@@ -1074,43 +1074,64 @@
                                 bind:value={appSettings.metaRegex}
                             />
                         </div>
+                        <!-- 合并：字数阈值 和 撤销开关 -->
                         <div class="set-row">
-                            <label for="wth">字数阈值:</label><input
+                            <label for="wth">字数阈值:</label>
+                            <input
                                 id="wth"
                                 type="number"
                                 bind:value={appSettings.wordCountThreshold}
+                                style="flex:1"
                             />
+
+                            <div
+                                style="display:flex; align-items:center; margin-left:10px; flex-shrink:0;"
+                            >
+                                <label
+                                    for="clh"
+                                    style="width:auto; margin-right:5px; font-weight:normal;"
+                                    >保存清空撤销</label
+                                >
+                                <input
+                                    id="clh"
+                                    type="checkbox"
+                                    bind:checked={
+                                        appSettings.clearHistoryOnSave
+                                    }
+                                    style="width:auto !important; margin:0;"
+                                />
+                            </div>
                         </div>
-                        <div class="set-row">
-                            <label for="clh">保存清空撤销:</label><input
-                                id="clh"
-                                type="checkbox"
-                                bind:checked={appSettings.clearHistoryOnSave}
-                            />
+
+                        <!-- 底部按钮：放在一行 -->
+                        <div style="display:flex; gap:10px; margin-top:10px;">
+                            <button
+                                class="grid-btn blue"
+                                style="flex:1;"
+                                on:click={() => {
+                                    localStorage.setItem(
+                                        "app-settings",
+                                        JSON.stringify(appSettings),
+                                    );
+                                    closeAllPanels();
+                                    scanToc();
+                                }}>保存并应用</button
+                            >
+                            <button
+                                class="grid-btn"
+                                style="flex:1;"
+                                on:click={async () => {
+                                    historyList = await invoke(
+                                        "get_history_list",
+                                        {
+                                            originalPath: filePath,
+                                        },
+                                    );
+                                    showHistoryPanel = true;
+                                    showSettingsPanel = false;
+                                }}>历史版本</button
+                            >
                         </div>
-                        <button
-                            class="grid-btn blue"
-                            style="width:100%; margin-top:10px;"
-                            on:click={() => {
-                                localStorage.setItem(
-                                    "app-settings",
-                                    JSON.stringify(appSettings),
-                                );
-                                closeAllPanels();
-                                scanToc();
-                            }}>保存并应用</button
-                        >
-                        <button
-                            class="grid-btn"
-                            style="width:100%; margin-top:5px;"
-                            on:click={async () => {
-                                historyList = await invoke("get_history_list", {
-                                    originalPath: filePath,
-                                });
-                                showHistoryPanel = true;
-                                showSettingsPanel = false;
-                            }}>🕒 查看历史版本</button
-                        >
                     </div>
                 {:else if showEpubModal}
                     <div class="p-header">
@@ -1790,7 +1811,7 @@
     .modal-content {
         background: #fff;
         width: 100%;
-        max-width: 440px;
+        max-width: 520px;
         border-radius: 20px;
         overflow: hidden;
         display: flex;
@@ -1827,9 +1848,16 @@
         font-size: 15px;
         gap: 10px;
     }
+    .set-row label {
+        width: 110px;
+        flex-shrink: 0;
+        font-weight: bold;
+        color: #444;
+    }
     .set-row input,
     .set-row button.mini-btn {
-        width: 65% !important;
+        width: auto !important;
+        flex: 1;
         padding: 8px !important;
         border: 1px solid #ddd !important;
         border-radius: 6px !important;
