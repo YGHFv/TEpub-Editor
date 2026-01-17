@@ -1,0 +1,152 @@
+
+> epub-editor@0.1.0 check C:\Users\YGHF\Desktop\epub-editor
+> svelte-kit sync && svelte-check --tsconfig ./tsconfig.json
+
+Loading svelte-check in workspace: c:\Users\YGHF\Desktop\epub-editor
+Getting Svelte diagnostics...
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:71:3
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m{#if showMenu}
+  [35m<div 
+    class="context-menu" 
+    bind:this={menuElement}
+    style="top: {pos.y}px; left: {pos.x}px;"
+    on:click|stopPropagation
+  >
+    <div class="menu-item" on:click={() => handleAction('cut')}>剪切</div>
+    <div class="menu-item" on:click={() => handleAction('copy')}>复制</div>
+    <div class="menu-item" on:click={() => handleAction('paste')}>粘贴</div>
+    <div class="separator"></div>
+    <div class="menu-item" on:click={() => handleAction('select-all')}>全选</div>
+  </div>[36m
+{/if}[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:71:3
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m{#if showMenu}
+  [35m<div 
+    class="context-menu" 
+    bind:this={menuElement}
+    style="top: {pos.y}px; left: {pos.x}px;"
+    on:click|stopPropagation
+  >
+    <div class="menu-item" on:click={() => handleAction('cut')}>剪切</div>
+    <div class="menu-item" on:click={() => handleAction('copy')}>复制</div>
+    <div class="menu-item" on:click={() => handleAction('paste')}>粘贴</div>
+    <div class="separator"></div>
+    <div class="menu-item" on:click={() => handleAction('select-all')}>全选</div>
+  </div>[36m
+{/if}[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:77:5
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m  >
+    [35m<div class="menu-item" on:click={() => handleAction('cut')}>剪切</div>[36m
+    <div class="menu-item" on:click={() => handleAction('copy')}>复制</div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:77:5
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m  >
+    [35m<div class="menu-item" on:click={() => handleAction('cut')}>剪切</div>[36m
+    <div class="menu-item" on:click={() => handleAction('copy')}>复制</div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:78:5
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m    <div class="menu-item" on:click={() => handleAction('cut')}>剪切</div>
+    [35m<div class="menu-item" on:click={() => handleAction('copy')}>复制</div>[36m
+    <div class="menu-item" on:click={() => handleAction('paste')}>粘贴</div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:78:5
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m    <div class="menu-item" on:click={() => handleAction('cut')}>剪切</div>
+    [35m<div class="menu-item" on:click={() => handleAction('copy')}>复制</div>[36m
+    <div class="menu-item" on:click={() => handleAction('paste')}>粘贴</div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:79:5
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m    <div class="menu-item" on:click={() => handleAction('copy')}>复制</div>
+    [35m<div class="menu-item" on:click={() => handleAction('paste')}>粘贴</div>[36m
+    <div class="separator"></div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:79:5
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m    <div class="menu-item" on:click={() => handleAction('copy')}>复制</div>
+    [35m<div class="menu-item" on:click={() => handleAction('paste')}>粘贴</div>[36m
+    <div class="separator"></div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:81:5
+[33mWarn[39m: Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events (svelte)
+[36m    <div class="separator"></div>
+    [35m<div class="menu-item" on:click={() => handleAction('select-all')}>全选</div>[36m
+  </div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\ContextMenu.svelte[39m:81:5
+[33mWarn[39m: `<div>` with a click handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions (svelte)
+[36m    <div class="separator"></div>
+    [35m<div class="menu-item" on:click={() => handleAction('select-all')}>全选</div>[36m
+  </div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\lib\Editor.svelte[39m:86:33
+[31mError[39m: No overload matches this call.
+  Overload 1 of 3, '(tr: Transaction): void', gave the following error.
+    Type 'Extension' is not assignable to type 'readonly StateEffect<any>[]'.
+      Type '{ extension: Extension; }' is missing the following properties from type 'readonly StateEffect<any>[]': length, concat, join, slice, and 26 more.
+  Overload 2 of 3, '(trs: readonly Transaction[]): void', gave the following error.
+    Object literal may only specify known properties, and 'effects' does not exist in type 'readonly Transaction[]'.
+  Overload 3 of 3, '(...specs: TransactionSpec[]): void', gave the following error.
+    Type 'Extension' is not assignable to type 'StateEffect<any> | readonly StateEffect<any>[] | undefined'.
+      Type '{ extension: Extension; }' is not assignable to type 'StateEffect<any> | readonly StateEffect<any>[] | undefined'. (ts)
+[36m                localStorage.setItem("editor-font-size", fontSize.toString());
+                view.dispatch({ [35meffects[36m: EditorView.theme({ "&": { fontSize: `${fontSize}px` } }) });
+                lastDist = dist;[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\routes\+page.svelte[39m:495:42
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m                    <div class="set-row"><label for="ep">出版社:</label><input id="ep" type="text" bind:value={epubMeta.publisher}></div>
+                    <div class="set-row">[35m<label>UUID:</label>[36m<input type="text" value={epubMeta.uuid} readonly style="font-size:10px; background:#f5f5f5"></div>
+                    <div class="set-row"><label>MD5:</label><input type="text" value={epubMeta.md5} readonly style="font-size:10px; background:#f5f5f5"></div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\routes\+page.svelte[39m:496:42
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m                    <div class="set-row"><label>UUID:</label><input type="text" value={epubMeta.uuid} readonly style="font-size:10px; background:#f5f5f5"></div>
+                    <div class="set-row">[35m<label>MD5:</label>[36m<input type="text" value={epubMeta.md5} readonly style="font-size:10px; background:#f5f5f5"></div>
+                    <div class="set-row"><label>封面:</label><button class="mini-btn" style="flex:1" on:click={async () => { const s = await open({ filters: [{ name: 'Image', extensions: ['jpg','png'] }] }); if(s) epubMeta.cover_path = s as string; }}>{epubMeta.cover_path ? '已选' : '选择图片'}</button></div>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\routes\+page.svelte[39m:497:42
+[33mWarn[39m: A form label must be associated with a control
+https://svelte.dev/e/a11y_label_has_associated_control (svelte)
+[36m                    <div class="set-row"><label>MD5:</label><input type="text" value={epubMeta.md5} readonly style="font-size:10px; background:#f5f5f5"></div>
+                    <div class="set-row">[35m<label>封面:</label>[36m<button class="mini-btn" style="flex:1" on:click={async () => { const s = await open({ filters: [{ name: 'Image', extensions: ['jpg','png'] }] }); if(s) epubMeta.cover_path = s as string; }}>{epubMeta.cover_path ? '已选' : '选择图片'}</button></div>
+                    <button class="grid-btn blue full-row" style="height:44px; margin-top:10px;" on:click={generateEpub}>开始生成</button>[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\routes\+page.svelte[39m:537:95
+[33mWarn[39m: Also define the standard property 'user-select' for compatibility (css)
+[36m<style>
+  :global(body) { margin: 0; background: #fff; overflow: hidden; -webkit-touch-callout: none; [35m-webkit-user-select[36m: none; font-family: system-ui; }
+  .app-container { display: flex; flex-direction: column; height: 100vh; width: 100vw; }[39m
+
+c:\Users\YGHF\Desktop\epub-editor\[32msrc\routes\+page.svelte[39m:76:11
+[31mError[39m: Argument of type '() => Promise<() => void>' is not assignable to parameter of type '() => (() => any) | Promise<never>'.
+  Type 'Promise<() => void>' is not assignable to type '(() => any) | Promise<never>'.
+    Type 'Promise<() => void>' is not assignable to type 'Promise<never>'.
+      Type '() => void' is not assignable to type 'never'. (ts)
+[36m
+  onMount([35masync () => {[36m
+    // 1. 移动端检测[39m
+
+====================================
+[31msvelte-check found 2 errors and 14 warnings in 3 files
+[39m ELIFECYCLE  Command failed with exit code 1.

@@ -1,7 +1,57 @@
-# Tauri + SvelteKit + TypeScript
+TEpub Editor
+TEpub Editor 是一款基于 Tauri + Svelte + Rust 构建的高性能小说编辑器。它专注于解决长篇 TXT 小说的分章节管理、内容质量检查以及一键生成标准 EPUB 电子书的需求。
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+🌟 核心功能 (PC 端)
 
-## Recommended IDE Setup
+1. 智能目录解析
+多维度解析：内置强大的正则匹配引擎，支持“分卷”与“分章”二级结构。
+自定义配置：用户可根据小说风格自由定义卷、章、及元数据（序、跋等）的匹配规则。
+实时同步：目录树与编辑器双向同步，点击目录即刻跳转，滚动编辑器时目录自动追踪当前章节。
+高性能引擎：底层采用 CodeMirror 6，即使处理数百万字的超大文本也能保持极速响应。
+字数统计：实时统计全书及各章节字数，进度一目了然。
+2. 安全保障
+崩溃恢复：意外关闭后自动恢复未保存的编辑内容。
+版本快照：每次保存均会自动记录硬盘快照，支持随时回滚到历史版本。
+3. 内容质量控制
+断序检查：自动检测章节序号是否存在跳跃（如第10章后接第12章）。
+空标题检测：识别只有序号没有章节名的异常条目。
+超标预警：支持自定义单章字数阈值，自动标记字数过多的章节，优化阅读体验。
+4. 高级查找与替换
+正则支持：完整支持正则表达式查找，支持“单次替换”与“全局替换”。
+视觉增强：查找结果高亮显示，并提供快捷导航（上一处/下一处）。
+5. 标准 EPUB 制作
+一键导出：一键将 TXT 转换为标准的 EPUB 3.0 电子书。
+元数据管理：支持自定义书名、作者、出版社、封面图，自动生成 UUID 与内容 MD5 校验，确保电子书的唯一性。
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+🛠️ 技术架构
+
+前端: Svelte + TypeScript (响应式 UI)
+后端: Rust (高性能文件 I/O 与逻辑处理)
+框架: Tauri (轻量级跨平台架构，内存占用远低于 Electron)
+编辑器: CodeMirror 6 (现代化的文本编辑组件)
+
+🚀 规划
+
+计划在未来的 PC 版本中引入以下功能：
+[ ] 主题系统：支持深色模式、羊皮纸模式及自定义编辑器配色。
+[ ] 排版自动化：一键全书排版（自动缩进、空行清理、标点纠错）。
+[ ] 插件系统：支持用户编写脚本处理特定格式的内容。
+
+📦 如何构建
+
+前置要求
+Node.js (推荐 v18+)
+Rust
+pnpm
+开发环境
+安装依赖
+pnpm install
+启动 PC 端开发预览
+pnpm tauri dev
+编译正式版
+编译 Windows 版
+pnpm tauri build
+
+⚖️ 许可
+本项目采用 MIT 协议开源。
+
