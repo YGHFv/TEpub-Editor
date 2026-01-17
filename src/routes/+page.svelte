@@ -76,12 +76,17 @@
     let activeChapterId = "";
     let editorComponent: Editor;
 
-    let showSidebar = true;
-    let isMobile = false;
+    let showSidebar = true; // State
+    // [Removed duplicate declarations]
     let isLoading = false;
-    let isModified = false;
     let isLoadingFile = false;
+    let isModified = false;
     let isSaving = false;
+    let isMobile = false;
+    // 导航锁：点击目录跳转时暂时屏蔽滚动监听，防止目录乱跳
+    let isNavigating = false;
+    let scrollTimeout: any = null;
+    let navTimer: any = null;
     let hasInitialized = false;
 
     // 面板显示状态
@@ -90,6 +95,9 @@
     let showEpubModal = false;
     let showCheckPanel = false;
     let showHistoryPanel = false;
+    let showRestoreConfirm = false;
+    let restoreTargetSnapshot: any = null;
+    let epubGenerationStatus: "idle" | "generating" | "success" = "idle";
 
     // 功能数据
     let epubMeta = {
@@ -281,6 +289,14 @@
                 isLoadingFile = true;
                 filePath = selected as string;
 
+                // 自动填充 EPUB 书名
+                const basename =
+                    filePath
+                        .split(/[\\/]/)
+                        .pop()
+                        ?.replace(/\.[^/.]+$/, "") || "未命名";
+                epubMeta.title = basename;
+
                 const content = await readTextFile(filePath);
                 fileContent = content;
 
@@ -409,9 +425,11 @@
     async function handleScroll(line: number) {
         saveStateToCache(line);
         if (flatToc.length === 0) return;
+        if (isNavigating) return; // 正在手动跳转，忽略滚动监听
 
         // 二分查找或倒序查找当前章节
         let found: FlatNode | null = null;
+        // Editor 现在传递的是【屏幕中心】的行号，所以直接比较即可
         for (let i = flatToc.length - 1; i >= 0; i--) {
             if (flatToc[i].line <= line) {
                 found = flatToc[i];
@@ -433,9 +451,58 @@
             }
 
             // 侧边栏自动滚动
+            await tick();
             const el = document.getElementById(`toc-${activeChapterId}`);
             if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
         }
+    }
+
+    // 处理搜索/选择时的目录同步（绕过导航锁）
+    async function handleSelectionChange(line: number) {
+        if (isNavigating) return;
+        // 这里也可以加少量防抖
+        handleScroll(line);
+    }
+
+    // 统一处理章节跳转点击
+    function handleChapterClick(id: string, line: number) {
+        console.log("handleChapterClick", id, line);
+
+        // 1. 清理旧定时器
+        if (scrollTimeout) {
+            clearTimeout(scrollTimeout);
+            scrollTimeout = null;
+        }
+
+        // 2. 开启导航锁
+        isNavigating = true;
+
+        // 3. 立即更新高亮
+        activeChapterId = id;
+
+        // 4. 执行滚动
+        if (editorComponent) {
+            editorComponent.scrollToLine(line);
+        } else {
+            console.error("Editor component not ready");
+        }
+
+        // 5. 手动滚动侧边栏（因为 handleScroll 被锁住了）
+        requestAnimationFrame(() => {
+            const el = document.getElementById(`toc-${id}`);
+            if (el) {
+                console.log("handleChapterClick: scrolling sidebar to", id);
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+            } else {
+                console.warn("handleChapterClick: TOC element not found", id);
+            }
+        });
+
+        // 6. 设置解锁定时器
+        scrollTimeout = setTimeout(() => {
+            isNavigating = false;
+            scrollTimeout = null;
+        }, 600);
     }
 
     // --- 检查逻辑 ---
@@ -609,6 +676,7 @@
     // --- EPUB 导出 ---
     async function generateEpub() {
         if (!fileContent) return;
+        epubGenerationStatus = "generating";
         isLoading = true;
         try {
             const savePath = await save({
@@ -617,6 +685,7 @@
             });
             if (!savePath) {
                 isLoading = false;
+                epubGenerationStatus = "idle";
                 return;
             }
 
@@ -641,12 +710,39 @@
                 chapters,
                 metadata: epubMeta,
             });
-            await message("EPUB 制作成功！");
-            showEpubModal = false;
+            // 制作成功：设置状态为成功，不显示弹窗
+            epubGenerationStatus = "success";
         } catch (e) {
+            // 失败时显示错误并重置状态
             await message("制作失败: " + e, { kind: "error" });
+            epubGenerationStatus = "idle";
         } finally {
             isLoading = false;
+        }
+    }
+
+    async function confirmRestore() {
+        if (!restoreTargetSnapshot) return;
+
+        try {
+            // 1. 先保存当前版本为新历史
+            if (filePath && fileContent) {
+                await invoke("save_snapshot", {
+                    path: filePath,
+                    content: fileContent,
+                });
+            }
+
+            // 2. 执行回退
+            fileContent = await readTextFile(restoreTargetSnapshot.path);
+            editorComponent.resetDoc(fileContent);
+
+            // 3. 关闭所有弹窗并重新扫描目录
+            showRestoreConfirm = false;
+            closeAllPanels();
+            await scanToc();
+        } catch (e) {
+            await message("回退失败: " + e, { kind: "error" });
         }
     }
 
@@ -683,6 +779,10 @@
             >
             <button
                 class="btn-secondary"
+                on:click={() => editorComponent.triggerRedo()}>↪️</button
+            >
+            <button
+                class="btn-secondary"
                 on:click={() => (showSidebar = !showSidebar)}>📖</button
             >
             <button
@@ -691,6 +791,20 @@
                     closeAllPanels();
                     showEpubModal = true;
                     updateMd5(fileContent);
+                    // 确保书名已填充
+                    if (
+                        epubMeta.title === "书名" &&
+                        filePath !== "请打开一本小说..."
+                    ) {
+                        const basename =
+                            filePath
+                                .split(/[\\/]/)
+                                .pop()
+                                ?.replace(/\.[^/.]+$/, "") || "未命名";
+                        epubMeta.title = basename;
+                    }
+                    // 重置EPUB制作状态
+                    epubGenerationStatus = "idle";
                 }}>📚</button
             >
             <button
@@ -798,7 +912,8 @@
                                         ? 'active'
                                         : ''}"
                                     on:click={() =>
-                                        editorComponent.scrollToLine(
+                                        handleChapterClick(
+                                            child.id,
                                             child.line_number,
                                         )}
                                     on:keydown={() => {}}
@@ -826,14 +941,16 @@
             <Editor
                 bind:this={editorComponent}
                 doc={fileContent}
+                titleLines={flatToc.map((n) => n.line)}
                 onChange={(v) => {
                     fileContent = v;
                     isModified = true;
                     // Debounced TOC Sync
                     clearTimeout(autoRefreshTimer);
-                    autoRefreshTimer = setTimeout(() => scanToc(v), 800);
+                    autoRefreshTimer = setTimeout(() => scanToc(v), 200);
                 }}
                 onScroll={handleScroll}
+                onSelectionChange={handleSelectionChange}
             />
         </section>
     </div>
@@ -929,7 +1046,12 @@
                 on:click|stopPropagation
             >
                 {#if showSettingsPanel}
-                    <div class="p-header">偏好设置</div>
+                    <div class="p-header">
+                        <span>偏好设置</span>
+                        <button class="icon-close" on:click={closeAllPanels}
+                            >✕</button
+                        >
+                    </div>
                     <div class="p-body">
                         <div class="set-row">
                             <label for="vreg">卷正则:</label><input
@@ -991,7 +1113,12 @@
                         >
                     </div>
                 {:else if showEpubModal}
-                    <div class="p-header">制作 EPUB</div>
+                    <div class="p-header">
+                        <span>制作 EPUB</span>
+                        <button class="icon-close" on:click={closeAllPanels}
+                            >✕</button
+                        >
+                    </div>
                     <div class="p-body">
                         <div class="set-row">
                             <label for="et">书名:</label><input
@@ -1033,7 +1160,6 @@
                         <div class="set-row">
                             <label>封面:</label><button
                                 class="mini-btn"
-                                style="flex:1"
                                 on:click={async () => {
                                     const s = await open({
                                         filters: [
@@ -1050,31 +1176,54 @@
                                     : "选择图片"}</button
                             >
                         </div>
-                        <button
-                            class="grid-btn blue full-row"
-                            style="height:44px; margin-top:10px;"
-                            on:click={generateEpub}>开始生成</button
-                        >
+                        {#if epubGenerationStatus === "idle"}
+                            <button
+                                class="grid-btn blue full-row"
+                                style="height:44px; margin-top:10px;"
+                                on:click={generateEpub}>开始生成</button
+                            >
+                        {:else if epubGenerationStatus === "generating"}
+                            <button
+                                class="grid-btn full-row"
+                                disabled
+                                style="height:44px; margin-top:10px; opacity:0.6; cursor:not-allowed;"
+                                >正在制作...</button
+                            >
+                        {:else if epubGenerationStatus === "success"}
+                            <button
+                                class="grid-btn epub-success full-row"
+                                style="height:44px; margin-top:10px;"
+                                on:click={() => {
+                                    showEpubModal = false;
+                                    epubGenerationStatus = "idle";
+                                }}>制作完成 ✓</button
+                            >
+                        {/if}
                     </div>
                 {:else if showHistoryPanel}
-                    <div class="p-header">历史版本</div>
+                    <div class="p-header">
+                        <div style="display:flex; align-items:center;">
+                            <button
+                                class="icon-close"
+                                style="font-size:18px; margin-right:8px; transform:rotate(180deg);"
+                                on:click={() => {
+                                    showHistoryPanel = false;
+                                    showSettingsPanel = true;
+                                }}>➜</button
+                            >
+                            <span>历史版本</span>
+                        </div>
+                        <button class="icon-close" on:click={closeAllPanels}
+                            >✕</button
+                        >
+                    </div>
                     <div class="p-body scroll-p">
                         {#each historyList as h}
                             <button
                                 class="hist-item"
-                                on:click={async () => {
-                                    if (
-                                        await ask(
-                                            "回滚将丢失未保存内容，确定吗？",
-                                        )
-                                    ) {
-                                        fileContent = await readTextFile(
-                                            h.path,
-                                        );
-                                        editorComponent.resetDoc(fileContent);
-                                        closeAllPanels();
-                                        await scanToc();
-                                    }
+                                on:click={() => {
+                                    restoreTargetSnapshot = h;
+                                    showRestoreConfirm = true;
                                 }}
                             >
                                 <span
@@ -1089,6 +1238,54 @@
                         {/each}
                     </div>
                 {/if}
+            </div>
+        </div>
+    {/if}
+
+    <!-- 历史回退确认弹窗 -->
+    {#if showRestoreConfirm}
+        <div
+            role="presentation"
+            class="modal-overlay"
+            on:click={() => {
+                showRestoreConfirm = false;
+                restoreTargetSnapshot = null;
+            }}
+        >
+            <div
+                role="presentation"
+                class="modal-content"
+                style="max-width: 400px; padding: 30px; text-align: center;"
+                on:click|stopPropagation
+            >
+                <div
+                    style="font-size: 18px; margin-bottom: 20px; font-weight: bold;"
+                >
+                    确认回退到历史版本？
+                </div>
+                <div style="color: #666; margin-bottom: 30px; line-height:1.6;">
+                    当前版本将自动保存为新的历史记录。<br />
+                    此操作可以再次回退。
+                </div>
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button
+                        class="btn-small"
+                        style="flex: 1; max-width: 120px;"
+                        on:click={() => {
+                            showRestoreConfirm = false;
+                            restoreTargetSnapshot = null;
+                        }}
+                    >
+                        取消
+                    </button>
+                    <button
+                        class="btn-small"
+                        style="flex: 1; max-width: 120px; background: linear-gradient(135deg, #0066b8, #0088dd); color: white; border: none;"
+                        on:click={confirmRestore}
+                    >
+                        确认回退
+                    </button>
+                </div>
             </div>
         </div>
     {/if}
@@ -1126,9 +1323,9 @@
                             {#each sequenceErrors as e}
                                 <button
                                     class="err-tag"
-                                    on:click={() => {
-                                        editorComponent.scrollToLine(e.line);
-                                    }}>{e.title} ({e.msg})</button
+                                    on:click={() =>
+                                        handleChapterClick(e.id, e.line)}
+                                    >{e.title} ({e.msg})</button
                                 >
                             {:else}<span class="toc-count">无</span>{/each}
                         </div>
@@ -1152,9 +1349,9 @@
                             {#each titleErrors as e}
                                 <button
                                     class="err-tag"
-                                    on:click={() => {
-                                        editorComponent.scrollToLine(e.line);
-                                    }}>{e.title}</button
+                                    on:click={() =>
+                                        handleChapterClick(e.id, e.line)}
+                                    >{e.title}</button
                                 >
                             {:else}<span class="toc-count">无</span>{/each}
                         </div>
@@ -1178,9 +1375,9 @@
                             {#each wordCountErrors as e}
                                 <button
                                     class="err-tag"
-                                    on:click={() => {
-                                        editorComponent.scrollToLine(e.line);
-                                    }}>{e.title} ({e.val})</button
+                                    on:click={() =>
+                                        handleChapterClick(e.id, e.line)}
+                                    >{e.title} ({e.val})</button
                                 >
                             {:else}<span class="toc-count">无</span>{/each}
                         </div>
@@ -1315,8 +1512,9 @@
         font-size: 14px;
         border-bottom: 1px solid #eee;
         display: flex;
-        justify-content: space-between;
+        /* justify-content: space-between; Removed to fix centering issue */
         align-items: center;
+        cursor: pointer;
         cursor: pointer;
         position: relative; /* Fix z-index stacking */
         z-index: 1;
@@ -1347,6 +1545,7 @@
     .toc-count {
         color: #999;
         font-size: 11px;
+        margin-left: auto; /* Push to right */
     }
     .arrow {
         font-size: 10px;
@@ -1420,6 +1619,7 @@
         flex-direction: column;
         font-size: 13px;
         max-height: 80vh;
+        overflow: hidden;
     }
     .check-sec {
         margin-bottom: 10px;
@@ -1469,6 +1669,7 @@
         border: none;
         font-size: 16px;
         width: 20px;
+        min-width: unset; /* Override global button min-width */
         height: 20px;
         padding: 0;
         line-height: 1;
@@ -1597,11 +1798,17 @@
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
     }
     .p-header {
-        padding: 18px;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px 18px;
         background: #f0f0f0;
         font-weight: bold;
         border-bottom: 1px solid #ddd;
         font-size: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-shrink: 0;
     }
     .p-body {
         padding: 20px;
@@ -1620,11 +1827,19 @@
         font-size: 15px;
         gap: 10px;
     }
-    .set-row input {
-        width: 65%;
-        padding: 8px;
-        border: 1px solid #ddd;
-        border-radius: 6px;
+    .set-row input,
+    .set-row button.mini-btn {
+        width: 65% !important;
+        padding: 8px !important;
+        border: 1px solid #ddd !important;
+        border-radius: 6px !important;
+        font-size: 15px !important;
+        background: #fff !important;
+        height: auto !important;
+        line-height: 1.5 !important;
+        box-sizing: border-box !important;
+        display: block !important;
+        min-height: 38px !important;
     }
 
     .err-tag {
@@ -1655,6 +1870,27 @@
         text-align: center;
         color: #999;
         padding: 20px;
+    }
+
+    /* EPUB制作完成按钮样式 - 墨蓝色渐变 */
+    .epub-success {
+        background: linear-gradient(
+            135deg,
+            #1e3a8a 0%,
+            #3b82f6 100%
+        ) !important;
+        color: white !important;
+        border: none !important;
+        font-weight: 600;
+        box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);
+    }
+    .epub-success:active {
+        background: linear-gradient(
+            135deg,
+            #1e40af 0%,
+            #2563eb 100%
+        ) !important;
+        transform: scale(0.98);
     }
 
     .sidebar-mask {

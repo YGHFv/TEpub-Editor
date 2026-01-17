@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "epub-editor",
+        "title": "TEpub-Editor",
         "width": 800,
         "height": 600
       }

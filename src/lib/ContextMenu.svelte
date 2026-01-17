@@ -15,7 +15,7 @@
       switch (action) {
         case "copy":
           if (selectedText) await navigator.clipboard.writeText(selectedText);
-          break; 
+          break;
         case "cut":
           if (selectedText) {
             await navigator.clipboard.writeText(selectedText);
@@ -27,30 +27,49 @@
           document.execCommand("insertText", false, text);
           break;
         case "select-all":
-          if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement) {
+          if (
+            activeEl instanceof HTMLInputElement ||
+            activeEl instanceof HTMLTextAreaElement
+          ) {
             activeEl.select();
           } else {
             document.execCommand("selectAll");
           }
           break;
       }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   function onContextMenu(e: MouseEvent) {
     e.preventDefault();
+
+    // 检查是否在编辑器内（CodeMirror）
+    const target = e.target as HTMLElement;
+    const isInEditor =
+      target.closest(".cm-content") || target.closest(".cm-editor");
+
+    if (!isInEditor) {
+      return; // 不在编辑器内，不显示菜单
+    }
+
     let x = e.clientX;
     let y = e.clientY;
-    const menuWidth = 120; 
-    const menuHeight = 130; 
+    const menuWidth = 120;
+    const menuHeight = 130;
     if (x + menuWidth > window.innerWidth) x -= menuWidth;
     if (y + menuHeight > window.innerHeight) y -= menuHeight;
     pos = { x, y };
     showMenu = true;
   }
 
-  function onGlobalClick() { if (showMenu) showMenu = false; }
-  function onScroll() { if (showMenu) showMenu = false; }
+  function onGlobalClick() {
+    if (showMenu) showMenu = false;
+  }
+  function onScroll() {
+    if (showMenu) showMenu = false;
+  }
 
   onMount(() => {
     window.addEventListener("contextmenu", onContextMenu);
@@ -60,25 +79,37 @@
 
   onDestroy(() => {
     if (typeof window !== "undefined") {
-        window.removeEventListener("contextmenu", onContextMenu);
-        window.removeEventListener("click", onGlobalClick);
-        window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("click", onGlobalClick);
+      window.removeEventListener("scroll", onScroll, true);
     }
   });
 </script>
 
 {#if showMenu}
-  <div 
-    class="context-menu" 
+  <div
+    class="context-menu"
     bind:this={menuElement}
     style="top: {pos.y}px; left: {pos.x}px;"
     on:click|stopPropagation
   >
-    <div class="menu-item" on:click={() => handleAction('cut')}>剪切</div>
-    <div class="menu-item" on:click={() => handleAction('copy')}>复制</div>
-    <div class="menu-item" on:click={() => handleAction('paste')}>粘贴</div>
+    <div class="menu-item" on:click={() => handleAction("cut")}>
+      <span class="icon">✂️</span>
+      <span>剪切</span>
+    </div>
+    <div class="menu-item" on:click={() => handleAction("copy")}>
+      <span class="icon">📋</span>
+      <span>复制</span>
+    </div>
+    <div class="menu-item" on:click={() => handleAction("paste")}>
+      <span class="icon">📄</span>
+      <span>粘贴</span>
+    </div>
     <div class="separator"></div>
-    <div class="menu-item" on:click={() => handleAction('select-all')}>全选</div>
+    <div class="menu-item" on:click={() => handleAction("select-all")}>
+      <span class="icon">✨</span>
+      <span>全选</span>
+    </div>
   </div>
 {/if}
 
@@ -86,32 +117,47 @@
   .context-menu {
     position: fixed;
     z-index: 999999;
-    width: 100px; /* 更窄，更像原生 */
+    min-width: 140px;
     background: #ffffff;
-    border: 1px solid #d0d0d0;
-    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
-    padding: 4px 0;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 12px; /* 字体稍微改小 */
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 6px 0;
+    font-family: system-ui, sans-serif;
+    font-size: 13px;
     color: #333;
     cursor: default;
     user-select: none;
   }
 
   .menu-item {
-    padding: 6px 12px; /* 调整内边距 */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
     cursor: pointer;
-    transition: background 0.1s;
+    transition: all 0.15s ease;
   }
 
   .menu-item:hover {
-    background-color: #e8e8e8; /* 原生风格通常是浅灰或深蓝，这里用浅灰更自然 */
-    color: #000;
+    background: linear-gradient(90deg, #0066b8 0%, #0077cc 100%);
+    color: white;
+  }
+
+  .menu-item .icon {
+    font-size: 14px;
+    width: 18px;
+    display: inline-block;
   }
 
   .separator {
     height: 1px;
-    background-color: #e0e0e0;
-    margin: 3px 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      #e0e0e0 50%,
+      transparent 100%
+    );
+    margin: 4px 8px;
   }
 </style>
