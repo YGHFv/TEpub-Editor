@@ -289,9 +289,63 @@
         try {
             const selected = await open({
                 multiple: false,
-                filters: [{ name: "Text", extensions: ["txt", "md"] }],
+                filters: [
+                    {
+                        name: "所有支持的文件",
+                        extensions: ["txt", "md", "epub"],
+                    },
+                    { name: "文本文件", extensions: ["txt", "md"] },
+                    { name: "EPUB 文件", extensions: ["epub"] },
+                ],
             });
             if (selected) {
+                // 检查是否是 EPUB 文件
+                if (selected.toString().toLowerCase().endsWith(".epub")) {
+                    try {
+                        // 打开新窗口显示 EPUB 编辑器
+                        const { WebviewWindow } = await import(
+                            "@tauri-apps/api/webviewWindow"
+                        );
+
+                        // 确保路径正确编码
+                        const encodedPath = encodeURIComponent(
+                            selected.toString(),
+                        );
+                        console.log("打开 EPUB 文件:", selected);
+                        console.log("编码后路径:", encodedPath);
+
+                        const epubWindow = new WebviewWindow(
+                            "epub-editor-" + Date.now(),
+                            {
+                                url: `/epub-editor?file=${encodedPath}`,
+                                title: "EPUB 编辑器",
+                                width: 1200,
+                                height: 800,
+                            },
+                        );
+
+                        epubWindow.once("tauri://created", () => {
+                            console.log("EPUB 编辑器窗口创建成功");
+                        });
+
+                        epubWindow.once("tauri://error", (e) => {
+                            console.error("窗口创建失败:", e);
+                            message("打开 EPUB 编辑器失败: " + e, {
+                                title: "错误",
+                                kind: "error",
+                            });
+                        });
+                    } catch (e) {
+                        console.error("EPUB 窗口打开错误:", e);
+                        await message("打开 EPUB 编辑器失败: " + e, {
+                            title: "错误",
+                            kind: "error",
+                        });
+                    }
+                    return; // EPUB 文件处理完毕，直接返回
+                }
+
+                // 普通文本文件处理
                 isLoading = true;
                 isLoadingFile = true;
                 filePath = selected as string;

@@ -528,6 +528,16 @@ struct EpubMetadata {
     md5: String,
 }
 
+#[derive(Serialize, Debug, Clone)]
+struct EpubFileNode {
+    name: String,
+    path: String,
+    file_type: String, // folder, html, css, xml, image, font, other
+    size: Option<u64>,
+    title: Option<String>, // For HTML files
+    children: Option<Vec<EpubFileNode>>,
+}
+
 // --- 辅助函数 ---
 
 fn escape_xml(input: &str) -> String {
@@ -870,14 +880,14 @@ async fn export_epub(
 
         let start_line = chapter.line_number;
         let end_line = if i + 1 < chapters.len() {
-            chapters[i + 1].line_number
+            chapters[i + 1].line_number - 2 // line_number 指向标题的下一行，所以要减2
         } else {
-            lines.len()
+            lines.len() - 1
         };
-        let safe_end = end_line.min(lines.len());
+        let safe_end = end_line.min(lines.len() - 1);
         let safe_start = start_line.min(safe_end);
-        let body_lines = if safe_start + 1 < safe_end {
-            &lines[safe_start + 1..safe_end]
+        let body_lines = if safe_start + 1 <= safe_end {
+            &lines[safe_start + 1..=safe_end] // 使用 ..= 包含 safe_end
         } else {
             &[]
         };
@@ -1077,6 +1087,183 @@ async fn export_epub(
     Ok(())
 }
 
+// --- EPUB 编辑器相关命令 ---
+
+#[tauri::command]
+async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
+    use std::collections::HashMap;
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+
+    // 收集所有文件信息
+    let mut all_files = Vec::new();
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let file_path = file.name().to_string();
+
+        if file_path.ends_with('/') {
+            continue; // 跳过目录
+        }
+
+        let size = file.size();
+        let file_name = file_path.split('/').last().unwrap_or("").to_string();
+
+        // 确定文件类型
+        let file_type = if file_name.ends_with(".html") || file_name.ends_with(".xhtml") {
+            "html"
+        } else if file_name.ends_with(".css") {
+            "css"
+        } else if file_name.ends_with(".xml")
+            || file_name.ends_with(".opf")
+            || file_name.ends_with(".ncx")
+        {
+            "xml"
+        } else if file_name.ends_with(".jpg")
+            || file_name.ends_with(".jpeg")
+            || file_name.ends_with(".png")
+        {
+            "image"
+        } else if file_name.ends_with(".ttf") || file_name.ends_with(".otf") {
+            "font"
+        } else {
+            "other"
+        }
+        .to_string();
+
+        // 提取 HTML 标题
+        let mut title = None;
+        if file_type == "html" {
+            let mut content = String::new();
+            if file.read_to_string(&mut content).is_ok() {
+                if let Some(start) = content.find("<title>") {
+                    if let Some(end) = content[start..].find("</title>") {
+                        let title_text = &content[start + 7..start + end];
+                        title = Some(title_text.trim().to_string());
+                    }
+                }
+            }
+        }
+
+        all_files.push((file_path, file_name, file_type, size, title));
+    }
+
+    // 构建嵌套文件树
+    fn build_tree(files: &[(String, String, String, u64, Option<String>)]) -> Vec<EpubFileNode> {
+        let mut root_map: HashMap<String, Vec<EpubFileNode>> = HashMap::new();
+
+        for (full_path, file_name, file_type, size, title) in files {
+            let parts: Vec<&str> = full_path.split('/').collect();
+
+            if parts.len() == 1 {
+                // 根目录文件
+                root_map
+                    .entry("__root__".to_string())
+                    .or_insert_with(Vec::new)
+                    .push(EpubFileNode {
+                        name: file_name.clone(),
+                        path: full_path.clone(),
+                        file_type: file_type.clone(),
+                        size: Some(*size),
+                        title: title.clone(),
+                        children: None,
+                    });
+            } else {
+                // 有目录的文件
+                let dir_key = parts[0].to_string();
+                root_map
+                    .entry(dir_key)
+                    .or_insert_with(Vec::new)
+                    .push(EpubFileNode {
+                        name: file_name.clone(),
+                        path: full_path.clone(),
+                        file_type: file_type.clone(),
+                        size: Some(*size),
+                        title: title.clone(),
+                        children: None,
+                    });
+            }
+        }
+
+        let mut result = Vec::new();
+
+        // 处理根目录文件
+        if let Some(root_files) = root_map.remove("__root__") {
+            result.extend(root_files);
+        }
+
+        // 处理文件夹
+        let mut sorted_dirs: Vec<_> = root_map.into_iter().collect();
+        sorted_dirs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (dir_name, mut files) in sorted_dirs {
+            // 按路径深度分组子文件夹
+            let mut subdir_map: HashMap<String, Vec<EpubFileNode>> = HashMap::new();
+            let mut dir_files = Vec::new();
+
+            for file in files {
+                let path_parts: Vec<&str> = file.path.split('/').collect();
+                if path_parts.len() == 2 {
+                    // 直接在当前目录下的文件
+                    dir_files.push(file);
+                } else if path_parts.len() > 2 {
+                    // 子目录中的文件
+                    let subdir = path_parts[1].to_string();
+                    subdir_map.entry(subdir).or_insert_with(Vec::new).push(file);
+                }
+            }
+
+            // 创建子文件夹节点
+            let mut children = dir_files;
+            for (subdir_name, subdir_files) in subdir_map {
+                children.push(EpubFileNode {
+                    name: subdir_name.clone(),
+                    path: format!("{}/{}", dir_name, subdir_name),
+                    file_type: "folder".to_string(),
+                    size: None,
+                    title: None,
+                    children: Some(subdir_files),
+                });
+            }
+
+            result.push(EpubFileNode {
+                name: dir_name.clone(),
+                path: dir_name,
+                file_type: "folder".to_string(),
+                size: None,
+                title: None,
+                children: Some(children),
+            });
+        }
+
+        result
+    }
+
+    Ok(build_tree(&all_files))
+}
+
+#[tauri::command]
+async fn read_epub_file_content(epub_path: String, file_path: String) -> Result<String, String> {
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+
+    let mut zip_file = archive
+        .by_name(&file_path)
+        .map_err(|e| format!("文件不存在: {}", e))?;
+    let mut content = String::new();
+    zip_file
+        .read_to_string(&mut content)
+        .map_err(|e| format!("读取失败: {}", e))?;
+
+    Ok(content)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1093,6 +1280,8 @@ pub fn run() {
             advanced_search,
             advanced_replace,
             export_epub,
+            extract_epub,
+            read_epub_file_content,
             exit_app // 注册新指令
         ])
         .run(tauri::generate_context!())
