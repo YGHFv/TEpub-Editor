@@ -1264,6 +1264,25 @@ async fn read_epub_file_content(epub_path: String, file_path: String) -> Result<
     Ok(content)
 }
 
+#[tauri::command]
+async fn read_epub_file_binary(epub_path: String, file_path: String) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+
+    let mut zip_file = archive
+        .by_name(&file_path)
+        .map_err(|e| format!("文件不存在: {}", e))?;
+    let mut buffer = Vec::new();
+    zip_file
+        .read_to_end(&mut buffer)
+        .map_err(|e| format!("读取失败: {}", e))?;
+
+    Ok(buffer)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1282,7 +1301,8 @@ pub fn run() {
             export_epub,
             extract_epub,
             read_epub_file_content,
-            exit_app // 注册新指令
+            read_epub_file_binary, // 新增命令
+            exit_app               // 注册新指令
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

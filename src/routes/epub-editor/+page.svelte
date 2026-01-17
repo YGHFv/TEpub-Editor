@@ -2,6 +2,7 @@
     import { onMount } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { page } from "$app/stores";
+    import TocNode from "$lib/TocNode.svelte";
 
     interface EpubFileNode {
         name: string;
@@ -16,9 +17,114 @@
     let fileTree: EpubFileNode[] = [];
     let selectedFile: EpubFileNode | null = null;
     let fileContent = "";
+    let previewContent = "";
     let isLoading = true;
     let error = "";
     let expandedFolders: Set<string> = new Set();
+
+    // 追踪当前的请求生成ID，解决竞态条件
+    let currentGeneration = 0;
+    // 存储已生成的Blob URL以便释放
+    // 存储已生成的Blob URL以便释放
+    let blobUrls: string[] = [];
+    // 缓存: 绝对路径 -> Blob URL
+    let assetCache: Map<string, string> = new Map();
+    // 缓存: 绝对路径 -> 文件纯文本内容 (HTML, CSS, XML...)
+    let fileContentCache: Map<string, string> = new Map();
+    // 缓存: 绝对路径 -> 处理后的预览HTML
+    let previewCache: Map<string, string> = new Map();
+
+    // 扁平化的文件列表 (仅HTML)，用于快速查找章节顺序
+    let flatHtmlFiles: EpubFileNode[] = [];
+
+    function flattenFiles(nodes: EpubFileNode[]): EpubFileNode[] {
+        let result: EpubFileNode[] = [];
+        for (const node of nodes) {
+            if (
+                node.file_type === "html" ||
+                node.name.endsWith(".xhtml") ||
+                node.name.endsWith(".html")
+            ) {
+                result.push(node);
+            }
+            if (node.children) {
+                result = result.concat(flattenFiles(node.children));
+            }
+        }
+        return result;
+    }
+
+    async function preloadFile(file: EpubFileNode) {
+        if (!file) return;
+        const filePath = file.path;
+
+        // 1. 检查/加载文件内容
+        let content = "";
+        if (fileContentCache.has(filePath)) {
+            content = fileContentCache.get(filePath)!;
+        } else {
+            try {
+                content = await invoke<string>("read_epub_file_content", {
+                    epubPath: epubPath,
+                    filePath: filePath,
+                });
+                fileContentCache.set(filePath, content);
+            } catch (e) {
+                console.warn(`预加载失败: ${filePath}`, e);
+                return;
+            }
+        }
+
+        // 2. 预处理预览 (仅HTML)
+        if (!previewCache.has(filePath)) {
+            try {
+                // 使用 -1 generation 避免干扰当前流程，但这里 processHtmlForPreview 需要 generation 校验
+                // 我们稍微修改 processHtmlForPreview 或仅仅只是跑一遍逻辑
+                // 为了简单且不传递 generation 导致的中断，我们可以传一个永远有效的 generation 或者 0?
+                // 但原函数设计强依赖 generation。
+                // 我们复制一个 simplified 的处理逻辑或者复用。
+                // 此时为了安全，我们复用逻辑但传入 currentGeneration (有风险? NO, currentGeneration 可能会变)
+                // 更好的方式：processHtmlForPreview 不应强绑定 UI 的 generation。
+                // 让我们修改 processHtmlForPreview 让 generation 可选，或者在此处不预处理 HTML (因为预处理涉及 DOM Parser 只能在主线程且较重)
+                // 权衡：用户说性能消耗再大也行。
+                // 我们在 requestIdleCallback 中做?
+                // 直接调用，传入当前的 currentGeneration。如果用户切换了，generation 变了，预加载中断也是对的。
+
+                const processed = await processHtmlForPreview(
+                    content,
+                    filePath,
+                    currentGeneration,
+                );
+                if (processed) {
+                    previewCache.set(filePath, processed);
+                }
+            } catch (e) {
+                console.warn(`预处理预览失败: ${filePath}`, e);
+            }
+        }
+    }
+
+    function preloadNeighbors(currentFile: EpubFileNode) {
+        if (flatHtmlFiles.length === 0) return;
+        const index = flatHtmlFiles.findIndex(
+            (f) => f.path === currentFile.path,
+        );
+        if (index === -1) return;
+
+        // 延时一点执行，优先保证当前 UI 响应
+        setTimeout(() => {
+            const next = flatHtmlFiles[index + 1];
+            const prev = flatHtmlFiles[index - 1];
+            if (next) preloadFile(next);
+            if (prev) preloadFile(prev);
+        }, 300);
+    }
+
+    // ... resolvePath ... (unchanged)
+
+    // ... processCssAssets ... (unchanged)
+
+    // ... processHtmlForPreview ... (unchanged)
 
     function toggleFolder(path: string) {
         if (expandedFolders.has(path)) {
@@ -29,39 +135,363 @@
         expandedFolders = expandedFolders; // trigger reactivity
     }
 
-    onMount(async () => {
-        // 从 URL 参数获取 EPUB 路径
-        epubPath = $page.url.searchParams.get("file") || "";
+    onMount(() => {
+        const loadEpub = async () => {
+            // 从 URL 参数获取 EPUB 路径
+            epubPath = $page.url.searchParams.get("file") || "";
 
-        if (!epubPath) {
-            error = "未指定 EPUB 文件路径";
-            isLoading = false;
-            return;
-        }
+            if (!epubPath) {
+                error = "未指定 EPUB 文件路径";
+                isLoading = false;
+                return;
+            }
 
-        try {
-            // 调用后端解压 EPUB
-            fileTree = await invoke<EpubFileNode[]>("extract_epub", {
-                epubPath: epubPath,
-            });
-            isLoading = false;
-        } catch (e) {
-            error = `加载失败: ${e}`;
-            isLoading = false;
-        }
+            try {
+                // 调用后端解压 EPUB
+                fileTree = await invoke<EpubFileNode[]>("extract_epub", {
+                    epubPath: epubPath,
+                });
+
+                // 构建扁平列表用于预加载
+                flatHtmlFiles = flattenFiles(fileTree);
+
+                // 加载完成后，自动加载目录
+                await loadTOC();
+
+                isLoading = false;
+            } catch (e) {
+                error = `加载失败: ${e}`;
+                isLoading = false;
+            }
+        };
+
+        loadEpub();
+
+        return () => {
+            // 组件销毁时清理
+            cleanupBlobUrls();
+        };
     });
+
+    function cleanupBlobUrls() {
+        blobUrls.forEach((url) => URL.revokeObjectURL(url));
+        blobUrls = [];
+        assetCache.clear();
+        fileContentCache.clear();
+        previewCache.clear();
+    }
+
+    // 解析相对路径
+    function resolvePath(basePath: string, relativePath: string): string {
+        const stack = basePath.split("/");
+        stack.pop(); // 移除文件名，保留目录
+
+        const parts = relativePath.split("/");
+        for (const part of parts) {
+            if (part === ".") continue;
+            if (part === "..") {
+                if (stack.length > 0) stack.pop();
+            } else {
+                stack.push(part);
+            }
+        }
+        return stack.join("/");
+    }
+
+    async function processCssAssets(
+        css: string,
+        cssPath: string,
+    ): Promise<string> {
+        // 查找 url(...) 引用
+        // 排除 data: 和 http: 开头
+        const urlRegex = /url\(['"]?([^'"\)]+)['"]?\)/g;
+        let match;
+        const matches: { original: string; url: string }[] = [];
+
+        // 收集所有匹配项
+        while ((match = urlRegex.exec(css)) !== null) {
+            const originalUrl = match[1];
+            if (
+                !originalUrl.startsWith("data:") &&
+                !originalUrl.startsWith("http")
+            ) {
+                matches.push({ original: match[0], url: originalUrl });
+            }
+        }
+
+        if (matches.length === 0) return css;
+
+        // 并行处理
+        const promises = matches.map(async (m) => {
+            const absolutePath = resolvePath(cssPath, m.url);
+
+            // 检查缓存
+            if (assetCache.has(absolutePath)) {
+                return {
+                    original: m.original,
+                    replacement: `url("${assetCache.get(absolutePath)}")`,
+                };
+            }
+
+            try {
+                const binaryData = await invoke<number[]>(
+                    "read_epub_file_binary",
+                    {
+                        epubPath: epubPath,
+                        filePath: absolutePath,
+                    },
+                );
+
+                const uint8Array = new Uint8Array(binaryData);
+                // 简单猜测 MIME (主要是字体)
+                let mimeType = "application/octet-stream";
+                const lower = m.url.toLowerCase();
+                if (lower.endsWith(".ttf")) mimeType = "font/ttf";
+                else if (lower.endsWith(".woff")) mimeType = "font/woff";
+                else if (lower.endsWith(".woff2")) mimeType = "font/woff2";
+                else if (lower.endsWith(".otf")) mimeType = "font/otf";
+                else if (lower.endsWith(".eot"))
+                    mimeType = "application/vnd.ms-fontobject";
+                else if (lower.endsWith(".svg")) mimeType = "image/svg+xml";
+
+                const blob = new Blob([uint8Array], { type: mimeType });
+                const blobUrl = URL.createObjectURL(blob);
+                blobUrls.push(blobUrl);
+                assetCache.set(absolutePath, blobUrl);
+
+                return {
+                    original: m.original,
+                    replacement: `url("${blobUrl}")`,
+                };
+            } catch (e) {
+                console.error(`无法加载资源: ${absolutePath}`, e);
+                return null;
+            }
+        });
+
+        const results = await Promise.all(promises);
+
+        // ... (results handling same as before)
+        let processedCss = css;
+        for (const res of results) {
+            if (res) {
+                processedCss = processedCss
+                    .split(res.original)
+                    .join(res.replacement);
+            }
+        }
+        return processedCss;
+    }
+
+    // ...
+
+    async function processHtmlForPreview(
+        html: string,
+        filePath: string,
+        generation: number,
+    ): Promise<string> {
+        // ... (setup parser)
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+
+        const links = Array.from(
+            doc.querySelectorAll('link[rel="stylesheet"]'),
+        );
+        const images = Array.from(doc.querySelectorAll("img"));
+
+        // 并行处理所有 CSS
+        const cssPromises = links.map(async (link) => {
+            const href = link.getAttribute("href");
+            if (!href) return;
+            if (currentGeneration !== generation) return;
+
+            const cssPath = resolvePath(filePath, href);
+            try {
+                let cssContent = await invoke<string>(
+                    "read_epub_file_content",
+                    {
+                        epubPath: epubPath,
+                        filePath: cssPath,
+                    },
+                );
+
+                if (currentGeneration !== generation) return;
+
+                // 处理 CSS 中的字体和图片引用
+                cssContent = await processCssAssets(cssContent, cssPath);
+
+                if (currentGeneration !== generation) return;
+
+                return { link, cssContent };
+            } catch (e) {
+                console.error(`无法加载CSS: ${cssPath}`, e);
+            }
+        });
+
+        // 并行处理所有图片
+        const imgPromises = images.map(async (img) => {
+            const src = img.getAttribute("src");
+            if (src && !src.startsWith("http") && !src.startsWith("data:")) {
+                if (currentGeneration !== generation) return;
+
+                const imgPath = resolvePath(filePath, src);
+
+                // 检查缓存
+                if (assetCache.has(imgPath)) {
+                    return { img, blobUrl: assetCache.get(imgPath) };
+                }
+
+                try {
+                    // 获取图片的二进制数据
+                    const imgData = await invoke<number[]>(
+                        "read_epub_file_binary",
+                        {
+                            epubPath: epubPath,
+                            filePath: imgPath,
+                        },
+                    );
+
+                    if (currentGeneration !== generation) return;
+
+                    // 创建 Blob 并生成 URL
+                    const uint8Array = new Uint8Array(imgData);
+                    let mimeType = "image/jpeg";
+                    const lowerSrc = src.toLowerCase();
+                    if (lowerSrc.endsWith(".png")) mimeType = "image/png";
+                    else if (lowerSrc.endsWith(".gif")) mimeType = "image/gif";
+                    else if (lowerSrc.endsWith(".svg"))
+                        mimeType = "image/svg+xml";
+                    else if (lowerSrc.endsWith(".webp"))
+                        mimeType = "image/webp";
+
+                    const blob = new Blob([uint8Array], { type: mimeType });
+                    const blobUrl = URL.createObjectURL(blob);
+                    blobUrls.push(blobUrl);
+                    assetCache.set(imgPath, blobUrl);
+
+                    return { img, blobUrl };
+                } catch (e) {
+                    console.error(`无法加载图片: ${imgPath}`, e);
+                }
+            }
+        });
+
+        // ... (wait and replace)
+        // 等待所有异步操作完成
+        const [cssResults, imgResults] = await Promise.all([
+            Promise.all(cssPromises),
+            Promise.all(imgPromises),
+        ]);
+
+        if (currentGeneration !== generation) return "";
+
+        // 统一应用更改
+        cssResults.forEach((res) => {
+            if (res) {
+                const style = doc.createElement("style");
+                style.textContent = res.cssContent;
+                res.link.replaceWith(style);
+            }
+        });
+
+        // 注入全局样式：强制隐藏横向滚动条
+        const globalStyle = doc.createElement("style");
+        globalStyle.textContent =
+            "html, body { overflow-x: hidden !important; }";
+        doc.head.appendChild(globalStyle);
+
+        imgResults.forEach((res) => {
+            if (res) {
+                // @ts-ignore
+                res.img.setAttribute("src", res.blobUrl);
+            }
+        });
+
+        return doc.documentElement.outerHTML;
+    }
 
     async function selectFile(file: EpubFileNode) {
         if (file.file_type === "folder") return;
 
+        // 增加代数，使得之前的 pending 请求失效
+        currentGeneration++;
+        const generation = currentGeneration;
+
         selectedFile = file;
+
+        // 1. 尝试直接从预览缓存命中 (最快路径)
+        if (previewCache.has(file.path)) {
+            fileContent = fileContentCache.get(file.path) || "加载中..."; // 试图同步显示内容，如果有
+            previewContent = previewCache.get(file.path)!;
+            activeTab = "preview"; // 自动切换
+            preloadNeighbors(file); // 触发预加载下一章
+            return;
+        }
+
+        // 立即清理旧内容，避免视觉混淆
+        // 如果有内容缓存，先显示内容缓存
+        if (fileContentCache.has(file.path)) {
+            fileContent = fileContentCache.get(file.path)!;
+        } else {
+            fileContent = "加载中...";
+        }
+
+        // 如果没命中预览缓存
+        if (!previewCache.has(file.path)) {
+            previewContent = "加载中...";
+        }
+
         try {
-            fileContent = await invoke<string>("read_epub_file_content", {
-                epubPath: epubPath,
-                filePath: file.path,
-            });
+            let content = "";
+
+            // 2. 检查文件内容缓存
+            if (fileContentCache.has(file.path)) {
+                content = fileContentCache.get(file.path)!;
+            } else {
+                content = await invoke<string>("read_epub_file_content", {
+                    epubPath: epubPath,
+                    filePath: file.path,
+                });
+
+                // 存入缓存
+                fileContentCache.set(file.path, content);
+            }
+
+            // 如果代数不匹配，说明用户已经切换了文件，忽略结果
+            if (currentGeneration !== generation) return;
+
+            fileContent = content;
+
+            // 3. 仅对 HTML 文件进行预览处理，优化性能
+            if (
+                file.file_type === "html" ||
+                file.name.endsWith(".xhtml") ||
+                file.name.endsWith(".html")
+            ) {
+                const processed = await processHtmlForPreview(
+                    fileContent,
+                    file.path,
+                    generation,
+                );
+
+                // 4. 存入预览缓存
+                if (currentGeneration === generation && processed) {
+                    previewContent = processed;
+                    previewCache.set(file.path, processed);
+                    activeTab = "preview";
+
+                    // 5. 触发相邻章节预加载
+                    preloadNeighbors(file);
+                }
+            } else {
+                // 对于非 HTML 文件（如 XML, OPF, NCX），不展示预览
+                previewContent = "";
+            }
         } catch (e) {
-            fileContent = `读取失败: ${e}`;
+            if (currentGeneration === generation) {
+                fileContent = `读取失败: ${e}`;
+                previewContent = `读取失败: ${e}`;
+            }
         }
     }
 
@@ -82,6 +512,238 @@
             default:
                 return "📎";
         }
+    }
+
+    // --- 目录 (TOC) 相关逻辑 ---
+    interface TocItem {
+        id: string;
+        label: string;
+        src: string;
+        children?: TocItem[];
+    }
+
+    let activeTab: "preview" | "toc" = "toc"; // 默认显示目录
+    let tocList: TocItem[] = [];
+    let isTocLoading = false;
+    let expandedTocItems: Set<string> = new Set(); // 存储展开的目录项ID
+
+    function toggleTocItem(id: string) {
+        if (expandedTocItems.has(id)) {
+            expandedTocItems.delete(id);
+        } else {
+            expandedTocItems.add(id);
+        }
+        expandedTocItems = expandedTocItems;
+    }
+
+    function parseNavPoints(container: Element): TocItem[] {
+        const items: TocItem[] = [];
+        // 获取直接子级的 navPoint
+        // querySelectorAll 会获取所有后代，所以这里只能遍历 children
+        for (const child of Array.from(container.children)) {
+            if (child.tagName.toLowerCase() === "navpoint") {
+                const id =
+                    child.getAttribute("id") ||
+                    Math.random().toString(36).substr(2, 9);
+                const label =
+                    child.querySelector(":scope > navLabel > text")
+                        ?.textContent || "未知章节";
+                const src =
+                    child
+                        .querySelector(":scope > content")
+                        ?.getAttribute("src") || "";
+
+                const item: TocItem = {
+                    id,
+                    label,
+                    src,
+                    children: [],
+                };
+
+                // 递归查找子项
+                item.children = parseNavPoints(child);
+                if (item.children.length === 0) delete item.children;
+
+                items.push(item);
+            }
+        }
+        return items;
+    }
+
+    function sortFileTree(nodes: EpubFileNode[], tocPaths: string[]) {
+        // 1. Root Level Priority
+        const rootPriority = ["oebps", "meta-inf"];
+
+        // 2. OEBPS Children Priority
+        const oebpsFilePriority = ["content.opf", "toc.ncx"];
+        const oebpsFolderPriority = ["text", "styles", "fonts", "images"];
+
+        // Helper to get sorting weight
+        const getWeight = (node: EpubFileNode, parentName: string) => {
+            const name = node.name.toLowerCase();
+
+            // Auto-expand logic
+            if (
+                name === "oebps" ||
+                (parentName === "oebps" && name === "text")
+            ) {
+                expandedFolders.add(node.path);
+            }
+
+            // Root Level Sorting
+            if (!parentName) {
+                const idx = rootPriority.indexOf(name);
+                return idx !== -1 ? idx : 100;
+            }
+
+            // OEBPS Level Sorting
+            if (parentName === "oebps") {
+                if (node.file_type !== "folder") {
+                    const idx = oebpsFilePriority.indexOf(name);
+                    return idx !== -1 ? idx : 200; // Files without specific priority
+                } else {
+                    const idx = oebpsFolderPriority.indexOf(name);
+                    return idx !== -1 ? 300 + idx : 400; // Folders
+                }
+            }
+
+            // Text Folder Sorting (based on TOC)
+            if (parentName === "text") {
+                const idx = tocPaths.indexOf(node.path);
+                return idx !== -1 ? idx : 9999;
+            }
+
+            return 0; // Default
+        };
+
+        const sortRecursive = (
+            list: EpubFileNode[],
+            parentName: string = "",
+        ) => {
+            list.sort((a, b) => {
+                const wA = getWeight(a, parentName);
+                const wB = getWeight(b, parentName);
+                if (wA !== wB) return wA - wB;
+                return a.name.localeCompare(b.name, undefined, {
+                    numeric: true,
+                });
+            });
+
+            list.forEach((node) => {
+                if (node.children) {
+                    sortRecursive(node.children, node.name.toLowerCase());
+                }
+            });
+        };
+
+        sortRecursive(nodes);
+        expandedFolders = expandedFolders; // Trigger reactivity
+    }
+
+    async function loadTOC() {
+        if (tocList.length > 0) return; // 已经加载过
+        isTocLoading = true;
+
+        // 1. 在文件树中查找 .ncx 文件
+        function findNcx(nodes: EpubFileNode[]): EpubFileNode | null {
+            for (const node of nodes) {
+                if (node.file_type === "folder" && node.children) {
+                    const found = findNcx(node.children);
+                    if (found) return found;
+                } else if (node.name.toLowerCase().endsWith(".ncx")) {
+                    return node;
+                }
+            }
+            return null;
+        }
+
+        const ncxNode = findNcx(fileTree);
+
+        if (!ncxNode) {
+            console.warn("未找到 .ncx 文件");
+            isTocLoading = false;
+            return;
+        }
+
+        try {
+            // 2. 读取 ncx 内容
+            const ncxContent = await invoke<string>("read_epub_file_content", {
+                epubPath: epubPath,
+                filePath: ncxNode.path,
+            });
+
+            // 3. 解析 XML
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(ncxContent, "text/xml");
+            const navMap = xmlDoc.querySelector("navMap");
+
+            if (navMap) {
+                tocList = parseNavPoints(navMap);
+
+                // 收集所有 TOC 引用的文件路径，用于排序
+                tocNcxPath = ncxNode.path;
+                const tocPaths: string[] = [];
+                const collectPaths = (items: TocItem[]) => {
+                    for (const item of items) {
+                        // 解析为绝对路径 (去除锚点)
+                        const [relativePath] = item.src.split("#");
+                        if (relativePath) {
+                            const fullPath = resolvePath(
+                                tocNcxPath,
+                                relativePath,
+                            );
+                            if (!tocPaths.includes(fullPath)) {
+                                tocPaths.push(fullPath);
+                            }
+                        }
+                        if (item.children) collectPaths(item.children);
+                    }
+                };
+                collectPaths(tocList);
+
+                // 执行排序
+                sortFileTree(fileTree, tocPaths);
+                fileTree = fileTree; // 触发更新
+            }
+
+            // 存储 ncx 文件的路径，用于后续解析相对路径
+            tocNcxPath = ncxNode.path;
+        } catch (e) {
+            console.error("加载目录失败", e);
+        } finally {
+            isTocLoading = false;
+        }
+    }
+
+    let tocNcxPath = ""; // ncx 文件的完整路径
+
+    // 处理目录点击
+    function handleTocClick(src: string) {
+        // src 可能是 "Text/chapter1.xhtml" 或 "chapter1.xhtml#point"
+        let [relativePath, anchor] = src.split("#");
+
+        // 解析出绝对路径
+        const targetPath = resolvePath(tocNcxPath, relativePath);
+
+        // 在 fileTree 中查找对应节点并选中
+        function findAndSelect(nodes: EpubFileNode[]) {
+            for (const node of nodes) {
+                if (node.path === targetPath) {
+                    selectFile(node);
+                    return true;
+                }
+                if (node.children) {
+                    if (findAndSelect(node.children)) return true;
+                }
+            }
+            return false;
+        }
+
+        findAndSelect(fileTree);
+        // 注释掉自动切换，保持在目录页
+        // if (found) {
+        //      activeTab = "preview";
+        // }
     }
 
     function getFileDescription(file: EpubFileNode): string {
@@ -363,20 +1025,61 @@
             {/if}
         </main>
 
-        <!-- 右侧：预览 -->
+        <!-- 右侧：预览/目录 -->
         <aside class="preview-pane">
-            {#if selectedFile?.file_type === "html"}
-                <div class="preview-header">
-                    <h4>📖 预览</h4>
+            <div class="preview-header">
+                <div class="tabs">
+                    <button
+                        class="tab"
+                        class:active={activeTab === "preview"}
+                        on:click={() => (activeTab = "preview")}
+                    >
+                        预览
+                    </button>
+                    <button
+                        class="tab"
+                        class:active={activeTab === "toc"}
+                        on:click={() => {
+                            activeTab = "toc";
+                            loadTOC();
+                        }}
+                    >
+                        目录
+                    </button>
                 </div>
-                <div class="preview-content">
-                    {@html fileContent}
+            </div>
+
+            {#if activeTab === "preview"}
+                <div class="preview-container">
+                    {#if selectedFile?.file_type === "html"}
+                        <div class="mobile-frame">
+                            <iframe
+                                title="preview"
+                                srcdoc={previewContent}
+                                sandbox="allow-same-origin"
+                            ></iframe>
+                        </div>
+                    {:else}
+                        <div class="placeholder">
+                            {selectedFile
+                                ? "选择 HTML 文件以预览"
+                                : "请从左侧选择一个文件"}
+                        </div>
+                    {/if}
                 </div>
             {:else}
-                <div class="placeholder">
-                    {selectedFile
-                        ? "仅支持预览 HTML 文件"
-                        : "选择 HTML 文件以预览"}
+                <div class="toc-container">
+                    {#if isTocLoading}
+                        <div class="loading">加载目录...</div>
+                    {:else if tocList.length === 0}
+                        <div class="empty">暂无目录或未找到 toc.ncx</div>
+                    {:else}
+                        <div class="toc-list">
+                            {#each tocList as item}
+                                <TocNode {item} onSelect={handleTocClick} />
+                            {/each}
+                        </div>
+                    {/if}
                 </div>
             {/if}
         </aside>
@@ -404,6 +1107,15 @@
         color: #d32f2f;
     }
 
+    /* 全局重置，防止出现额外的滚动条 */
+    :global(body) {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    }
+
     /* 文件树 */
     .file-tree {
         width: 300px;
@@ -414,9 +1126,13 @@
     }
 
     .tree-header {
-        padding: 16px;
+        height: 50px;
+        padding: 0 16px;
         border-bottom: 1px solid #eee;
         background: #fafafa;
+        display: flex;
+        align-items: center;
+        box-sizing: border-box;
     }
 
     .tree-header h3 {
@@ -534,12 +1250,15 @@
     }
 
     .editor-header {
-        padding: 12px 16px;
+        height: 50px;
+        padding: 0 16px;
         background: #fafafa;
         border-bottom: 1px solid #eee;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        justify-content: center;
+        gap: 2px;
+        box-sizing: border-box;
     }
 
     .file-name {
@@ -567,6 +1286,8 @@
         white-space: pre-wrap;
         word-wrap: break-word;
         color: #000;
+        tab-size: 2;
+        -moz-tab-size: 2;
     }
 
     .code-block code {
@@ -620,29 +1341,99 @@
 
     /* 预览 */
     .preview-pane {
-        width: 400px;
+        width: 390px;
         background: #fff;
+        display: flex;
+        flex-direction: column;
+        border-left: 1px solid #ddd;
+    }
+
+    .preview-header {
+        height: 50px;
+        background: #fafafa;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        align-items: center;
+        box-sizing: border-box;
+    }
+
+    .tabs {
+        display: flex;
+        height: 100%;
+        width: 100%;
+    }
+
+    .tab {
+        flex: 1;
+        border: none;
+        background: transparent;
+        font-size: 14px;
+        color: #666;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: all 0.2s;
+        font-weight: 500;
+    }
+
+    .tab:hover {
+        background: #f0f0f0;
+        color: #333;
+    }
+
+    .tab.active {
+        color: #2196f3;
+        border-bottom: 2px solid #2196f3;
+        background: #fff;
+    }
+
+    .preview-container {
+        flex: 1;
+        overflow: hidden;
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .mobile-frame {
+        width: 390px;
+        height: 100%;
+        max-height: 812px; /* iPhone X height approx, or just limit it */
+        background: #fff;
+        box-shadow:
+            0 4px 6px -1px rgba(0, 0, 0, 0.1),
+            0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        border: 1px solid #d1d5db;
         display: flex;
         flex-direction: column;
     }
 
-    .preview-header {
-        padding: 12px 16px;
-        background: #fafafa;
-        border-bottom: 1px solid #eee;
+    .preview-container iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: #fff;
     }
 
-    .preview-header h4 {
-        margin: 0;
-        font-size: 14px;
-        color: #333;
-    }
-
-    .preview-content {
+    .toc-container {
         flex: 1;
-        overflow: auto;
-        padding: 16px;
-        background: #fefefe;
+        overflow-y: auto;
+        background: #fff;
+        padding: 0;
+    }
+
+    .toc-list {
+        margin: 0;
+        padding: 0;
+    }
+
+    .toc-container .empty,
+    .toc-container .loading {
+        padding: 20px;
+        text-align: center;
+        color: #999;
+        font-size: 14px;
     }
 
     .placeholder {
@@ -650,6 +1441,7 @@
         align-items: center;
         justify-content: center;
         height: 100%;
+        width: 100%;
         color: #999;
         font-size: 14px;
     }

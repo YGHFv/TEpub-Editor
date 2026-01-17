@@ -75,7 +75,10 @@
     );
   }
 
-  // 监听 titleLines 变化并更新插件
+  // 内部状态跟踪，避免昂贵的 toString() 比较
+  let lastKnownDoc = "";
+
+  // 监听 titleLines 变化并更新插件 (代码保持不变)
   $: if (view) {
     try {
       view.dispatch({
@@ -86,9 +89,28 @@
     }
   }
 
+  // 优化后的文档同步逻辑
+  $: if (view && doc !== lastKnownDoc) {
+    const stateDoc = view.state.doc;
+    // 1. 长度检查优化 (O(1))
+    // 2. 仅当长度相等时才进行全量字符串比较 (O(N))
+    if (doc.length !== stateDoc.length || doc !== stateDoc.toString()) {
+      view.dispatch({
+        changes: { from: 0, to: stateDoc.length, insert: doc },
+      });
+      lastKnownDoc = doc;
+    } else {
+      // 如果文档实际内容相同，仅仅是引用更新，也同步 lastKnownDoc 以防万一
+      lastKnownDoc = doc;
+    }
+  }
+
   onMount(() => {
     const savedSize = localStorage.getItem("editor-font-size");
     if (savedSize) fontSize = parseInt(savedSize);
+
+    // 初始化
+    lastKnownDoc = doc;
 
     // 初始化编辑器
     const state = createEditorState(doc);
@@ -171,7 +193,11 @@
           }),
         ),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) onChange(update.state.doc.toString());
+          if (update.docChanged) {
+            const newContent = update.state.doc.toString();
+            lastKnownDoc = newContent; // 更新内部状态
+            onChange(newContent);
+          }
           // 选中文字自动收起键盘
           if (update.selectionSet && !update.state.selection.main.empty) {
             view.contentDOM.blur();
@@ -210,6 +236,7 @@
   // 使用 setState 重置整个状态，顺便清除撤销历史
   export function resetDoc(n: string) {
     if (!view) return;
+    lastKnownDoc = n; // 同步状态
     view.setState(createEditorState(n));
   }
   export function scrollToLine(l: number) {
@@ -245,8 +272,10 @@
   }
   export function replaceSelection(t: string) {
     const sel = view.state.selection.main;
-    if (!sel.empty)
+    if (!sel.empty) {
+      // 这里的变化会触发 updateListener，从而更新 lastKnownDoc
       view.dispatch({ changes: { from: sel.from, to: sel.to, insert: t } });
+    }
   }
   export function triggerUndo() {
     undo(view);
