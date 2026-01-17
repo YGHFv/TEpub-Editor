@@ -1,0 +1,19 @@
+# Node.js
+node_modules/
+.svelte-kit/
+build/
+.env
+
+# Rust / Tauri Artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Android Local Files
+local.properties
+*.keystore
+*.jks
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
