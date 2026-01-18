@@ -1,6 +1,6 @@
 {
   "name": "tepub-editor",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "",
   "type": "module",
   "scripts": {
@@ -14,7 +14,9 @@
   "license": "MIT",
   "dependencies": {
     "@codemirror/commands": "^6.10.1",
+    "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.11",
+    "@codemirror/lang-xml": "^6.1.0",
     "@codemirror/language": "^6.12.1",
     "@codemirror/search": "^6.6.0",
     "@codemirror/state": "^6.5.4",

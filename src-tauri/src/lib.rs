@@ -605,6 +605,12 @@ fn split_title(full_title: &str) -> (String, String) {
     (full_title.to_string(), "".to_string())
 }
 
+// --- 换行符规范化 ---
+// 将所有换行符统一为 \n，确保后端行号计算与 CodeMirror 编辑器一致
+fn normalize_line_endings(s: String) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 // --- 指令区域 ---
 
 #[tauri::command]
@@ -634,7 +640,7 @@ fn read_text_file(path: String) -> Result<String, String> {
 
     // 1. 优先尝试 UTF-8 (严格)
     if let Ok(s) = String::from_utf8(buffer.clone()) {
-        return Ok(s);
+        return Ok(normalize_line_endings(s));
     }
 
     // 2. Chardetng 检测作为基准
@@ -655,7 +661,7 @@ fn read_text_file(path: String) -> Result<String, String> {
 
     // 如果检测结果完美且不是 windows-1252 (容易误判)，直接返回
     if min_errors == 0 && best_encoding != "windows-1252" && best_encoding != "ISO-8859-1" {
-        return Ok(best_content);
+        return Ok(normalize_line_endings(best_content));
     }
 
     // 3. 遍历候选编码打擂台
@@ -676,7 +682,7 @@ fn read_text_file(path: String) -> Result<String, String> {
     }
 
     // println!("Selected encoding: {} (errors: {})", best_encoding, min_errors);
-    Ok(best_content)
+    Ok(normalize_line_endings(best_content))
 }
 
 #[tauri::command]
@@ -766,6 +772,11 @@ async fn scan_chapters(
     chapreg: String,
     metareg: String,
 ) -> Vec<ChapterInfo> {
+    // Normalize line endings to ensure consistency with CodeMirror's line counting
+    // CodeMirror treats \r, \n, and \r\n all as line separators
+    // Rust's .lines() only recognizes \n and \r\n
+    let content = content.replace("\r\n", "\n").replace('\r', "\n");
+
     let mut chapters = Vec::new();
     let re_volume = Regex::new(&volreg).unwrap_or_else(|_| {
         Regex::new(r"^\s*第[零一二三四五六七八九十百千万0-9]+[卷部].*").unwrap()
@@ -1550,6 +1561,95 @@ async fn read_epub_binary_batch(
     Ok(results)
 }
 
+// --- EPUB 文件保存命令 ---
+
+#[tauri::command]
+async fn save_epub_file_content(
+    epub_path: String,
+    file_path: String,
+    content: String,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+    use zip::{write::FileOptions, ZipArchive, ZipWriter};
+
+    // 1. 读取原始 EPUB
+    let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+
+    // 2. 创建临时文件
+    let temp_path = format!("{}.tmp", epub_path);
+    let temp_file = fs::File::create(&temp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+    let mut zip_writer = ZipWriter::new(temp_file);
+
+    let options_deflated =
+        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options_stored = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+    // 3. 复制所有文件，替换目标文件
+    for i in 0..archive.len() {
+        let mut zip_file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = zip_file.name().to_string();
+
+        // mimetype 必须使用 Stored 压缩方式
+        let options = if name == "mimetype" {
+            options_stored
+        } else {
+            options_deflated
+        };
+
+        zip_writer
+            .start_file(&name, options)
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+
+        if name == file_path {
+            // 写入新内容
+            zip_writer
+                .write_all(content.as_bytes())
+                .map_err(|e| format!("写入内容失败: {}", e))?;
+        } else {
+            // 复制原内容
+            let mut buffer = Vec::new();
+            zip_file
+                .read_to_end(&mut buffer)
+                .map_err(|e| format!("读取文件失败: {}", e))?;
+            zip_writer
+                .write_all(&buffer)
+                .map_err(|e| format!("写入失败: {}", e))?;
+        }
+    }
+
+    zip_writer
+        .finish()
+        .map_err(|e| format!("完成 ZIP 失败: {}", e))?;
+
+    // 4. 替换原文件
+    fs::rename(&temp_path, &epub_path).map_err(|e| format!("替换文件失败: {}", e))?;
+
+    // 5. 更新缓存
+    {
+        let mut cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(ref mut cache) = *cache_guard {
+            if cache.epub_path == epub_path {
+                cache.text_cache.insert(file_path, content);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_launch_args() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    // Index 0 is the executable path
+    // Index 1 is usually the file path for file associations on Windows/Linux
+    if args.len() > 1 {
+        // Filter out common Tauri debug flags if necessary, though simple direct file opening usually puts file at index 1
+        return Some(args[1].clone());
+    }
+    None
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1571,6 +1671,8 @@ pub fn run() {
             read_epub_file_binary,
             read_epub_files_batch,
             read_epub_binary_batch,
+            save_epub_file_content,
+            get_launch_args, // Register new command
             exit_app
         ])
         .run(tauri::generate_context!())

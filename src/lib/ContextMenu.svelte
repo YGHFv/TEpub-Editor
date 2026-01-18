@@ -48,11 +48,24 @@
 
     // 检查是否在编辑器内（CodeMirror）
     const target = e.target as HTMLElement;
+
+    // Logic:
+    // 1. Always prevent default native menu (as requested).
+    // 2. Only show custom menu if:
+    //    - In Editor (CodeMirror)
+    //    - In standard Input/Textarea
+    //    - Has Selection (e.g. read-only text)
+
     const isInEditor =
       target.closest(".cm-content") || target.closest(".cm-editor");
+    const isInput =
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.isContentEditable;
+    const hasSelection = window.getSelection()?.toString().length > 0;
 
-    if (!isInEditor) {
-      return; // 不在编辑器内，不显示菜单
+    if (!isInEditor && !isInput && !hasSelection) {
+      return; // Not in editable/selectable area, show nothing (native menu blocked)
     }
 
     let x = e.clientX;

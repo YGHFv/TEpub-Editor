@@ -107,7 +107,6 @@
         date: new Date().toISOString().split("T")[0],
         uuid: crypto.randomUUID(),
         md5: "",
-        md5: "",
         cover_path: "",
         description: "",
     };
@@ -138,6 +137,33 @@
     let isDragging = false;
     let dragStart = { x: 0, y: 0 };
     let activeDragTarget = "find"; // 'find' or 'check'
+
+    // Close Dialog State
+    let showCloseDialog = false;
+    let isDialogSaving = false;
+
+    function handleDialogSave() {
+        isDialogSaving = true;
+        saveFile()
+            .then(async () => {
+                // After save, exit
+                await invoke("exit_app");
+                // Window destroys, state doesn't matter much but good practice
+            })
+            .catch(() => {
+                isDialogSaving = false;
+            });
+    }
+
+    async function handleDialogDiscard() {
+        // Discard changes: Clear cache and exit
+        localStorage.removeItem("app-crash-recovery");
+        await invoke("exit_app");
+    }
+
+    function handleDialogCancel() {
+        showCloseDialog = false;
+    }
 
     function startDrag(e: MouseEvent, target: "find" | "check") {
         if (
@@ -192,6 +218,7 @@
                 } catch (e) {}
 
             // 3. 崩溃恢复逻辑 (完整保留)
+            // 3. 崩溃恢复逻辑
             const savedState = localStorage.getItem("app-crash-recovery");
             if (savedState) {
                 try {
@@ -201,23 +228,42 @@
                         state.filePath !== "请打开一本小说..."
                     ) {
                         filePath = state.filePath;
-                        // 只有当有未保存内容时才恢复 content，否则读文件
-                        if (state.isModified && state.content) {
+
+                        // Check if file exists first
+                        let diskContent = "";
+                        try {
+                            diskContent = await invoke("read_text_file", {
+                                path: filePath,
+                            });
+                        } catch (e) {
+                            console.warn("File read fail:", e);
+                        }
+
+                        // Logic: If state says modified, restore content.
+                        // BUT if we just saved and exited, state.isModified should be false.
+                        if (
+                            state.isModified &&
+                            state.content &&
+                            state.content !== diskContent
+                        ) {
                             fileContent = state.content;
                             isModified = true;
                         } else {
-                            try {
-                                fileContent = await readTextFile(filePath);
-                            } catch (e) {}
+                            // Either not modified, or content matches disk (false alarm)
+                            fileContent = diskContent;
+                            // Ensure modification flag is false
+                            isModified = false;
+                            // Clear cache if it was a false alarm
+                            if (state.isModified)
+                                localStorage.removeItem("app-crash-recovery");
                         }
 
                         if (fileContent) {
-                            await tick(); // 等待编辑器挂载
+                            await tick();
                             editorComponent?.resetDoc(fileContent);
                             await scanToc(fileContent);
                             updateMd5(fileContent);
-                            // 恢复滚动位置
-                            if (state.scrollLine)
+                            if (state.scrollLine) {
                                 setTimeout(
                                     () =>
                                         editorComponent?.scrollToLine(
@@ -225,31 +271,45 @@
                                         ),
                                     200,
                                 );
+                            }
                         }
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error("Recovery failed:", e);
+                    localStorage.removeItem("app-crash-recovery");
+                }
             }
-            setTimeout(() => {
+            setTimeout(async () => {
+                // Check launch args first (File Association)
+                const launchArg = await invoke<string | null>(
+                    "get_launch_args",
+                );
+                if (launchArg) {
+                    openLocalFile(launchArg, true); // true = initial launch
+                }
                 hasInitialized = true;
             }, 500);
 
-            // 4. 防止误触退出
-            const appWindow = getCurrentWindow();
-            unlisten = await appWindow.onCloseRequested(async (event) => {
-                if (isModified) {
-                    event.preventDefault();
-                    const confirmed = await ask(
-                        "当前文件有未保存的修改，确定要退出吗？",
-                        { title: "未保存警告", kind: "warning" },
+            // 4. Windows Title & Close Handler
+            const setupCloseHandler = async () => {
+                try {
+                    const appWindow = getCurrentWindow();
+                    await appWindow.setTitle("TEpub-Editor-TXT");
+                    unlisten = await appWindow.onCloseRequested(
+                        async (event) => {
+                            if (isModified) {
+                                event.preventDefault();
+                                showCloseDialog = true;
+                            } else {
+                                await invoke("exit_app");
+                            }
+                        },
                     );
-                    if (confirmed) {
-                        localStorage.removeItem("app-crash-recovery");
-                        await invoke("exit_app");
-                    }
-                } else {
-                    await invoke("exit_app");
+                } catch (e) {
+                    console.error("Setup close handler failed", e);
                 }
-            });
+            };
+            setupCloseHandler();
         };
 
         init();
@@ -287,22 +347,26 @@
         localStorage.setItem("app-crash-recovery", JSON.stringify(state));
     }
 
-    async function selectFile() {
+    async function openLocalFile(path: string, initialLaunch = false) {
         try {
-            const selected = await open({
-                multiple: false,
-                filters: [
-                    {
-                        name: "所有支持的文件",
-                        extensions: ["txt", "md", "epub"],
-                    },
-                    { name: "文本文件", extensions: ["txt", "md"] },
-                    { name: "EPUB 文件", extensions: ["epub"] },
-                ],
-            });
-            if (selected) {
+            if (path) {
                 // 检查是否是 EPUB 文件
-                if (selected.toString().toLowerCase().endsWith(".epub")) {
+                if (path.toLowerCase().endsWith(".epub")) {
+                    const encodedPath = encodeURIComponent(path);
+                    console.log("打开 EPUB 文件:", path);
+
+                    if (initialLaunch) {
+                        // Initial launch: Reuse the main window
+                        const { getCurrentWindow, LogicalSize } = await import(
+                            "@tauri-apps/api/window"
+                        );
+                        const appWindow = getCurrentWindow();
+                        await appWindow.setTitle("TEpub-Editor-EPUB");
+                        await appWindow.setSize(new LogicalSize(1200, 800));
+                        window.location.href = `/epub-editor?file=${encodedPath}`;
+                        return;
+                    }
+
                     try {
                         // 打开新窗口显示 EPUB 编辑器
                         const { WebviewWindow } = await import(
@@ -310,17 +374,13 @@
                         );
 
                         // 确保路径正确编码
-                        const encodedPath = encodeURIComponent(
-                            selected.toString(),
-                        );
-                        console.log("打开 EPUB 文件:", selected);
                         console.log("编码后路径:", encodedPath);
 
                         const epubWindow = new WebviewWindow(
                             "epub-editor-" + Date.now(),
                             {
                                 url: `/epub-editor?file=${encodedPath}`,
-                                title: "EPUB 编辑器",
+                                title: "TEpub-Editor-EPUB",
                                 width: 1200,
                                 height: 800,
                             },
@@ -349,7 +409,7 @@
 
                 isLoading = true;
                 isLoadingFile = true;
-                filePath = selected as string;
+                filePath = path;
 
                 // 重置元数据 (防止上一本书的信息残留)
                 epubMeta = {
@@ -424,6 +484,29 @@
             }
         } catch (e) {
             isLoading = false;
+            console.error("Open file failed:", e);
+            message(`打开文件失败: ${e}`, { kind: "error" });
+        }
+    }
+
+    async function selectFile() {
+        try {
+            const selected = await open({
+                multiple: false,
+                filters: [
+                    {
+                        name: "所有支持的文件",
+                        extensions: ["txt", "md", "epub"],
+                    },
+                    { name: "文本文件", extensions: ["txt", "md"] },
+                    { name: "EPUB 文件", extensions: ["epub"] },
+                ],
+            });
+            if (selected) {
+                await openLocalFile(selected.toString());
+            }
+        } catch (e) {
+            console.error("Select file failed:", e);
         }
     }
 
@@ -453,7 +536,9 @@
             }).catch(() => {});
 
             isModified = false;
-            saveStateToCache(0); // 保存成功后更新缓存状态
+            // Clear crash recovery on explicit save
+            localStorage.removeItem("app-crash-recovery");
+            // saveStateToCache(0); // Optional: re-save cleanslate or just remove. Removing is safer.
             updateMd5(fileContent);
             await scanToc(fileContent);
             // await message("保存成功！"); // 移除弹窗，保持静默成功
@@ -866,7 +951,9 @@
             }
 
             // 2. 执行回退
-            fileContent = await readTextFile(restoreTargetSnapshot.path);
+            fileContent = await invoke("read_text_file", {
+                path: restoreTargetSnapshot.path,
+            });
             editorComponent.resetDoc(fileContent);
 
             // 3. 关闭所有弹窗并重新扫描目录
@@ -1551,7 +1638,105 @@
     {/if}
 </main>
 
+<!-- Context Menu -->
+<ContextMenu />
+
+{#if showCloseDialog}
+    <div class="dialog-overlay">
+        <div class="dialog">
+            <div class="dialog-header">未保存的更改</div>
+            <div class="dialog-content">
+                当前文件包含未保存的更改，是否保存并退出？
+            </div>
+            <div class="dialog-actions">
+                <!-- 假设 saveFile 已存在 -->
+                <button
+                    class="btn primary"
+                    on:click={handleDialogSave}
+                    disabled={isDialogSaving}
+                >
+                    {isDialogSaving ? "保存中..." : "保存"}
+                </button>
+                <button
+                    class="btn danger"
+                    on:click={handleDialogDiscard}
+                    disabled={isDialogSaving}>不保存</button
+                >
+                <button
+                    class="btn secondary"
+                    on:click={handleDialogCancel}
+                    disabled={isDialogSaving}>取消</button
+                >
+            </div>
+        </div>
+    </div>
+{/if}
+
 <style>
+    /* Dialog Styles (Matched with Epub Editor) */
+    .dialog-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 2000; /* High z-index */
+    }
+
+    .dialog {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        min-width: 300px;
+        color: #333;
+    }
+
+    .dialog-header {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 15px;
+    }
+
+    .dialog-content {
+        margin-bottom: 20px;
+        color: #333;
+    }
+
+    .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+    }
+
+    .btn {
+        padding: 8px 16px;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 14px;
+    }
+
+    .btn.primary {
+        background: #2196f3;
+        color: white;
+    }
+
+    .btn.danger {
+        background: #f44336;
+        color: white;
+    }
+
+    .btn.secondary {
+        background: #e0e0e0;
+        color: #333;
+    }
+
     :global(body) {
         margin: 0;
         background: #fff;

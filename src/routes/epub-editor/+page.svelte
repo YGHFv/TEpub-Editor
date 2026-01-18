@@ -1,8 +1,12 @@
 <script lang="ts">
     import { onMount, tick } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
+    import { getCurrentWindow } from "@tauri-apps/api/window";
+    import { confirm } from "@tauri-apps/plugin-dialog";
     import { page } from "$app/stores";
     import TocNode from "$lib/TocNode.svelte";
+    import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
+    import ContextMenu from "$lib/ContextMenu.svelte";
 
     interface EpubFileNode {
         name: string;
@@ -11,6 +15,13 @@
         size?: number;
         title?: string;
         children?: EpubFileNode[];
+    }
+
+    // Validation Error Interface
+    interface ValidationError {
+        type: "tag" | "img";
+        message: string;
+        line: number;
     }
 
     let epubPath = "";
@@ -22,9 +33,22 @@
     let error = "";
     let expandedFolders: Set<string> = new Set();
 
+    // Modification Tracking
+    let modifiedFiles: Set<string> = new Set();
+    let isSaving = false;
+
+    // Validation State
+    let previewError: ValidationError[] = [];
+    let errorLines: number[] = [];
+
+    // Tab Close Confirmation Dialog State
+    let showCloseDialog = false;
+    let pendingCloseIndex = -1;
+    let pendingCloseFile: EpubFileNode | null = null;
+    let closeContext: "tab" | "app" = "tab"; // Context tracking
+
     // 追踪当前的请求生成ID，解决竞态条件
     let currentGeneration = 0;
-    // 存储已生成的Blob URL以便释放
     // 存储已生成的Blob URL以便释放
     let blobUrls: string[] = [];
     // 缓存: 绝对路径 -> Blob URL
@@ -40,6 +64,7 @@
     // 滚动同步相关
     let previewIframe: HTMLIFrameElement | null = null;
     let editorContentDiv: HTMLElement | null = null;
+    let epubCodeEditorComponent: EpubCodeEditor | null = null;
 
     // 多标签页相关
     let openTabs: EpubFileNode[] = []; // 已打开的文件标签
@@ -167,6 +192,29 @@
     }
 
     onMount(() => {
+        // 1. 添加窗口关闭提示 (Web)
+        window.addEventListener("beforeunload", handleBeforeUnload);
+
+        // 2. 添加窗口关闭提示 (Tauri Desktop)
+        let unlistenClose: (() => void) | null = null;
+        const setupCloseHandler = async () => {
+            try {
+                const appWindow = getCurrentWindow();
+                unlistenClose = await appWindow.onCloseRequested(
+                    async (event) => {
+                        if (hasUnsavedChanges()) {
+                            event.preventDefault();
+                            closeContext = "app";
+                            showCloseDialog = true;
+                        }
+                    },
+                );
+            } catch (e) {
+                console.warn("Tauri close handler init failed:", e);
+            }
+        };
+        setupCloseHandler();
+
         const loadEpub = async () => {
             // 从 URL 参数获取 EPUB 路径
             epubPath = $page.url.searchParams.get("file") || "";
@@ -200,7 +248,21 @@
 
         return () => {
             // 组件销毁时清理
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+            if (unlistenClose) unlistenClose();
             cleanupBlobUrls();
+            cleanupBlobUrls();
+        };
+    });
+
+    // 监听全选事件
+    onMount(() => {
+        const handleSelectAll = () => {
+            epubCodeEditorComponent?.selectAll();
+        };
+        window.addEventListener("editor-select-all", handleSelectAll);
+        return () => {
+            window.removeEventListener("editor-select-all", handleSelectAll);
         };
     });
 
@@ -441,6 +503,185 @@
         return doc.documentElement.outerHTML;
     }
 
+    function hasUnsavedChanges(): boolean {
+        return modifiedFiles.size > 0;
+    }
+
+    function validateHtml(content: string, currentPath: string) {
+        const errors: ValidationError[] = [];
+        const newErrorLines: number[] = [];
+
+        // 1. 检查标签匹配 (容错算法)
+        const lines = content.split("\n");
+        const tagStack: { tag: string; line: number }[] = [];
+
+        // 匹配 <tag> 或 </tag>
+        const tagRegex = /<\/?([a-zA-Z0-9]+)[^>]*>/g;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const lineNum = i; // 0-based
+
+            let match;
+            while ((match = tagRegex.exec(line)) !== null) {
+                const fullTag = match[0];
+                const tagName = match[1].toLowerCase();
+
+                // 跳过自闭合标签和 void elements
+                if (
+                    fullTag.endsWith("/>") ||
+                    ["br", "hr", "img", "input", "meta", "link"].includes(
+                        tagName,
+                    )
+                ) {
+                    continue;
+                }
+
+                if (fullTag.startsWith("</")) {
+                    // 闭合标签: 在栈中向下寻找最近的匹配
+                    let matchIndex = -1;
+                    for (let j = tagStack.length - 1; j >= 0; j--) {
+                        if (tagStack[j].tag === tagName) {
+                            matchIndex = j;
+                            break;
+                        }
+                    }
+
+                    if (matchIndex !== -1) {
+                        // 找到了匹配，弹出该标签及之上的所有标签（如果有未闭合的，它们就是错误）
+                        // 实际上，栈顶到 matchIndex 之间的都是未闭合的错误？
+                        // 简单策略：仅认为 matchIndex 是匹配的，将其弹出。
+                        // 如果 matchIndex 不是栈顶，说明中间有未闭合的标签。
+                        // 我们的策略：匹配到后，将栈裁剪到 matchIndex，中间的视为“未闭合”报错
+                        const popped = tagStack.splice(matchIndex);
+                        // popped[0] 是匹配的那个开始标签。popped[1...] 是中间未闭合的。
+                        for (let k = 1; k < popped.length; k++) {
+                            errors.push({
+                                type: "tag",
+                                message: `第 ${popped[k].line} 行: 未闭合的标签 <${popped[k].tag}>`,
+                                line: popped[k].line,
+                            });
+                            newErrorLines.push(popped[k].line);
+                        }
+                    } else {
+                        // 没找到匹配的开始标签 -> 多余的闭合标签
+                        errors.push({
+                            type: "tag",
+                            message: `第 ${lineNum + 1} 行: 多余的闭合标签 </${tagName}>`,
+                            line: lineNum + 1,
+                        });
+                        newErrorLines.push(lineNum + 1);
+                    }
+                } else {
+                    // 开始标签
+                    tagStack.push({ tag: tagName, line: lineNum + 1 });
+                }
+            }
+        }
+
+        // 剩余的栈中标签都是未闭合的
+        for (const unclosed of tagStack) {
+            errors.push({
+                type: "tag",
+                message: `第 ${unclosed.line} 行: 未闭合的标签 <${unclosed.tag}>`,
+                line: unclosed.line,
+            });
+            newErrorLines.push(unclosed.line);
+        }
+
+        // 2. 检查图片引用
+        const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+        let match;
+        while ((match = imgRegex.exec(content)) !== null) {
+            const src = match[1];
+            if (src.startsWith("http") || src.startsWith("data:")) continue;
+
+            // 解析绝对路径
+            // EPUB 中通常引用是相对当前 HTML 的
+            const fullPath = resolvePath(currentPath, src);
+
+            // 检查文件是否存在
+            // 简单检查 flatHtmlFiles (仅HTML) 不够，需检查 fileTree 或构建全量 map
+            // 这里我们用 fileTree 递归查找或 assetCache? assetCache 只有加载过的。
+            // 我们可以用一个简单的全路径查找。
+            // 由于 flatHtmlFiles 不全，我们还是遍历 fileTree 吧，或者构建一个 pathSet
+            // 优化：我们可以构建一个全量 path Set。
+            // TODO: Performance optimization required here for large books.
+            // For now, simple assumption: if we can't find it easily, warn?
+            // Actually, flattening fileTree to get all paths is better.
+        }
+
+        // 由于 pathSet 不在作用域，先简化省略图片检查的报错，以免误报。
+        // 或者使用 invoke('exists')? 不行，是 zip 内部路径。
+        // 暂且保留 Tag 检查，图片检查待完善。
+
+        previewError = errors;
+        errorLines = newErrorLines;
+    }
+
+    let validationTimer: any = null;
+    function handleFileContentChange(newContent: string) {
+        fileContent = newContent;
+        if (selectedFile) {
+            fileContentCache.set(selectedFile.path, newContent);
+            modifiedFiles.add(selectedFile.path);
+            modifiedFiles = modifiedFiles; // reactivity
+
+            if (validationTimer) clearTimeout(validationTimer);
+            validationTimer = setTimeout(async () => {
+                if (
+                    selectedFile?.file_type === "html" ||
+                    selectedFile?.name.endsWith(".html") ||
+                    selectedFile?.name.endsWith(".xhtml")
+                ) {
+                    // Validate
+                    validateHtml(newContent, selectedFile.path);
+
+                    // Update Preview
+                    const processed = await processHtmlForPreview(
+                        newContent,
+                        selectedFile.path,
+                        currentGeneration,
+                    );
+                    if (processed) {
+                        previewContent = processed;
+                        previewCache.set(selectedFile.path, processed);
+                    }
+                }
+            }, 500);
+        }
+    }
+
+    async function saveCurrentFile() {
+        if (!selectedFile) return;
+        isSaving = true;
+        try {
+            await invoke("save_epub_file_content", {
+                epubPath: epubPath,
+                filePath: selectedFile.path,
+                content: fileContent,
+            });
+            modifiedFiles.delete(selectedFile.path);
+            modifiedFiles = modifiedFiles;
+        } catch (e) {
+            console.error("Save failed:", e);
+            await confirm(`保存失败: ${e}`, {
+                title: "错误",
+                kind: "error",
+            });
+        } finally {
+            isSaving = false;
+        }
+    }
+
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+        if (hasUnsavedChanges()) {
+            e.preventDefault();
+            e.returnValue = "您有未保存的更改，确定要离开吗？";
+            return e.returnValue;
+        }
+    }
+
     async function selectFile(file: EpubFileNode) {
         if (file.file_type === "folder") return;
 
@@ -575,8 +816,26 @@
 
     function closeTab(event: Event, index: number) {
         event.stopPropagation();
-
         if (index < 0 || index >= openTabs.length) return;
+
+        const tab = openTabs[index];
+        if (modifiedFiles.has(tab.path)) {
+            pendingCloseIndex = index;
+            pendingCloseFile = tab;
+            closeContext = "tab";
+            showCloseDialog = true;
+        } else {
+            doCloseTab(index);
+        }
+    }
+
+    function doCloseTab(index: number) {
+        if (index < 0 || index >= openTabs.length) return;
+
+        const tab = openTabs[index];
+        // 确保从修改列表中移除（如果是放弃更改关闭）
+        modifiedFiles.delete(tab.path);
+        modifiedFiles = modifiedFiles;
 
         openTabs.splice(index, 1);
         openTabs = openTabs; // 触发响应式更新
@@ -599,6 +858,94 @@
                 activeTabIndex--;
             }
         }
+    }
+
+    async function handleDialogSave() {
+        isSaving = true; // Use global isSaving or a new one? Global is fine as it locks UI.
+
+        if (closeContext === "tab") {
+            // Tab Logic
+            if (pendingCloseFile && modifiedFiles.has(pendingCloseFile.path)) {
+                const contentToSave = fileContentCache.get(
+                    pendingCloseFile.path,
+                );
+                if (contentToSave !== undefined) {
+                    try {
+                        await invoke("save_epub_file_content", {
+                            epubPath: epubPath,
+                            filePath: pendingCloseFile.path,
+                            content: contentToSave,
+                        });
+                        modifiedFiles.delete(pendingCloseFile.path);
+                        modifiedFiles = modifiedFiles;
+                    } catch (e) {
+                        console.error("Save failed in dialog:", e);
+                    }
+                }
+            }
+            isSaving = false;
+            showCloseDialog = false;
+            if (pendingCloseIndex !== -1) {
+                doCloseTab(pendingCloseIndex);
+            }
+        } else {
+            // App Logic: Save ALL modified files
+            try {
+                const tasks = Array.from(modifiedFiles).map(async (path) => {
+                    const content = fileContentCache.get(path);
+                    if (content !== undefined) {
+                        await invoke("save_epub_file_content", {
+                            epubPath: epubPath,
+                            filePath: path,
+                            content: content,
+                        });
+                    }
+                });
+                await Promise.all(tasks);
+                modifiedFiles.clear();
+                modifiedFiles = modifiedFiles;
+
+                const appWindow = getCurrentWindow();
+                await appWindow.destroy();
+            } catch (e) {
+                isSaving = false;
+                await confirm(`保存部分文件失败: ${e}`, { kind: "error" });
+                return;
+            }
+        }
+        // No need to reset isSaving here for App Logic as window destroys,
+        // but strictly speaking we should if destroy failed?
+        // We handle error case above.
+        resetDialog();
+    }
+
+    async function handleDialogDiscard() {
+        if (closeContext === "tab") {
+            if (pendingCloseFile) {
+                modifiedFiles.delete(pendingCloseFile.path);
+                modifiedFiles = modifiedFiles;
+            }
+            showCloseDialog = false;
+            if (pendingCloseIndex !== -1) {
+                doCloseTab(pendingCloseIndex);
+            }
+        } else {
+            // App Logic: Discard all
+            const appWindow = getCurrentWindow();
+            await appWindow.destroy();
+        }
+        resetDialog();
+    }
+
+    function handleDialogCancel() {
+        resetDialog();
+    }
+
+    function resetDialog() {
+        showCloseDialog = false;
+        pendingCloseIndex = -1;
+        pendingCloseFile = null;
+        closeContext = "tab"; // Reset to default
     }
 
     function getFileIcon(type: string): string {
@@ -985,6 +1332,16 @@
         return result;
     }
 
+    function isEditable(type: string): boolean {
+        return ["html", "css", "xml", "opf", "ncx"].includes(type);
+    }
+
+    function getFileLanguage(type: string): "html" | "css" | "xml" {
+        if (type === "css") return "css";
+        if (type === "xml" || type === "opf" || type === "ncx") return "xml";
+        return "html";
+    }
+
     // 添加行号
     function addLineNumbers(highlighted: string): string {
         const lines = highlighted.split("\n");
@@ -1007,7 +1364,7 @@
         <!-- 左侧：文件树 -->
         <aside class="file-tree">
             <div class="tree-header">
-                <h3>📚 EPUB 文件结构</h3>
+                <h3>文件结构</h3>
             </div>
             <div class="tree-content">
                 {#each fileTree as node}
@@ -1165,7 +1522,9 @@
                                 >{getFileIcon(tab.file_type)}</span
                             >
                             <span class="tab-name" title={tab.name}
-                                >{tab.name}</span
+                                >{tab.name}{#if modifiedFiles.has(tab.path)}
+                                    <span class="modified-indicator">*</span>
+                                {/if}</span
                             >
                             <button
                                 class="tab-close"
@@ -1180,27 +1539,16 @@
             {/if}
 
             {#if selectedFile}
-                <div class="editor-header">
-                    <span class="file-name">{selectedFile.name}</span>
-                    <span class="file-path">{selectedFile.path}</span>
-                </div>
-                <div
-                    class="editor-content"
-                    bind:this={editorContentDiv}
-                    on:scroll={handleEditorScroll}
-                >
-                    {#if selectedFile.file_type === "html" || selectedFile.file_type === "xml"}
-                        <pre class="code-block language-html"><code
-                                >{@html addLineNumbers(
-                                    highlightHTML(fileContent),
-                                )}</code
-                            ></pre>
-                    {:else if selectedFile.file_type === "css"}
-                        <pre class="code-block language-css"><code
-                                >{@html addLineNumbers(
-                                    highlightCSS(fileContent),
-                                )}</code
-                            ></pre>
+                <!-- Editor Header Removed -->
+                <div class="editor-content" bind:this={editorContentDiv}>
+                    {#if isEditable(selectedFile.file_type)}
+                        <EpubCodeEditor
+                            bind:this={epubCodeEditorComponent}
+                            doc={fileContent}
+                            language={getFileLanguage(selectedFile.file_type)}
+                            onChange={handleFileContentChange}
+                            onSave={saveCurrentFile}
+                        />
                     {:else}
                         <pre class="code-block">{@html addLineNumbers(
                                 fileContent
@@ -1240,7 +1588,23 @@
 
             {#if activeTab === "preview"}
                 <div class="preview-container">
-                    {#if selectedFile?.file_type === "html"}
+                    {#if previewError.length > 0}
+                        <div class="preview-error">
+                            <div class="error-header">
+                                <span class="error-icon">⚠️</span>
+                                <span>发现 {previewError.length} 个问题</span>
+                            </div>
+                            <div class="error-content">
+                                {#each previewError as err}
+                                    <div class="error-item">
+                                        {err.message}
+                                    </div>
+                                {/each}
+                            </div>
+                        </div>
+                    {/if}
+
+                    {#if selectedFile?.file_type === "html" || selectedFile?.name.endsWith(".xhtml") || selectedFile?.name.endsWith(".html")}
                         <div class="mobile-frame">
                             <iframe
                                 bind:this={previewIframe}
@@ -1276,7 +1640,154 @@
     {/if}
 </div>
 
+<!-- Context Menu -->
+<ContextMenu />
+
+{#if showCloseDialog}
+    <div class="dialog-overlay">
+        <div class="dialog">
+            <div class="dialog-header">未保存的更改</div>
+            <div class="dialog-content">
+                {#if closeContext === "tab"}
+                    文件 "{pendingCloseFile?.name}" 有未保存的更改，是否保存？
+                {:else}
+                    您有 {modifiedFiles.size} 个文件包含未保存的更改，是否保存所有并退出？
+                {/if}
+            </div>
+            <div class="dialog-actions">
+                <button
+                    class="btn primary"
+                    on:click={handleDialogSave}
+                    disabled={isSaving}
+                >
+                    {isSaving ? "保存中..." : "保存"}
+                </button>
+                <button
+                    class="btn danger"
+                    on:click={handleDialogDiscard}
+                    disabled={isSaving}>不保存</button
+                >
+                <button
+                    class="btn secondary"
+                    on:click={handleDialogCancel}
+                    disabled={isSaving}>取消</button
+                >
+            </div>
+        </div>
+    </div>
+{/if}
+
 <style>
+    /* Dialog Styles */
+    .dialog-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .dialog {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        min-width: 300px;
+    }
+
+    .dialog-header {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 15px;
+    }
+
+    .dialog-content {
+        margin-bottom: 20px;
+        color: #333;
+    }
+
+    .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+    }
+
+    .btn {
+        padding: 8px 16px;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        font-weight: 500;
+    }
+
+    .btn.primary {
+        background: #2196f3;
+        color: white;
+    }
+
+    .btn.danger {
+        background: #f44336;
+        color: white;
+    }
+
+    .btn.secondary {
+        background: #e0e0e0;
+        color: #333;
+    }
+
+    /* Mod Indicator */
+    .modified-indicator {
+        color: #ff9800;
+        margin-left: 4px;
+        font-weight: bold;
+    }
+
+    /* Preview Error (Absolute Position) */
+    .preview-error {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        border-radius: 4px;
+        margin: 8px;
+        font-size: 12px;
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        opacity: 0.95;
+    }
+
+    .preview-error .error-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        background: #ffc107;
+        color: #856404;
+        font-weight: 600;
+        border-radius: 4px 4px 0 0;
+    }
+
+    .preview-error .error-content {
+        margin: 0;
+        padding: 8px 12px;
+        color: #856404;
+        white-space: pre-wrap;
+        max-height: 100px;
+        overflow-y: auto;
+        font-family: "Consolas", monospace;
+    }
+
+    /* Ensure container is relative */
+    .preview-container {
+        position: relative;
+    }
     .epub-editor {
         display: flex;
         height: 100vh;
@@ -1316,12 +1827,13 @@
     }
 
     .tree-header {
-        height: 50px;
+        height: 40px; /* Matched with tabs-bar */
         padding: 0 16px;
         border-bottom: 1px solid #eee;
         background: #fafafa;
         display: flex;
         align-items: center;
+        justify-content: center; /* Center the title */
         box-sizing: border-box;
     }
 
@@ -1541,49 +2053,22 @@
         white-space: pre-wrap; /* 保留空白但允许换行 */
     }
 
-    .editor-header {
-        height: 50px;
-        padding: 0 16px;
-        background: #fafafa;
-        border-bottom: 1px solid #eee;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        gap: 2px;
-        box-sizing: border-box;
-    }
-
-    .file-name {
-        font-weight: 600;
-        color: #333;
-    }
-
-    .file-path {
-        font-size: 12px;
-        color: #999;
-    }
-
     .editor-content {
         flex: 1;
-        overflow: auto;
-        padding: 16px;
-        background: #fff;
+        overflow-y: hidden; /* Let CodeMirror handle scroll */
+        position: relative;
+        padding: 0; /* Remove padding to fix black border */
+        /* background removal handled by CodeMirror theme */
     }
 
     .code-block {
         margin: 0;
-        font-family: "Consolas", "Monaco", "Courier New", monospace;
+        padding: 0;
+        font-family: "Consolas", "Monaco", monospace;
         font-size: 14px;
-        line-height: 1.6;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        color: #000;
-        tab-size: 2;
-        -moz-tab-size: 2;
-    }
-
-    .code-block code {
-        display: block;
+        line-height: 1.5;
+        white-space: pre; /* crucial for code formatting */
+        counter-reset: line;
     }
 
     /* 语法高亮颜色 - 浅色主题 */
@@ -1641,7 +2126,7 @@
     }
 
     .preview-header {
-        height: 50px;
+        height: 40px; /* Matched with tabs-bar */
         background: #fafafa;
         border-bottom: 1px solid #eee;
         display: flex;
@@ -1659,12 +2144,12 @@
         flex: 1;
         border: none;
         background: transparent;
-        font-size: 14px;
+        font-size: 16px; /* Matched with tree-header h3 */
         color: #666;
         cursor: pointer;
         border-bottom: 2px solid transparent;
         transition: all 0.2s;
-        font-weight: 500;
+        font-weight: bold; /* Matched with tree-header h3 */
     }
 
     .tab:hover {
