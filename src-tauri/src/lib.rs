@@ -619,28 +619,64 @@ fn read_text_file(path: String) -> Result<String, String> {
     file.read_to_end(&mut buffer)
         .map_err(|e| format!("读取失败: {}", e))?;
 
-    // 1. 优先尝试 UTF-8
+    // 策略：尝试多种编码，选取"乱码"（替换字符 ）最少的一个
+    let candidates = vec![
+        ("utf-8", encoding_rs::UTF_8),
+        ("gb18030", encoding_rs::GB18030),
+        ("utf-16le", encoding_rs::UTF_16LE),
+        ("utf-16be", encoding_rs::UTF_16BE),
+        ("big5", encoding_rs::BIG5),
+    ];
+
+    let mut min_errors = usize::MAX;
+    let mut best_content = String::new();
+    let mut best_encoding = "utf-8";
+
+    // 1. 优先尝试 UTF-8 (严格)
     if let Ok(s) = String::from_utf8(buffer.clone()) {
         return Ok(s);
     }
 
-    // 2. 使用 chardetng 猜测
+    // 2. Chardetng 检测作为基准
     let mut detector = EncodingDetector::new();
     detector.feed(&buffer, true);
-    let encoding = detector.guess(Some(b"cn"), true);
-    let (cow, _, malformed) = encoding.decode(&buffer);
+    let detected_encoding = detector.guess(Some(b"cn"), true);
 
-    // 3. 如果 chardetng 也没探测出来或者觉得有问题，强制尝试 GB18030 (常见于中文小说)
-    // chardetng 有时候对短文本或者特殊 GBK 字符会保守地给 Windows-1252
-    if malformed || encoding.name() == "windows-1252" || encoding.name() == "ISO-8859-1" {
-        use encoding_rs::GB18030;
-        let (cow_gbk, _, malformed_gbk) = GB18030.decode(&buffer);
-        if !malformed_gbk {
-            return Ok(cow_gbk.into_owned());
+    let (cow_detected, _, malformed_detected) = detected_encoding.decode(&buffer);
+    let errors_detected = cow_detected.chars().filter(|&c| c == '\u{FFFD}').count();
+
+    best_content = cow_detected.into_owned();
+    min_errors = if malformed_detected {
+        errors_detected
+    } else {
+        0
+    };
+    best_encoding = detected_encoding.name();
+
+    // 如果检测结果完美且不是 windows-1252 (容易误判)，直接返回
+    if min_errors == 0 && best_encoding != "windows-1252" && best_encoding != "ISO-8859-1" {
+        return Ok(best_content);
+    }
+
+    // 3. 遍历候选编码打擂台
+    for (name, enc) in candidates {
+        let (cow, _, _) = enc.decode(&buffer);
+        let content = cow.into_owned();
+        let errors = content.chars().filter(|&c| c == '\u{FFFD}').count();
+
+        // 优选错误更少的。
+        // 特判：如果 best 是 windows-1252 (常见误判)，只要 candidates 里有 reasonably low error (<10%) 的中文编码，就替换它
+        let is_current_bad_guess = best_encoding == "windows-1252" || best_encoding == "ISO-8859-1";
+
+        if errors < min_errors || (is_current_bad_guess && errors < buffer.len() / 20) {
+            min_errors = errors;
+            best_content = content;
+            best_encoding = name;
         }
     }
 
-    Ok(cow.into_owned())
+    // println!("Selected encoding: {} (errors: {})", best_encoding, min_errors);
+    Ok(best_content)
 }
 
 #[tauri::command]

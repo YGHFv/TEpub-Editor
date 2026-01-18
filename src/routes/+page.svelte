@@ -2,7 +2,7 @@
     import { onMount, tick } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { open, save, message, ask } from "@tauri-apps/plugin-dialog";
-    import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+    // import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs"; // Removed to force use of custom backend
     import { getCurrentWindow } from "@tauri-apps/api/window";
     import Editor from "$lib/Editor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
@@ -371,7 +371,10 @@
                         ?.replace(/\.[^/.]+$/, "") || "未命名";
                 epubMeta.title = basename;
 
-                const content = await readTextFile(filePath);
+                // const content = await readTextFile(filePath);
+                const content = await invoke<string>("read_text_file", {
+                    path: filePath,
+                });
                 fileContent = content;
 
                 // 尝试从文件内容解析元数据 (智能填充)
@@ -438,7 +441,11 @@
                 }
                 filePath = path;
             }
-            await writeTextFile(filePath, fileContent);
+            // await writeTextFile(filePath, fileContent);
+            await invoke("save_text_file", {
+                path: filePath,
+                content: fileContent,
+            });
             // 调用后端保存历史
             await invoke("save_history", {
                 originalPath: filePath,
@@ -674,7 +681,6 @@
                 }
 
                 // 空标题检查: 仅包含数字、序号，没有具体内容
-                // 匹配 "第xxx章" 后仅有空白
                 if (
                     /^第\s*[0-9零一二三四五六七八九十百千万]+\s*[章卷回节]\s*$/.test(
                         node.title.trim(),
@@ -699,6 +705,9 @@
                         val: node.word_count,
                     });
                 }
+            } else if (node.type === "Volume") {
+                // 新卷开始，重置序号计数
+                lastNum = -1;
             }
         }
         tocTree = [...tocTree]; // 触发 Svelte 更新
@@ -787,7 +796,13 @@
 
         // 必填项检查 (仅书名如果不填会无法生成有效OPF，其他可选)
         if (!epubMeta.title || epubMeta.title.trim() === "") {
-            epubMeta.title = "未命名书籍";
+            // 尝试使用文件名作为默认书名
+            const basename =
+                filePath
+                    .split(/[\\/]/)
+                    .pop()
+                    ?.replace(/\.[^/.]+$/, "") || "未命名书籍";
+            epubMeta.title = basename;
         }
         if (!epubMeta.uuid) epubMeta.uuid = crypto.randomUUID();
         // MD5 应该在文件加载时已计算，防卫性保留
