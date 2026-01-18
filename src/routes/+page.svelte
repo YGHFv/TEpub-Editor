@@ -107,7 +107,9 @@
         date: new Date().toISOString().split("T")[0],
         uuid: crypto.randomUUID(),
         md5: "",
+        md5: "",
         cover_path: "",
+        description: "",
     };
     let appSettings = { ...DEFAULT_SETTINGS };
     let historyList: HistoryMeta[] = [];
@@ -345,10 +347,21 @@
                     return; // EPUB 文件处理完毕，直接返回
                 }
 
-                // 普通文本文件处理
                 isLoading = true;
                 isLoadingFile = true;
                 filePath = selected as string;
+
+                // 重置元数据 (防止上一本书的信息残留)
+                epubMeta = {
+                    title: "书名",
+                    creator: "作者",
+                    publisher: "出版社",
+                    date: new Date().toISOString().split("T")[0],
+                    uuid: crypto.randomUUID(),
+                    md5: "",
+                    cover_path: "",
+                    description: "", // 重置简介
+                };
 
                 // 自动填充 EPUB 书名
                 const basename =
@@ -360,6 +373,40 @@
 
                 const content = await readTextFile(filePath);
                 fileContent = content;
+
+                // 尝试从文件内容解析元数据 (智能填充)
+                try {
+                    // 1. 书名
+                    const titleMatch = content.match(
+                        /(?:^|\n)\s*(?:书名|小说名)[\s:：]+([^\n\r]+)/,
+                    );
+                    if (titleMatch && titleMatch[1]) {
+                        epubMeta.title = titleMatch[1].trim();
+                    }
+
+                    // 2. 作者
+                    const authorMatch = content.match(
+                        /(?:^|\n)\s*(?:作者|Author)[\s:：]+([^\n\r]+)/,
+                    );
+                    if (authorMatch && authorMatch[1]) {
+                        epubMeta.creator = authorMatch[1].trim();
+                    }
+
+                    // 3. 简介
+                    // 匹配 "简介" 或 "内容简介" 开始，直到遇到 "第x章" 或文件结束
+                    const descMatch = content.match(
+                        /(?:^|\n)\s*(?:内容)?(?:简介|Intro)[\s:：]+([\s\S]+?)(?=\n\s*(?:第[零一二三四五六七八九十百千万0-9]+[卷部章回]|Chapter\s*\d+)|$)/i,
+                    );
+                    if (descMatch && descMatch[1]) {
+                        // 限制简介长度，避免误匹配过多内容
+                        const desc = descMatch[1].trim();
+                        if (desc.length < 2000) {
+                            epubMeta.description = desc;
+                        }
+                    }
+                } catch (e) {
+                    console.log("Metadata parsing failed", e);
+                }
 
                 editorComponent?.resetDoc(content);
                 isModified = false;
@@ -737,6 +784,15 @@
     // --- EPUB 导出 ---
     async function generateEpub() {
         if (!fileContent) return;
+
+        // 必填项检查 (仅书名如果不填会无法生成有效OPF，其他可选)
+        if (!epubMeta.title || epubMeta.title.trim() === "") {
+            epubMeta.title = "未命名书籍";
+        }
+        if (!epubMeta.uuid) epubMeta.uuid = crypto.randomUUID();
+        // MD5 应该在文件加载时已计算，防卫性保留
+        if (!epubMeta.md5) await updateMd5(fileContent);
+
         epubGenerationStatus = "generating";
         isLoading = true;
         try {
@@ -1222,6 +1278,16 @@
                                 type="text"
                                 bind:value={epubMeta.publisher}
                             />
+                        </div>
+                        <div class="set-row" style="align-items:flex-start">
+                            <label for="ed" style="margin-top:6px;">简介:</label
+                            >
+                            <textarea
+                                id="ed"
+                                rows="4"
+                                bind:value={epubMeta.description}
+                                style="flex:1; padding:8px; border:1px solid #ddd; border-radius:6px; font-size:13px; font-family:inherit; resize:vertical; min-height:80px;"
+                            ></textarea>
                         </div>
                         <div class="set-row">
                             <label>UUID:</label><input

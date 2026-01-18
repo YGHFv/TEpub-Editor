@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { page } from "$app/stores";
     import TocNode from "$lib/TocNode.svelte";
@@ -36,6 +36,37 @@
 
     // 扁平化的文件列表 (仅HTML)，用于快速查找章节顺序
     let flatHtmlFiles: EpubFileNode[] = [];
+
+    // 滚动同步相关
+    let previewIframe: HTMLIFrameElement | null = null;
+    let editorContentDiv: HTMLElement | null = null;
+
+    // 多标签页相关
+    let openTabs: EpubFileNode[] = []; // 已打开的文件标签
+    let activeTabIndex: number = -1; // 当前激活的标签索引
+    let tabsBarDiv: HTMLElement | null = null; // 标签页栏引用
+
+    // 编辑器滚动处理函数
+    function handleEditorScroll(event: Event) {
+        if (!previewIframe?.contentWindow || !editorContentDiv) return;
+
+        const target = event.target as HTMLElement;
+        const scrollTop = target.scrollTop;
+        const scrollHeight = target.scrollHeight - target.clientHeight;
+
+        if (scrollHeight <= 0) return;
+
+        const scrollPercent = scrollTop / scrollHeight;
+
+        // 发送消息给iframe
+        previewIframe.contentWindow.postMessage(
+            {
+                type: "editorScroll",
+                percent: scrollPercent,
+            },
+            "*",
+        );
+    }
 
     function flattenFiles(nodes: EpubFileNode[]): EpubFileNode[] {
         let result: EpubFileNode[] = [];
@@ -198,99 +229,13 @@
         return stack.join("/");
     }
 
-    async function processCssAssets(
-        css: string,
-        cssPath: string,
-    ): Promise<string> {
-        // 查找 url(...) 引用
-        // 排除 data: 和 http: 开头
-        const urlRegex = /url\(['"]?([^'"\)]+)['"]?\)/g;
-        let match;
-        const matches: { original: string; url: string }[] = [];
-
-        // 收集所有匹配项
-        while ((match = urlRegex.exec(css)) !== null) {
-            const originalUrl = match[1];
-            if (
-                !originalUrl.startsWith("data:") &&
-                !originalUrl.startsWith("http")
-            ) {
-                matches.push({ original: match[0], url: originalUrl });
-            }
-        }
-
-        if (matches.length === 0) return css;
-
-        // 并行处理
-        const promises = matches.map(async (m) => {
-            const absolutePath = resolvePath(cssPath, m.url);
-
-            // 检查缓存
-            if (assetCache.has(absolutePath)) {
-                return {
-                    original: m.original,
-                    replacement: `url("${assetCache.get(absolutePath)}")`,
-                };
-            }
-
-            try {
-                const binaryData = await invoke<number[]>(
-                    "read_epub_file_binary",
-                    {
-                        epubPath: epubPath,
-                        filePath: absolutePath,
-                    },
-                );
-
-                const uint8Array = new Uint8Array(binaryData);
-                // 简单猜测 MIME (主要是字体)
-                let mimeType = "application/octet-stream";
-                const lower = m.url.toLowerCase();
-                if (lower.endsWith(".ttf")) mimeType = "font/ttf";
-                else if (lower.endsWith(".woff")) mimeType = "font/woff";
-                else if (lower.endsWith(".woff2")) mimeType = "font/woff2";
-                else if (lower.endsWith(".otf")) mimeType = "font/otf";
-                else if (lower.endsWith(".eot"))
-                    mimeType = "application/vnd.ms-fontobject";
-                else if (lower.endsWith(".svg")) mimeType = "image/svg+xml";
-
-                const blob = new Blob([uint8Array], { type: mimeType });
-                const blobUrl = URL.createObjectURL(blob);
-                blobUrls.push(blobUrl);
-                assetCache.set(absolutePath, blobUrl);
-
-                return {
-                    original: m.original,
-                    replacement: `url("${blobUrl}")`,
-                };
-            } catch (e) {
-                console.error(`无法加载资源: ${absolutePath}`, e);
-                return null;
-            }
-        });
-
-        const results = await Promise.all(promises);
-
-        // ... (results handling same as before)
-        let processedCss = css;
-        for (const res of results) {
-            if (res) {
-                processedCss = processedCss
-                    .split(res.original)
-                    .join(res.replacement);
-            }
-        }
-        return processedCss;
-    }
-
-    // ...
+    // 解析相对路径
 
     async function processHtmlForPreview(
         html: string,
         filePath: string,
         generation: number,
     ): Promise<string> {
-        // ... (setup parser)
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, "text/html");
 
@@ -299,113 +244,199 @@
         );
         const images = Array.from(doc.querySelectorAll("img"));
 
-        // 并行处理所有 CSS
-        const cssPromises = links.map(async (link) => {
-            const href = link.getAttribute("href");
-            if (!href) return;
-            if (currentGeneration !== generation) return;
+        // 1. 收集所有需要读取的 CSS 路径
+        const cssPaths: string[] = [];
+        const cssLinkMap = new Map<string, Element>();
 
-            const cssPath = resolvePath(filePath, href);
+        for (const link of links) {
+            const href = link.getAttribute("href");
+            if (href) {
+                const cssPath = resolvePath(filePath, href);
+                cssPaths.push(cssPath);
+                cssLinkMap.set(cssPath, link);
+            }
+        }
+
+        // 2. 批量读取所有 CSS 文件
+        let cssContents: Record<string, string> = {};
+        if (cssPaths.length > 0) {
             try {
-                let cssContent = await invoke<string>(
-                    "read_epub_file_content",
+                cssContents = await invoke<Record<string, string>>(
+                    "read_epub_files_batch",
                     {
                         epubPath: epubPath,
-                        filePath: cssPath,
+                        filePaths: cssPaths,
                     },
                 );
-
-                if (currentGeneration !== generation) return;
-
-                // 处理 CSS 中的字体和图片引用
-                cssContent = await processCssAssets(cssContent, cssPath);
-
-                if (currentGeneration !== generation) return;
-
-                return { link, cssContent };
             } catch (e) {
-                console.error(`无法加载CSS: ${cssPath}`, e);
+                console.error("批量读取CSS失败:", e);
             }
-        });
-
-        // 并行处理所有图片
-        const imgPromises = images.map(async (img) => {
-            const src = img.getAttribute("src");
-            if (src && !src.startsWith("http") && !src.startsWith("data:")) {
-                if (currentGeneration !== generation) return;
-
-                const imgPath = resolvePath(filePath, src);
-
-                // 检查缓存
-                if (assetCache.has(imgPath)) {
-                    return { img, blobUrl: assetCache.get(imgPath) };
-                }
-
-                try {
-                    // 获取图片的二进制数据
-                    const imgData = await invoke<number[]>(
-                        "read_epub_file_binary",
-                        {
-                            epubPath: epubPath,
-                            filePath: imgPath,
-                        },
-                    );
-
-                    if (currentGeneration !== generation) return;
-
-                    // 创建 Blob 并生成 URL
-                    const uint8Array = new Uint8Array(imgData);
-                    let mimeType = "image/jpeg";
-                    const lowerSrc = src.toLowerCase();
-                    if (lowerSrc.endsWith(".png")) mimeType = "image/png";
-                    else if (lowerSrc.endsWith(".gif")) mimeType = "image/gif";
-                    else if (lowerSrc.endsWith(".svg"))
-                        mimeType = "image/svg+xml";
-                    else if (lowerSrc.endsWith(".webp"))
-                        mimeType = "image/webp";
-
-                    const blob = new Blob([uint8Array], { type: mimeType });
-                    const blobUrl = URL.createObjectURL(blob);
-                    blobUrls.push(blobUrl);
-                    assetCache.set(imgPath, blobUrl);
-
-                    return { img, blobUrl };
-                } catch (e) {
-                    console.error(`无法加载图片: ${imgPath}`, e);
-                }
-            }
-        });
-
-        // ... (wait and replace)
-        // 等待所有异步操作完成
-        const [cssResults, imgResults] = await Promise.all([
-            Promise.all(cssPromises),
-            Promise.all(imgPromises),
-        ]);
+        }
 
         if (currentGeneration !== generation) return "";
 
-        // 统一应用更改
-        cssResults.forEach((res) => {
-            if (res) {
-                const style = doc.createElement("style");
-                style.textContent = res.cssContent;
-                res.link.replaceWith(style);
-            }
-        });
+        // 3. 从 CSS 中提取需要的二进制资源（字体、图片）
+        const binaryPaths = new Set<string>();
+        const cssAssetMap = new Map<
+            string,
+            Array<{ original: string; url: string; path: string }>
+        >();
 
-        // 注入全局样式：强制隐藏横向滚动条
+        for (const [cssPath, cssContent] of Object.entries(cssContents)) {
+            const urlRegex = /url\(['"]?([^'"\)]+)['"]?\)/g;
+            let match;
+            const assets: Array<{
+                original: string;
+                url: string;
+                path: string;
+            }> = [];
+
+            while ((match = urlRegex.exec(cssContent)) !== null) {
+                const originalUrl = match[1];
+                if (
+                    !originalUrl.startsWith("data:") &&
+                    !originalUrl.startsWith("http")
+                ) {
+                    const absolutePath = resolvePath(cssPath, originalUrl);
+                    if (!assetCache.has(absolutePath)) {
+                        binaryPaths.add(absolutePath);
+                    }
+                    assets.push({
+                        original: match[0],
+                        url: originalUrl,
+                        path: absolutePath,
+                    });
+                }
+            }
+            if (assets.length > 0) {
+                cssAssetMap.set(cssPath, assets);
+            }
+        }
+
+        // 4. 收集图片路径
+        const imagePaths: string[] = [];
+        const imageElemMap = new Map<string, Element>();
+
+        for (const img of images) {
+            const src = img.getAttribute("src");
+            if (src && !src.startsWith("http") && !src.startsWith("data:")) {
+                const imgPath = resolvePath(filePath, src);
+                if (!assetCache.has(imgPath)) {
+                    imagePaths.push(imgPath);
+                }
+                imageElemMap.set(imgPath, img);
+            }
+        }
+
+        // 5. 批量读取所有二进制资源（CSS 引用的字体 + 图片）
+        const allBinaryPaths = [...binaryPaths, ...imagePaths];
+        let binaryData: Record<string, number[]> = {};
+
+        if (allBinaryPaths.length > 0) {
+            try {
+                binaryData = await invoke<Record<string, number[]>>(
+                    "read_epub_binary_batch",
+                    {
+                        epubPath: epubPath,
+                        filePaths: allBinaryPaths,
+                    },
+                );
+            } catch (e) {
+                console.error("批量读取二进制资源失败:", e);
+            }
+        }
+
+        if (currentGeneration !== generation) return "";
+
+        // 6. 创建 Blob URLs
+        for (const [path, data] of Object.entries(binaryData)) {
+            const uint8Array = new Uint8Array(data);
+
+            // 猜测 MIME 类型
+            let mimeType = "application/octet-stream";
+            const lower = path.toLowerCase();
+            if (lower.endsWith(".ttf")) mimeType = "font/ttf";
+            else if (lower.endsWith(".woff")) mimeType = "font/woff";
+            else if (lower.endsWith(".woff2")) mimeType = "font/woff2";
+            else if (lower.endsWith(".otf")) mimeType = "font/otf";
+            else if (lower.endsWith(".eot"))
+                mimeType = "application/vnd.ms-fontobject";
+            else if (lower.endsWith(".png")) mimeType = "image/png";
+            else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+                mimeType = "image/jpeg";
+            else if (lower.endsWith(".gif")) mimeType = "image/gif";
+            else if (lower.endsWith(".svg")) mimeType = "image/svg+xml";
+            else if (lower.endsWith(".webp")) mimeType = "image/webp";
+
+            const blob = new Blob([uint8Array], { type: mimeType });
+            const blobUrl = URL.createObjectURL(blob);
+            blobUrls.push(blobUrl);
+            assetCache.set(path, blobUrl);
+        }
+
+        // 7. 处理 CSS，替换资源 URL
+        for (const [cssPath, cssContent] of Object.entries(cssContents)) {
+            let processedCss = cssContent;
+            const assets = cssAssetMap.get(cssPath);
+
+            if (assets) {
+                for (const asset of assets) {
+                    const blobUrl = assetCache.get(asset.path);
+                    if (blobUrl) {
+                        processedCss = processedCss
+                            .split(asset.original)
+                            .join(`url("${blobUrl}")`);
+                    }
+                }
+            }
+
+            // 创建 style 标签并替换 link
+            const link = cssLinkMap.get(cssPath);
+            if (link) {
+                const style = doc.createElement("style");
+                style.textContent = processedCss;
+                link.replaceWith(style);
+            }
+        }
+
+        // 8. 处理图片
+        for (const [imgPath, img] of imageElemMap) {
+            const blobUrl = assetCache.get(imgPath);
+            if (blobUrl) {
+                img.setAttribute("src", blobUrl);
+            }
+        }
+
+        // 注入全局样式：只移除html/body的默认边距，保留内容原有布局
         const globalStyle = doc.createElement("style");
-        globalStyle.textContent =
-            "html, body { overflow-x: hidden !important; }";
+        globalStyle.textContent = `
+            /* 只移除html/body的默认边距，避免出现滚动条 */
+            html { 
+                overflow-x: hidden !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            body {
+                overflow-x: hidden !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+        `;
         doc.head.appendChild(globalStyle);
 
-        imgResults.forEach((res) => {
-            if (res) {
-                // @ts-ignore
-                res.img.setAttribute("src", res.blobUrl);
-            }
-        });
+        // 注入滚动同步脚本：监听来自父窗口的滚动消息
+        const syncScript = doc.createElement("script");
+        syncScript.textContent = `
+            window.addEventListener('message', function(event) {
+                if (event.data && event.data.type === 'editorScroll') {
+                    const scrollPercent = event.data.percent;
+                    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+                    const targetScroll = maxScroll * scrollPercent;
+                    window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                }
+            });
+        `;
+        doc.head.appendChild(syncScript);
 
         return doc.documentElement.outerHTML;
     }
@@ -418,6 +449,37 @@
         const generation = currentGeneration;
 
         selectedFile = file;
+
+        // 多标签页支持：添加到openTabs如果还没有
+        const existingIndex = openTabs.findIndex(
+            (tab) => tab.path === file.path,
+        );
+        if (existingIndex >= 0) {
+            activeTabIndex = existingIndex;
+            // 滚动到该标签
+            await tick();
+            if (tabsBarDiv && tabsBarDiv.children[existingIndex]) {
+                const tabElement = tabsBarDiv.children[
+                    existingIndex
+                ] as HTMLElement;
+                // 使用 inline: "center" 确保标签在中间，或者 "nearest" 确保可见
+                tabElement.scrollIntoView({
+                    behavior: "smooth",
+                    block: "nearest",
+                    inline: "center",
+                });
+            }
+        } else {
+            openTabs.push(file);
+            activeTabIndex = openTabs.length - 1;
+            openTabs = openTabs; // 触发响应式更新
+
+            // 新标签页打开后自动滚动到最右侧
+            await tick();
+            if (tabsBarDiv) {
+                tabsBarDiv.scrollLeft = tabsBarDiv.scrollWidth;
+            }
+        }
 
         // 1. 尝试直接从预览缓存命中 (最快路径)
         if (previewCache.has(file.path)) {
@@ -491,6 +553,50 @@
             if (currentGeneration === generation) {
                 fileContent = `读取失败: ${e}`;
                 previewContent = `读取失败: ${e}`;
+            }
+        }
+    }
+
+    // 标签页管理函数
+    function switchTab(index: number) {
+        if (index < 0 || index >= openTabs.length) return;
+        activeTabIndex = index;
+        const tab = openTabs[index];
+        selectedFile = tab;
+
+        // 加载文件内容
+        if (fileContentCache.has(tab.path)) {
+            fileContent = fileContentCache.get(tab.path)!;
+        }
+        if (previewCache.has(tab.path)) {
+            previewContent = previewCache.get(tab.path)!;
+        }
+    }
+
+    function closeTab(event: Event, index: number) {
+        event.stopPropagation();
+
+        if (index < 0 || index >= openTabs.length) return;
+
+        openTabs.splice(index, 1);
+        openTabs = openTabs; // 触发响应式更新
+
+        if (openTabs.length === 0) {
+            // 所有标签页都关闭了
+            activeTabIndex = -1;
+            selectedFile = null;
+            fileContent = "";
+            previewContent = "";
+        } else {
+            // 如果关闭的是当前激活的标签，切换到相邻的标签
+            if (index === activeTabIndex) {
+                // 优先切换到右侧标签，如果没有则切换到左侧
+                const newIndex =
+                    index >= openTabs.length ? openTabs.length - 1 : index;
+                switchTab(newIndex);
+            } else if (index < activeTabIndex) {
+                // 如果关闭的标签在当前激活标签左侧，调整索引
+                activeTabIndex--;
             }
         }
     }
@@ -725,11 +831,36 @@
         // 解析出绝对路径
         const targetPath = resolvePath(tocNcxPath, relativePath);
 
+        // 展开文件所在的所有父文件夹
+        function expandParentFolders(path: string) {
+            const parts = path.split("/");
+            let currentPath = "";
+            for (let i = 0; i < parts.length - 1; i++) {
+                currentPath += (i > 0 ? "/" : "") + parts[i];
+                expandedFolders.add(currentPath);
+            }
+            expandedFolders = expandedFolders; // 触发响应式更新
+        }
+
         // 在 fileTree 中查找对应节点并选中
-        function findAndSelect(nodes: EpubFileNode[]) {
+        function findAndSelect(nodes: EpubFileNode[]): boolean {
             for (const node of nodes) {
                 if (node.path === targetPath) {
                     selectFile(node);
+
+                    // 滚动到文件节点
+                    setTimeout(() => {
+                        const fileElement = document.querySelector(
+                            `.file-node[data-path="${targetPath}"]`,
+                        );
+                        if (fileElement) {
+                            fileElement.scrollIntoView({
+                                behavior: "smooth",
+                                block: "center",
+                            });
+                        }
+                    }, 100);
+
                     return true;
                 }
                 if (node.children) {
@@ -739,6 +870,7 @@
             return false;
         }
 
+        expandParentFolders(targetPath);
         findAndSelect(fileTree);
         // 注释掉自动切换，保持在目录页
         // if (found) {
@@ -852,6 +984,18 @@
 
         return result;
     }
+
+    // 添加行号
+    function addLineNumbers(highlighted: string): string {
+        const lines = highlighted.split("\n");
+        return lines
+            .map((line, i) => {
+                const lineNum = i + 1;
+                // 使用 div 而不是 span，避免换行符导致的额外间距
+                return `<div class="line-with-number"><span class="line-number">${lineNum}</span><span class="line-content">${line || " "}</span></div>`;
+            })
+            .join(""); // 不加换行符，因为 div 本身会换行
+    }
 </script>
 
 <div class="epub-editor">
@@ -923,6 +1067,7 @@
                                                     {#each child.children as subChild}
                                                         <div
                                                             class="tree-node file-node"
+                                                            data-path={subChild.path}
                                                             class:selected={selectedFile?.path ===
                                                                 subChild.path}
                                                             on:click={() =>
@@ -968,6 +1113,7 @@
                                         <!-- 文件 -->
                                         <div
                                             class="tree-node file-node"
+                                            data-path={child.path}
                                             class:selected={selectedFile?.path ===
                                                 child.path}
                                             on:click={() => selectFile(child)}
@@ -1002,22 +1148,65 @@
 
         <!-- 中间：编辑器 -->
         <main class="editor-pane">
+            {#if openTabs.length > 0}
+                <!-- 标签页栏 -->
+                <div class="tabs-bar" bind:this={tabsBarDiv}>
+                    {#each openTabs as tab, index}
+                        <div
+                            class="editor-tab"
+                            class:active={index === activeTabIndex}
+                            on:click={() => switchTab(index)}
+                            on:keydown={(e) =>
+                                e.key === "Enter" && switchTab(index)}
+                            role="button"
+                            tabindex="0"
+                        >
+                            <span class="tab-icon"
+                                >{getFileIcon(tab.file_type)}</span
+                            >
+                            <span class="tab-name" title={tab.name}
+                                >{tab.name}</span
+                            >
+                            <button
+                                class="tab-close"
+                                on:click={(e) => closeTab(e, index)}
+                                aria-label="关闭标签页"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
+
             {#if selectedFile}
                 <div class="editor-header">
                     <span class="file-name">{selectedFile.name}</span>
                     <span class="file-path">{selectedFile.path}</span>
                 </div>
-                <div class="editor-content">
+                <div
+                    class="editor-content"
+                    bind:this={editorContentDiv}
+                    on:scroll={handleEditorScroll}
+                >
                     {#if selectedFile.file_type === "html" || selectedFile.file_type === "xml"}
                         <pre class="code-block language-html"><code
-                                >{@html highlightHTML(fileContent)}</code
+                                >{@html addLineNumbers(
+                                    highlightHTML(fileContent),
+                                )}</code
                             ></pre>
                     {:else if selectedFile.file_type === "css"}
                         <pre class="code-block language-css"><code
-                                >{@html highlightCSS(fileContent)}</code
+                                >{@html addLineNumbers(
+                                    highlightCSS(fileContent),
+                                )}</code
                             ></pre>
                     {:else}
-                        <pre class="code-block">{fileContent}</pre>
+                        <pre class="code-block">{@html addLineNumbers(
+                                fileContent
+                                    .replace(/</g, "&lt;")
+                                    .replace(/>/g, "&gt;"),
+                            )}</pre>
                     {/if}
                 </div>
             {:else}
@@ -1054,9 +1243,10 @@
                     {#if selectedFile?.file_type === "html"}
                         <div class="mobile-frame">
                             <iframe
+                                bind:this={previewIframe}
                                 title="preview"
                                 srcdoc={previewContent}
-                                sandbox="allow-same-origin"
+                                sandbox="allow-same-origin allow-scripts"
                             ></iframe>
                         </div>
                     {:else}
@@ -1247,6 +1437,108 @@
         flex-direction: column;
         background: #fff;
         border-right: 1px solid #ddd;
+        min-width: 0; /* 关键：允许 flex 子项收缩，从而触发内部滚动 */
+    }
+
+    /* 标签页栏 */
+    .tabs-bar {
+        display: flex;
+        background: #f3f3f3;
+        border-bottom: 1px solid #ddd;
+        overflow-x: auto;
+        overflow-y: hidden;
+        gap: 0;
+        flex-shrink: 0;
+        max-height: 40px;
+        width: 100%; /* 确保不超出父元素 */
+        box-sizing: border-box; /* 包含边框在宽度内 */
+    }
+
+    .editor-tab {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        min-width: 120px;
+        max-width: 200px;
+        border-right: 1px solid #ddd;
+        cursor: pointer;
+        background: #e8e8e8;
+        transition: background 0.2s;
+        user-select: none;
+        flex-shrink: 0; /* 防止标签被压缩，允许横向滚动 */
+    }
+
+    .editor-tab:hover {
+        background: #d8d8d8;
+    }
+
+    .editor-tab.active {
+        background: #fff;
+        border-bottom: 2px solid #2196f3;
+        position: relative;
+    }
+
+    .tab-icon {
+        font-size: 14px;
+        margin-right: 6px;
+        flex-shrink: 0;
+    }
+
+    .tab-name {
+        flex: 1;
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #333;
+    }
+
+    .tab-close {
+        margin-left: 6px;
+        width: 18px;
+        height: 18px;
+        border: none;
+        background: transparent;
+        color: #999;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 0;
+    }
+
+    .tab-close:hover {
+        background: #ccc;
+        color: #333;
+    }
+
+    /* 行号相关 */
+    .code-block :global(.line-with-number) {
+        display: flex; /* 改用 flex 而不是 grid */
+        line-height: 1.5;
+        margin: 0;
+        padding: 0;
+    }
+
+    .code-block :global(.line-number) {
+        color: #858585;
+        text-align: right;
+        padding-right: 12px;
+        user-select: none;
+        border-right: 1px solid #e0e0e0;
+        min-width: 40px;
+        background: #f8f8f8;
+        flex-shrink: 0;
+    }
+
+    .code-block :global(.line-content) {
+        padding-left: 8px;
+        flex: 1;
+        white-space: pre-wrap; /* 保留空白但允许换行 */
     }
 
     .editor-header {
@@ -1341,7 +1633,7 @@
 
     /* 预览 */
     .preview-pane {
-        width: 390px;
+        width: 360px; /* 标准安卓手机CSS宽度 */
         background: #fff;
         display: flex;
         flex-direction: column;
@@ -1397,7 +1689,7 @@
     }
 
     .mobile-frame {
-        width: 390px;
+        width: 360px; /* 标准安卓手机CSS宽度 */
         height: 100%;
         max-height: 812px; /* iPhone X height approx, or just limit it */
         background: #fff;
@@ -1405,6 +1697,8 @@
             0 4px 6px -1px rgba(0, 0, 0, 0.1),
             0 2px 4px -1px rgba(0, 0, 0, 0.06);
         border: 1px solid #d1d5db;
+        border-radius: 8px; /* 添加圆角模拟手机外观 */
+        overflow: hidden; /* 确保内容不超出边框 */
         display: flex;
         flex-direction: column;
     }
@@ -1414,6 +1708,10 @@
         height: 100%;
         border: none;
         background: #fff;
+        /* 关键：确保 iframe 内容无边距 */
+        margin: 0;
+        padding: 0;
+        display: block;
     }
 
     .toc-container {

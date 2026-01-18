@@ -1,13 +1,40 @@
 use chardetng::EncodingDetector;
 use fancy_regex::Regex;
 use md5;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process; // 引入进程控制
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zip::write::FileOptions;
+
+// --- EPUB 全局缓存 ---
+struct EpubCache {
+    epub_path: String,
+    text_cache: HashMap<String, String>,
+    binary_cache: HashMap<String, Vec<u8>>,
+}
+
+impl EpubCache {
+    fn new(path: String) -> Self {
+        EpubCache {
+            epub_path: path,
+            text_cache: HashMap::new(),
+            binary_cache: HashMap::new(),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.text_cache.clear();
+        self.binary_cache.clear();
+    }
+}
+
+static EPUB_CACHE: Lazy<Mutex<Option<EpubCache>>> = Lazy::new(|| Mutex::new(None));
 
 // --- 静态资源: 整理后的 CSS ---
 
@@ -526,6 +553,8 @@ struct EpubMetadata {
     cover_path: String,
     uuid: String,
     md5: String,
+    #[serde(default)]
+    description: String,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -589,10 +618,28 @@ fn read_text_file(path: String) -> Result<String, String> {
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)
         .map_err(|e| format!("读取失败: {}", e))?;
+
+    // 1. 优先尝试 UTF-8
+    if let Ok(s) = String::from_utf8(buffer.clone()) {
+        return Ok(s);
+    }
+
+    // 2. 使用 chardetng 猜测
     let mut detector = EncodingDetector::new();
     detector.feed(&buffer, true);
-    let encoding = detector.guess(None, true);
-    let (cow, _, _) = encoding.decode(&buffer);
+    let encoding = detector.guess(Some(b"cn"), true);
+    let (cow, _, malformed) = encoding.decode(&buffer);
+
+    // 3. 如果 chardetng 也没探测出来或者觉得有问题，强制尝试 GB18030 (常见于中文小说)
+    // chardetng 有时候对短文本或者特殊 GBK 字符会保守地给 Windows-1252
+    if malformed || encoding.name() == "windows-1252" || encoding.name() == "ISO-8859-1" {
+        use encoding_rs::GB18030;
+        let (cow_gbk, _, malformed_gbk) = GB18030.decode(&buffer);
+        if !malformed_gbk {
+            return Ok(cow_gbk.into_owned());
+        }
+    }
+
     Ok(cow.into_owned())
 }
 
@@ -1032,6 +1079,7 @@ async fn export_epub(
     <dc:date>{}</dc:date>
     <dc:publisher>{}</dc:publisher>
     <dc:identifier opf:scheme="UUID" id="BookId">{}</dc:identifier>
+    <dc:description>{}</dc:description>
     <meta name="cover" content="cover-image" />
     <meta property="reamicro:md5" content="{}" />
   </metadata>
@@ -1048,6 +1096,7 @@ async fn export_epub(
         date_str,
         escape_xml(&metadata.publisher),
         full_uuid,
+        escape_xml(&metadata.description),
         metadata.md5,
         manifest_items,
         spine_refs
@@ -1242,6 +1291,12 @@ async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
         result
     }
 
+    // 初始化全局缓存
+    {
+        let mut cache_guard = EPUB_CACHE.lock().unwrap();
+        *cache_guard = Some(EpubCache::new(epub_path));
+    }
+
     Ok(build_tree(&all_files))
 }
 
@@ -1250,6 +1305,19 @@ async fn read_epub_file_content(epub_path: String, file_path: String) -> Result<
     use std::io::Read;
     use zip::ZipArchive;
 
+    // 1. 检查缓存
+    {
+        let cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(ref cache) = *cache_guard {
+            if cache.epub_path == epub_path {
+                if let Some(content) = cache.text_cache.get(&file_path) {
+                    return Ok(content.clone());
+                }
+            }
+        }
+    }
+
+    // 2. 从 ZIP 读取
     let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
     let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
 
@@ -1261,6 +1329,16 @@ async fn read_epub_file_content(epub_path: String, file_path: String) -> Result<
         .read_to_string(&mut content)
         .map_err(|e| format!("读取失败: {}", e))?;
 
+    // 3. 存入缓存
+    {
+        let mut cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(ref mut cache) = *cache_guard {
+            if cache.epub_path == epub_path {
+                cache.text_cache.insert(file_path, content.clone());
+            }
+        }
+    }
+
     Ok(content)
 }
 
@@ -1269,6 +1347,19 @@ async fn read_epub_file_binary(epub_path: String, file_path: String) -> Result<V
     use std::io::Read;
     use zip::ZipArchive;
 
+    // 1. 检查缓存
+    {
+        let cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(ref cache) = *cache_guard {
+            if cache.epub_path == epub_path {
+                if let Some(data) = cache.binary_cache.get(&file_path) {
+                    return Ok(data.clone());
+                }
+            }
+        }
+    }
+
+    // 2. 从 ZIP 读取
     let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
     let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
 
@@ -1280,7 +1371,147 @@ async fn read_epub_file_binary(epub_path: String, file_path: String) -> Result<V
         .read_to_end(&mut buffer)
         .map_err(|e| format!("读取失败: {}", e))?;
 
+    // 3. 存入缓存
+    {
+        let mut cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(ref mut cache) = *cache_guard {
+            if cache.epub_path == epub_path {
+                cache.binary_cache.insert(file_path, buffer.clone());
+            }
+        }
+    }
+
     Ok(buffer)
+}
+
+// --- 批量读取 API ---
+
+#[tauri::command]
+async fn read_epub_files_batch(
+    epub_path: String,
+    file_paths: Vec<String>,
+) -> Result<HashMap<String, String>, String> {
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    let mut results: HashMap<String, String> = HashMap::new();
+    let mut to_read: Vec<String> = Vec::new();
+
+    // 1. 检查缓存，收集需要读取的文件
+    {
+        let cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(ref cache) = *cache_guard {
+            if cache.epub_path == epub_path {
+                for path in &file_paths {
+                    if let Some(content) = cache.text_cache.get(path) {
+                        results.insert(path.clone(), content.clone());
+                    } else {
+                        to_read.push(path.clone());
+                    }
+                }
+            } else {
+                to_read = file_paths.clone();
+            }
+        } else {
+            to_read = file_paths.clone();
+        }
+    }
+
+    // 2. 批量读取未缓存的文件
+    if !to_read.is_empty() {
+        let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+        let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+
+        let mut new_contents: Vec<(String, String)> = Vec::new();
+
+        for path in to_read {
+            if let Ok(mut zip_file) = archive.by_name(&path) {
+                let mut content = String::new();
+                if zip_file.read_to_string(&mut content).is_ok() {
+                    results.insert(path.clone(), content.clone());
+                    new_contents.push((path, content));
+                }
+            }
+        }
+
+        // 3. 存入缓存
+        {
+            let mut cache_guard = EPUB_CACHE.lock().unwrap();
+            if let Some(ref mut cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    for (path, content) in new_contents {
+                        cache.text_cache.insert(path, content);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+#[tauri::command]
+async fn read_epub_binary_batch(
+    epub_path: String,
+    file_paths: Vec<String>,
+) -> Result<HashMap<String, Vec<u8>>, String> {
+    use std::io::Read;
+    use zip::ZipArchive;
+
+    let mut results: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut to_read: Vec<String> = Vec::new();
+
+    // 1. 检查缓存
+    {
+        let cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(ref cache) = *cache_guard {
+            if cache.epub_path == epub_path {
+                for path in &file_paths {
+                    if let Some(data) = cache.binary_cache.get(path) {
+                        results.insert(path.clone(), data.clone());
+                    } else {
+                        to_read.push(path.clone());
+                    }
+                }
+            } else {
+                to_read = file_paths.clone();
+            }
+        } else {
+            to_read = file_paths.clone();
+        }
+    }
+
+    // 2. 批量读取
+    if !to_read.is_empty() {
+        let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+        let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+
+        let mut new_data: Vec<(String, Vec<u8>)> = Vec::new();
+
+        for path in to_read {
+            if let Ok(mut zip_file) = archive.by_name(&path) {
+                let mut buffer = Vec::new();
+                if zip_file.read_to_end(&mut buffer).is_ok() {
+                    results.insert(path.clone(), buffer.clone());
+                    new_data.push((path, buffer));
+                }
+            }
+        }
+
+        // 3. 存入缓存
+        {
+            let mut cache_guard = EPUB_CACHE.lock().unwrap();
+            if let Some(ref mut cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    for (path, data) in new_data {
+                        cache.binary_cache.insert(path, data);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1301,8 +1532,10 @@ pub fn run() {
             export_epub,
             extract_epub,
             read_epub_file_content,
-            read_epub_file_binary, // 新增命令
-            exit_app               // 注册新指令
+            read_epub_file_binary,
+            read_epub_files_batch,
+            read_epub_binary_batch,
+            exit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
