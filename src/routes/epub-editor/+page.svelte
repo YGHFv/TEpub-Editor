@@ -13,19 +13,100 @@
     // Setup Close Listener
     onMount(async () => {
         const win = getCurrentWindow();
+        // NOTE: Do NOT emit restore-main-window here. It should only be emitted
+        // after the user confirms closing (or if there are no unsaved changes).
+        // The actual restoration is handled by the confirmation dialog logic.
         const unlisten = await win.listen(
             "tauri://close-requested",
-            async () => {
-                console.log(
-                    "EPUB window closing, emitting restore-main-window...",
-                );
-                await emit("restore-main-window");
+            async (event) => {
+                // Prevent default close, show confirmation if needed
+                // The 'beforeunload' or custom logic should handle this
+                console.log("EPUB window close requested");
+                // Do NOT emit restore-main-window here as it's too early
             },
         );
+
+        // 监听来自 Preview Iframe 的消息
+        const handleMessage = (event: MessageEvent) => {
+            if (event.data && event.data.type === "previewClick") {
+                // 优先使用文本定位
+                if (event.data.text) {
+                    if (event.data.context) {
+                        // 使用上下文感知同步 (Context-Aware Sync)
+                        epubCodeEditorComponent?.selectTextWithContext(
+                            event.data.text,
+                            event.data.context,
+                        );
+                    } else {
+                        // Fallback to strict text matching
+                        epubCodeEditorComponent?.selectText(event.data.text);
+                    }
+                } else if (event.data.percent !== undefined) {
+                    // Fallback to percent
+                    epubCodeEditorComponent?.scrollToRatio(event.data.percent);
+                }
+            }
+            // NOTE: Removed 'previewSelection' handling to prevent sync loop.
+            // Selecting text in preview should NOT sync back to editor and then to preview again.
+        };
+        window.addEventListener("message", handleMessage);
+
         return () => {
             unlisten();
+            window.removeEventListener("message", handleMessage);
         };
     });
+
+    // Editor -> Preview Sync
+    function handleEditorClick(line: number) {
+        const iframeWindow = previewIframe?.contentWindow;
+        if (!iframeWindow) return;
+
+        const view = epubCodeEditorComponent?.getView();
+        if (!view) return;
+
+        // 获取该行文本
+        const lineContent = view.state.doc.line(line).text;
+        // 移除标签，只保留文本，用于模糊搜索
+        const cleanText = lineContent
+            .replace(/<[^>]+>/g, " ") // 标签变空格
+            .replace(/\s+/g, " ") // 多空格变单空格
+            .trim();
+
+        if (cleanText.length < 2) return; // 太短不搜索
+
+        iframeWindow.postMessage(
+            {
+                type: "editorClickText",
+                text: cleanText,
+            },
+            "*",
+        );
+    }
+
+    let editorSelectionTimeout: any;
+    function handleEditorSelection(text: string) {
+        if (!previewIframe?.contentWindow) return;
+
+        if (editorSelectionTimeout) clearTimeout(editorSelectionTimeout);
+        editorSelectionTimeout = setTimeout(() => {
+            // 移除 HTML 标签，并标准化空白字符 (换行符转空格)，只同步纯文本
+            const cleanText = text
+                .replace(/<[^>]+>/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+            // Prevent flashing on short selections
+            if (!cleanText || cleanText.length < 2) return;
+
+            previewIframe.contentWindow.postMessage(
+                {
+                    type: "editorSelection",
+                    text: cleanText,
+                },
+                "*",
+            );
+        }, 300);
+    }
 
     interface EpubFileNode {
         name: string;
@@ -33,6 +114,7 @@
         file_type: string;
         size?: number;
         title?: string;
+        resolution?: string;
         children?: EpubFileNode[];
     }
 
@@ -306,7 +388,28 @@
             autoExpand(fileTree);
             expandedFolders = expandedFolders;
 
+            // 立即显示 UI（目录先加载完毕）
             isLoading = false;
+
+            // Background: Pre-cache all CSS files (non-blocking)
+            // 在后台预加载 CSS，不阻塞用户操作
+            precacheCssAssets(fileTree).then(() => {
+                console.log("CSS pre-caching completed");
+                // After CSS is cached, auto-open first chapter
+                if (activeTabIndex === -1 && !selectedFile) {
+                    const firstHtml = flatHtmlFiles.find(
+                        (f) =>
+                            f.file_type === "html" ||
+                            f.name.endsWith(".xhtml") ||
+                            f.name.endsWith(".html"),
+                    );
+                    if (firstHtml) {
+                        selectFile(firstHtml);
+                    } else if (flatHtmlFiles.length > 0) {
+                        selectFile(flatHtmlFiles[0]);
+                    }
+                }
+            });
         } catch (e) {
             error = `加载失败: ${e}`;
             isLoading = false;
@@ -370,16 +473,118 @@
         );
         if (index === -1) return;
 
-        // 延时一点执行，优先保证当前 UI 响应
+        // 延时执行，优先保证当前 UI 响应
+        // 预加载更多章节以提升后续导航速度
         setTimeout(() => {
-            const next = flatHtmlFiles[index + 1];
+            // Pre-cache next 3 chapters
+            for (let i = 1; i <= 3; i++) {
+                const next = flatHtmlFiles[index + i];
+                if (next) preloadFile(next);
+            }
+            // Pre-cache previous 1 chapter
             const prev = flatHtmlFiles[index - 1];
-            if (next) preloadFile(next);
             if (prev) preloadFile(prev);
         }, 300);
     }
 
     // ... resolvePath ... (unchanged)
+
+    // Pre-cache all CSS files and their referenced resources (fonts, images)
+    async function precacheCssAssets(nodes: EpubFileNode[]) {
+        // 1. Collect all CSS files
+        const allFiles = getAllFiles(nodes);
+        const cssFiles = allFiles.filter(
+            (f) => f.name.endsWith(".css") || f.file_type === "css",
+        );
+
+        if (cssFiles.length === 0) return;
+
+        const cssPaths = cssFiles.map((f) => f.path);
+
+        // 2. Batch read all CSS files
+        let cssContents: Record<string, string> = {};
+        try {
+            cssContents = await invoke<Record<string, string>>(
+                "read_epub_files_batch",
+                {
+                    epubPath: epubPath,
+                    filePaths: cssPaths,
+                },
+            );
+        } catch (e) {
+            console.error("Pre-cache CSS: batch read failed", e);
+            return;
+        }
+
+        // 3. Extract all url() references from CSS
+        const binaryPaths = new Set<string>();
+
+        for (const [cssPath, cssContent] of Object.entries(cssContents)) {
+            const urlRegex = /url\(['"]?([^'")\s]+)['"]?\)/g;
+            let match;
+
+            while ((match = urlRegex.exec(cssContent)) !== null) {
+                const originalUrl = match[1];
+                if (
+                    !originalUrl.startsWith("data:") &&
+                    !originalUrl.startsWith("http")
+                ) {
+                    const absolutePath = resolvePath(cssPath, originalUrl);
+                    if (!assetCache.has(absolutePath)) {
+                        binaryPaths.add(absolutePath);
+                    }
+                }
+            }
+        }
+
+        // 4. Batch read all referenced binary files (fonts, images)
+        if (binaryPaths.size === 0) return;
+
+        let binaryData: Record<string, number[]> = {};
+        try {
+            binaryData = await invoke<Record<string, number[]>>(
+                "read_epub_binary_batch",
+                {
+                    epubPath: epubPath,
+                    filePaths: [...binaryPaths],
+                },
+            );
+        } catch (e) {
+            console.error("Pre-cache CSS: binary read failed", e);
+            return;
+        }
+
+        // 5. Create Blob URLs and cache them
+        for (const [path, data] of Object.entries(binaryData)) {
+            if (assetCache.has(path)) continue;
+
+            const uint8Array = new Uint8Array(data);
+            let mimeType = "application/octet-stream";
+            const lower = path.toLowerCase();
+
+            if (lower.endsWith(".woff2")) mimeType = "font/woff2";
+            else if (lower.endsWith(".woff")) mimeType = "font/woff";
+            else if (lower.endsWith(".ttf")) mimeType = "font/ttf";
+            else if (lower.endsWith(".otf")) mimeType = "font/otf";
+            else if (lower.endsWith(".eot"))
+                mimeType = "application/vnd.ms-fontobject";
+            else if (lower.endsWith(".png")) mimeType = "image/png";
+            else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+                mimeType = "image/jpeg";
+            else if (lower.endsWith(".gif")) mimeType = "image/gif";
+            else if (lower.endsWith(".webp")) mimeType = "image/webp";
+            else if (lower.endsWith(".svg")) mimeType = "image/svg+xml";
+
+            const blob = new Blob([uint8Array], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            assetCache.set(path, url);
+            blobUrls.push(url);
+        }
+
+        console.log(
+            `Pre-cached ${Object.keys(cssContents).length} CSS files and ${Object.keys(binaryData).length} binary assets`,
+        );
+    }
 
     // ... processCssAssets ... (unchanged)
 
@@ -1127,6 +1332,7 @@
         html: string,
         filePath: string,
         generation: number,
+        skipAssets: boolean = false,
     ): Promise<string> {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, "text/html");
@@ -1135,6 +1341,8 @@
             doc.querySelectorAll('link[rel="stylesheet"]'),
         );
         const images = Array.from(doc.querySelectorAll("img"));
+        // 支持 SVG 中的 image 元素 (xlink:href 或 href)
+        const svgImages = Array.from(doc.querySelectorAll("image"));
 
         // 1. 收集所有需要读取的 CSS 路径
         const cssPaths: string[] = [];
@@ -1151,7 +1359,7 @@
 
         // 2. 批量读取所有 CSS 文件
         let cssContents: Record<string, string> = {};
-        if (cssPaths.length > 0) {
+        if (!skipAssets && cssPaths.length > 0) {
             try {
                 cssContents = await invoke<Record<string, string>>(
                     "read_epub_files_batch",
@@ -1207,7 +1415,7 @@
 
         // 4. 收集图片路径
         const imagePaths: string[] = [];
-        const imageElemMap = new Map<string, Element>();
+        const imageElemMap = new Map<string, Element[]>();
 
         for (const img of images) {
             const src = img.getAttribute("src");
@@ -1216,7 +1424,26 @@
                 if (!assetCache.has(imgPath)) {
                     imagePaths.push(imgPath);
                 }
-                imageElemMap.set(imgPath, img);
+                const existing = imageElemMap.get(imgPath) || [];
+                existing.push(img);
+                imageElemMap.set(imgPath, existing);
+            }
+        }
+
+        // 处理 SVG image 元素 (xlink:href 或 href)
+        for (const svgImg of svgImages) {
+            // SVG image 可能使用 xlink:href 或 href
+            const href =
+                svgImg.getAttributeNS("http://www.w3.org/1999/xlink", "href") ||
+                svgImg.getAttribute("href");
+            if (href && !href.startsWith("http") && !href.startsWith("data:")) {
+                const imgPath = resolvePath(filePath, href);
+                if (!assetCache.has(imgPath)) {
+                    imagePaths.push(imgPath);
+                }
+                const existing = imageElemMap.get(imgPath) || [];
+                existing.push(svgImg);
+                imageElemMap.set(imgPath, existing);
             }
         }
 
@@ -1224,7 +1451,7 @@
         const allBinaryPaths = [...binaryPaths, ...imagePaths];
         let binaryData: Record<string, number[]> = {};
 
-        if (allBinaryPaths.length > 0) {
+        if (!skipAssets && allBinaryPaths.length > 0) {
             try {
                 binaryData = await invoke<Record<string, number[]>>(
                     "read_epub_binary_batch",
@@ -1291,29 +1518,39 @@
             }
         }
 
-        // 8. 处理图片
-        for (const [imgPath, img] of imageElemMap) {
+        // 8. 处理图片 (包括 SVG image 元素)
+        for (const [imgPath, imgElements] of imageElemMap) {
             const blobUrl = assetCache.get(imgPath);
             if (blobUrl) {
-                img.setAttribute("src", blobUrl);
+                for (const img of imgElements) {
+                    if (img.tagName.toLowerCase() === "image") {
+                        // SVG image 元素需要设置 href 和 xlink:href
+                        img.setAttributeNS(
+                            "http://www.w3.org/1999/xlink",
+                            "href",
+                            blobUrl,
+                        );
+                        img.setAttribute("href", blobUrl);
+                    } else {
+                        // 普通 img 元素
+                        img.setAttribute("src", blobUrl);
+                    }
+                }
             }
         }
 
         // 注入全局样式：只移除html/body的默认边距，避免出现滚动条，并隐藏滚动条但保留滚动功能
         const globalStyle = doc.createElement("style");
+
         globalStyle.textContent = `
-            /* 只移除html/body的默认边距 */
+            /* 隐藏滚动条但保留滚动功能，不强制移除 margin/padding 以保留默认或书籍样式 */
             html { 
                 overflow-x: hidden !important;
-                margin: 0 !important;
-                padding: 0 !important;
                 scrollbar-width: none !important; /* Firefox */
                 -ms-overflow-style: none !important; /* IE */
             }
             body {
                 overflow-x: hidden !important;
-                margin: 0 !important;
-                padding: 0 !important;
                 scrollbar-width: none !important;
                 -ms-overflow-style: none !important;
             }
@@ -1321,20 +1558,345 @@
             ::-webkit-scrollbar {
                 display: none !important;
             }
+
+            /* 默认隐藏 EPUB 注脚，模拟阅读器行为 */
+            aside[epub\\:type="footnote"] {
+                display: none;
+            }
+
+            /* 注脚弹窗样式 */
+            .footnote-popup {
+                position: fixed;
+                background: #fff;
+                border: 1px solid #ddd;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                padding: 12px;
+                max-width: 80%;
+                z-index: 9999;
+                border-radius: 6px;
+                font-size: 14px;
+                color: #333;
+                line-height: 1.5;
+                pointer-events: auto;
+                animation: fadeIn 0.2s ease;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(5px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+
+            /* 选中颜色高亮 */
+            ::selection {
+                background-color: #ffeb3b !important;
+                color: #000 !important;
+            }
         `;
         doc.head.appendChild(globalStyle);
 
         // 注入滚动同步脚本：监听来自父窗口的滚动消息
         const syncScript = doc.createElement("script");
         syncScript.textContent = `
+
+            // 接收父窗口消息
+            // 自动处理头图全宽 (三面贴边)
+            function fixHeaderImage() {
+                try {
+                    const body = document.body;
+                    const style = window.getComputedStyle(body);
+                    const paddingLeft = parseFloat(style.paddingLeft) || 0;
+                    const paddingRight = parseFloat(style.paddingRight) || 0;
+                    const paddingTop = parseFloat(style.paddingTop) || 0;
+                    const marginLeft = parseFloat(style.marginLeft) || 0;
+                    const marginRight = parseFloat(style.marginRight) || 0;
+                    const marginTop = parseFloat(style.marginTop) || 0;
+
+                    // 1. Find the first visual element
+                    let target = null;
+                    for (let i = 0; i < body.children.length; i++) {
+                        const el = body.children[i];
+                        // Skip non-visual or utility tags
+                        if (['SCRIPT', 'STYLE', 'LINK', 'META', 'ASIDE', 'NOSCRIPT', 'TEMPLATE'].includes(el.tagName)) continue;
+                        
+                        // We found the first potential content element.
+                        // Check if it qualifies as a header image.
+                        // Must contain an image or be an image
+                        const imgs = el.querySelectorAll('img, svg, image');
+                        const isImgTag = ['IMG', 'SVG', 'IMAGE'].includes(el.tagName);
+                        
+                        if (isImgTag || imgs.length > 0) {
+                             // Check text content length if it's a container
+                             if (!isImgTag) {
+                                 const textLen = el.innerText.replace(/\s/g, '').length;
+                                 if (textLen > 50) {
+                                     break; // Too much text, not a header image container
+                                 }
+                             }
+                             target = el;
+                        }
+                        
+                        // Stop searching after the first visual element
+                        break;
+                    }
+
+                    if (!target) return;
+                    
+                    // 2. Validate Width Heuristic
+                    // We only want to force full-bleed if the image is INTENDED to be wide.
+                    // If it's a small logo or centered cover (e.g. width: 40%), we should leave it alone.
+                    let shouldFix = false;
+                    const innerImgs = target.querySelectorAll('img, svg, image');
+                    
+                    if (innerImgs.length > 0) {
+                        const firstImg = innerImgs[0];
+                        const rect = firstImg.getBoundingClientRect();
+                        
+                        if (rect.width === 0) {
+                            // Image not loaded yet, wait for it
+                            firstImg.addEventListener('load', fixHeaderImage);
+                            return; 
+                        }
+                        // Only fix if image occupies > 60% of viewport
+                        if (rect.width > window.innerWidth * 0.6) {
+                            shouldFix = true;
+                        }
+                    } else if (['IMG', 'SVG', 'IMAGE'].includes(target.tagName)) {
+                        const rect = target.getBoundingClientRect();
+                        if (rect.width === 0) {
+                             target.addEventListener('load', fixHeaderImage);
+                             return;
+                        }
+                        if (rect.width > window.innerWidth * 0.6) {
+                             shouldFix = true;
+                        }
+                    }
+                    
+                    if (!shouldFix) return;
+
+                    // 3. Apply Absolute Positioning Strategy
+                    if (target.dataset.headerFixed) return;
+                    target.dataset.headerFixed = 'true';
+
+                    // Force Styles matches viewport
+                    target.style.setProperty('position', 'absolute', 'important');
+                    target.style.setProperty('top', '0', 'important');
+                    target.style.setProperty('left', '0', 'important');
+                    target.style.setProperty('width', '100vw', 'important');
+                    target.style.setProperty('max-width', 'none', 'important');
+                    target.style.setProperty('box-sizing', 'border-box', 'important');
+                    target.style.setProperty('margin', '0', 'important');
+                    target.style.setProperty('padding', '0', 'important');
+                    target.style.setProperty('z-index', '0', 'important');
+
+                    // Force internal images to fill
+                    innerImgs.forEach(img => {
+                        img.style.setProperty('width', '100%', 'important');
+                        img.style.setProperty('max-width', 'none', 'important');
+                        img.style.setProperty('display', 'block', 'important');
+                        img.style.setProperty('margin', '0', 'important');
+                        img.style.setProperty('padding', '0', 'important');
+                    });
+
+                    // 4. Insert Spacer
+                    const spacer = document.createElement('div');
+                    spacer.style.width = '100%';
+                    spacer.style.margin = '0';
+                    spacer.style.padding = '0';
+                    spacer.style.pointerEvents = 'none';
+                    
+                    // Insert spacer after target (or append if target is last)
+                    if (target.nextSibling) {
+                        target.parentElement.insertBefore(spacer, target.nextSibling);
+                    } else {
+                        target.parentElement.appendChild(spacer);
+                    }
+
+                    // 5. Sync Spacer Height
+                    const updateSpacer = () => {
+                        if (target && spacer) {
+                            const height = target.getBoundingClientRect().height;
+                            if (height > 0) {
+                                spacer.style.height = height + 'px';
+                            }
+                        }
+                    };
+
+                    if (window.ResizeObserver) {
+                        new ResizeObserver(updateSpacer).observe(target);
+                    }
+                    window.addEventListener('resize', updateSpacer);
+                    setTimeout(updateSpacer, 50);
+                    setTimeout(updateSpacer, 200);
+                    setTimeout(updateSpacer, 1000);
+                    innerImgs.forEach(img => img.addEventListener('load', updateSpacer));
+                } catch (e) {
+                    console.error('Header fix error:', e);
+                }
+            }
+            
+            // 尝试多次执行以应对加载延迟
+            window.addEventListener('load', fixHeaderImage);
+            window.addEventListener('DOMContentLoaded', fixHeaderImage);
+            setTimeout(fixHeaderImage, 50);
+            setTimeout(fixHeaderImage, 500);
+
+            // 接收父窗口消息
+            let isRemoteSelecting = false;
             window.addEventListener('message', function(event) {
-                if (event.data && event.data.type === 'editorScroll') {
-                    const scrollPercent = event.data.percent;
-                    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-                    const targetScroll = maxScroll * scrollPercent;
-                    window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                if (event.data) {
+                    if (event.data.type === 'editorScroll') {
+                        // 滚动同步 (百分比)
+                        const scrollPercent = event.data.percent;
+                        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+                        const targetScroll = maxScroll * scrollPercent;
+                        window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                    } else if (event.data.type === 'editorClick') {
+                        // 兼容旧的百分比点击 (Fallback)
+                        const percent = event.data.percent;
+                        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+                        const targetScroll = maxScroll * percent;
+                        window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+                    } else if (event.data.type === 'editorSelection' || event.data.type === 'editorClickText') {
+                        const text = event.data.text;
+                        if (!text) return;
+                        
+                        // 先清除当前选中
+                        isRemoteSelecting = true;
+                        window.getSelection().removeAllRanges();
+                        // 搜索文本
+                        const found = window.find(text, false, false, true, false, false, false);
+                        
+                        if (found) {
+                            const selection = window.getSelection();
+                            if (selection.rangeCount > 0) {
+                                // 点击时居中，拖拽选中时最近
+                                const blockMode = event.data.type === 'editorClickText' ? 'center' : 'nearest';
+                                selection.getRangeAt(0).startContainer.parentElement.scrollIntoView({ behavior: 'smooth', block: blockMode });
+                            }
+                            setTimeout(() => { isRemoteSelecting = false; }, 500);
+                        } else {
+                            // 未找到时，简单的 fallback (可选)
+                            isRemoteSelecting = false;
+                        }
+                    }
                 }
             });
+
+             // 双向同步：点击预览区，通知编辑器
+            // 双向同步：点击预览区，通知编辑器
+            document.addEventListener('click', function(e) {
+                // 忽略注脚点击和链接
+                if (e.target.closest('[zy-footnote]') || e.target.closest('a')) return;
+
+                let text = '';
+                const selection = document.getSelection();
+                if (selection && selection.toString().trim().length > 1) {
+                    text = selection.toString();
+                } else {
+                    // 若无选中，取点击元素的文本 (适度截断)
+                    const target = e.target;
+                    text = target.innerText || target.textContent || '';
+                    // 增加截断长度以确保完整匹配
+                    if (text.length > 150) text = text.substring(0, 150);
+                }
+
+                if (text && text.trim().length >= 1) {
+                    // Normalize
+                    text = text.replace(/\s+/g, " ").trim();
+                    
+                    // 获取上下文 (父级Block元素的文本)
+                    let context = "";
+                    let p = e.target;
+                    while (p && p !== document.body) {
+                        const style = window.getComputedStyle(p);
+                        if (style.display === 'block' || style.display === 'list-item') {
+                            context = p.innerText || p.textContent || "";
+                            // 增加 context 长度以改善匹配
+                            if (context.length > 500) context = context.substring(0, 500);
+                            break;
+                        }
+                        p = p.parentElement;
+                    }
+                    
+                    window.parent.postMessage({ type: 'previewClick', text: text, context: context }, '*');
+                }
+            });
+
+            // 双向同步：选中文本 (Debounced)
+            let selectionTimeout;
+            document.addEventListener('selectionchange', function() {
+                if (isRemoteSelecting) return;
+                
+                clearTimeout(selectionTimeout);
+                selectionTimeout = setTimeout(() => {
+                    const selection = document.getSelection();
+                    const text = selection ? selection.toString() : '';
+                    if (text && text.length >= 1) { 
+                        window.parent.postMessage({ type: 'previewSelection', text: text }, '*');
+                    }
+                }, 300); // 300ms debounce
+            });
+
+            // 注脚处理 (Hover)
+            // 使用 mouseover/mouseout 代理
+            document.addEventListener('mouseover', function(e) {
+                let target = e.target;
+                
+                // 检查是否是注脚触发器
+                let footnoteTrigger = null;
+                let cursor = target;
+                while (cursor && cursor !== document.body) {
+                    if (cursor.getAttribute('zy-footnote') || (cursor.tagName === 'A' && cursor.getAttribute('epub:type') === 'noteref')) {
+                        footnoteTrigger = cursor;
+                        break;
+                    }
+                    cursor = cursor.parentElement;
+                }
+
+                if (footnoteTrigger) {
+                    // 显示弹窗
+                    let content = footnoteTrigger.getAttribute('zy-footnote');
+                    if (!content && footnoteTrigger.tagName === 'A') {
+                         const href = footnoteTrigger.getAttribute('href');
+                         if (href && href.startsWith('#')) {
+                             const noteEl = document.getElementById(href.substring(1));
+                             if (noteEl) content = noteEl.innerText;
+                         }
+                    }
+
+                    if (content) {
+                        // 检查是否已存在
+                        let popup = document.querySelector('.footnote-popup');
+                        if (!popup) {
+                            popup = document.createElement('div');
+                            popup.className = 'footnote-popup';
+                            document.body.appendChild(popup);
+                        }
+                        popup.innerText = content;
+                        
+                        // Positioning
+                        const rect = footnoteTrigger.getBoundingClientRect();
+                        popup.style.top = (rect.bottom + 5) + 'px';
+                        popup.style.left = Math.max(10, Math.min(window.innerWidth - 300, rect.left)) + 'px';
+                        popup.style.display = 'block';
+                    }
+                }
+            });
+
+            document.addEventListener('mouseout', function(e) {
+                 // 简单的隐藏逻辑：如果在弹窗外移动，且移出的元素是注脚
+                 // 更好的方式：检查鼠标是否进入了弹窗？
+                 // 简化实现：移出 footnoteTrigger 就隐藏，除非移入的是 popup (太复杂了)
+                 // 先简单实现：主要针对 footnoteTrigger 的 mouseleave
+                 
+                 let target = e.target;
+                 if (target.getAttribute('zy-footnote') || (target.tagName === 'A' && target.getAttribute('epub:type') === 'noteref')) {
+                     const popup = document.querySelector('.footnote-popup');
+                     if (popup) {
+                         popup.style.display = 'none';
+                     }
+                 }
+            });
+
         `;
         doc.head.appendChild(syncScript);
 
@@ -1475,15 +2037,29 @@
                     // Validate
                     validateHtml(newContent, selectedFile.path);
 
-                    // Update Preview
-                    const processed = await processHtmlForPreview(
+                    // Update Preview (Stage 1: Fast render without assets)
+                    const fastPreview = await processHtmlForPreview(
                         newContent,
                         selectedFile.path,
                         currentGeneration,
+                        true, // skipAssets
                     );
-                    if (processed) {
-                        previewContent = processed;
-                        previewCache.set(selectedFile.path, processed);
+                    if (fastPreview) {
+                        previewContent = fastPreview;
+                        // Don't cache fast preview to force full load next time?
+                        // Actually, better caching logic needed, but for now ok.
+                    }
+
+                    // Update Preview (Stage 2: Full render with assets)
+                    const fullPreview = await processHtmlForPreview(
+                        newContent,
+                        selectedFile.path,
+                        currentGeneration,
+                        false, // load assets
+                    );
+                    if (fullPreview) {
+                        previewContent = fullPreview;
+                        previewCache.set(selectedFile.path, fullPreview);
                     }
                 }
             }, 500);
@@ -1640,6 +2216,15 @@
             return;
         }
 
+        // UX Optimization: Immediate Switch
+        if (
+            file.file_type === "html" ||
+            file.name.endsWith(".xhtml") ||
+            file.name.endsWith(".html")
+        ) {
+            activeTab = "preview";
+        }
+
         // 立即清理旧内容，避免视觉混淆
         // 如果有内容缓存，先显示内容缓存
         if (fileContentCache.has(file.path)) {
@@ -1648,9 +2233,15 @@
             fileContent = "加载中...";
         }
 
-        // 如果没命中预览缓存
-        if (!previewCache.has(file.path)) {
-            previewContent = "加载中...";
+        // 如果是 HTML 文件且没命中预览缓存，显示加载中
+        // 对于非 HTML 文件，保留当前预览内容
+        const isHtml =
+            file.file_type === "html" ||
+            file.name.endsWith(".xhtml") ||
+            file.name.endsWith(".html");
+        if (isHtml && !previewCache.has(file.path)) {
+            // 设为空字符串，让 placeholder div 显示而不是 iframe
+            previewContent = "";
         }
 
         try {
@@ -1695,7 +2286,7 @@
                     }
                 }
                 fileContent = ""; // Clear editor content
-                previewContent = "";
+                // 不清除 previewContent，保留最近的 HTML 预览
                 return;
             } else {
                 currentImageSrc = null;
@@ -1721,30 +2312,32 @@
 
             fileContent = content;
 
-            // 3. 仅对 HTML 文件进行预览处理，优化性能
+            // 3. 仅对 HTML 文件进行预览处理
             if (
                 file.file_type === "html" ||
                 file.name.endsWith(".xhtml") ||
                 file.name.endsWith(".html")
             ) {
+                // Single-stage loading with full assets for visual consistency
                 const processed = await processHtmlForPreview(
                     fileContent,
                     file.path,
                     generation,
+                    false, // load all assets
                 );
 
-                // 4. 存入预览缓存
                 if (currentGeneration === generation && processed) {
                     previewContent = processed;
                     previewCache.set(file.path, processed);
                     activeTab = "preview";
 
-                    // 5. 触发相邻章节预加载
+                    // 5. 触发相邻章节预加载 (在后台异步执行)
                     preloadNeighbors(file);
                 }
             } else {
-                // 对于非 HTML 文件（如 XML, OPF, NCX），不展示预览
-                previewContent = "";
+                // 对于非 HTML 文件（如 XML, OPF, NCX, CSS, 图片），保留当前预览
+                // 如果之前有 HTML 预览，保持不变；否则预览区保持目录列表
+                // (不清空 previewContent，所以保留最近的 HTML 预览)
             }
         } catch (e) {
             if (currentGeneration === generation) {
@@ -2646,7 +3239,13 @@
         if (file.file_type === "font")
             return `字体 ${(file.size! / 1024).toFixed(1)}KB`;
         if (file.file_type === "image") {
-            return `封面 ${file.size ? `${Math.round(file.size / 1024)}KB` : ""}`;
+            const sizeStr = file.size
+                ? `${Math.round(file.size / 1024)}KB`
+                : "";
+            // 如果后端提供了分辨率，直接显示，否则显示“图片”
+            return file.resolution
+                ? `${file.resolution} ${sizeStr}`
+                : `图片 ${sizeStr}`;
         }
 
         // 默认返回文件类型
@@ -3668,7 +4267,7 @@
     aria-label="File Drop Zone"
 >
     {#if isLoading}
-        <div class="loading">加载中...</div>
+        <div class="loading">少女祈祷中······</div>
     {:else if error}
         <div class="error">{error}</div>
     {:else}
@@ -3765,6 +4364,8 @@
                                 )}
                                 onChange={handleFileContentChange}
                                 onSave={saveCurrentFile}
+                                onClick={handleEditorClick}
+                                onSelectionChange={handleEditorSelection}
                             />
                         {:else}
                             <pre class="code-block">{@html addLineNumbers(
@@ -3993,7 +4594,8 @@
                         </div>
                     {/if}
 
-                    {#if selectedFile?.file_type === "html" || selectedFile?.name.endsWith(".xhtml") || selectedFile?.name.endsWith(".html")}
+                    {#if previewContent}
+                        <!-- 如果有预览内容（HTML），显示iframe -->
                         <div class="mobile-frame">
                             <iframe
                                 bind:this={previewIframe}
@@ -4005,7 +4607,7 @@
                     {:else}
                         <div class="placeholder">
                             {selectedFile
-                                ? "选择 HTML 文件以预览"
+                                ? "少女祈祷中······"
                                 : "请从左侧选择一个文件"}
                         </div>
                     {/if}
@@ -4013,7 +4615,7 @@
             {:else}
                 <div class="toc-container">
                     {#if isTocLoading}
-                        <div class="loading">加载目录...</div>
+                        <div class="loading">少女祈祷中······</div>
                     {:else if tocList.length === 0}
                         <div class="empty">暂无目录或未找到 toc.ncx</div>
                     {:else}
@@ -4173,9 +4775,13 @@
         font-family: "Consolas", monospace;
     }
 
-    /* Ensure container is relative */
+    /* Ensure container is relative and takes full height for centering */
     .preview-container {
         position: relative;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
     }
     .epub-editor {
         display: flex;
@@ -4183,6 +4789,7 @@
         background: #f5f5f5;
     }
 
+    /* 主页面加载（大字体） */
     .loading,
     .error {
         display: flex;
@@ -4190,11 +4797,27 @@
         justify-content: center;
         width: 100%;
         height: 100%;
-        font-size: 18px;
+        font-size: 36px;
+        color: #888;
+        font-weight: 500;
+        letter-spacing: 3px;
     }
 
     .error {
         color: #d32f2f;
+    }
+
+    /* 预览区占位符（小字体居中） */
+    .placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        font-size: 18px;
+        color: #999;
+        font-weight: 400;
+        letter-spacing: 2px;
     }
 
     /* 全局重置，防止出现额外的滚动条 */
@@ -4499,28 +5122,42 @@
         width: 100%; /* Fill sidebar width */
         display: flex;
         flex-direction: column;
-        overflow: hidden;
-        background: #fff;
-        position: relative;
-        border-left: 1px solid #ddd;
+        overflow-y: auto; /* Allow scrolling if phone height > window height */
+        overflow-x: hidden; /* Prevent horizontal scrollbar */
+        background: #f0f0f0; /* Darker background to distinguish phone frame */
+        align-items: center; /* Center horizontally */
+        justify-content: flex-start; /* Align to top (placeholder will center itself) */
+        padding: 0; /* No padding */
     }
 
     .mobile-frame {
-        width: 100%;
-        flex: 1;
-        height: 100%;
-        max-height: none;
+        width: 100%; /* 320px */
+        height: 711px; /* 20:9 ratio based on 320px width */
+        flex: 0 0 auto; /* Fixed height, don't grow/shrink */
         background: #fff;
-        border: none;
-        box-shadow: none;
-        border-radius: 0;
-        overflow-y: auto;
-        scrollbar-width: none;
-        -ms-overflow-style: none;
+        border: 1px solid #ddd;
+        box-sizing: border-box; /* Prevent border from adding width */
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); /* Shadow for depth */
+        /* overflow-y: auto;  <- Internal scroll is handled by iframe content usually? No, iframe has own scroll. */
+        /* But we want the FRAME to be the viewport. */
+        overflow: hidden; /* Hide overflow outside the "phone screen" */
+        position: relative;
     }
 
     .mobile-frame::-webkit-scrollbar {
         display: none;
+    }
+
+    /* 封面专用框架：自动高度，无固定比例 */
+    .mobile-frame-cover {
+        height: auto !important;
+        max-height: none !important;
+        flex: 0 0 auto !important;
+    }
+
+    .mobile-frame-cover iframe {
+        height: auto !important;
+        min-height: 200px;
     }
 
     .preview-container iframe {

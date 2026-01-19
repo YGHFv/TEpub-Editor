@@ -568,7 +568,8 @@ struct EpubFileNode {
     path: String,
     file_type: String, // folder, html, css, xml, image, font, other
     size: Option<u64>,
-    title: Option<String>, // For HTML files
+    title: Option<String>,      // For HTML files
+    resolution: Option<String>, // For Image files (e.g., "1920x1080")
     children: Option<Vec<EpubFileNode>>,
 }
 
@@ -1287,23 +1288,25 @@ async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
 
         // 提取标题 (如果是 HTML)
         let title = None;
-        // if file_type == "html" {
-        //     if let Ok(content) = fs::read_to_string(full_path) {
-        //         let re = Regex::new(r"<title>(.*?)</title>").unwrap();
-        //         if let Ok(Some(caps)) = re.captures(&content) {
-        //             title = Some(caps[1].to_string());
-        //         }
-        //     }
-        // }
+        let mut resolution = None;
 
-        all_files.push((path_str, file_name, file_type, size, title));
+        if file_type == "image" {
+            // 尝试获取图片分辨率
+            if let Ok((width, height)) = image::image_dimensions(full_path) {
+                resolution = Some(format!("{}x{}", width, height));
+            }
+        }
+
+        all_files.push((path_str, file_name, file_type, size, title, resolution));
     }
 
     // 构建嵌套文件树
-    fn build_tree(files: &[(String, String, String, u64, Option<String>)]) -> Vec<EpubFileNode> {
+    fn build_tree(
+        files: &[(String, String, String, u64, Option<String>, Option<String>)],
+    ) -> Vec<EpubFileNode> {
         let mut root_map: HashMap<String, Vec<EpubFileNode>> = HashMap::new();
 
-        for (full_path, file_name, file_type, size, title) in files {
+        for (full_path, file_name, file_type, size, title, res) in files {
             let parts: Vec<&str> = full_path.split('/').collect();
 
             if parts.len() == 1 {
@@ -1317,6 +1320,7 @@ async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
                         file_type: file_type.clone(),
                         size: Some(*size),
                         title: title.clone(),
+                        resolution: res.clone(),
                         children: None,
                     });
             } else {
@@ -1331,6 +1335,7 @@ async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
                         file_type: file_type.clone(),
                         size: Some(*size),
                         title: title.clone(),
+                        resolution: res.clone(),
                         children: None,
                     });
             }
@@ -1385,6 +1390,7 @@ async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
                         file_type: "folder".to_string(),
                         size: None,
                         title: None,
+                        resolution: None,
                         children: Some(subdir_files),
                     });
                 }
@@ -1396,6 +1402,7 @@ async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
                 file_type: "folder".to_string(),
                 size: None,
                 title: None,
+                resolution: None,
                 children: Some(children),
             });
         }
