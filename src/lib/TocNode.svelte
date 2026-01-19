@@ -20,7 +20,7 @@
     }
 </script>
 
-<div class="toc-node">
+<div class="toc-node" data-context-type="toc" data-src={item.src}>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <div
         class="node-content"

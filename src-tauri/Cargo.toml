@@ -1,6 +1,6 @@
 [package]
 name = "epub-editor"
-version = "0.1.0"
+version = "0.3.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -41,4 +41,6 @@ once_cell = "1.19"
 quick-xml = { version = "0.36", features = ["serialize"] }
 rayon = "1.10"
 encoding_rs = "0.8"
+tempfile = "3.24.0"
+walkdir = "2.5.0"
 

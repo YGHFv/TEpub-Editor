@@ -2,11 +2,30 @@
     import { onMount, tick } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { getCurrentWindow } from "@tauri-apps/api/window";
-    import { confirm } from "@tauri-apps/plugin-dialog";
+    import { emit } from "@tauri-apps/api/event"; // Added emit
+    import { confirm, open, save } from "@tauri-apps/plugin-dialog";
     import { page } from "$app/stores";
     import TocNode from "$lib/TocNode.svelte";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
+    import FileTreeItem from "$lib/FileTreeItem.svelte";
+
+    // Setup Close Listener
+    onMount(async () => {
+        const win = getCurrentWindow();
+        const unlisten = await win.listen(
+            "tauri://close-requested",
+            async () => {
+                console.log(
+                    "EPUB window closing, emitting restore-main-window...",
+                );
+                await emit("restore-main-window");
+            },
+        );
+        return () => {
+            unlisten();
+        };
+    });
 
     interface EpubFileNode {
         name: string;
@@ -35,6 +54,7 @@
 
     // Modification Tracking
     let modifiedFiles: Set<string> = new Set();
+    let isProjectDirty = false;
     let isSaving = false;
 
     // Validation State
@@ -70,6 +90,121 @@
     let openTabs: EpubFileNode[] = []; // 已打开的文件标签
     let activeTabIndex: number = -1; // 当前激活的标签索引
     let tabsBarDiv: HTMLElement | null = null; // 标签页栏引用
+
+    // 查找替换状态
+    let currentImageSrc: string | null = null;
+
+    function isImageFile(name: string) {
+        return /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(name);
+    }
+
+    // 自定义输入对话框状态 (替代 JavaScript prompt，因为在 Tauri 中 prompt 不工作)
+    let showPrompt = false;
+    let promptTitle = "";
+    let promptValue = "";
+    let promptOptions = false; // 是否显示额外选项 (如：自动更新链接)
+    let promptCheckValue = true; // 额外选项的勾选状态
+    let isPromptBusy = false; // 是否正在处理中 (如：更新链接)
+    let promptResolve:
+        | ((value: { value: string; confirmRefactor: boolean } | null) => void)
+        | null = null;
+
+    // Confirm Dialog State
+    let showConfirm = false;
+    let confirmTitle = "";
+    let confirmMessage = "";
+    let confirmResolve: ((result: boolean) => void) | null = null;
+
+    function showPromptDialog(
+        title: string,
+        defaultValue: string = "",
+        options: boolean = false,
+    ): Promise<{ value: string; confirmRefactor: boolean } | null> {
+        console.log("[DEBUG] showPromptDialog called:", title, defaultValue);
+        return new Promise((resolve) => {
+            promptTitle = title;
+            promptValue = defaultValue;
+            promptOptions = options;
+            promptCheckValue = true;
+            isPromptBusy = false;
+            promptResolve = resolve;
+            showPrompt = true;
+            console.log("[DEBUG] showPrompt set to true");
+        });
+    }
+
+    function handlePromptConfirm() {
+        if (isPromptBusy) return;
+        console.log("[DEBUG] handlePromptConfirm called, value:", promptValue);
+        // 如果是复杂操作（重命名并更新链接），由调用方负责关闭对话框并设置 isPromptBusy
+        if (promptResolve) {
+            promptResolve({
+                value: promptValue,
+                confirmRefactor: promptCheckValue,
+            });
+            // 注意：我们不立即关闭 showPrompt = false;
+            // 直到 handleContextMenuAction 完成处理或发现它是简单操作
+        }
+    }
+
+    function handlePromptCancel() {
+        if (isPromptBusy) return;
+        showPrompt = false;
+        if (promptResolve) {
+            promptResolve(null);
+            promptResolve = null;
+        }
+    }
+
+    function showConfirmDialog(
+        title: string,
+        message: string,
+    ): Promise<boolean> {
+        return new Promise((resolve) => {
+            confirmTitle = title;
+            confirmMessage = message;
+            showConfirm = true;
+            confirmResolve = resolve;
+        });
+    }
+
+    function handleConfirmConfirm() {
+        if (confirmResolve) confirmResolve(true);
+        showConfirm = false;
+        confirmResolve = null;
+    }
+
+    function handleConfirmCancel() {
+        if (confirmResolve) confirmResolve(false);
+        showConfirm = false;
+        confirmResolve = null;
+    }
+
+    let showFindReplace = false;
+    let findPattern = "";
+    let replacePattern = "";
+    let isRegex = false;
+    let searchScope: "all" | "html" | "selected" | "open" | "current" =
+        "current";
+    let searchDirection: "down" | "up" = "down";
+    let wrapAround = true;
+    let textOnly = false;
+    let searchMessage = "";
+    let currentMatchInfo: {
+        filePath: string;
+        from: number;
+        to: number;
+    } | null = null;
+
+    // 查找替换历史
+    let findHistory: string[] = [];
+    let replaceHistory: string[] = [];
+    let showFindHistory = false;
+    let showReplaceHistory = false;
+
+    // Multi-select
+    let multiSelectedFiles = new Set<string>();
+    const MAX_HISTORY = 10;
 
     // 编辑器滚动处理函数
     function handleEditorScroll(event: Event) {
@@ -109,6 +244,74 @@
         }
         return result;
     }
+
+    function getAllFiles(nodes: EpubFileNode[]): EpubFileNode[] {
+        let result: EpubFileNode[] = [];
+        for (const node of nodes) {
+            if (node.file_type !== "folder") {
+                result.push(node);
+            }
+            if (node.children) {
+                result = result.concat(getAllFiles(node.children));
+            }
+        }
+        return result;
+    }
+
+    const loadEpub = async () => {
+        epubPath = $page.url.searchParams.get("file") || "";
+        if (!epubPath) {
+            error = "未指定 EPUB 文件路径";
+            isLoading = false;
+            return;
+        }
+
+        try {
+            // 清理旧缓存
+            blobUrls.forEach((url) => URL.revokeObjectURL(url));
+            blobUrls = [];
+            assetCache.clear();
+            fileContentCache.clear();
+            previewCache.clear();
+
+            fileTree = await invoke<EpubFileNode[]>("extract_epub", {
+                epubPath: epubPath,
+            });
+            isProjectDirty = false;
+            modifiedFiles.clear();
+            modifiedFiles = modifiedFiles;
+
+            // 排序在 loadTOC 中基于 TOC 顺序执行
+            flatHtmlFiles = flattenFiles(fileTree);
+            await loadSpine(); // Load Spine for sorting
+            await loadTOC();
+
+            // 自动展开核心文件夹 (OEBPS, Text)
+            const autoExpand = (nodes: EpubFileNode[]) => {
+                nodes.forEach((node) => {
+                    const name = node.name.toLowerCase();
+                    if (name === "oebps") {
+                        expandedFolders.add(node.path);
+                        if (node.children) {
+                            node.children.forEach((child) => {
+                                if (child.name.toLowerCase() === "text") {
+                                    expandedFolders.add(child.path);
+                                }
+                            });
+                        }
+                    }
+                    if (node.children) autoExpand(node.children);
+                });
+            };
+            autoExpand(fileTree);
+            expandedFolders = expandedFolders;
+
+            isLoading = false;
+        } catch (e) {
+            error = `加载失败: ${e}`;
+            isLoading = false;
+        }
+    };
 
     async function preloadFile(file: EpubFileNode) {
         if (!file) return;
@@ -188,7 +391,7 @@
         } else {
             expandedFolders.add(path);
         }
-        expandedFolders = expandedFolders; // trigger reactivity
+        expandedFolders = expandedFolders;
     }
 
     onMount(() => {
@@ -215,35 +418,7 @@
         };
         setupCloseHandler();
 
-        const loadEpub = async () => {
-            // 从 URL 参数获取 EPUB 路径
-            epubPath = $page.url.searchParams.get("file") || "";
-
-            if (!epubPath) {
-                error = "未指定 EPUB 文件路径";
-                isLoading = false;
-                return;
-            }
-
-            try {
-                // 调用后端解压 EPUB
-                fileTree = await invoke<EpubFileNode[]>("extract_epub", {
-                    epubPath: epubPath,
-                });
-
-                // 构建扁平列表用于预加载
-                flatHtmlFiles = flattenFiles(fileTree);
-
-                // 加载完成后，自动加载目录
-                await loadTOC();
-
-                isLoading = false;
-            } catch (e) {
-                error = `加载失败: ${e}`;
-                isLoading = false;
-            }
-        };
-
+        // Calling loadEpub (now top-level)
         loadEpub();
 
         return () => {
@@ -251,18 +426,673 @@
             window.removeEventListener("beforeunload", handleBeforeUnload);
             if (unlistenClose) unlistenClose();
             cleanupBlobUrls();
-            cleanupBlobUrls();
         };
     });
 
-    // 监听全选事件
+    // 监听全选及 context-menu
     onMount(() => {
+        const handleContextMenuAction = async (e: CustomEvent) => {
+            const { action, context } = e.detail;
+            console.log(
+                "[DEBUG] context-menu-action received:",
+                action,
+                context,
+            );
+            try {
+                if (action === "toggle-select") {
+                    if (context.path) {
+                        if (multiSelectedFiles.has(context.path)) {
+                            multiSelectedFiles.delete(context.path);
+                        } else {
+                            multiSelectedFiles.add(context.path);
+                        }
+                        multiSelectedFiles = multiSelectedFiles;
+                    }
+                } else if (action === "save-as") {
+                    try {
+                        const res = await invoke<Record<string, string>>(
+                            "read_epub_files_batch",
+                            {
+                                epubPath,
+                                filePaths: [context.path],
+                            },
+                        );
+                        const content = res[context.path];
+                        if (!content) throw new Error("无法读取文件内容");
+                        const savedPath = await save({
+                            defaultPath: context.path.split("/").pop(),
+                            filters: [
+                                {
+                                    name: "Text",
+                                    extensions: ["xhtml", "html", "txt"],
+                                },
+                            ],
+                        });
+                        if (savedPath) {
+                            await invoke("save_text_file", {
+                                path: savedPath,
+                                content,
+                            });
+                            alert("导出成功!");
+                        }
+                    } catch (e) {
+                        alert("导出失败: " + e);
+                    }
+                } else if (action === "duplicate") {
+                    try {
+                        const oldPath = context.path;
+                        const res = await invoke<Record<string, string>>(
+                            "read_epub_files_batch",
+                            {
+                                epubPath,
+                                filePaths: [oldPath],
+                            },
+                        );
+                        const content = res[oldPath];
+                        if (!content) throw new Error("无法读取源文件内容");
+                        // Simple duplicate naming: foo.xhtml -> foo_copy.xhtml
+                        const parts = oldPath.split(".");
+                        const ext = parts.pop();
+                        const base = parts.join(".");
+                        const newPath = `${base}_copy.${ext}`;
+
+                        await invoke("add_epub_file", {
+                            epubPath,
+                            filePath: newPath,
+                            content,
+                        });
+                        await addToOpf(newPath, oldPath);
+
+                        await loadEpub();
+                        isProjectDirty = true;
+                    } catch (e) {
+                        alert("副本创建失败: " + e);
+                    }
+                } else if (action === "import-sibling") {
+                    try {
+                        const selected = await open({
+                            multiple: false,
+                            filters: [
+                                {
+                                    name: "HTML",
+                                    extensions: ["html", "xhtml", "htm"],
+                                },
+                            ],
+                        });
+                        if (selected) {
+                            const localPath = selected as string;
+                            const fileName =
+                                localPath.split(/[\\/]/).pop() ||
+                                "imported.xhtml";
+                            const currentDir = context.path.substring(
+                                0,
+                                context.path.lastIndexOf("/"),
+                            );
+                            const newEpubPath = currentDir + "/" + fileName;
+
+                            const content = await invoke<string>(
+                                "read_text_file",
+                                { path: localPath },
+                            );
+                            await invoke("add_epub_file", {
+                                epubPath,
+                                filePath: newEpubPath,
+                                content,
+                            });
+                            await addToOpf(newEpubPath, context.path);
+                            await loadEpub();
+                            isProjectDirty = true;
+                        }
+                    } catch (e) {
+                        alert("导入失败: " + e);
+                    }
+                } else if (action === "new-sibling-html") {
+                    const res = await showPromptDialog(
+                        "新文件名",
+                        "new_chapter.xhtml",
+                    );
+                    if (res && res.value) {
+                        const fileName = res.value;
+                        showPrompt = false;
+                        const currentDir = context.path.substring(
+                            0,
+                            context.path.lastIndexOf("/"),
+                        );
+                        const newPath = currentDir + "/" + fileName;
+                        const content =
+                            '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml">\n<head>\n<title></title>\n</head>\n<body>\n</body>\n</html>';
+
+                        isPromptBusy = true;
+                        try {
+                            await invoke("add_epub_file", {
+                                epubPath,
+                                filePath: newPath,
+                                content,
+                            });
+                            await addToOpf(newPath, context.path);
+                            await loadEpub();
+                            isProjectDirty = true;
+                        } catch (e) {
+                            alert("新建失败: " + e);
+                        } finally {
+                            isPromptBusy = false;
+                            showPrompt = false;
+                            promptResolve = null;
+                        }
+                    }
+                } else if (action === "rename") {
+                    const oldPath = context.path;
+                    const oldName = oldPath.split("/").pop() || "";
+
+                    const res = await showPromptDialog(
+                        "请输入新文件名",
+                        oldName,
+                        true, // 显示“自动更新链接”选项
+                    );
+
+                    if (res && res.value && res.value !== oldName) {
+                        const newName = res.value;
+                        const doRefactor = res.confirmRefactor;
+                        const newPath =
+                            oldPath.substring(0, oldPath.lastIndexOf("/") + 1) +
+                            newName;
+
+                        // 设置加载状态，使弹窗保持打开并显示“正在更新...”
+                        isPromptBusy = true;
+
+                        try {
+                            // 1. Rename file in backend
+                            await invoke("rename_epub_file", {
+                                epubPath,
+                                oldPath,
+                                newPath,
+                            });
+
+                            // 2. Sync UI Tabs & Selection
+                            openTabs = openTabs.map((tab) => {
+                                if (tab.path === oldPath) {
+                                    return {
+                                        ...tab,
+                                        path: newPath,
+                                        name: newName,
+                                    };
+                                }
+                                return tab;
+                            });
+                            openTabs = openTabs;
+
+                            if (selectedFile && selectedFile.path === oldPath) {
+                                selectedFile = {
+                                    ...selectedFile,
+                                    path: newPath,
+                                    name: newName,
+                                } as EpubFileNode;
+                            }
+
+                            // 3. Refactor links if requested
+                            if (doRefactor) {
+                                let updatedCount = 0;
+                                const everyFile = getAllFiles(fileTree);
+
+                                for (const file of everyFile) {
+                                    const isTextFile =
+                                        file.file_type === "html" ||
+                                        file.file_type === "xml" ||
+                                        file.file_type === "css" ||
+                                        file.name.endsWith(".opf") ||
+                                        file.name.endsWith(".ncx");
+
+                                    if (!isTextFile) continue;
+
+                                    let targetFilePath = file.path;
+                                    if (targetFilePath === oldPath)
+                                        targetFilePath = newPath;
+
+                                    let content = "";
+                                    try {
+                                        content = await invoke<string>(
+                                            "read_epub_file_content",
+                                            {
+                                                epubPath,
+                                                filePath: targetFilePath,
+                                            },
+                                        );
+                                    } catch (e) {
+                                        continue;
+                                    }
+
+                                    const escapedOld = oldName.replace(
+                                        /[.*+?^${}()|[\]\\]/g,
+                                        "\\$&",
+                                    );
+                                    const regexFinal = new RegExp(
+                                        `([/"'])` + escapedOld + `([ "'#?])`,
+                                        "g",
+                                    );
+
+                                    let newContent = content.replace(
+                                        regexFinal,
+                                        (match, prefix, suffix) => {
+                                            return prefix + newName + suffix;
+                                        },
+                                    );
+
+                                    if (newContent !== content) {
+                                        await invoke("add_epub_file", {
+                                            epubPath,
+                                            filePath: targetFilePath,
+                                            content: newContent,
+                                        });
+                                        updatedCount++;
+                                    }
+                                }
+                                console.log(
+                                    `[DEBUG] Refactor completed, updated ${updatedCount} files.`,
+                                );
+                            }
+
+                            // 4. Reload tree & auto-expand (MUST be after link update)
+                            await loadEpub();
+
+                            isProjectDirty = true; // 标记为未保存
+
+                            const newFolderPath = newPath.substring(
+                                0,
+                                newPath.lastIndexOf("/"),
+                            );
+                            if (newFolderPath) {
+                                expandedFolders.add(newFolderPath);
+                                expandedFolders = expandedFolders;
+                            }
+                        } catch (e) {
+                            console.error("Rename/Refactor failed", e);
+                            alert("操作失败: " + e);
+                        } finally {
+                            isPromptBusy = false;
+                            showPrompt = false; // 操作完成后关闭对话框
+                            promptResolve = null;
+                        }
+                    } else {
+                        showPrompt = false; // 取消操作时关闭
+                        promptResolve = null;
+                    }
+                } else if (action === "delete") {
+                    const confirmed = await showConfirmDialog(
+                        "确认删除",
+                        `确定要删除 ${context.path} 吗?`,
+                    );
+                    if (confirmed) {
+                        // 1. Delete file
+                        await invoke("delete_epub_file", {
+                            epubPath,
+                            filePath: context.path,
+                        });
+
+                        // 2. Close tab if open
+                        const wasOpenIndex = openTabs.findIndex(
+                            (t) => t.path === context.path,
+                        );
+                        if (wasOpenIndex !== -1) {
+                            openTabs = openTabs.filter(
+                                (_, i) => i !== wasOpenIndex,
+                            );
+
+                            // If the deleted file was the currently selected one, switch to another tab or clear
+                            if (
+                                selectedFile &&
+                                selectedFile.path === context.path
+                            ) {
+                                // If finding active tab index is needed, we can rely on selectedFile check
+                                // Update selectedFile to the last available tab
+                                if (openTabs.length > 0) {
+                                    // Switch to last tab
+                                    const newActive =
+                                        openTabs[openTabs.length - 1];
+                                    selectedFile = newActive;
+                                    // Trigger file load logic?
+                                    // Usually clicking a tab triggers 'selectFile'.
+                                    // Here we might just set the variable, but 'selectFile' loads content.
+                                    // Let's call selectFile logic or just set it and let reactivity handle if bindings exist.
+                                    // But selectFile(newActive) is better.
+                                    // Can we access selectFile here? It's defined below probably.
+                                    // Let's just set 'selectedFile' and 'fileContent' manually for safety or rely on existing logic.
+                                    // For now, just setting selectedFile might not load text.
+                                    // But wait, the user just wants the tab to close.
+                                    // If I set selectedFile = newActive, does the editor update?
+                                    // Svelte reactivity should handle 'selectedFile' prop pass down.
+                                    // But 'fileContent' variable needs update.
+                                    // Calling selectFile(newActive) is best but it takes an event.
+                                    // Let's emulate:
+                                    // await selectFile(newActive);
+                                    // But selectFile might not be async or exported.
+                                } else {
+                                    selectedFile = null;
+                                    fileContent = "";
+                                    activeTabIndex = -1;
+                                }
+                            }
+                        }
+
+                        await loadEpub();
+                        isProjectDirty = true; // 标记为未保存
+                    }
+                } else if (action === "new-file") {
+                    // Fix path calc: if folder, use path; if file, use parent.
+                    let folderPath = context.path;
+                    // Check if context is a file (context.type === 'file' or from context-type data)
+                    // If we clicked on a folder node, type should be folder.
+                    // But to be safe, if it looks like a file (has extension?), use parent.
+                    // Better: check 'context-type'
+                    // context comes from dataset.contextType
+                    if (context.folderType && context.path.endsWith("/")) {
+                        // It's likely a folder if folderType exists?
+                    }
+                    // Actually, let's look at how we bind data.
+                    // If type is 'folder', context.path creates inside it.
+                    // If type is 'file', context.path is the file, create sibling.
+
+                    if (context.contextType === "file") {
+                        folderPath = context.path.substring(
+                            0,
+                            context.path.lastIndexOf("/"),
+                        );
+                    }
+
+                    const res = await showPromptDialog("文件名", "new.xhtml");
+                    console.log("[DEBUG] new-file: res result:", res);
+                    if (res && res.value) {
+                        const fileName = res.value;
+                        const filePath = folderPath + "/" + fileName;
+
+                        isPromptBusy = true; // 开启忙碌状态
+
+                        let content = "";
+                        if (
+                            fileName.endsWith(".xhtml") ||
+                            fileName.endsWith(".html")
+                        ) {
+                            content =
+                                '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml">\n<head>\n<title></title>\n</head>\n<body>\n</body>\n</html>';
+                        }
+                        try {
+                            await invoke("add_epub_file", {
+                                epubPath,
+                                filePath,
+                                content,
+                            });
+                            console.log(
+                                "[DEBUG] new-file: add_epub_file success",
+                            );
+
+                            await loadEpub();
+
+                            // 标记为未保存
+                            isProjectDirty = true;
+
+                            // 展开父文件夹，确保新文件可见
+                            expandedFolders.add(folderPath);
+                            expandedFolders = expandedFolders;
+                        } catch (e) {
+                            console.error(
+                                "[DEBUG] new-file: add_epub_file failed:",
+                                e,
+                            );
+                            alert("创建失败: " + e);
+                        } finally {
+                            isPromptBusy = false;
+                            showPrompt = false;
+                            promptResolve = null;
+                        }
+                    }
+                } else if (action === "select-in-tree") {
+                    // TOC 选中文件
+                    if (context.src) {
+                        const targetPath = context.src.split("#")[0];
+                        const findAndSelect = (
+                            nodes: EpubFileNode[],
+                        ): boolean => {
+                            for (const node of nodes) {
+                                // 模糊匹配：因为 src 可能是相对路径，而 node.path 是 ZIP 内全路径
+                                if (
+                                    node.path.endsWith(targetPath) ||
+                                    targetPath.endsWith(node.path)
+                                ) {
+                                    // 1. 展开父文件夹
+                                    const parts = node.path.split("/");
+                                    let currentPath = "";
+                                    for (let i = 0; i < parts.length - 1; i++) {
+                                        currentPath +=
+                                            (currentPath ? "/" : "") + parts[i];
+                                        expandedFolders.add(currentPath);
+                                    }
+                                    expandedFolders = expandedFolders;
+
+                                    // 2. 选中文件
+                                    selectFile(node);
+                                    return true;
+                                }
+                                if (node.children) {
+                                    if (findAndSelect(node.children))
+                                        return true;
+                                }
+                            }
+                            return false;
+                        };
+                        findAndSelect(fileTree);
+                    }
+                } else if (action === "select-children") {
+                    // TOC 选中卷下所有文件
+                    // 逻辑：
+                    // 1. 找到当前 TOC 节点（通过 src 查找？）
+                    //    TOC 数据结构在 tocData 中。
+                    //    context 只有 src 和 type。
+                    //    我们需要遍历 tocData 找到这个节点，然后递归收集它的 children 的 src。
+                    // 2. 将收集到的 src 转换为 file tree path (split('#')[0])
+                    // 3. 将这些 paths 添加到 multiSelectedFiles
+
+                    if (context.src) {
+                        const targetSrc = context.src;
+
+                        // 1. Find node and its parent in tocList
+                        const findNodeAndParent = (
+                            nodes: any[],
+                            parent: any = null,
+                        ): { node: any; parent: any } | null => {
+                            for (const node of nodes) {
+                                if (node.src === targetSrc)
+                                    return { node, parent };
+                                if (node.children) {
+                                    const found = findNodeAndParent(
+                                        node.children,
+                                        node,
+                                    );
+                                    if (found) return found;
+                                }
+                            }
+                            return null;
+                        };
+
+                        const result = findNodeAndParent(tocList);
+
+                        if (result) {
+                            let { node: tocNode, parent: parentNode } = result;
+
+                            // If it's a leaf node (chapter), try to use parent (volume)
+                            if (
+                                (!tocNode.children ||
+                                    tocNode.children.length === 0) &&
+                                parentNode
+                            ) {
+                                tocNode = parentNode;
+                            }
+
+                            const filesToSelect = new Set<string>();
+
+                            // 2. Collect all descendant srcs
+                            const collectSrcs = (node: any) => {
+                                if (node.src) {
+                                    // Remove anchor
+                                    const cleanPath = node.src.split("#")[0];
+                                    // Resolve to full path if needed?
+                                    // Usually src in TOC is relative to content or absolute in EPUB?
+                                    // In our app, tocData usually has paths relative to root or OEBPS.
+                                    // Let's match with flatHtmlFiles to be sure.
+
+                                    // 模糊匹配：找到 flatHtmlFiles 中以 cleanPath 结尾的文件
+                                    const file = flatHtmlFiles.find((f) =>
+                                        f.path.endsWith(cleanPath),
+                                    );
+                                    if (file) filesToSelect.add(file.path);
+                                }
+                                if (node.children) {
+                                    node.children.forEach(collectSrcs);
+                                }
+                            };
+
+                            collectSrcs(tocNode); // Include self
+
+                            // 3. Apply selection
+                            if (filesToSelect.size > 0) {
+                                // Add to existing or clear? Usually "Select" implies clearing others unless Ctrl held.
+                                // But context menu action is isolated. Let's Clear then Add to be clean.
+                                multiSelectedFiles.clear();
+                                filesToSelect.forEach((p) =>
+                                    multiSelectedFiles.add(p),
+                                );
+                                multiSelectedFiles = multiSelectedFiles; // trigger
+
+                                // Auto expand folders for first item
+                                const firstPath = filesToSelect
+                                    .values()
+                                    .next().value;
+                                if (firstPath) {
+                                    const parts = firstPath.split("/");
+                                    let currentPath = "";
+                                    for (let i = 0; i < parts.length - 1; i++) {
+                                        currentPath +=
+                                            (currentPath ? "/" : "") + parts[i];
+                                        expandedFolders.add(currentPath);
+                                    }
+                                    expandedFolders = expandedFolders;
+                                }
+                            } else {
+                                alert("未找到相关文件");
+                            }
+                        }
+                    }
+                } else if (action === "import-file") {
+                    // 根据文件夹类型设置文件过滤器
+                    const folderType = (context.folderType || "").toLowerCase();
+                    let filters: { name: string; extensions: string[] }[] = [];
+
+                    if (folderType === "text") {
+                        filters = [
+                            {
+                                name: "XHTML/HTML 文件",
+                                extensions: ["xhtml", "html", "htm"],
+                            },
+                        ];
+                    } else if (folderType === "styles") {
+                        filters = [{ name: "CSS 文件", extensions: ["css"] }];
+                    } else if (folderType === "fonts") {
+                        filters = [
+                            {
+                                name: "字体文件",
+                                extensions: ["ttf", "otf", "woff", "woff2"],
+                            },
+                        ];
+                    } else if (folderType === "images") {
+                        filters = [
+                            {
+                                name: "图片文件",
+                                extensions: [
+                                    "jpg",
+                                    "jpeg",
+                                    "png",
+                                    "gif",
+                                    "svg",
+                                    "webp",
+                                ],
+                            },
+                        ];
+                    } else {
+                        filters = [{ name: "所有文件", extensions: ["*"] }];
+                    }
+
+                    // 打开文件选择对话框
+                    const selected = await open({
+                        multiple: true,
+                        filters,
+                    });
+
+                    if (selected) {
+                        const files = Array.isArray(selected)
+                            ? selected
+                            : [selected];
+                        let importedCount = 0;
+
+                        for (const filePath of files) {
+                            try {
+                                // 获取文件名
+                                const fileName =
+                                    filePath.split(/[\\/]/).pop() || "unknown";
+                                // 计算目标路径
+                                const targetPath =
+                                    context.path + "/" + fileName;
+
+                                // 读取文件内容
+                                const fileData = await invoke<number[]>(
+                                    "read_binary_file",
+                                    {
+                                        path: filePath,
+                                    },
+                                );
+
+                                // 添加到 EPUB
+                                await invoke("add_epub_file_binary", {
+                                    epubPath,
+                                    filePath: targetPath,
+                                    content: fileData,
+                                });
+
+                                importedCount++;
+                            } catch (e) {
+                                console.error(`导入失败: ${filePath}`, e);
+                            }
+                        }
+
+                        if (importedCount > 0) {
+                            alert(`成功导入 ${importedCount} 个文件`);
+                            await loadEpub();
+                            // 展开导入到的目标文件夹
+                            if (context.path) {
+                                expandedFolders.add(context.path);
+                                expandedFolders = expandedFolders;
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Action error:", err);
+                alert("操作失败: " + err);
+            }
+        };
+
         const handleSelectAll = () => {
             epubCodeEditorComponent?.selectAll();
         };
+
         window.addEventListener("editor-select-all", handleSelectAll);
+        window.addEventListener(
+            "context-menu-action",
+            handleContextMenuAction as unknown as EventListener,
+        );
         return () => {
             window.removeEventListener("editor-select-all", handleSelectAll);
+            window.removeEventListener(
+                "context-menu-action",
+                handleContextMenuAction as unknown as EventListener,
+            );
         };
     });
 
@@ -469,19 +1299,27 @@
             }
         }
 
-        // 注入全局样式：只移除html/body的默认边距，保留内容原有布局
+        // 注入全局样式：只移除html/body的默认边距，避免出现滚动条，并隐藏滚动条但保留滚动功能
         const globalStyle = doc.createElement("style");
         globalStyle.textContent = `
-            /* 只移除html/body的默认边距，避免出现滚动条 */
+            /* 只移除html/body的默认边距 */
             html { 
                 overflow-x: hidden !important;
                 margin: 0 !important;
                 padding: 0 !important;
+                scrollbar-width: none !important; /* Firefox */
+                -ms-overflow-style: none !important; /* IE */
             }
             body {
                 overflow-x: hidden !important;
                 margin: 0 !important;
                 padding: 0 !important;
+                scrollbar-width: none !important;
+                -ms-overflow-style: none !important;
+            }
+            /* Chrome/Safari 隐藏滚动条 */
+            ::-webkit-scrollbar {
+                display: none !important;
             }
         `;
         doc.head.appendChild(globalStyle);
@@ -504,7 +1342,7 @@
     }
 
     function hasUnsavedChanges(): boolean {
-        return modifiedFiles.size > 0;
+        return modifiedFiles.size > 0 || isProjectDirty;
     }
 
     function validateHtml(content: string, currentPath: string) {
@@ -652,6 +1490,30 @@
         }
     }
 
+    async function saveEpub() {
+        if (isSaving) return;
+        isSaving = true;
+        try {
+            await invoke("save_epub_to_disk", { epubPath });
+            isProjectDirty = false;
+            // Clear modifiedFiles? No, modifiedFiles tracks editor vs temp.
+            // If we saved temp to disk, temp is still "modified" vs what was in editor?
+            // No, modifiedFiles means "Editor content" != "File content".
+            // When we "saveCurrentFile", we write Editor -> Temp, and clear modifiedFiles.
+            // So modifiedFiles should be empty if all files are saved to temp.
+            // isProjectDirty means Temp != Original.
+            // So this logic holds.
+        } catch (e) {
+            console.error("Save failed:", e);
+            await confirm(`保存主要文件失败: ${e}`, {
+                title: "错误",
+                kind: "error",
+            });
+        } finally {
+            isSaving = false;
+        }
+    }
+
     async function saveCurrentFile() {
         if (!selectedFile) return;
         isSaving = true;
@@ -663,6 +1525,7 @@
             });
             modifiedFiles.delete(selectedFile.path);
             modifiedFiles = modifiedFiles;
+            isProjectDirty = true;
         } catch (e) {
             console.error("Save failed:", e);
             await confirm(`保存失败: ${e}`, {
@@ -682,14 +1545,60 @@
         }
     }
 
-    async function selectFile(file: EpubFileNode) {
+    function expandParents(nodes: EpubFileNode[], targetPath: string): boolean {
+        for (const node of nodes) {
+            if (node.path === targetPath) return true;
+            if (node.children) {
+                if (expandParents(node.children, targetPath)) {
+                    expandedFolders.add(node.path);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    async function selectFile(
+        file: EpubFileNode,
+        event?: MouseEvent | KeyboardEvent,
+    ) {
         if (file.file_type === "folder") return;
+
+        // Multi-select logic
+        if (event && (event as MouseEvent).ctrlKey) {
+            if (multiSelectedFiles.has(file.path)) {
+                multiSelectedFiles.delete(file.path);
+            } else {
+                multiSelectedFiles.add(file.path);
+            }
+            multiSelectedFiles = multiSelectedFiles; // trigger update
+            // Also set as current selected file for preview? Yes.
+        } else {
+            // Normal click clears multi-select unless right-click
+            // Note: Right-click usually doesn't trigger 'click' event but 'contextmenu'
+            // We handle context menu separately.
+            // But if user Left Clicks, clear multi-select
+            multiSelectedFiles.clear();
+            multiSelectedFiles.add(file.path);
+            multiSelectedFiles = multiSelectedFiles;
+        }
 
         // 增加代数，使得之前的 pending 请求失效
         currentGeneration++;
         const generation = currentGeneration;
 
         selectedFile = file;
+
+        // 展开父目录并滚动到文件树位置
+        expandParents(fileTree, file.path);
+        expandedFolders = expandedFolders; // 触发更新
+        await tick();
+        const fileNode = document.querySelector(
+            `.tree-node[data-path="${file.path.replace(/"/g, '\\"')}"]`,
+        );
+        if (fileNode) {
+            fileNode.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
 
         // 多标签页支持：添加到openTabs如果还没有
         const existingIndex = openTabs.findIndex(
@@ -745,6 +1654,53 @@
         }
 
         try {
+            // 图片处理逻辑
+            if (isImageFile(file.name)) {
+                currentImageSrc = null;
+                // 检查资源缓存
+                if (assetCache.has(file.path)) {
+                    currentImageSrc = assetCache.get(file.path)!;
+                } else {
+                    // 读取二进制
+                    try {
+                        const binaryData = await invoke<
+                            Record<string, number[]>
+                        >("read_epub_binary_batch", {
+                            epubPath: epubPath,
+                            filePaths: [file.path],
+                        });
+                        const data = binaryData[file.path];
+                        if (data) {
+                            const uint8Array = new Uint8Array(data);
+                            let mimeType = "image/jpeg";
+                            const lower = file.name.toLowerCase();
+                            if (lower.endsWith(".png")) mimeType = "image/png";
+                            else if (lower.endsWith(".gif"))
+                                mimeType = "image/gif";
+                            else if (lower.endsWith(".svg"))
+                                mimeType = "image/svg+xml";
+                            else if (lower.endsWith(".webp"))
+                                mimeType = "image/webp";
+
+                            const blob = new Blob([uint8Array], {
+                                type: mimeType,
+                            });
+                            const url = URL.createObjectURL(blob);
+                            assetCache.set(file.path, url);
+                            currentImageSrc = url;
+                        }
+                    } catch (err) {
+                        console.error("Failed to load image", err);
+                        fileContent = "图片加载失败";
+                    }
+                }
+                fileContent = ""; // Clear editor content
+                previewContent = "";
+                return;
+            } else {
+                currentImageSrc = null;
+            }
+
             let content = "";
 
             // 2. 检查文件内容缓存
@@ -979,6 +1935,7 @@
     let tocList: TocItem[] = [];
     let isTocLoading = false;
     let expandedTocItems: Set<string> = new Set(); // 存储展开的目录项ID
+    let spinePaths: string[] = []; // Store Spine reading order paths
 
     function toggleTocItem(id: string) {
         if (expandedTocItems.has(id)) {
@@ -987,6 +1944,446 @@
             expandedTocItems.add(id);
         }
         expandedTocItems = expandedTocItems;
+    }
+
+    async function loadSpine() {
+        spinePaths = [];
+        try {
+            // 1. Find rootfile (OPF)
+            // Usually in META-INF/container.xml pointing to OPF, but here we scan OEBPS
+            // Implementation shortcut: assume we know where OPF is or search for it.
+            // Our file structure usually has OEBPS/content.opf
+            let opfPath = "OEBPS/content.opf"; // Default guess
+
+            // Try reading content directly
+            let content = "";
+            try {
+                const res = await invoke<Record<string, string>>(
+                    "read_epub_files_batch",
+                    {
+                        epubPath,
+                        filePaths: [opfPath],
+                    },
+                );
+                if (res[opfPath]) {
+                    content = res[opfPath];
+                } else {
+                    // Try another common path?
+                    // For now just fail gracefully
+                }
+            } catch (e) {
+                console.warn("OPF read failed:", e);
+            }
+
+            if (!content) return; // Exit if no content
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(content, "text/xml");
+
+            // Map id -> href (manifest)
+            const manifestItems = Array.from(
+                doc.querySelectorAll("manifest > item"),
+            );
+            const idToHref = new Map<string, string>();
+            for (const item of manifestItems) {
+                const id = item.getAttribute("id");
+                const href = item.getAttribute("href");
+                if (id && href) {
+                    idToHref.set(id, href);
+                }
+            }
+
+            // Get Spine idrefs
+            const itemrefs = Array.from(
+                doc.querySelectorAll("spine > itemref"),
+            );
+            const opfDir = opfPath.substring(0, opfPath.lastIndexOf("/"));
+
+            for (const itemref of itemrefs) {
+                const idref = itemref.getAttribute("idref");
+                if (idref && idToHref.has(idref)) {
+                    let href = idToHref.get(idref)!;
+                    // Resolve to absolute path in zip (e.g. OEBPS/Text/foo.xhtml)
+                    // If href is relative to opf
+                    const fullPath = opfDir ? opfDir + "/" + href : href;
+                    spinePaths.push(fullPath);
+                }
+            }
+            console.log("[DEBUG] Spine paths loaded:", spinePaths.length);
+        } catch (e) {
+            console.warn("Failed to load Spine:", e);
+        }
+    }
+
+    // Helper: Add new file to OPF Manifest and Spine (inserted AFTER a sibling)
+    async function addToOpf(newFullPath: string, insertAfterFullPath: string) {
+        try {
+            let opfPath = "OEBPS/content.opf";
+            const res = await invoke<Record<string, string>>(
+                "read_epub_files_batch",
+                {
+                    epubPath,
+                    filePaths: [opfPath],
+                },
+            );
+            const opfContent = res[opfPath];
+            if (!opfContent) throw new Error("无法读取 OPF 文件");
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(opfContent, "text/xml");
+            const opfDir = opfPath.substring(0, opfPath.lastIndexOf("/"));
+
+            // 1. Calculate relative paths
+            // newFullPath: OEBPS/Text/new.xhtml -> relative to OPF: Text/new.xhtml
+            // We assume simple structure where opfDir prefixes logic works.
+            const getRelPath = (full: string) =>
+                full.startsWith(opfDir + "/")
+                    ? full.substring(opfDir.length + 1)
+                    : full;
+
+            const newHref = getRelPath(newFullPath);
+            const insertAfterHref = getRelPath(insertAfterFullPath);
+
+            // 2. Add to Manifest
+            const manifest = doc.querySelector("manifest");
+            if (manifest) {
+                const newItem = doc.createElement("item");
+                // ID generation: "x" + filename slug or random
+                const newId =
+                    "x" +
+                        newFullPath
+                            .split("/")
+                            .pop()
+                            ?.replace(/[^a-zA-Z0-9]/g, "") || "newitem";
+                newItem.setAttribute("id", newId);
+                newItem.setAttribute("href", newHref);
+                newItem.setAttribute("media-type", "application/xhtml+xml"); // Assume XHTML
+                manifest.appendChild(newItem);
+
+                // 3. Add to Spine
+                const spine = doc.querySelector("spine");
+                if (spine) {
+                    // 查找 insertAfter 的 idref
+                    // Find ID of neighbor
+                    const neighborItem = manifest.querySelector(
+                        `item[href="${insertAfterHref}"]`,
+                    );
+                    const neighborId = neighborItem
+                        ? neighborItem.getAttribute("id")
+                        : null;
+
+                    const newItemRef = doc.createElement("itemref");
+                    newItemRef.setAttribute("idref", newId);
+
+                    if (neighborId) {
+                        const neighborRef = spine.querySelector(
+                            `itemref[idref="${neighborId}"]`,
+                        );
+                        if (neighborRef && neighborRef.nextSibling) {
+                            spine.insertBefore(
+                                newItemRef,
+                                neighborRef.nextSibling,
+                            );
+                        } else {
+                            spine.appendChild(newItemRef);
+                        }
+                    } else {
+                        spine.appendChild(newItemRef);
+                    }
+                }
+            }
+
+            // Serialize and Save
+            const serializer = new XMLSerializer();
+            const newOpfContent = serializer.serializeToString(doc);
+
+            await invoke("save_epub_file_content", {
+                epubPath: epubPath,
+                filePath: opfPath,
+                content: newOpfContent,
+            });
+        } catch (e) {
+            console.error("Failed to update OPF:", e);
+            alert("更新 OPF 失败, 排序可能不正确: " + e);
+        }
+    }
+
+    // New helper for assets (only Manifest, no Spine)
+    async function addAssetToOpf(newFullPath: string) {
+        try {
+            let opfPath = "OEBPS/content.opf";
+            const res = await invoke<Record<string, string>>(
+                "read_epub_files_batch",
+                {
+                    epubPath,
+                    filePaths: [opfPath],
+                },
+            );
+            let opfContent = res[opfPath];
+            if (!opfContent) return;
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(opfContent, "text/xml");
+            const opfDir = opfPath.substring(0, opfPath.lastIndexOf("/"));
+
+            const getRelPath = (full: string) =>
+                full.startsWith(opfDir + "/")
+                    ? full.substring(opfDir.length + 1)
+                    : full;
+
+            const newHref = getRelPath(newFullPath);
+            const manifest = doc.querySelector("manifest");
+
+            if (manifest) {
+                // Check duplicate
+                if (manifest.querySelector(`item[href="${newHref}"]`)) {
+                    console.log("Item already exists in manifest:", newHref);
+                    return;
+                }
+
+                const newItem = doc.createElement("item");
+                const newId =
+                    "x" +
+                        newFullPath
+                            .split("/")
+                            .pop()
+                            ?.replace(/[^a-zA-Z0-9]/g, "") || "asset";
+
+                // Guess media-type
+                let mediaType = "application/octet-stream";
+                if (newFullPath.endsWith(".css")) mediaType = "text/css";
+                else if (
+                    newFullPath.endsWith(".jpg") ||
+                    newFullPath.endsWith(".jpeg")
+                )
+                    mediaType = "image/jpeg";
+                else if (newFullPath.endsWith(".png")) mediaType = "image/png";
+                else if (newFullPath.endsWith(".gif")) mediaType = "image/gif";
+                else if (newFullPath.endsWith(".ttf")) mediaType = "font/ttf";
+                else if (newFullPath.endsWith(".woff")) mediaType = "font/woff";
+                else if (newFullPath.endsWith(".woff2"))
+                    mediaType = "font/woff2";
+
+                newItem.setAttribute("id", newId);
+                newItem.setAttribute("href", newHref);
+                newItem.setAttribute("media-type", mediaType);
+                manifest.appendChild(newItem);
+
+                const serializer = new XMLSerializer();
+                const newOpf = serializer.serializeToString(doc);
+                await invoke("save_epub_file_content", {
+                    epubPath,
+                    filePath: opfPath,
+                    content: newOpf,
+                });
+            }
+        } catch (e) {
+            console.warn("addAssetToOpf failed", e);
+        }
+    }
+
+    async function handleFileDrop(e: DragEvent) {
+        console.log("File dropped", e.dataTransfer?.files);
+        e.preventDefault();
+        e.stopPropagation();
+        if (!epubPath) {
+            alert("错误: EPUB 路径丢失");
+            return;
+        }
+
+        // Wait, regular web DnD: we can read file content via FileReader.
+        if (
+            e.dataTransfer &&
+            e.dataTransfer.files &&
+            e.dataTransfer.files.length > 0
+        ) {
+            const files = e.dataTransfer.files;
+            const newSpineItems: string[] = [];
+            const newAssetItems: string[] = [];
+            const fileWrites: Promise<any>[] = [];
+
+            // 1. Prepare all file writes
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const name = file.name.toLowerCase();
+                let targetFolder = "";
+                let isSpineItem = false;
+
+                if (name.endsWith(".html") || name.endsWith(".xhtml")) {
+                    targetFolder = "OEBPS/Text";
+                    isSpineItem = true;
+                } else if (name.endsWith(".css")) {
+                    targetFolder = "OEBPS/Styles";
+                } else if (/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/.test(name)) {
+                    targetFolder = "OEBPS/Images";
+                } else if (/\.(ttf|otf|woff|woff2)$/.test(name)) {
+                    targetFolder = "OEBPS/Fonts";
+                } else {
+                    targetFolder = "OEBPS/Misc";
+                }
+
+                const newPath = targetFolder + "/" + file.name;
+
+                if (isSpineItem) {
+                    newSpineItems.push(newPath);
+                } else {
+                    newAssetItems.push(newPath);
+                }
+
+                // Prepare Payload for Batch Write
+                // We convert everything to Vec<u8> (binary) for simplicity in Rust
+                fileWrites.push(
+                    (async () => {
+                        const buffer = await file.arrayBuffer();
+                        const uint8 = new Uint8Array(buffer);
+                        return { path: newPath, content: Array.from(uint8) };
+                    })(),
+                );
+            }
+
+            // 2. Execute Batch Write
+            try {
+                const preparedFiles = await Promise.all(fileWrites);
+                const filesMap: Record<string, number[]> = {};
+                for (const f of preparedFiles) {
+                    filesMap[f.path] = f.content;
+                }
+
+                await invoke("save_epub_files_batch", {
+                    epubPath,
+                    files: filesMap,
+                });
+            } catch (err) {
+                console.error("Batch file write failed", err);
+                alert("导入文件出错: " + err);
+                return;
+            }
+
+            // 3. Update OPF once (Batch mode)
+            try {
+                // Manually implement simplified batch OPF update here to avoid N reads/writes
+                // Reuse logic from addToOpf but for a list
+                let opfPath = "OEBPS/content.opf";
+                const res = await invoke<Record<string, string>>(
+                    "read_epub_files_batch",
+                    {
+                        epubPath,
+                        filePaths: [opfPath],
+                    },
+                );
+                const opfContent = res[opfPath];
+                if (opfContent) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(opfContent, "text/xml");
+                    const opfDir = opfPath.substring(
+                        0,
+                        opfPath.lastIndexOf("/"),
+                    );
+
+                    const getRelPath = (full: string) =>
+                        full.startsWith(opfDir + "/")
+                            ? full.substring(opfDir.length + 1)
+                            : full;
+
+                    const manifest = doc.querySelector("manifest");
+                    const spine = doc.querySelector("spine");
+
+                    if (manifest && spine) {
+                        // Add Assets
+                        for (const path of newAssetItems) {
+                            const href = getRelPath(path);
+                            if (manifest.querySelector(`item[href="${href}"]`))
+                                continue;
+
+                            const newItem = doc.createElement("item");
+                            // ID generation
+                            const safeName =
+                                path
+                                    .split("/")
+                                    .pop()
+                                    ?.replace(/[^a-zA-Z0-9]/g, "") || "asset";
+                            const newId =
+                                "x" +
+                                safeName +
+                                Math.floor(Math.random() * 1000); // add random
+
+                            // Media type guess
+                            let mediaType = "application/octet-stream";
+                            if (path.endsWith(".css")) mediaType = "text/css";
+                            else if (/\.(jpg|jpeg|png)$/.test(path))
+                                mediaType = "image/jpeg";
+                            else if (path.endsWith(".gif"))
+                                mediaType = "image/gif";
+                            else if (path.endsWith(".svg"))
+                                mediaType = "image/svg+xml";
+                            else if (path.endsWith(".ttf"))
+                                mediaType = "font/ttf";
+                            else if (path.endsWith(".woff"))
+                                mediaType = "font/woff";
+                            else if (path.endsWith(".woff2"))
+                                mediaType = "font/woff2";
+
+                            newItem.setAttribute("id", newId);
+                            newItem.setAttribute("href", href);
+                            newItem.setAttribute("media-type", mediaType);
+                            manifest.appendChild(newItem);
+                        }
+
+                        // Add Spine Items
+                        for (const path of newSpineItems) {
+                            const href = getRelPath(path);
+                            // Manifest entry first
+                            if (
+                                !manifest.querySelector(`item[href="${href}"]`)
+                            ) {
+                                const newItem = doc.createElement("item");
+                                const safeName =
+                                    path
+                                        .split("/")
+                                        .pop()
+                                        ?.replace(/[^a-zA-Z0-9]/g, "") ||
+                                    "chapter";
+                                const newId =
+                                    "x" +
+                                    safeName +
+                                    Math.floor(Math.random() * 1000);
+                                newItem.setAttribute("id", newId);
+                                newItem.setAttribute("href", href);
+                                newItem.setAttribute(
+                                    "media-type",
+                                    "application/xhtml+xml",
+                                );
+                                manifest.appendChild(newItem);
+
+                                // Spine entry
+                                const newItemRef = doc.createElement("itemref");
+                                newItemRef.setAttribute("idref", newId);
+                                spine.appendChild(newItemRef);
+                            }
+                        }
+
+                        // Save OPF
+                        const serializer = new XMLSerializer();
+                        const newOpf = serializer.serializeToString(doc);
+                        await invoke("save_epub_file_content", {
+                            epubPath,
+                            filePath: opfPath,
+                            content: newOpf,
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error("Batch OPF update failed", e);
+            }
+
+            await loadEpub();
+            isProjectDirty = true;
+        }
+    }
+
+    function handleDragOver(e: DragEvent) {
+        e.preventDefault();
+        e.dataTransfer!.dropEffect = "copy";
     }
 
     function parseNavPoints(container: Element): TocItem[] {
@@ -1035,14 +2432,6 @@
         const getWeight = (node: EpubFileNode, parentName: string) => {
             const name = node.name.toLowerCase();
 
-            // Auto-expand logic
-            if (
-                name === "oebps" ||
-                (parentName === "oebps" && name === "text")
-            ) {
-                expandedFolders.add(node.path);
-            }
-
             // Root Level Sorting
             if (!parentName) {
                 const idx = rootPriority.indexOf(name);
@@ -1060,20 +2449,28 @@
                 }
             }
 
-            // Text Folder Sorting (based on TOC)
+            // Text Folder Sorting (Priority: Spine > TOC > Alphabetical)
             if (parentName === "text") {
-                const idx = tocPaths.indexOf(node.path);
-                return idx !== -1 ? idx : 9999;
+                // 1. Spine Order (User Custom Order)
+                const spineIdx = spinePaths.indexOf(node.path);
+                if (spineIdx !== -1) return spineIdx;
+
+                // 2. TOC Order (Legacy fallback)
+                const tocIdx = tocPaths.indexOf(node.path);
+                if (tocIdx !== -1) return 10000 + tocIdx;
+
+                // 3. Alphabetical (fallback) - Handled by sort() default string comp after weight
+                return 20000;
             }
 
             return 0; // Default
         };
 
         const sortRecursive = (
-            list: EpubFileNode[],
+            nodes: EpubFileNode[],
             parentName: string = "",
         ) => {
-            list.sort((a, b) => {
+            nodes.sort((a, b) => {
                 const wA = getWeight(a, parentName);
                 const wB = getWeight(b, parentName);
                 if (wA !== wB) return wA - wB;
@@ -1082,19 +2479,24 @@
                 });
             });
 
-            list.forEach((node) => {
+            nodes.forEach((node) => {
                 if (node.children) {
-                    sortRecursive(node.children, node.name.toLowerCase());
+                    node.children = sortRecursive(
+                        node.children,
+                        node.name.toLowerCase(),
+                    );
                 }
             });
+            return [...nodes]; // 返回新引用的副本以触发响应式
         };
 
-        sortRecursive(nodes);
+        fileTree = sortRecursive(fileTree);
         expandedFolders = expandedFolders; // Trigger reactivity
     }
 
     async function loadTOC() {
-        if (tocList.length > 0) return; // 已经加载过
+        // 每次刷新时重置 tocList，确保重新解析
+        tocList = [];
         isTocLoading = true;
 
         // 1. 在文件树中查找 .ncx 文件
@@ -1114,6 +2516,9 @@
 
         if (!ncxNode) {
             console.warn("未找到 .ncx 文件");
+            // 即使没有 TOC，也执行默认排序
+            sortFileTree(fileTree, []);
+            fileTree = [...fileTree]; // 使用新数组引用触发响应式更新
             isTocLoading = false;
             return;
         }
@@ -1156,7 +2561,7 @@
 
                 // 执行排序
                 sortFileTree(fileTree, tocPaths);
-                fileTree = fileTree; // 触发更新
+                fileTree = [...fileTree]; // 使用新数组引用触发响应式更新
             }
 
             // 存储 ncx 文件的路径，用于后续解析相对路径
@@ -1353,9 +2758,915 @@
             })
             .join(""); // 不加换行符，因为 div 本身会换行
     }
+
+    // ========== 查找替换功能 ==========
+
+    // 获取搜索范围内的文件列表
+    function getFilesInScope(): EpubFileNode[] {
+        switch (searchScope) {
+            case "current":
+                return selectedFile ? [selectedFile] : [];
+            case "selected":
+                if (multiSelectedFiles.size > 0) {
+                    // Convert Set to Array of EpubFileNode
+                    // This requires finding nodes by path.
+                    // flatHtmlFiles only contains HTML.
+                    // We need a map or traverse.
+                    // For performance, we can just filter allFiles or Use flatHtmlFiles if we assume HTML only?
+                    // Selected files might be CSS.
+                    // Let's traverse tree or use a cache.
+                    const selected: EpubFileNode[] = [];
+                    const traverse = (nodes: EpubFileNode[]) => {
+                        for (const node of nodes) {
+                            if (multiSelectedFiles.has(node.path))
+                                selected.push(node);
+                            if (node.children) traverse(node.children);
+                        }
+                    };
+                    traverse(fileTree);
+                    return selected;
+                }
+                return selectedFile ? [selectedFile] : [];
+            case "open":
+                return openTabs.filter(
+                    (tab) =>
+                        tab.file_type === "html" ||
+                        tab.file_type === "css" ||
+                        tab.file_type === "xml" ||
+                        tab.name.endsWith(".xhtml") ||
+                        tab.name.endsWith(".html"),
+                );
+            case "html":
+                return flatHtmlFiles;
+            case "all":
+                // 递归获取所有可编辑文件
+                const allFiles: EpubFileNode[] = [];
+                const collectFiles = (nodes: EpubFileNode[]) => {
+                    for (const node of nodes) {
+                        if (node.file_type !== "folder") {
+                            if (isEditable(node.file_type)) {
+                                allFiles.push(node);
+                            }
+                        }
+                        if (node.children) {
+                            collectFiles(node.children);
+                        }
+                    }
+                };
+                collectFiles(fileTree);
+                return allFiles;
+            default:
+                return [];
+        }
+    }
+
+    // 在当前文件中搜索
+    function searchInCurrentFile(
+        content: string,
+        pattern: string,
+        startPos: number = 0,
+        direction: "down" | "up" = "down",
+        useWrap: boolean = true,
+    ): { from: number; to: number } | null {
+        if (!pattern) return null;
+
+        try {
+            if (isRegex) {
+                const regex = new RegExp(pattern, "g");
+                const matches: { from: number; to: number }[] = [];
+                let match;
+                while ((match = regex.exec(content)) !== null) {
+                    matches.push({
+                        from: match.index,
+                        to: match.index + match[0].length,
+                    });
+                }
+                if (matches.length === 0) return null;
+
+                if (direction === "down") {
+                    for (const m of matches) {
+                        if (m.from >= startPos) return m;
+                    }
+                    return useWrap && wrapAround ? matches[0] : null;
+                } else {
+                    for (let i = matches.length - 1; i >= 0; i--) {
+                        if (matches[i].to <= startPos) return matches[i];
+                    }
+                    return useWrap && wrapAround
+                        ? matches[matches.length - 1]
+                        : null;
+                }
+            } else {
+                // 普通文本搜索
+                if (direction === "down") {
+                    const index = content.indexOf(pattern, startPos);
+                    if (index !== -1) {
+                        return { from: index, to: index + pattern.length };
+                    }
+                    if (useWrap && wrapAround) {
+                        const wrapIndex = content.indexOf(pattern, 0);
+                        if (wrapIndex !== -1 && wrapIndex < startPos) {
+                            return {
+                                from: wrapIndex,
+                                to: wrapIndex + pattern.length,
+                            };
+                        }
+                    }
+                } else {
+                    const searchContent = content.substring(0, startPos);
+                    const index = searchContent.lastIndexOf(pattern);
+                    if (index !== -1) {
+                        return { from: index, to: index + pattern.length };
+                    }
+                    if (useWrap && wrapAround) {
+                        const wrapIndex = content.lastIndexOf(pattern);
+                        if (wrapIndex !== -1 && wrapIndex >= startPos) {
+                            return {
+                                from: wrapIndex,
+                                to: wrapIndex + pattern.length,
+                            };
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            searchMessage = "正则表达式语法错误";
+            return null;
+        }
+        return null;
+    }
+
+    // 向下查找
+    async function findNext() {
+        if (!findPattern) {
+            searchMessage = "请输入查找内容";
+            return;
+        }
+
+        // 保存到历史
+        savePatternToHistory();
+
+        const files = getFilesInScope();
+        if (files.length === 0) {
+            searchMessage = "没有可搜索的文件";
+            return;
+        }
+
+        // 获取当前文件索引
+        const currentPath = selectedFile?.path || "";
+        let currentFileIndex = files.findIndex((f) => f.path === currentPath);
+        if (currentFileIndex === -1) currentFileIndex = 0;
+
+        // 获取当前编辑器的实际内容（而非缓存）
+        let content = "";
+        if (epubCodeEditorComponent) {
+            const view = epubCodeEditorComponent.getView();
+            if (view) {
+                content = view.state.doc.toString();
+            }
+        }
+        if (!content) content = fileContent;
+
+        // 确定搜索起始位置
+        let startPos = 0;
+        if (currentMatchInfo && currentMatchInfo.filePath === currentPath) {
+            startPos =
+                searchDirection === "down"
+                    ? currentMatchInfo.to
+                    : currentMatchInfo.from;
+        }
+
+        // 在当前文件中搜索
+        // 多文件模式下禁用 wrapAround，让搜索继续到下一个文件
+        const isMultiFile = searchScope !== "current" && files.length > 1;
+        let result = searchInCurrentFile(
+            content,
+            findPattern,
+            startPos,
+            searchDirection,
+            !isMultiFile, // 多文件模式下不使用 wrap
+        );
+
+        if (result) {
+            // 在当前文件找到匹配
+            currentMatchInfo = {
+                filePath: currentPath,
+                from: result.from,
+                to: result.to,
+            };
+            searchMessage = `找到匹配`;
+
+            // 选中匹配内容
+            if (epubCodeEditorComponent) {
+                const view = epubCodeEditorComponent.getView();
+                if (view) {
+                    view.dispatch({
+                        selection: { anchor: result.from, head: result.to },
+                        scrollIntoView: true,
+                    });
+                    view.focus();
+                }
+            }
+            return;
+        }
+
+        // 如果只搜索当前文件，没找到就结束
+        if (searchScope === "current" || files.length === 1) {
+            searchMessage = "未找到匹配";
+            currentMatchInfo = null;
+            return;
+        }
+
+        // 多文件搜索：继续搜索其他文件
+        const direction = searchDirection === "down" ? 1 : -1;
+        const filesSearched = new Set<string>();
+        filesSearched.add(currentPath);
+
+        let nextIndex = currentFileIndex;
+        while (filesSearched.size < files.length) {
+            nextIndex = (nextIndex + direction + files.length) % files.length;
+            const nextFile = files[nextIndex];
+
+            if (filesSearched.has(nextFile.path)) break;
+            filesSearched.add(nextFile.path);
+
+            // 获取文件内容
+            let nextContent = fileContentCache.get(nextFile.path) || "";
+            if (!nextContent) {
+                try {
+                    nextContent = await invoke<string>(
+                        "read_epub_file_content",
+                        {
+                            epubPath: epubPath,
+                            filePath: nextFile.path,
+                        },
+                    );
+                    fileContentCache.set(nextFile.path, nextContent);
+                } catch (e) {
+                    continue;
+                }
+            }
+
+            // 从文件开头搜索（多文件时不使用 wrapAround）
+            let matchResult: { from: number; to: number } | null = null;
+            try {
+                if (isRegex) {
+                    const regex = new RegExp(findPattern, "g");
+                    let match;
+                    const matches: { from: number; to: number }[] = [];
+                    while ((match = regex.exec(nextContent)) !== null) {
+                        matches.push({
+                            from: match.index,
+                            to: match.index + match[0].length,
+                        });
+                    }
+                    if (matches.length > 0) {
+                        matchResult =
+                            searchDirection === "down"
+                                ? matches[0]
+                                : matches[matches.length - 1];
+                    }
+                } else {
+                    const idx =
+                        searchDirection === "down"
+                            ? nextContent.indexOf(findPattern)
+                            : nextContent.lastIndexOf(findPattern);
+                    if (idx !== -1) {
+                        matchResult = {
+                            from: idx,
+                            to: idx + findPattern.length,
+                        };
+                    }
+                }
+            } catch (e) {
+                continue;
+            }
+            result = matchResult;
+
+            if (result) {
+                // 切换到该文件
+                await selectFile(nextFile);
+                await tick();
+                await new Promise((resolve) => setTimeout(resolve, 100));
+
+                // 从编辑器当前内容重新搜索匹配位置
+                if (epubCodeEditorComponent) {
+                    const view = epubCodeEditorComponent.getView();
+                    if (view) {
+                        const actualContent = view.state.doc.toString();
+
+                        // 在实际编辑器内容中重新搜索
+                        let actualResult: { from: number; to: number } | null =
+                            null;
+                        try {
+                            if (isRegex) {
+                                const regex = new RegExp(findPattern, "g");
+                                let match;
+                                const matches: { from: number; to: number }[] =
+                                    [];
+                                while (
+                                    (match = regex.exec(actualContent)) !== null
+                                ) {
+                                    matches.push({
+                                        from: match.index,
+                                        to: match.index + match[0].length,
+                                    });
+                                }
+                                if (matches.length > 0) {
+                                    actualResult =
+                                        searchDirection === "down"
+                                            ? matches[0]
+                                            : matches[matches.length - 1];
+                                }
+                            } else {
+                                const idx =
+                                    searchDirection === "down"
+                                        ? actualContent.indexOf(findPattern)
+                                        : actualContent.lastIndexOf(
+                                              findPattern,
+                                          );
+                                if (idx !== -1) {
+                                    actualResult = {
+                                        from: idx,
+                                        to: idx + findPattern.length,
+                                    };
+                                }
+                            }
+                        } catch (e) {
+                            // ignore
+                        }
+
+                        if (actualResult) {
+                            currentMatchInfo = {
+                                filePath: nextFile.path,
+                                from: actualResult.from,
+                                to: actualResult.to,
+                            };
+                            searchMessage = `找到匹配 (${nextFile.name})`;
+
+                            view.dispatch({
+                                selection: {
+                                    anchor: actualResult.from,
+                                    head: actualResult.to,
+                                },
+                                scrollIntoView: true,
+                            });
+                            view.focus();
+                        }
+                    }
+                }
+                return;
+            }
+        }
+
+        // 所有文件都搜索完毕，没找到
+        searchMessage = "未找到匹配";
+        currentMatchInfo = null;
+    }
+
+    // 向上查找
+    async function findPrev() {
+        const origDirection = searchDirection;
+        searchDirection = searchDirection === "down" ? "up" : "down";
+        await findNext();
+        searchDirection = origDirection;
+    }
+
+    // 替换当前选中
+    function performReplace() {
+        if (!currentMatchInfo || !epubCodeEditorComponent) {
+            searchMessage = "请先查找";
+            return;
+        }
+
+        const view = epubCodeEditorComponent?.getView();
+        if (!view) return;
+
+        let replacement = replacePattern;
+
+        // 文本模式：不替换标签内的内容
+        if (textOnly && isRegex) {
+            // 简化处理：暂时直接替换
+        }
+
+        view.dispatch({
+            changes: {
+                from: currentMatchInfo.from,
+                to: currentMatchInfo.to,
+                insert: replacement,
+            },
+        });
+
+        // 调整匹配位置
+        const diff =
+            replacement.length - (currentMatchInfo.to - currentMatchInfo.from);
+        currentMatchInfo.to = currentMatchInfo.from + replacement.length;
+
+        searchMessage = "已替换";
+
+        // 继续查找下一个
+        findNext();
+    }
+
+    // 全部替换
+    async function performReplaceAll() {
+        if (!findPattern) {
+            searchMessage = "请输入查找内容";
+            return;
+        }
+
+        const files = getFilesInScope();
+        let totalReplaced = 0;
+
+        for (const file of files) {
+            let content = fileContentCache.get(file.path) || "";
+            if (!content) {
+                try {
+                    content = await invoke<string>("read_epub_file_content", {
+                        epubPath: epubPath,
+                        filePath: file.path,
+                    });
+                } catch (e) {
+                    continue;
+                }
+            }
+
+            let newContent = content;
+            let replacedCount = 0;
+
+            try {
+                if (isRegex) {
+                    const regex = new RegExp(findPattern, "g");
+                    const matches = content.match(regex);
+                    replacedCount = matches ? matches.length : 0;
+                    newContent = content.replace(regex, replacePattern);
+                } else {
+                    // 计算替换次数
+                    let pos = 0;
+                    while ((pos = content.indexOf(findPattern, pos)) !== -1) {
+                        replacedCount++;
+                        pos += findPattern.length;
+                    }
+                    newContent = content
+                        .split(findPattern)
+                        .join(replacePattern);
+                }
+            } catch (e) {
+                searchMessage = "正则表达式语法错误";
+                return;
+            }
+
+            if (newContent !== content) {
+                totalReplaced += replacedCount;
+                fileContentCache.set(file.path, newContent);
+                modifiedFiles.add(file.path);
+
+                // 如果是当前文件，更新编辑器
+                if (file.path === selectedFile?.path) {
+                    fileContent = newContent;
+                    if (epubCodeEditorComponent) {
+                        epubCodeEditorComponent.resetDoc(newContent);
+                    }
+                }
+            }
+        }
+
+        modifiedFiles = modifiedFiles; // 触发响应式
+        searchMessage = `已替换 ${totalReplaced} 处`;
+        currentMatchInfo = null;
+    }
+
+    // 计算匹配数量
+    // 计算匹配数量
+    async function countMatches() {
+        try {
+            if (!findPattern) {
+                searchMessage = "请输入查找内容";
+                return;
+            }
+            searchMessage = "计算中...";
+            await tick();
+
+            const files = getFilesInScope();
+            const backendFiles = [];
+            const localFiles = [];
+            for (const file of files) {
+                if (
+                    (file.path === selectedFile?.path &&
+                        epubCodeEditorComponent) ||
+                    fileContentCache.has(file.path)
+                ) {
+                    localFiles.push(file);
+                } else {
+                    backendFiles.push(file.path);
+                }
+            }
+
+            let totalCount = 0;
+            // Backend
+            if (backendFiles.length > 0) {
+                searchMessage = `正在后台搜索 ${backendFiles.length} 个文件...`;
+                await tick();
+                try {
+                    const count = await invoke("search_in_files", {
+                        epubPath,
+                        files: backendFiles,
+                        pattern: findPattern,
+                        isRegex,
+                    });
+                    totalCount += count as number;
+                } catch (e) {
+                    console.error(e);
+                    // If backend fails, totalCount isn't incremented. User sees partial result.
+                }
+            }
+            // Frontend
+            if (localFiles.length > 0) {
+                searchMessage = `正在搜索缓存文件...`;
+                await tick();
+                let processed = 0;
+                for (const file of localFiles) {
+                    processed++;
+                    if (processed % 50 === 0)
+                        await new Promise((r) => setTimeout(r, 0));
+                    let content = "";
+                    if (
+                        file.path === selectedFile?.path &&
+                        epubCodeEditorComponent
+                    ) {
+                        try {
+                            content =
+                                epubCodeEditorComponent
+                                    .getView()
+                                    ?.state.doc.toString() || fileContent;
+                        } catch {
+                            content = fileContent;
+                        }
+                    } else {
+                        content = fileContentCache.get(file.path) || "";
+                    }
+
+                    try {
+                        if (isRegex) {
+                            totalCount += (
+                                content.match(new RegExp(findPattern, "g")) ||
+                                []
+                            ).length;
+                        } else {
+                            let pos = 0;
+                            while (
+                                (pos = content.indexOf(findPattern, pos)) !== -1
+                            ) {
+                                totalCount++;
+                                pos += findPattern.length;
+                            }
+                        }
+                    } catch {
+                        searchMessage = "正则表达式错误";
+                        return;
+                    }
+                }
+            }
+            searchMessage = `共 ${totalCount} 处匹配`;
+        } catch (e: any) {
+            searchMessage = "错: " + e.message;
+        }
+    }
+
+    async function countMatches_OLD() {
+        try {
+            if (!findPattern) {
+                searchMessage = "请输入查找内容";
+                return;
+            }
+
+            searchMessage = "计算中...";
+            await tick();
+
+            const files = getFilesInScope();
+
+            // 1. 批量预加载内容 (优化速度)
+            const filesToFetch = files.filter(
+                (f) =>
+                    !(
+                        f.path === selectedFile?.path && epubCodeEditorComponent
+                    ) && !fileContentCache.has(f.path),
+            );
+
+            if (filesToFetch.length > 0) {
+                const BATCH_SIZE = 20;
+                for (let i = 0; i < filesToFetch.length; i += BATCH_SIZE) {
+                    const batch = filesToFetch.slice(i, i + BATCH_SIZE);
+                    searchMessage = `正在加载文件 ${i}/${filesToFetch.length}...`;
+                    await tick();
+
+                    await Promise.all(
+                        batch.map(async (file) => {
+                            try {
+                                const content = await invoke<string>(
+                                    "read_epub_file_content",
+                                    {
+                                        epubPath: epubPath,
+                                        filePath: file.path,
+                                    },
+                                );
+                                fileContentCache.set(file.path, content);
+                            } catch (e) {}
+                        }),
+                    );
+
+                    await new Promise((r) => setTimeout(r, 0));
+                }
+            }
+
+            let totalCount = 0;
+            let processedCount = 0;
+
+            searchMessage = `正在搜索...`;
+            await tick();
+
+            for (const file of files) {
+                // 每处理几个文件让出主线程，避免界面卡死
+                processedCount++;
+                if (processedCount % 5 === 0) {
+                    searchMessage = `搜索中 ${processedCount}/${files.length}`;
+                    await new Promise((r) => setTimeout(r, 0));
+                }
+
+                let content = "";
+
+                // 当前打开的文件，从编辑器获取实际内容
+                if (
+                    file.path === selectedFile?.path &&
+                    epubCodeEditorComponent
+                ) {
+                    try {
+                        const view = epubCodeEditorComponent.getView();
+                        if (view) {
+                            content = view.state.doc.toString();
+                        } else {
+                            content = fileContent;
+                        }
+                    } catch (e) {
+                        content = fileContent;
+                    }
+                } else {
+                    // 其他文件从缓存或后端获取
+                    content = fileContentCache.get(file.path) || "";
+                    if (!content) {
+                        try {
+                            content = await invoke<string>(
+                                "read_epub_file_content",
+                                {
+                                    epubPath: epubPath,
+                                    filePath: file.path,
+                                },
+                            );
+                            fileContentCache.set(file.path, content);
+                        } catch (e) {
+                            continue;
+                        }
+                    }
+                }
+
+                try {
+                    if (isRegex) {
+                        const regex = new RegExp(findPattern, "g");
+                        const matches = content.match(regex);
+                        totalCount += matches ? matches.length : 0;
+                    } else {
+                        let pos = 0;
+                        while (
+                            (pos = content.indexOf(findPattern, pos)) !== -1
+                        ) {
+                            totalCount++;
+                            pos += findPattern.length;
+                        }
+                    }
+                } catch (e) {
+                    searchMessage = "正则表达式语法错误";
+                    return;
+                }
+            }
+
+            searchMessage = `共 ${totalCount} 处匹配`;
+        } catch (e: any) {
+            console.error("Count error:", e);
+            searchMessage = "计算出错: " + (e.message || "未知错误");
+        }
+    }
+
+    // 关闭查找面板
+    function closeFindReplace() {
+        showFindReplace = false;
+        showFindHistory = false;
+        showReplaceHistory = false;
+        currentMatchInfo = null;
+        searchMessage = "";
+    }
+
+    // 保存查找历史到 localStorage
+    function saveSearchHistory() {
+        localStorage.setItem("epub-find-history", JSON.stringify(findHistory));
+        localStorage.setItem(
+            "epub-replace-history",
+            JSON.stringify(replaceHistory),
+        );
+    }
+
+    // 加载查找历史
+    function loadSearchHistory() {
+        try {
+            const findH = localStorage.getItem("epub-find-history");
+            const replaceH = localStorage.getItem("epub-replace-history");
+            if (findH) findHistory = JSON.parse(findH);
+            if (replaceH) replaceHistory = JSON.parse(replaceH);
+            // 自动填充上次的值
+            if (findHistory.length > 0) findPattern = findHistory[0];
+            if (replaceHistory.length > 0) replacePattern = replaceHistory[0];
+        } catch (e) {}
+    }
+
+    // 添加到历史记录
+    function addToHistory(text: string, history: string[]): string[] {
+        if (!text.trim()) return history;
+        // 移除重复项
+        const filtered = history.filter((h) => h !== text);
+        // 添加到开头
+        const newHistory = [text, ...filtered].slice(0, MAX_HISTORY);
+        return newHistory;
+    }
+
+    // 从历史记录中删除
+    function removeFromFindHistory(index: number) {
+        findHistory = findHistory.filter((_, i) => i !== index);
+        saveSearchHistory();
+    }
+
+    function removeFromReplaceHistory(index: number) {
+        replaceHistory = replaceHistory.filter((_, i) => i !== index);
+        saveSearchHistory();
+    }
+
+    // 选中历史记录
+    function selectFindHistory(text: string) {
+        findPattern = text;
+        showFindHistory = false;
+    }
+
+    function selectReplaceHistory(text: string) {
+        replacePattern = text;
+        showReplaceHistory = false;
+    }
+
+    // 在执行查找时保存历史
+    function savePatternToHistory() {
+        if (findPattern) {
+            findHistory = addToHistory(findPattern, findHistory);
+        }
+        if (replacePattern) {
+            replaceHistory = addToHistory(replacePattern, replaceHistory);
+        }
+        saveSearchHistory();
+    }
+
+    function handleKeydown(e: KeyboardEvent) {
+        // Ctrl+F 打开查找
+        if (e.ctrlKey && e.key === "f") {
+            e.preventDefault();
+            e.stopPropagation();
+            showFindReplace = true;
+        }
+        // Ctrl+H 打开替换
+        if (e.ctrlKey && e.key === "h") {
+            e.preventDefault();
+            e.stopPropagation();
+            showFindReplace = true;
+        }
+        // Escape 关闭
+        if (e.key === "Escape" && showFindReplace) {
+            closeFindReplace();
+        }
+        // F3 查找下一个
+        if (e.key === "F3" && showFindReplace) {
+            e.preventDefault();
+            if (e.shiftKey) {
+                findPrev();
+            } else {
+                findNext();
+            }
+        }
+        // Ctrl+S 保存
+        if (e.ctrlKey && e.key === "s") {
+            e.preventDefault();
+            e.stopPropagation();
+            if (modifiedFiles.size > 0) {
+                saveCurrentFile().then(() => {
+                    saveEpub();
+                });
+            } else if (isProjectDirty) {
+                saveEpub();
+            }
+        }
+    }
+
+    // 监听键盘事件 (capture phase to intercept before CodeMirror)
+    onMount(() => {
+        loadSearchHistory();
+    });
 </script>
 
-<div class="epub-editor">
+<svelte:window
+    on:keydown={handleKeydown}
+    on:dragover={handleDragOver}
+    on:drop={handleFileDrop}
+/>
+
+<!-- 自定义输入对话框 (替代 JavaScript prompt) -->
+{#if showPrompt}
+    <div class="prompt-overlay" on:click={handlePromptCancel}>
+        <div class="prompt-dialog" on:click|stopPropagation>
+            <div class="prompt-title">{promptTitle}</div>
+            <input
+                type="text"
+                class="prompt-input"
+                bind:value={promptValue}
+                on:keydown={(e) => e.key === "Enter" && handlePromptConfirm()}
+                disabled={isPromptBusy}
+                autofocus
+            />
+
+            {#if promptOptions}
+                <div class="prompt-options">
+                    <label class="prompt-checkbox">
+                        <input
+                            type="checkbox"
+                            bind:checked={promptCheckValue}
+                            disabled={isPromptBusy}
+                        />
+                        自动更新其他文件中的链接引用
+                    </label>
+                </div>
+            {/if}
+
+            <div class="prompt-buttons">
+                <button
+                    class="prompt-btn cancel"
+                    on:click={handlePromptCancel}
+                    disabled={isPromptBusy}>取消</button
+                >
+                <button
+                    class="prompt-btn confirm"
+                    on:click={handlePromptConfirm}
+                    disabled={isPromptBusy}
+                >
+                    {isPromptBusy ? "正在更新链接..." : "确定"}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- 自定义确认对话框 -->
+{#if showConfirm}
+    <div
+        class="prompt-overlay"
+        on:click={handleConfirmCancel}
+        role="presentation"
+    >
+        <div
+            class="prompt-dialog"
+            on:click|stopPropagation
+            role="dialog"
+            aria-modal="true"
+        >
+            <div class="prompt-title">{confirmTitle}</div>
+            <div
+                class="prompt-message"
+                style="margin-bottom: 20px; color: #ccc;"
+            >
+                {confirmMessage}
+            </div>
+            <div class="prompt-buttons">
+                <button class="prompt-btn cancel" on:click={handleConfirmCancel}
+                    >取消</button
+                >
+                <button
+                    class="prompt-btn confirm delete"
+                    on:click={handleConfirmConfirm}>删除</button
+                >
+            </div>
+        </div>
+    </div>
+{/if}
+
+<div
+    class="epub-editor"
+    on:drop={handleFileDrop}
+    on:dragover={handleDragOver}
+    role="region"
+    aria-label="File Drop Zone"
+>
     {#if isLoading}
         <div class="loading">加载中...</div>
     {:else if error}
@@ -1365,140 +3676,33 @@
         <aside class="file-tree">
             <div class="tree-header">
                 <h3>文件结构</h3>
+                <div class="header-actions">
+                    <button
+                        class="icon-btn"
+                        on:click={saveEpub}
+                        disabled={!isProjectDirty && modifiedFiles.size === 0}
+                        title="保存所有更改 (Ctrl+S)"
+                        class:dirty={isProjectDirty || modifiedFiles.size > 0}
+                    >
+                        💾
+                    </button>
+                    <button class="icon-btn" on:click={loadEpub} title="刷新">
+                        🔄
+                    </button>
+                </div>
             </div>
             <div class="tree-content">
-                {#each fileTree as node}
-                    <div class="tree-node folder-node">
-                        <div
-                            class="node-label"
-                            on:click={() => toggleFolder(node.path)}
-                            on:keydown={(e) =>
-                                e.key === "Enter" && toggleFolder(node.path)}
-                            role="button"
-                            tabindex="0"
-                        >
-                            <span class="expand-icon">
-                                {expandedFolders.has(node.path) ? "▼" : "▶"}
-                            </span>
-                            <span class="icon"
-                                >{getFileIcon(node.file_type)}</span
-                            >
-                            <span class="name">{node.name}</span>
-                        </div>
-                        {#if node.children && expandedFolders.has(node.path)}
-                            <div class="children">
-                                {#each node.children as child}
-                                    {#if child.file_type === "folder"}
-                                        <!-- 嵌套文件夹 -->
-                                        <div
-                                            class="tree-node folder-node subfolder"
-                                        >
-                                            <div
-                                                class="node-label"
-                                                on:click={() =>
-                                                    toggleFolder(child.path)}
-                                                on:keydown={(e) =>
-                                                    e.key === "Enter" &&
-                                                    toggleFolder(child.path)}
-                                                role="button"
-                                                tabindex="0"
-                                            >
-                                                <span class="expand-icon">
-                                                    {expandedFolders.has(
-                                                        child.path,
-                                                    )
-                                                        ? "▼"
-                                                        : "▶"}
-                                                </span>
-                                                <span class="icon"
-                                                    >{getFileIcon(
-                                                        child.file_type,
-                                                    )}</span
-                                                >
-                                                <span class="name"
-                                                    >{child.name}</span
-                                                >
-                                            </div>
-                                            {#if child.children && expandedFolders.has(child.path)}
-                                                <div class="children">
-                                                    {#each child.children as subChild}
-                                                        <div
-                                                            class="tree-node file-node"
-                                                            data-path={subChild.path}
-                                                            class:selected={selectedFile?.path ===
-                                                                subChild.path}
-                                                            on:click={() =>
-                                                                selectFile(
-                                                                    subChild,
-                                                                )}
-                                                            on:keydown={(e) =>
-                                                                e.key ===
-                                                                    "Enter" &&
-                                                                selectFile(
-                                                                    subChild,
-                                                                )}
-                                                            role="button"
-                                                            tabindex="0"
-                                                        >
-                                                            <span class="icon"
-                                                                >{getFileIcon(
-                                                                    subChild.file_type,
-                                                                )}</span
-                                                            >
-                                                            <div
-                                                                class="file-info"
-                                                            >
-                                                                <span
-                                                                    class="name"
-                                                                >
-                                                                    {subChild.name}
-                                                                </span>
-                                                                <span
-                                                                    class="description"
-                                                                >
-                                                                    {getFileDescription(
-                                                                        subChild,
-                                                                    )}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    {/each}
-                                                </div>
-                                            {/if}
-                                        </div>
-                                    {:else}
-                                        <!-- 文件 -->
-                                        <div
-                                            class="tree-node file-node"
-                                            data-path={child.path}
-                                            class:selected={selectedFile?.path ===
-                                                child.path}
-                                            on:click={() => selectFile(child)}
-                                            on:keydown={(e) =>
-                                                e.key === "Enter" &&
-                                                selectFile(child)}
-                                            role="button"
-                                            tabindex="0"
-                                        >
-                                            <span class="icon"
-                                                >{getFileIcon(
-                                                    child.file_type,
-                                                )}</span
-                                            >
-                                            <div class="file-info">
-                                                <span class="name">
-                                                    {child.name}
-                                                </span>
-                                                <span class="description">
-                                                    {getFileDescription(child)}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    {/if}
-                                {/each}
-                            </div>
-                        {/if}
-                    </div>
+                {#each fileTree as node (node.path)}
+                    <FileTreeItem
+                        {node}
+                        {expandedFolders}
+                        {selectedFile}
+                        {multiSelectedFiles}
+                        {toggleFolder}
+                        {selectFile}
+                        {getFileIcon}
+                        {getFileDescription}
+                    />
                 {/each}
             </div>
         </aside>
@@ -1539,26 +3743,211 @@
             {/if}
 
             {#if selectedFile}
-                <!-- Editor Header Removed -->
-                <div class="editor-content" bind:this={editorContentDiv}>
-                    {#if isEditable(selectedFile.file_type)}
-                        <EpubCodeEditor
-                            bind:this={epubCodeEditorComponent}
-                            doc={fileContent}
-                            language={getFileLanguage(selectedFile.file_type)}
-                            onChange={handleFileContentChange}
-                            onSave={saveCurrentFile}
-                        />
-                    {:else}
-                        <pre class="code-block">{@html addLineNumbers(
-                                fileContent
-                                    .replace(/</g, "&lt;")
-                                    .replace(/>/g, "&gt;"),
-                            )}</pre>
-                    {/if}
-                </div>
+                {#if isImageFile(selectedFile.name)}
+                    <div class="image-preview-container">
+                        {#if currentImageSrc}
+                            <img
+                                src={currentImageSrc}
+                                alt={selectedFile.name}
+                            />
+                        {:else}
+                            <div class="loading">加载图片中...</div>
+                        {/if}
+                    </div>
+                {:else}
+                    <div class="editor-content" bind:this={editorContentDiv}>
+                        {#if isEditable(selectedFile.file_type)}
+                            <EpubCodeEditor
+                                bind:this={epubCodeEditorComponent}
+                                doc={fileContent}
+                                language={getFileLanguage(
+                                    selectedFile.file_type,
+                                )}
+                                onChange={handleFileContentChange}
+                                onSave={saveCurrentFile}
+                            />
+                        {:else}
+                            <pre class="code-block">{@html addLineNumbers(
+                                    fileContent
+                                        .replace(/</g, "&lt;")
+                                        .replace(/>/g, "&gt;"),
+                                )}</pre>
+                        {/if}
+                    </div>
+                {/if}
             {:else}
                 <div class="placeholder">点击左侧文件以查看内容</div>
+            {/if}
+
+            <!-- 查找替换面板 -->
+            {#if showFindReplace}
+                <div class="find-replace-panel">
+                    <div class="fr-row">
+                        <span class="fr-label">查找:</span>
+                        <div class="fr-input-wrapper">
+                            <input
+                                type="text"
+                                class="fr-input"
+                                bind:value={findPattern}
+                                on:keydown={(e) =>
+                                    e.key === "Enter" && findNext()}
+                                on:focus={() => {
+                                    showFindHistory = false;
+                                    showReplaceHistory = false;
+                                }}
+                            />
+                            <button
+                                class="fr-dropdown-btn"
+                                on:click={() => {
+                                    showFindHistory = !showFindHistory;
+                                    showReplaceHistory = false;
+                                }}
+                                title="历史记录">▼</button
+                            >
+                            {#if showFindHistory && findHistory.length > 0}
+                                <div class="fr-history-dropdown">
+                                    {#each findHistory as item, i}
+                                        <div class="fr-history-item">
+                                            <span
+                                                class="fr-history-text"
+                                                on:click={() =>
+                                                    selectFindHistory(item)}
+                                                on:keydown={(e) =>
+                                                    e.key === "Enter" &&
+                                                    selectFindHistory(item)}
+                                                role="button"
+                                                tabindex="0">{item}</span
+                                            >
+                                            <button
+                                                class="fr-history-del"
+                                                on:click|stopPropagation={() =>
+                                                    removeFromFindHistory(i)}
+                                                title="删除">✕</button
+                                            >
+                                        </div>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
+                        <div class="fr-actions">
+                            <button
+                                class="fr-btn fr-btn-text"
+                                on:click={findPrev}
+                                title="上一个">上一个</button
+                            >
+                            <button
+                                class="fr-btn fr-btn-text"
+                                on:click={findNext}
+                                title="下一个">下一个</button
+                            >
+                            <button
+                                class="fr-btn fr-close-btn"
+                                on:click={closeFindReplace}
+                                title="关闭">✕</button
+                            >
+                        </div>
+                    </div>
+                    <div class="fr-row">
+                        <span class="fr-label">替换:</span>
+                        <div class="fr-input-wrapper">
+                            <input
+                                type="text"
+                                class="fr-input"
+                                bind:value={replacePattern}
+                                on:focus={() => {
+                                    showFindHistory = false;
+                                    showReplaceHistory = false;
+                                }}
+                            />
+                            <button
+                                class="fr-dropdown-btn"
+                                on:click={() => {
+                                    showReplaceHistory = !showReplaceHistory;
+                                    showFindHistory = false;
+                                }}
+                                title="历史记录">▼</button
+                            >
+                            {#if showReplaceHistory && replaceHistory.length > 0}
+                                <div class="fr-history-dropdown">
+                                    {#each replaceHistory as item, i}
+                                        <div class="fr-history-item">
+                                            <span
+                                                class="fr-history-text"
+                                                on:click={() =>
+                                                    selectReplaceHistory(item)}
+                                                on:keydown={(e) =>
+                                                    e.key === "Enter" &&
+                                                    selectReplaceHistory(item)}
+                                                role="button"
+                                                tabindex="0">{item}</span
+                                            >
+                                            <button
+                                                class="fr-history-del"
+                                                on:click|stopPropagation={() =>
+                                                    removeFromReplaceHistory(i)}
+                                                title="删除">✕</button
+                                            >
+                                        </div>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
+                        <div class="fr-actions">
+                            <button
+                                class="fr-btn fr-btn-text"
+                                on:click={performReplace}
+                                title="替换">替换</button
+                            >
+                            <button
+                                class="fr-btn fr-btn-text fr-danger"
+                                on:click={performReplaceAll}
+                                title="全部替换">全部</button
+                            >
+                            <button
+                                class="fr-btn fr-btn-text"
+                                on:click={countMatches}
+                                title="计数">计数</button
+                            >
+                        </div>
+                    </div>
+                    <div class="fr-row fr-options">
+                        <span class="fr-label">模式:</span>
+                        <select
+                            class="fr-select fr-select-sm"
+                            bind:value={isRegex}
+                        >
+                            <option value={false}>正常</option>
+                            <option value={true}>正则</option>
+                        </select>
+                        <select class="fr-select" bind:value={searchScope}>
+                            <option value="current">当前文件</option>
+                            <option value="open">已打开</option>
+                            <option value="html">HTML文件</option>
+                            <option value="selected">选中文件</option>
+                            <option value="all">所有文件</option>
+                        </select>
+                        <select
+                            class="fr-select fr-select-sm"
+                            bind:value={searchDirection}
+                        >
+                            <option value="down">下</option>
+                            <option value="up">上</option>
+                        </select>
+                        <label class="fr-checkbox"
+                            ><input
+                                type="checkbox"
+                                bind:checked={wrapAround}
+                            />循环</label
+                        >
+                        <label class="fr-checkbox"
+                            ><input
+                                type="checkbox"
+                                bind:checked={textOnly}
+                            />文本</label
+                        >
+                        <span class="fr-message">{searchMessage}</span>
+                    </div>
+                </div>
             {/if}
         </main>
 
@@ -1819,11 +4208,12 @@
 
     /* 文件树 */
     .file-tree {
-        width: 300px;
+        width: 240px;
         background: #fff;
         border-right: 1px solid #ddd;
         display: flex;
         flex-direction: column;
+        flex-shrink: 0;
     }
 
     .tree-header {
@@ -1841,105 +4231,45 @@
         margin: 0;
         font-size: 16px;
         color: #333;
+        flex: 1;
+    }
+
+    .header-actions {
+        display: flex;
+        gap: 8px;
+    }
+
+    .icon-btn {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 4px;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s;
+    }
+
+    .icon-btn:hover:not(:disabled) {
+        background: #e0e0e0;
+    }
+
+    .icon-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+    }
+
+    .icon-btn.dirty {
+        color: #ff9800;
+        filter: drop-shadow(0 0 2px rgba(255, 152, 0, 0.5));
     }
 
     .tree-content {
         flex: 1;
         overflow-y: auto;
         padding: 8px;
-    }
-
-    .tree-node {
-        margin: 4px 0;
-    }
-
-    .folder-node {
-        margin-bottom: 12px;
-    }
-
-    .node-label {
-        display: flex;
-        align-items: center;
-        padding: 8px;
-        font-weight: 600;
-        color: #555;
-        background: #f0f0f0;
-        border-radius: 4px;
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .node-label:hover {
-        background: #e8e8e8;
-    }
-
-    .expand-icon {
-        margin-right: 4px;
-        font-size: 12px;
-        color: #666;
-        width: 16px;
-        display: inline-block;
-    }
-
-    .subfolder {
-        margin-left: 16px;
-    }
-
-    .subfolder .node-label {
-        background: #f8f8f8;
-        font-weight: 500;
-        font-size: 13px;
-    }
-
-    .file-node {
-        display: flex;
-        align-items: center;
-        padding: 8px 8px 8px 24px;
-        cursor: pointer;
-        border-radius: 4px;
-        transition: background 0.2s;
-    }
-
-    .file-node:hover {
-        background: #f5f5f5;
-    }
-
-    .file-node.selected {
-        background: #e3f2fd;
-        border-left: 3px solid #2196f3;
-    }
-
-    .icon {
-        margin-right: 8px;
-        font-size: 18px;
-    }
-
-    .file-info {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-    }
-
-    .name {
-        font-size: 14px;
-        color: #333;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .description {
-        font-size: 12px;
-        color: #999;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .children {
-        margin-top: 4px;
     }
 
     /* 编辑器 */
@@ -1950,6 +4280,7 @@
         background: #fff;
         border-right: 1px solid #ddd;
         min-width: 0; /* 关键：允许 flex 子项收缩，从而触发内部滚动 */
+        position: relative; /* 使查找替换面板的 absolute 定位相对于此元素 */
     }
 
     /* 标签页栏 */
@@ -2118,7 +4449,7 @@
 
     /* 预览 */
     .preview-pane {
-        width: 360px; /* 标准安卓手机CSS宽度 */
+        width: 320px; /* Standard Android/iPhone Width */
         background: #fff;
         display: flex;
         flex-direction: column;
@@ -2164,28 +4495,32 @@
     }
 
     .preview-container {
-        flex: 1;
+        flex: 1; /* Grow vertically */
+        width: 100%; /* Fill sidebar width */
+        display: flex;
+        flex-direction: column;
         overflow: hidden;
         background: #fff;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         position: relative;
+        border-left: 1px solid #ddd;
     }
 
     .mobile-frame {
-        width: 360px; /* 标准安卓手机CSS宽度 */
+        width: 100%;
+        flex: 1;
         height: 100%;
-        max-height: 812px; /* iPhone X height approx, or just limit it */
+        max-height: none;
         background: #fff;
-        box-shadow:
-            0 4px 6px -1px rgba(0, 0, 0, 0.1),
-            0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        border: 1px solid #d1d5db;
-        border-radius: 8px; /* 添加圆角模拟手机外观 */
-        overflow: hidden; /* 确保内容不超出边框 */
-        display: flex;
-        flex-direction: column;
+        border: none;
+        box-shadow: none;
+        border-radius: 0;
+        overflow-y: auto;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    .mobile-frame::-webkit-scrollbar {
+        display: none;
     }
 
     .preview-container iframe {
@@ -2246,5 +4581,369 @@
 
     ::-webkit-scrollbar-thumb:hover {
         background: #555;
+    }
+
+    /* 查找替换面板 */
+    .find-replace-panel {
+        background: #f0f0f0;
+        border-top: 1px solid #ccc;
+        padding: 6px 10px;
+        font-size: 13px;
+        flex-shrink: 0;
+    }
+
+    .fr-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 6px;
+    }
+
+    .fr-actions {
+        display: flex;
+        gap: 4px;
+        width: 154px; /* 固定宽度以对齐两行按钮 */
+        justify-content: space-between;
+        flex-shrink: 0;
+    }
+
+    .fr-row:last-child {
+        margin-bottom: 0;
+    }
+
+    .fr-label {
+        font-weight: 600;
+        color: #555;
+        min-width: 40px;
+        text-align: right;
+    }
+
+    .fr-input {
+        flex: 1;
+        padding: 6px 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 13px;
+        font-family: "Consolas", "Monaco", monospace;
+        background: #fff;
+    }
+
+    .fr-input:focus {
+        outline: none;
+        border-color: #2196f3;
+        box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+    }
+
+    .fr-btn {
+        padding: 4px 8px;
+        border: 1px solid #bbb;
+        border-radius: 4px;
+        background: linear-gradient(to bottom, #fff, #e8e8e8);
+        cursor: pointer;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+    }
+
+    .fr-btn-text {
+        padding: 4px 10px;
+    }
+
+    .fr-btn:hover {
+        background: linear-gradient(to bottom, #f5f5f5, #ddd);
+        border-color: #999;
+    }
+
+    .fr-btn:active {
+        background: #ddd;
+    }
+
+    .fr-danger {
+        background: linear-gradient(to bottom, #fff0e6, #ffddcc);
+        border-color: #e65c00;
+    }
+
+    .fr-danger:hover {
+        background: linear-gradient(to bottom, #ffe6d9, #ffcc99);
+    }
+
+    .fr-close-btn {
+        background: linear-gradient(to bottom, #fee, #fcc);
+        border-color: #d99;
+    }
+
+    .fr-close-btn:hover {
+        background: linear-gradient(to bottom, #fdd, #faa);
+        border-color: #c66;
+    }
+
+    .fr-select-sm {
+        min-width: 50px;
+        padding: 4px 6px;
+    }
+
+    .fr-select {
+        padding: 4px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: #fff;
+        font-size: 12px;
+        min-width: 75px;
+    }
+
+    .fr-select:focus {
+        outline: none;
+        border-color: #2196f3;
+    }
+
+    .fr-options {
+        font-size: 12px;
+    }
+
+    .fr-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+        color: #555;
+    }
+
+    .fr-checkbox input {
+        margin: 0;
+        cursor: pointer;
+    }
+
+    .fr-message {
+        margin-left: auto;
+        color: #2196f3;
+        font-weight: 500;
+        min-width: 80px;
+        text-align: right;
+    }
+
+    /* 输入框包装器（含下拉按钮） */
+    .fr-input-wrapper {
+        flex: 1;
+        display: flex;
+        position: relative;
+    }
+
+    .fr-input-wrapper .fr-input {
+        flex: 1;
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+        border-right: none;
+    }
+
+    .fr-dropdown-btn {
+        padding: 6px 8px;
+        border: 1px solid #ccc;
+        border-left: none;
+        border-top-right-radius: 4px;
+        border-bottom-right-radius: 4px;
+        background: linear-gradient(to bottom, #fff, #e8e8e8);
+        cursor: pointer;
+        font-size: 10px;
+        color: #666;
+    }
+
+    .fr-dropdown-btn:hover {
+        background: linear-gradient(to bottom, #f5f5f5, #ddd);
+    }
+
+    /* 历史记录下拉菜单 */
+    .fr-history-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: #fff;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        z-index: 200;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .fr-history-item {
+        display: flex;
+        align-items: center;
+        padding: 6px 10px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .fr-history-item:last-child {
+        border-bottom: none;
+    }
+
+    .fr-history-item:hover {
+        background: #f5f5f5;
+    }
+
+    .fr-history-text {
+        flex: 1;
+        cursor: pointer;
+        font-family: "Consolas", "Monaco", monospace;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .fr-history-del {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        color: #999;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: 8px;
+    }
+
+    .fr-history-del:hover {
+        background: #ffdddd;
+        color: #d32f2f;
+    }
+    .image-preview-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #f0f0f0;
+        overflow: auto;
+        padding: 20px;
+        height: 100%;
+    }
+
+    .image-preview-container img {
+        max-width: 100%;
+        max-height: 100%;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        /* 棋盘格背景 */
+        background-color: #fff;
+        background-image: linear-gradient(45deg, #eee 25%, transparent 25%),
+            linear-gradient(-45deg, #eee 25%, transparent 25%),
+            linear-gradient(45deg, transparent 75%, #eee 75%),
+            linear-gradient(-45deg, transparent 75%, #eee 75%);
+        background-size: 20px 20px;
+        background-position:
+            0 0,
+            0 10px,
+            10px -10px,
+            -10px 0px;
+    }
+
+    .loading {
+        color: #666;
+        font-size: 14px;
+    }
+
+    /* 自定义输入对话框样式 */
+    .prompt-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999;
+    }
+
+    .prompt-dialog {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        min-width: 320px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    .prompt-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 16px;
+        color: #333;
+    }
+
+    .prompt-input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        margin-bottom: 16px;
+        box-sizing: border-box;
+    }
+
+    .prompt-input:focus {
+        outline: none;
+        border-color: #4a90d9;
+        box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
+    }
+
+    .prompt-options {
+        margin-bottom: 20px;
+    }
+
+    .prompt-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        color: #555;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .prompt-checkbox input {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        margin: 0;
+    }
+
+    .prompt-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+
+    .prompt-btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .prompt-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .prompt-btn.cancel {
+        background: #f0f0f0;
+        color: #666;
+    }
+
+    .prompt-btn.cancel:hover {
+        background: #e0e0e0;
+    }
+
+    .prompt-btn.confirm {
+        background: #4a90d9;
+        color: white;
+    }
+
+    .prompt-btn.confirm:hover {
+        background: #3a80c9;
     }
 </style>

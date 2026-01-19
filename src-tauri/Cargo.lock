@@ -884,7 +884,7 @@ dependencies = [
 
 [[package]]
 name = "epub-editor"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "chardetng",
  "chrono",
@@ -901,7 +901,9 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-opener",
+ "tempfile",
  "uuid",
+ "walkdir",
  "zip",
 ]
 

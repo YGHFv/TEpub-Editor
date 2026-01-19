@@ -141,6 +141,7 @@
     // Close Dialog State
     let showCloseDialog = false;
     let isDialogSaving = false;
+    let lastGeneratedEpubPath = ""; // New state variable
 
     function handleDialogSave() {
         isDialogSaving = true;
@@ -197,7 +198,45 @@
         window.removeEventListener("mouseup", stopDrag);
     }
 
-    onMount(() => {
+    onMount(async () => {
+        // [Window Position Logic]
+        if (typeof window !== "undefined") {
+            const { getCurrentWindow, LogicalPosition } = await import(
+                "@tauri-apps/api/window"
+            );
+            const appWindow = getCurrentWindow();
+            const label = appWindow.label;
+
+            // Restore Position
+            const savedPos = localStorage.getItem("window_pos_" + label);
+            if (savedPos) {
+                try {
+                    const { x, y } = JSON.parse(savedPos);
+                    await appWindow.setPosition(new LogicalPosition(x, y));
+                } catch (e) {
+                    console.error("Restore pos error", e);
+                }
+            }
+
+            // Save Position on Move
+            appWindow.listen("tauri://move", async () => {
+                try {
+                    const pos = await appWindow.outerPosition();
+                    localStorage.setItem(
+                        "window_pos_" + label,
+                        JSON.stringify(pos),
+                    );
+                } catch (e) {}
+            });
+
+            // Listen for restore request from EPUB window
+            appWindow.listen("restore-main-window", async () => {
+                console.log("Received restore-main-window event");
+                await appWindow.show();
+                await appWindow.setFocus();
+            });
+        }
+
         let unlisten: any;
 
         const init = async () => {
@@ -382,20 +421,47 @@
                                 url: `/epub-editor?file=${encodedPath}`,
                                 title: "TEpub-Editor-EPUB",
                                 width: 1200,
-                                height: 800,
+                                height: 780,
+                                dragDropEnabled: false,
+                                center: true, // Center the window
                             },
                         );
 
-                        epubWindow.once("tauri://created", () => {
-                            console.log("EPUB 编辑器窗口创建成功");
-                        });
+                        // 这里的事件监听可能不触发，改为直接执行隐藏逻辑
+                        // Logic: Close main window if it's empty
+                        console.log(
+                            "Checking if main window should hide (Immediate). Content length:",
+                            fileContent ? fileContent.length : 0,
+                        );
 
+                        const current = getCurrentWindow();
+                        // 强制隐藏：只要不是在编辑已有的文件（通过内容是否为空判断），就隐藏
+                        if (!fileContent || fileContent.trim().length === 0) {
+                            console.log("Hiding main window...");
+                            await current.hide();
+                        } else {
+                            console.log(
+                                "Main window kept open. Content exists.",
+                            );
+                        }
+
+                        // 无论隐藏与否，都监听错误
                         epubWindow.once("tauri://error", (e) => {
                             console.error("窗口创建失败:", e);
                             message("打开 EPUB 编辑器失败: " + e, {
                                 title: "错误",
                                 kind: "error",
                             });
+                        });
+
+                        // 监听已销毁事件：当 EPUB 窗口关闭时，恢复主窗口显示
+                        epubWindow.once("tauri://destroyed", async () => {
+                            console.log(
+                                "EPUB window destroyed, restoring main window...",
+                            );
+                            const current = getCurrentWindow();
+                            await current.show();
+                            await current.setFocus();
                         });
                     } catch (e) {
                         console.error("EPUB 窗口打开错误:", e);
@@ -927,8 +993,16 @@
                 chapters,
                 metadata: epubMeta,
             });
-            // 制作成功：设置状态为成功，不显示弹窗
+            // 制作成功：设置状态为成功，在UI上显示操作按钮
             epubGenerationStatus = "success";
+
+            // 保存此时的路径供按钮使用
+            // (We can assume 'savePath' is available, but we need to store it in a state variable
+            // if we want the button in HTML to access it easily?
+            // actually 'savePath' is local. Let's create a module-level variable or just use the closure if we were inline.
+            // But here we are modifying state for the template.
+            // Let's add a state variable `lastGeneratedEpubPath`.
+            lastGeneratedEpubPath = savePath;
         } catch (e) {
             // 失败时显示错误并重置状态
             await message("制作失败: " + e, { kind: "error" });
@@ -1440,14 +1514,27 @@
                                 >正在制作...</button
                             >
                         {:else if epubGenerationStatus === "success"}
-                            <button
-                                class="grid-btn epub-success full-row"
-                                style="height:44px; margin-top:10px;"
-                                on:click={() => {
-                                    showEpubModal = false;
-                                    epubGenerationStatus = "idle";
-                                }}>制作完成 ✓</button
+                            <div
+                                style="display:flex; gap:10px; margin-top:10px;"
                             >
+                                <button
+                                    class="grid-btn blue"
+                                    style="flex:1; height:44px;"
+                                    on:click={() => {
+                                        if (lastGeneratedEpubPath) {
+                                            openLocalFile(
+                                                lastGeneratedEpubPath,
+                                            );
+                                            closeAllPanels();
+                                        }
+                                    }}>打开预览</button
+                                >
+                                <button
+                                    class="grid-btn"
+                                    style="flex:1; height:44px;"
+                                    on:click={closeAllPanels}>关闭</button
+                                >
+                            </div>
                         {/if}
                     </div>
                 {:else if showHistoryPanel}

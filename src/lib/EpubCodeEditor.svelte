@@ -111,6 +111,16 @@
                     ".cm-scroller::-webkit-scrollbar-thumb:hover": {
                         background: "#555",
                     },
+                    // 选中高亮样式 - 明亮的黄色背景
+                    ".cm-selectionBackground": {
+                        backgroundColor: "#ffeb3b !important",
+                    },
+                    "&.cm-focused .cm-selectionBackground": {
+                        backgroundColor: "#ffeb3b !important",
+                    },
+                    ".cm-selectionMatch": {
+                        backgroundColor: "#b3e5fc !important",
+                    },
                 }),
                 themeCompartment.of(
                     EditorView.theme({
@@ -160,6 +170,11 @@
             selection: { anchor: 0, head: view.state.doc.length },
         });
         view.focus();
+    }
+
+    // 获取 CodeMirror view 实例供外部使用
+    export function getView(): EditorView | null {
+        return view || null;
     }
 </script>
 
