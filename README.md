@@ -78,8 +78,3 @@ pnpm tauri build
 - [ ] **排版自动化** (一键缩进/去空行)
 - [ ] **插件系统**
 
----
-
-## 📄 许可证
-
-本项目采用 [MIT License](LICENSE) 开源。欢迎 Star ⭐️ 和 Fork！
