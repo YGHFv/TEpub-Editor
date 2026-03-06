@@ -313,6 +313,7 @@
                             await tick();
                             editorComponent?.resetDoc(fileContent);
                             await scanToc(fileContent);
+                            epubMeta = extractMetadata(fileContent, filePath);
                             updateMd5(fileContent);
                             if (state.scrollLine) {
                                 setTimeout(
@@ -383,6 +384,47 @@
         try {
             epubMeta.md5 = await invoke("calculate_md5", { content });
         } catch (e) {}
+    }
+
+    function extractMetadata(content: string, path: string) {
+        const meta = {
+            title: "书名",
+            creator: "作者",
+            publisher: "",
+            date: new Date().toISOString().split("T")[0],
+            uuid: crypto.randomUUID(),
+            md5: epubMeta.md5 || "",
+            cover_path: epubMeta.cover_path || "",
+            description: "",
+        };
+
+        // 默认书名
+        const basename = path.split(/[\\/]/).pop()?.replace(/\.[^/.]+$/, "") || "未命名";
+        meta.title = basename;
+
+        try {
+            // 1. 书名 (更稳健的正则)
+            const titleMatch = content.match(/(?:^|\n)\s*(?:书名|小说名|Title)[\s:：]*([^\n\r]+)/i);
+            if (titleMatch && titleMatch[1]) meta.title = titleMatch[1].trim();
+
+            // 2. 作者
+            const authorMatch = content.match(/(?:^|\n)\s*(?:作者|Author)[\s:：]*([^\n\r]+)/i);
+            if (authorMatch && authorMatch[1]) meta.creator = authorMatch[1].trim();
+
+            // 3. 简介 (更稳健的正则，支持无冒号换行)
+            // 优化：允许简介文字跨多行，直到看到章节标志
+            const descMatch = content.match(/(?:^|\n)\s*(?:内容)?(?:简介|Intro|Description)[\s:：]*([\s\S]+?)(?=\n\s*(?:第[零一二三四五六七八九十百千万0-9]+[卷部章回|卷部]|Chapter\s*\d+)|$)/i);
+            if (descMatch && descMatch[1]) {
+                const desc = descMatch[1].trim();
+                // 如果匹配到的内容太多（比如没找到章节标志一直匹配到结尾），且文档本身很长，则进行截断保护
+                if (desc.length > 0) {
+                    meta.description = desc.length > 3000 ? desc.substring(0, 3000) + "..." : desc;
+                }
+            }
+        } catch (e) {
+            console.log("Metadata extract failed", e);
+        }
+        return meta;
     }
 
     function saveStateToCache(line: number) {
@@ -489,29 +531,7 @@
                 isLoadingFile = true;
                 filePath = path;
 
-                // 重置元数据 (防止上一本书的信息残留)
-                epubMeta = {
-                    title: "书名",
-                    creator: "作者",
-                    publisher: "出版社",
-                    date: new Date().toISOString().split("T")[0],
-                    uuid: crypto.randomUUID(),
-                    md5: "",
-                    cover_path: "",
-                    description: "", // 重置简介
-                };
-
-                // 自动填充 EPUB 书名
-                const basename =
-                    filePath
-                        .split(/[\\/]/)
-                        .pop()
-                        ?.replace(/\.[^/.]+$/, "") || "未命名";
-                epubMeta.title = basename;
-
                 // 读取原生文本并施加终极降维打击：强力规范化换行符！
-                // 解决某些过时 TXT 或 Mac 导出的文件通篇只拿孤立 \r 甚至 U+2028 换行，
-                // 导致浏览器视觉上看似换了行，但被 CM6 的严格解析算作“几百万字的不换行超长单段”而死锁崩溃的问题。
                 let rawContent = await invoke<string>("read_text_file", {
                     path: filePath,
                 });
@@ -539,39 +559,9 @@
 
                 fileContent = content;
 
-                // 尝试从文件内容解析元数据 (智能填充)
-                try {
-                    // 1. 书名
-                    const titleMatch = content.match(
-                        /(?:^|\n)\s*(?:书名|小说名)[\s:：]+([^\n\r]+)/,
-                    );
-                    if (titleMatch && titleMatch[1]) {
-                        epubMeta.title = titleMatch[1].trim();
-                    }
-
-                    // 2. 作者
-                    const authorMatch = content.match(
-                        /(?:^|\n)\s*(?:作者|Author)[\s:：]+([^\n\r]+)/,
-                    );
-                    if (authorMatch && authorMatch[1]) {
-                        epubMeta.creator = authorMatch[1].trim();
-                    }
-
-                    // 3. 简介
-                    // 匹配 "简介" 或 "内容简介" 开始，直到遇到 "第x章" 或文件结束
-                    const descMatch = content.match(
-                        /(?:^|\n)\s*(?:内容)?(?:简介|Intro)[\s:：]+([\s\S]+?)(?=\n\s*(?:第[零一二三四五六七八九十百千万0-9]+[卷部章回]|Chapter\s*\d+)|$)/i,
-                    );
-                    if (descMatch && descMatch[1]) {
-                        // 限制简介长度，避免误匹配过多内容
-                        const desc = descMatch[1].trim();
-                        if (desc.length < 2000) {
-                            epubMeta.description = desc;
-                        }
-                    }
-                } catch (e) {
-                    console.log("Metadata parsing failed", e);
-                }
+                // 提取元数据
+                epubMeta = extractMetadata(content, path);
+                customMetadata = []; // 重置自定义元数据
 
                 editorComponent?.resetDoc(content);
                 isModified = false;
