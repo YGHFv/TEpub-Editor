@@ -136,6 +136,8 @@
           { label: "删除", action: "delete", icon: "🗑️", danger: true },
         );
       } else if (type === "toc") {
+        const hasChildren = currentContext.hasChildren === "true"; // 只检查data-has-children属性
+
         currentItems = [
           { label: "在文件树中选中", action: "select-in-tree", icon: "🔍" },
           {
@@ -143,8 +145,16 @@
             action: "select-children",
             icon: "📑",
           },
-          // { label: "重命名", action: "rename-toc", icon: "✏️" },
         ];
+
+        // 如果有子节点，添加折叠选项
+        if (hasChildren) {
+          currentItems.push(
+            { separator: true, label: "", action: "" },
+            { label: "折叠当前卷", action: "collapse-this", icon: "📁" },
+            { label: "折叠全部卷", action: "collapse-all", icon: "📂" },
+          );
+        }
       } else {
         return; // Unknown context
       }
@@ -160,10 +170,8 @@
         { label: "全选", action: "select-all", icon: "✨" },
       ];
     } else {
-      return; // Allow default or do nothing? User said "Always prevent default" in previous code?
-      // Previous code: always preventDefault then check.
-      // Let's stick to showing our menu or nothing.
-      // If not matched, we hide menu.
+      // 空白区域 - 阻止默认菜单，不显示自定义菜单
+      e.preventDefault();
       if (showMenu) showMenu = false;
       return;
     }

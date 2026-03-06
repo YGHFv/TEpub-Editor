@@ -61,7 +61,7 @@
     const DEFAULT_SETTINGS = {
         volRegex: "^\\s*第[零一二三四五六七八九十百千万0-9]+[卷部].*",
         chapRegex:
-            "^\\s*(第[一二三四五六七八九十百千万0-9]+[章回]|Chapter\\s*\\d+).*",
+            "^\\s*(第[一二三四五六七八九十百千万0-9]+(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+).*",
         metaRegex: "^\\s*(内容)?(简介|序[章言]?|前言|楔子|后记|完本感言).*", // 之前丢失的
         wordCountThreshold: 8000,
         clearHistoryOnSave: false,
@@ -90,7 +90,6 @@
     let hasInitialized = false;
 
     // 面板显示状态
-    let showFindReplace = false;
     let showSettingsPanel = false;
     let showEpubModal = false;
     let showCheckPanel = false;
@@ -254,6 +253,17 @@
                         ...DEFAULT_SETTINGS,
                         ...JSON.parse(stored),
                     };
+                    // 迁移旧版正则：将 [章回] 替换为排除"回合"的模式
+                    if (appSettings.chapRegex.includes("[章回]")) {
+                        appSettings.chapRegex = appSettings.chapRegex.replace(
+                            "[章回]",
+                            "(?:[章节]|回(?:[^合]|$))",
+                        );
+                        localStorage.setItem(
+                            "app-settings",
+                            JSON.stringify(appSettings),
+                        );
+                    }
                 } catch (e) {}
 
             // 3. 崩溃恢复逻辑 (完整保留)
@@ -421,7 +431,7 @@
                                 url: `/epub-editor?file=${encodedPath}`,
                                 title: "TEpub-Editor-EPUB",
                                 width: 1200,
-                                height: 780,
+                                height: 740,
                                 dragDropEnabled: false,
                                 center: true, // Center the window
                             },
@@ -497,10 +507,34 @@
                         ?.replace(/\.[^/.]+$/, "") || "未命名";
                 epubMeta.title = basename;
 
-                // const content = await readTextFile(filePath);
-                const content = await invoke<string>("read_text_file", {
+                // 读取原生文本并施加终极降维打击：强力规范化换行符！
+                // 解决某些过时 TXT 或 Mac 导出的文件通篇只拿孤立 \r 甚至 U+2028 换行，
+                // 导致浏览器视觉上看似换了行，但被 CM6 的严格解析算作“几百万字的不换行超长单段”而死锁崩溃的问题。
+                let rawContent = await invoke<string>("read_text_file", {
                     path: filePath,
                 });
+                let content = rawContent.replace(
+                    /\r\n|\r|\u2028|\u2029/g,
+                    "\n",
+                );
+
+                // 【终极排错大招】防巨型单行核武器：如果此文件的恶劣排版中包含超乎想象的巨龙行（>800字没有一个物理回车），
+                // CodeMirror 会在拖拽选区或滚动时因为几何测算彻底超载，并导致 posAtCoordsInline 读出 null 空指针崩溃。
+                // 解决方案：为所有超长异端长句智能注入真正的换行！
+                content = content
+                    .split("\n")
+                    .map((line) => {
+                        if (line.length > 800) {
+                            // 遇到八百字不换行的“伪文字段落”，在句号/叹号/问号后（包裹着引号时也行），并且后面跟着空格或什么都没有的地方，强制斩断加回车
+                            return line.replace(
+                                /([。！？\.\!\?][”’」』]*)(?=\s|\S)/g,
+                                "$1\n",
+                            );
+                        }
+                        return line;
+                    })
+                    .join("\n");
+
                 fileContent = content;
 
                 // 尝试从文件内容解析元数据 (智能填充)
@@ -686,22 +720,47 @@
             if (isCheckModeOn) runFullCheck();
         } catch (e) {}
     }
+    let saveCacheTimer: ReturnType<typeof setTimeout> | null = null;
+
+    let lastNavChapterId: string | null = null; // 导航锁定的章节ID
+    let lastNavLine: number = 0; // 导航锁定章节的行号
 
     // 编辑器滚动时触发：高亮侧边栏
-    async function handleScroll(line: number) {
-        saveStateToCache(line);
+    async function handleScroll(state: {
+        top: number;
+        bottom: number;
+        isAtBottom: boolean;
+    }) {
+        // 防抖: 每2秒最多保存一次状态到 localStorage（只保存 top 行号）
+        if (!saveCacheTimer) {
+            saveCacheTimer = setTimeout(() => {
+                saveCacheTimer = null;
+                saveStateToCache(state.top);
+            }, 2000);
+        }
         if (flatToc.length === 0) return;
         if (isNavigating) return; // 正在手动跳转，忽略滚动监听
 
-        // 二分查找或倒序查找当前章节
-        let found: FlatNode | null = null;
-        // Editor 现在传递的是【屏幕中心】的行号，所以直接比较即可
+        // 倒序查找上下边界分别对应的章节
+        // 注意：CM6 使用 scrollIntoView(y:"start") 时，章节标题往往排在视口顶部往下 5-20 行的地方。
+        // 所以我们加上 10 行的容差。如果某个章节标题出现在视口顶部这 10 行内，我们就认为当前处于该章节。
+        let foundTop: FlatNode | null = null;
+        let foundBottom: FlatNode | null = null;
+
         for (let i = flatToc.length - 1; i >= 0; i--) {
-            if (flatToc[i].line <= line) {
-                found = flatToc[i];
-                break;
+            if (!foundTop && flatToc[i].line <= state.top + 10) {
+                foundTop = flatToc[i];
             }
+            if (!foundBottom && flatToc[i].line <= state.bottom) {
+                foundBottom = flatToc[i];
+            }
+            if (foundTop && foundBottom) break;
         }
+
+        // 默认高亮视口最上方的章节
+        // 但如果已经滚到了文档绝对底部，则高亮视口最下方的章节
+        // 这样可以完美解决最后几章很短导致无法滚动到顶部时的高亮错位问题
+        let found = state.isAtBottom ? foundBottom : foundTop;
 
         if (found && found.id !== activeChapterId) {
             activeChapterId = found.id;
@@ -719,15 +778,30 @@
             // 侧边栏自动滚动
             await tick();
             const el = document.getElementById(`toc-${activeChapterId}`);
-            if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+            const tocList = document.querySelector(".toc-list");
+            if (el && tocList) {
+                const elRect = el.getBoundingClientRect();
+                const listRect = tocList.getBoundingClientRect();
+                // 仅当目标不在可视区域的中心时才微调滚动，避免频繁触发 reflow 抖动
+                if (
+                    elRect.top < listRect.top + 50 ||
+                    elRect.bottom > listRect.bottom - 50
+                ) {
+                    const scrollAmount =
+                        elRect.top -
+                        listRect.top -
+                        listRect.height / 2 +
+                        elRect.height / 2;
+                    tocList.scrollBy({ top: scrollAmount, behavior: "smooth" });
+                }
+            }
         }
     }
 
-    // 处理搜索/选择时的目录同步（绕过导航锁）
+    // 处理选择时的目录同步
     async function handleSelectionChange(line: number) {
         if (isNavigating) return;
-        // 这里也可以加少量防抖
-        handleScroll(line);
+        handleScroll({ top: line, bottom: line, isAtBottom: false });
     }
 
     // 统一处理章节跳转点击
@@ -743,12 +817,14 @@
         // 2. 开启导航锁
         isNavigating = true;
 
-        // 3. 立即更新高亮
+        // 3. 立即更新高亮 + 设置导航锁定目标
         activeChapterId = id;
+        lastNavChapterId = id;
+        lastNavLine = line;
 
         // 4. 执行滚动
         if (editorComponent) {
-            editorComponent.scrollToLine(line);
+            editorComponent.scrollToLine(line, true);
         } else {
             console.error("Editor component not ready");
         }
@@ -757,18 +833,15 @@
         requestAnimationFrame(() => {
             const el = document.getElementById(`toc-${id}`);
             if (el) {
-                console.log("handleChapterClick: scrolling sidebar to", id);
                 el.scrollIntoView({ behavior: "smooth", block: "center" });
-            } else {
-                console.warn("handleChapterClick: TOC element not found", id);
             }
         });
 
-        // 6. 设置解锁定时器
+        // 6. 解锁导航锁（handleScroll 会通过 lastNavChapterId 继续保护高亮）
         scrollTimeout = setTimeout(() => {
             isNavigating = false;
             scrollTimeout = null;
-        }, 600);
+        }, 1200);
     }
 
     // --- 检查逻辑 ---
@@ -808,6 +881,67 @@
         }, 600);
     }
 
+    // 中文数字转阿拉伯数字
+    function chineseToNum(cn: string): number {
+        const charMap: Record<string, number> = {
+            零: 0,
+            〇: 0,
+            一: 1,
+            二: 2,
+            两: 2,
+            三: 3,
+            四: 4,
+            五: 5,
+            六: 6,
+            七: 7,
+            八: 8,
+            九: 9,
+            十: 10,
+            百: 100,
+            千: 1000,
+            万: 10000,
+        };
+        let result = 0,
+            current = 0;
+        for (const c of cn) {
+            const v = charMap[c];
+            if (v === undefined) return -1;
+            if (v >= 10) {
+                if (current === 0) current = 1;
+                if (v === 10000) {
+                    result = (result + current) * v;
+                    current = 0;
+                } else {
+                    current *= v;
+                    result += current;
+                    current = 0;
+                }
+            } else {
+                current = current * 10 + v;
+            }
+        }
+        return result + current;
+    }
+
+    // 从标题中提取章节序号，优先匹配"第X章/回/节"格式
+    function extractChapterNum(title: string): number {
+        // 1. 优先匹配 "第X章/回/节" 格式（支持中文数字和阿拉伯数字）
+        const m = title.match(
+            /第\s*([0-9零一二三四五六七八九十百千万〇两]+)\s*[章回节]/,
+        );
+        if (m) {
+            const raw = m[1];
+            // 纯阿拉伯数字
+            if (/^\d+$/.test(raw)) return parseInt(raw);
+            // 中文数字
+            return chineseToNum(raw);
+        }
+        // 2. 降级：标题以纯数字开头（如 "101 黑暗"）
+        const m2 = title.match(/^(\d+)/);
+        if (m2) return parseInt(m2[1]);
+        return -1;
+    }
+
     function runFullCheck() {
         sequenceErrors = [];
         wordCountErrors = [];
@@ -816,7 +950,7 @@
         let lastNum = -1;
         for (const node of flatToc) {
             if (node.type === "Chapter") {
-                const num = parseInt(node.title.match(/\d+/)?.[0] || "-1");
+                const num = extractChapterNum(node.title);
                 if (num !== -1) {
                     if (lastNum !== -1 && num !== lastNum + 1) {
                         invalidSequenceIds.add(node.id);
@@ -1040,7 +1174,6 @@
     }
 
     function closeAllPanels() {
-        showFindReplace = false;
         showSettingsPanel = false;
         showEpubModal = false;
         showCheckPanel = false;
@@ -1110,12 +1243,11 @@
         </div>
         <button
             class="btn-secondary"
+            title="查找与替换 (Ctrl+F)"
             on:click={() => {
                 closeAllPanels();
-                showFindReplace = !showFindReplace;
-                // 重置位置到默认(如果未初始化)
-                if (findPanelPos.x === 0 && findPanelPos.y === 0) {
-                    findPanelPos = { x: window.innerWidth - 340, y: 60 };
+                if (editorComponent) {
+                    editorComponent.openSearchWindow();
                 }
             }}>🔍</button
         >
@@ -1247,85 +1379,6 @@
             />
         </section>
     </div>
-
-    {#if showFindReplace}
-        <div
-            class="find-panel"
-            style="left: {findPanelPos.x}px; top: {findPanelPos.y}px;"
-            on:mousedown={(e) => startDrag(e, "find")}
-        >
-            <div class="find-header">
-                <span class="drag-title">查找与替换 (可拖拽)</span>
-                <button
-                    class="icon-close"
-                    on:click={() => (showFindReplace = false)}>✕</button
-                >
-            </div>
-            <div class="find-body">
-                <div class="find-grid">
-                    <div class="input-group">
-                        <input
-                            type="text"
-                            bind:value={findPattern}
-                            placeholder="查找..."
-                            on:keydown={(e) =>
-                                e.key === "Enter" && performFind()}
-                        />
-                        <label class="regex-tag"
-                            ><input
-                                type="checkbox"
-                                bind:checked={isRegex}
-                            />.*</label
-                        >
-                    </div>
-                    <div class="input-group">
-                        <input
-                            type="text"
-                            bind:value={replacePattern}
-                            placeholder="替换为..."
-                        />
-                    </div>
-                </div>
-
-                <div class="msg-bar-compact">{replaceMsg || " "}</div>
-
-                <div class="action-bar">
-                    <div
-                        class="nav-btns"
-                        style="flex: 1; display:flex; gap:8px"
-                    >
-                        <button
-                            class="btn-small"
-                            style="flex:1"
-                            on:click={findPrev}>↑ 向上查找</button
-                        >
-                        <button
-                            class="btn-small"
-                            style="flex:1"
-                            on:click={findNext}>↓ 向下查找</button
-                        >
-                    </div>
-                </div>
-                <div class="action-bar" style="margin-top:8px">
-                    <div class="op-btns" style="flex: 1; display:flex; gap:8px">
-                        <button
-                            class="btn-small"
-                            style="flex:1"
-                            on:click={() =>
-                                editorComponent.replaceSelection(
-                                    replacePattern,
-                                )}>替换</button
-                        >
-                        <button
-                            class="btn-small btn-dang"
-                            style="flex:1"
-                            on:click={performReplaceAll}>全部替换</button
-                        >
-                    </div>
-                </div>
-            </div>
-        </div>
-    {/if}
 
     {#if showSettingsPanel || showEpubModal || showHistoryPanel}
         <div
@@ -1659,10 +1712,12 @@
                         <div class="tag-list">
                             {#each sequenceErrors as e}
                                 <button
-                                    class="err-tag"
+                                    class="err-tag err-tag-seq"
                                     on:click={() =>
                                         handleChapterClick(e.id, e.line)}
-                                    >{e.title} ({e.msg})</button
+                                    ><span class="err-tag-title">{e.title}</span
+                                    ><span class="err-tag-msg">({e.msg})</span
+                                    ></button
                                 >
                             {:else}<span class="toc-count">无</span>{/each}
                         </div>
@@ -2090,6 +2145,22 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .err-tag-seq {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        white-space: nowrap;
+    }
+    .err-tag-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+    }
+    .err-tag-msg {
+        flex-shrink: 0;
+        color: #c62828;
+        font-weight: bold;
     }
     .err-tag:hover {
         background: #ffe0b2;

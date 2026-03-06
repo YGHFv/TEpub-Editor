@@ -612,9 +612,13 @@ fn split_title(full_title: &str) -> (String, String) {
 }
 
 // --- 换行符规范化 ---
-// 将所有换行符统一为 \n，确保后端行号计算与 CodeMirror 编辑器一致
+// 将所有换行符（包括 Mac 旧时代的 \r 以及影响底层布局框架的特殊 Unicode 行分割符 U+2028）
+// 统一为正统的 \n，确保后端行号计算与 CodeMirror 编辑器的严格分行计算完全一致。
 fn normalize_line_endings(s: String) -> String {
-    s.replace("\r\n", "\n").replace('\r', "\n")
+    s.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\u{2028}', "\n")
+        .replace('\u{2029}', "\n")
 }
 
 // --- 指令区域 ---
@@ -786,7 +790,11 @@ async fn scan_chapters(
     // Normalize line endings to ensure consistency with CodeMirror's line counting
     // CodeMirror treats \r, \n, and \r\n all as line separators
     // Rust's .lines() only recognizes \n and \r\n
-    let content = content.replace("\r\n", "\n").replace('\r', "\n");
+    let content = content
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\u{2028}', "\n")
+        .replace('\u{2029}', "\n");
 
     let mut chapters = Vec::new();
     let re_volume = Regex::new(&volreg).unwrap_or_else(|_| {

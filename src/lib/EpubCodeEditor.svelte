@@ -16,6 +16,7 @@
     export let onScroll: (event: Event) => void = () => {};
     export let onClick: (line: number) => void = () => {};
     export let onSelectionChange: (text: string) => void = () => {};
+    export let onOpenSearch: () => void = () => {};
 
     let editorElement: HTMLElement;
     let view: EditorView;
@@ -158,7 +159,22 @@
         }
     }
 
+    let blockNativeSearch: (e: KeyboardEvent) => void;
+
     onMount(() => {
+        blockNativeSearch = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenSearch();
+            } else if (e.key === "F3") {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenSearch();
+            }
+        };
+        window.addEventListener("keydown", blockNativeSearch, true);
+
         const savedSize = localStorage.getItem("epub-editor-font-size");
         if (savedSize) fontSize = parseInt(savedSize);
 
@@ -170,7 +186,12 @@
         });
     });
 
-    onDestroy(() => view?.destroy());
+    onDestroy(() => {
+        if (blockNativeSearch) {
+            window.removeEventListener("keydown", blockNativeSearch, true);
+        }
+        view?.destroy();
+    });
 
     function getLanguageExtension() {
         switch (language) {

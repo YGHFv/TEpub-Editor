@@ -168,6 +168,37 @@
     let editorContentDiv: HTMLElement | null = null;
     let epubCodeEditorComponent: EpubCodeEditor | null = null;
 
+    // 禁用预览iframe的右键菜单
+    $: if (previewIframe && previewContent) {
+        // 等待iframe加载完成
+        const disableContextMenu = () => {
+            try {
+                const iframeDoc = previewIframe?.contentDocument;
+                if (iframeDoc) {
+                    // 移除旧的监听器（如果有）并添加新的
+                    iframeDoc.removeEventListener(
+                        "contextmenu",
+                        preventContextMenu,
+                    );
+                    iframeDoc.addEventListener(
+                        "contextmenu",
+                        preventContextMenu,
+                    );
+                }
+            } catch (err) {
+                // 跨域或其他安全错误，忽略
+            }
+        };
+
+        // 定义阻止函数
+        const preventContextMenu = (e: Event) => {
+            e.preventDefault();
+        };
+
+        // 立即尝试禁用
+        setTimeout(disableContextMenu, 100);
+    }
+
     // 多标签页相关
     let openTabs: EpubFileNode[] = []; // 已打开的文件标签
     let activeTabIndex: number = -1; // 当前激活的标签索引
@@ -262,7 +293,7 @@
         confirmResolve = null;
     }
 
-    let showFindReplace = false;
+    let showFindReplace = true; // 默认显示查找替换面板
     let findPattern = "";
     let replacePattern = "";
     let isRegex = false;
@@ -271,6 +302,35 @@
     let searchDirection: "down" | "up" = "down";
     let wrapAround = true;
     let textOnly = false;
+
+    // 从localStorage加载搜索选项
+    if (typeof localStorage !== "undefined") {
+        const savedOptions = localStorage.getItem("epub-search-options");
+        if (savedOptions) {
+            try {
+                const options = JSON.parse(savedOptions);
+                isRegex = options.isRegex ?? false;
+                searchScope = options.searchScope ?? "current";
+                searchDirection = options.searchDirection ?? "down";
+                wrapAround = options.wrapAround ?? true;
+                textOnly = options.textOnly ?? false;
+            } catch (e) {}
+        }
+    }
+
+    // 保存搜索选项到localStorage（响应式）
+    $: if (typeof localStorage !== "undefined") {
+        localStorage.setItem(
+            "epub-search-options",
+            JSON.stringify({
+                isRegex,
+                searchScope,
+                searchDirection,
+                wrapAround,
+                textOnly,
+            }),
+        );
+    }
     let searchMessage = "";
     let currentMatchInfo: {
         filePath: string;
@@ -314,9 +374,11 @@
         let result: EpubFileNode[] = [];
         for (const node of nodes) {
             if (
-                node.file_type === "html" ||
-                node.name.endsWith(".xhtml") ||
-                node.name.endsWith(".html")
+                (node.file_type === "html" ||
+                    node.name.endsWith(".xhtml") ||
+                    node.name.endsWith(".html")) &&
+                !node.name.endsWith(".opf") &&
+                !node.name.endsWith(".ncx")
             ) {
                 result.push(node);
             }
@@ -359,6 +421,41 @@
             fileTree = await invoke<EpubFileNode[]>("extract_epub", {
                 epubPath: epubPath,
             });
+
+            // 确保标准 EPUB 文件夹在 UI 中总是可见（类似 Sigil 的行为）
+            const ensureStandardFolders = (nodes: EpubFileNode[]) => {
+                // 查找 OEBPS 节点
+                const oebpsNode = nodes.find(
+                    (n) => n.name.toLowerCase() === "oebps",
+                );
+                if (oebpsNode && oebpsNode.children) {
+                    const standardFolders = ["Images", "Fonts"];
+
+                    standardFolders.forEach((folderName) => {
+                        // 检查文件夹是否已存在
+                        const exists = oebpsNode.children!.some(
+                            (child) =>
+                                child.name === folderName &&
+                                child.file_type === "folder",
+                        );
+
+                        if (!exists) {
+                            // 添加虚拟文件夹节点
+                            oebpsNode.children!.push({
+                                name: folderName,
+                                path: `OEBPS/${folderName}`,
+                                file_type: "folder",
+                                size: null,
+                                title: null,
+                                resolution: null,
+                                children: [],
+                            });
+                        }
+                    });
+                }
+            };
+            ensureStandardFolders(fileTree);
+
             isProjectDirty = false;
             modifiedFiles.clear();
             modifiedFiles = modifiedFiles;
@@ -626,8 +723,21 @@
         // Calling loadEpub (now top-level)
         loadEpub();
 
+        const blockGlobalSearch = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+                e.preventDefault();
+                showFindReplace = true;
+                setTimeout(() => {
+                    const input = document.getElementById("epub-search-input-fr");
+                    if (input) input.focus();
+                }, 50);
+            }
+        };
+        window.addEventListener("keydown", blockGlobalSearch, true);
+
         return () => {
             // 组件销毁时清理
+            window.removeEventListener("keydown", blockGlobalSearch, true);
             window.removeEventListener("beforeunload", handleBeforeUnload);
             if (unlistenClose) unlistenClose();
             cleanupBlobUrls();
@@ -1085,6 +1195,45 @@
                         };
                         findAndSelect(fileTree);
                     }
+                } else if (
+                    action === "collapse-this" ||
+                    action === "collapse-all"
+                ) {
+                    // 折叠TOC节点
+                    const tocId = context.id;
+                    console.log(
+                        "[DEBUG] Collapse action:",
+                        action,
+                        "tocId:",
+                        tocId,
+                    );
+                    console.log("[DEBUG] tocNodeRefs:", tocNodeRefs);
+                    console.log("[DEBUG] Has ref?", !!tocNodeRefs[tocId]);
+
+                    if (action === "collapse-this") {
+                        // 折叠当前卷
+                        if (tocId && tocNodeRefs[tocId]) {
+                            const nodeRef = tocNodeRefs[tocId];
+                            console.log("[DEBUG] nodeRef:", nodeRef);
+                            if (nodeRef.collapseThis) {
+                                console.log("[DEBUG] Calling collapseThis");
+                                nodeRef.collapseThis();
+                            }
+                        } else {
+                            console.log(
+                                "[DEBUG] No ref found for tocId:",
+                                tocId,
+                            );
+                        }
+                    } else if (action === "collapse-all") {
+                        // 折叠全部卷 - 遍历所有TOC节点并折叠
+                        console.log("[DEBUG] Collapsing all TOC nodes");
+                        Object.values(tocNodeRefs).forEach((nodeRef) => {
+                            if (nodeRef && nodeRef.collapseThis) {
+                                nodeRef.collapseThis();
+                            }
+                        });
+                    }
                 } else if (action === "select-children") {
                     // TOC 选中卷下所有文件
                     // 逻辑：
@@ -1480,10 +1629,6 @@
             else if (lower.endsWith(".otf")) mimeType = "font/otf";
             else if (lower.endsWith(".eot"))
                 mimeType = "application/vnd.ms-fontobject";
-            else if (lower.endsWith(".png")) mimeType = "image/png";
-            else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
-                mimeType = "image/jpeg";
-            else if (lower.endsWith(".gif")) mimeType = "image/gif";
             else if (lower.endsWith(".svg")) mimeType = "image/svg+xml";
             else if (lower.endsWith(".webp")) mimeType = "image/webp";
 
@@ -1553,6 +1698,10 @@
                 overflow-x: hidden !important;
                 scrollbar-width: none !important;
                 -ms-overflow-style: none !important;
+            }
+            /* 隐藏滚动条 */
+            ::-webkit-scrollbar {
+                display: none !important;
             }
             /* Chrome/Safari 隐藏滚动条 */
             ::-webkit-scrollbar {
@@ -2216,15 +2365,6 @@
             return;
         }
 
-        // UX Optimization: Immediate Switch
-        if (
-            file.file_type === "html" ||
-            file.name.endsWith(".xhtml") ||
-            file.name.endsWith(".html")
-        ) {
-            activeTab = "preview";
-        }
-
         // 立即清理旧内容，避免视觉混淆
         // 如果有内容缓存，先显示内容缓存
         if (fileContentCache.has(file.path)) {
@@ -2233,15 +2373,22 @@
             fileContent = "加载中...";
         }
 
-        // 如果是 HTML 文件且没命中预览缓存，显示加载中
-        // 对于非 HTML 文件，保留当前预览内容
+        // UX Optimization: Immediate Switch for HTML files
+        // Only auto-switch if no preview content yet (to avoid clearing existing preview)
         const isHtml =
             file.file_type === "html" ||
             file.name.endsWith(".xhtml") ||
             file.name.endsWith(".html");
-        if (isHtml && !previewCache.has(file.path)) {
-            // 设为空字符串，让 placeholder div 显示而不是 iframe
-            previewContent = "";
+
+        if (isHtml) {
+            // Only switch to preview tab if we already have preview content OR if we'll load it
+            // Don't clear previewContent here - let it retain the previous preview until new one loads
+            activeTab = "preview";
+
+            // Only clear preview if we don't have it cached (show loading placeholder)
+            if (!previewCache.has(file.path)) {
+                previewContent = "";
+            }
         }
 
         try {
@@ -2528,6 +2675,7 @@
     let tocList: TocItem[] = [];
     let isTocLoading = false;
     let expandedTocItems: Set<string> = new Set(); // 存储展开的目录项ID
+    let tocNodeRefs: Record<string, any> = {}; // 存储TOC节点引用（使用对象而不是Map）
     let spinePaths: string[] = []; // Store Spine reading order paths
 
     function toggleTocItem(id: string) {
@@ -3217,10 +3365,6 @@
 
         expandParentFolders(targetPath);
         findAndSelect(fileTree);
-        // 注释掉自动切换，保持在目录页
-        // if (found) {
-        //      activeTab = "preview";
-        // }
     }
 
     function getFileDescription(file: EpubFileNode): string {
@@ -4366,6 +4510,17 @@
                                 onSave={saveCurrentFile}
                                 onClick={handleEditorClick}
                                 onSelectionChange={handleEditorSelection}
+                                onOpenSearch={() => {
+                                    showFindReplace = true;
+                                    setTimeout(() => {
+                                        const input = document.getElementById("epub-search-input-fr");
+                                        if (input) input.focus();
+                                        else {
+                                            const inputs = document.querySelectorAll(".fr-input");
+                                            if (inputs.length > 0) (inputs[0] as HTMLElement).focus();
+                                        }
+                                    }, 50);
+                                }}
                             />
                         {:else}
                             <pre class="code-block">{@html addLineNumbers(
@@ -4387,6 +4542,7 @@
                         <span class="fr-label">查找:</span>
                         <div class="fr-input-wrapper">
                             <input
+                                id="epub-search-input-fr"
                                 type="text"
                                 class="fr-input"
                                 bind:value={findPattern}
@@ -4568,7 +4724,6 @@
                         class:active={activeTab === "toc"}
                         on:click={() => {
                             activeTab = "toc";
-                            loadTOC();
                         }}
                     >
                         目录
@@ -4621,7 +4776,11 @@
                     {:else}
                         <div class="toc-list">
                             {#each tocList as item}
-                                <TocNode {item} onSelect={handleTocClick} />
+                                <TocNode
+                                    bind:this={tocNodeRefs[item.id]}
+                                    {item}
+                                    onSelect={handleTocClick}
+                                />
                             {/each}
                         </div>
                     {/if}
@@ -4898,9 +5057,10 @@
     /* 编辑器 */
     .editor-pane {
         flex: 1;
+        background: #fff;
         display: flex;
         flex-direction: column;
-        background: #fff;
+        border-left: 1px solid #ddd;
         border-right: 1px solid #ddd;
         min-width: 0; /* 关键：允许 flex 子项收缩，从而触发内部滚动 */
         position: relative; /* 使查找替换面板的 absolute 定位相对于此元素 */
@@ -5122,7 +5282,7 @@
         width: 100%; /* Fill sidebar width */
         display: flex;
         flex-direction: column;
-        overflow-y: auto; /* Allow scrolling if phone height > window height */
+        overflow-y: hidden; /* Let iframe handle scroll, prevent double scrollbar */
         overflow-x: hidden; /* Prevent horizontal scrollbar */
         background: #f0f0f0; /* Darker background to distinguish phone frame */
         align-items: center; /* Center horizontally */
@@ -5132,16 +5292,16 @@
 
     .mobile-frame {
         width: 100%; /* 320px */
-        height: 711px; /* 20:9 ratio based on 320px width */
-        flex: 0 0 auto; /* Fixed height, don't grow/shrink */
+        height: 700px; /* 调整为700px */
+        max-height: 100%; /* 防止超出容器 */
         background: #fff;
         border: 1px solid #ddd;
         box-sizing: border-box; /* Prevent border from adding width */
         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); /* Shadow for depth */
-        /* overflow-y: auto;  <- Internal scroll is handled by iframe content usually? No, iframe has own scroll. */
-        /* But we want the FRAME to be the viewport. */
         overflow: hidden; /* Hide overflow outside the "phone screen" */
         position: relative;
+        display: flex; /* Make it a flex container for iframe */
+        flex-direction: column;
     }
 
     .mobile-frame::-webkit-scrollbar {
@@ -5227,6 +5387,7 @@
         padding: 6px 10px;
         font-size: 13px;
         flex-shrink: 0;
+        overflow: visible; /* 允许下拉框溢出显示 */
     }
 
     .fr-row {
@@ -5234,6 +5395,7 @@
         align-items: center;
         gap: 4px;
         margin-bottom: 6px;
+        overflow: visible; /* 允许下拉框溢出显示 */
     }
 
     .fr-actions {
@@ -5393,15 +5555,16 @@
     /* 历史记录下拉菜单 */
     .fr-history-dropdown {
         position: absolute;
-        top: 100%;
+        bottom: 100%; /* 向上展开 */
         left: 0;
         right: 0;
+        margin-bottom: 2px; /* 与输入框保持小间距 */
         background: #fff;
         border: 1px solid #ccc;
         border-radius: 4px;
         box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
         z-index: 200;
-        max-height: 200px;
+        max-height: 400px; /* 增加高度以显示更多历史记录 */
         overflow-y: auto;
     }
 
