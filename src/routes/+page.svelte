@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, tick } from "svelte";
-    import { invoke } from "@tauri-apps/api/core";
+    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
     import { open, save, message, ask } from "@tauri-apps/plugin-dialog";
     // import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs"; // Removed to force use of custom backend
     import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -102,13 +102,15 @@
     let epubMeta = {
         title: "书名",
         creator: "作者",
-        publisher: "出版社",
+        publisher: "",
         date: new Date().toISOString().split("T")[0],
         uuid: crypto.randomUUID(),
         md5: "",
         cover_path: "",
         description: "",
     };
+    let showAdvancedEpub = false;
+    let customMetadata: { key: string; value: string }[] = [];
     let appSettings = { ...DEFAULT_SETTINGS };
     let historyList: HistoryMeta[] = [];
 
@@ -1121,11 +1123,19 @@
                 return c;
             });
 
+            // 整合自定义元数据
+            const finalMetadata = { ...epubMeta };
+            customMetadata.forEach(item => {
+                if (item.key.trim()) {
+                    (finalMetadata as any)[item.key.trim()] = item.value;
+                }
+            });
+
             await invoke("export_epub", {
                 savePath,
                 content: fileContent,
                 chapters,
-                metadata: epubMeta,
+                metadata: finalMetadata,
             });
             // 制作成功：设置状态为成功，在UI上显示操作按钮
             epubGenerationStatus = "success";
@@ -1482,113 +1492,115 @@
                 {:else if showEpubModal}
                     <div class="p-header">
                         <span>制作 EPUB</span>
-                        <button class="icon-close" on:click={closeAllPanels}
-                            >✕</button
-                        >
+                        <button class="icon-close" on:click={closeAllPanels}>✕</button>
                     </div>
-                    <div class="p-body">
-                        <div class="set-row">
-                            <label for="et">书名:</label><input
-                                id="et"
-                                type="text"
-                                bind:value={epubMeta.title}
-                            />
-                        </div>
-                        <div class="set-row">
-                            <label for="ec">作者:</label><input
-                                id="ec"
-                                type="text"
-                                bind:value={epubMeta.creator}
-                            />
-                        </div>
-                        <div class="set-row">
-                            <label for="ep">出版社:</label><input
-                                id="ep"
-                                type="text"
-                                bind:value={epubMeta.publisher}
-                            />
-                        </div>
-                        <div class="set-row" style="align-items:flex-start">
-                            <label for="ed" style="margin-top:6px;">简介:</label
-                            >
-                            <textarea
-                                id="ed"
-                                rows="4"
-                                bind:value={epubMeta.description}
-                                style="flex:1; padding:8px; border:1px solid #ddd; border-radius:6px; font-size:13px; font-family:inherit; resize:vertical; min-height:80px;"
-                            ></textarea>
-                        </div>
-                        <div class="set-row">
-                            <label>UUID:</label><input
-                                type="text"
-                                value={epubMeta.uuid}
-                                readonly
-                                style="font-size:10px; background:#f5f5f5"
-                            />
-                        </div>
-                        <div class="set-row">
-                            <label>MD5:</label><input
-                                type="text"
-                                value={epubMeta.md5}
-                                readonly
-                                style="font-size:10px; background:#f5f5f5"
-                            />
-                        </div>
-                        <div class="set-row">
-                            <label>封面:</label><button
-                                class="mini-btn"
-                                on:click={async () => {
-                                    const s = await open({
-                                        filters: [
-                                            {
-                                                name: "Image",
-                                                extensions: ["jpg", "png"],
-                                            },
-                                        ],
-                                    });
-                                    if (s) epubMeta.cover_path = s as string;
-                                }}
-                                >{epubMeta.cover_path
-                                    ? "已选"
-                                    : "选择图片"}</button
-                            >
-                        </div>
-                        {#if epubGenerationStatus === "idle"}
-                            <button
-                                class="grid-btn blue full-row"
-                                style="height:44px; margin-top:10px;"
-                                on:click={generateEpub}>开始生成</button
-                            >
-                        {:else if epubGenerationStatus === "generating"}
-                            <button
-                                class="grid-btn full-row"
-                                disabled
-                                style="height:44px; margin-top:10px; opacity:0.6; cursor:not-allowed;"
-                                >正在制作...</button
-                            >
-                        {:else if epubGenerationStatus === "success"}
-                            <div
-                                style="display:flex; gap:10px; margin-top:10px;"
-                            >
-                                <button
-                                    class="grid-btn blue"
-                                    style="flex:1; height:44px;"
-                                    on:click={() => {
-                                        if (lastGeneratedEpubPath) {
-                                            openLocalFile(
-                                                lastGeneratedEpubPath,
-                                            );
-                                            closeAllPanels();
-                                        }
-                                    }}>打开预览</button
+                    <div class="p-body epub-modal-body">
+                        <div class="epub-main-layout">
+                            <!-- 左侧：主要信息 -->
+                            <div class="epub-fields-column">
+                                <div class="set-row compact">
+                                    <label for="et">书名:</label>
+                                    <input id="et" type="text" bind:value={epubMeta.title} class="epub-input-small" />
+                                </div>
+                                <div class="set-row compact">
+                                    <label for="ec">作者:</label>
+                                    <input id="ec" type="text" bind:value={epubMeta.creator} class="epub-input-small" />
+                                </div>
+                                <div class="set-row compact" style="align-items: flex-start;">
+                                    <label for="ed" style="margin-top: 6px;">简介:</label>
+                                    <textarea
+                                        id="ed"
+                                        rows="6"
+                                        bind:value={epubMeta.description}
+                                        class="epub-textarea-no-indent"
+                                        placeholder="请输入书籍简介..."
+                                    ></textarea>
+                                </div>
+                            </div>
+
+                            <!-- 右侧：封面预览 -->
+                            <div class="epub-cover-column">
+                                <div 
+                                    class="epub-cover-preview" 
+                                    on:click={async () => {
+                                        const s = await open({
+                                            filters: [{ name: "Image", extensions: ["jpg", "png", "jpeg", "webp"] }],
+                                        });
+                                        if (s) epubMeta.cover_path = s as string;
+                                    }}
+                                    role="button"
+                                    tabindex="0"
+                                    on:keydown={(e) => e.key === 'Enter' && (e.target as HTMLElement).click()}
                                 >
-                                <button
-                                    class="grid-btn"
-                                    style="flex:1; height:44px;"
-                                    on:click={closeAllPanels}>关闭</button
-                                >
+                                    {#if epubMeta.cover_path}
+                                        <img src={convertFileSrc(epubMeta.cover_path)} alt="封面预检" />
+                                        <div class="cover-hint">点击更换封面</div>
+                                    {:else}
+                                        <div class="no-cover">
+                                            <span>➕</span>
+                                            <span>添加封面</span>
+                                        </div>
+                                    {/if}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 高级选项折叠区 -->
+                        {#if showAdvancedEpub}
+                            <div class="epub-advanced-area">
+                                <div class="set-row compact">
+                                    <label for="ep">出版社:</label>
+                                    <input id="ep" type="text" bind:value={epubMeta.publisher} placeholder="(可选)" class="epub-input-small" />
+                                </div>
+                                <div class="set-row compact">
+                                    <label>UUID:</label>
+                                    <input type="text" value={epubMeta.uuid} readonly class="epub-input-readonly" />
+                                </div>
+                                <div class="set-row compact">
+                                    <label>MD5:</label>
+                                    <input type="text" value={epubMeta.md5} readonly class="epub-input-readonly" />
+                                </div>
+
+                                <!-- 自定义项 -->
+                                <div class="epub-custom-meta-section">
+                                    <div class="section-header">
+                                        <span>自定义元数据</span>
+                                        <button class="mini-icon-btn" on:click={() => customMetadata = [...customMetadata, { key: '', value: '' }]}>➕</button>
+                                    </div>
+                                    {#each customMetadata as item, i}
+                                        <div class="custom-meta-row">
+                                            <input type="text" bind:value={item.key} placeholder="键" />
+                                            <input type="text" bind:value={item.value} placeholder="值" />
+                                            <button class="mini-icon-btn remove" on:click={() => {
+                                                customMetadata.splice(i, 1);
+                                                customMetadata = [...customMetadata];
+                                            }}>✕</button>
+                                        </div>
+                                    {/each}
+                                </div>
                             </div>
                         {/if}
+
+                        <div class="epub-footer-actions">
+                            {#if epubGenerationStatus === "idle"}
+                                <button class="grid-btn" on:click={() => showAdvancedEpub = !showAdvancedEpub}>
+                                    {showAdvancedEpub ? '隐藏高级选项' : '高级选项'}
+                                </button>
+                                <button class="grid-btn blue" on:click={generateEpub}>开始生成</button>
+                            {:else if epubGenerationStatus === "generating"}
+                                <button class="grid-btn full-row" disabled style="opacity:0.6; cursor:not-allowed;">正在制作...</button>
+                            {:else if epubGenerationStatus === "success"}
+                                <div style="display:flex; gap:10px; width: 100%;">
+                                    <button class="grid-btn blue" style="flex:1;" on:click={() => {
+                                        if (lastGeneratedEpubPath) {
+                                            openLocalFile(lastGeneratedEpubPath);
+                                            closeAllPanels();
+                                        }
+                                    }}>打开预览</button>
+                                    <button class="grid-btn" style="flex:1;" on:click={closeAllPanels}>完成关闭</button>
+                                </div>
+                            {/if}
+                        </div>
                     </div>
                 {:else if showHistoryPanel}
                     <div class="p-header">
@@ -2422,5 +2434,218 @@
             width: 85%;
             box-shadow: 15px 0 50px rgba(0, 0, 0, 0.3);
         }
+    }
+    /* EPUB 制作面板重构样式 */
+    .epub-modal-body {
+        max-width: 680px !important; /* 增加宽度以容纳分栏 */
+        font-size: 13px;
+        color: #444;
+    }
+
+    .epub-main-layout {
+        display: flex;
+        gap: 24px;
+        margin-bottom: 20px;
+    }
+
+    .epub-fields-column {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .epub-cover-column {
+        width: 160px;
+        flex-shrink: 0;
+    }
+
+    /* 紧凑型行布局 */
+    .set-row.compact {
+        margin-bottom: 0;
+        gap: 12px;
+    }
+
+    .set-row.compact label {
+        width: 50px; /* 进一步缩小 Label 宽度 */
+        font-weight: 500;
+        color: #666;
+        font-size: 13px;
+    }
+
+    .epub-input-small {
+        height: 32px !important;
+        font-size: 13px !important;
+        padding: 0 10px !important;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        width: 100%;
+    }
+
+    .epub-textarea-no-indent {
+        flex: 1;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 13px;
+        font-family: inherit;
+        line-height: 1.6;
+        resize: vertical;
+        min-height: 120px;
+        text-indent: 0 !important; /* 禁用首行缩进 */
+    }
+
+    /* 封面预览窗 */
+    .epub-cover-preview {
+        width: 100%;
+        height: 220px;
+        border: 2px dashed #eee;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        overflow: hidden;
+        position: relative;
+        background: #fafafa;
+        transition: all 0.2s;
+    }
+
+    .epub-cover-preview:hover {
+        border-color: #0088dd;
+        background: #f0f8ff;
+    }
+
+    .epub-cover-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .epub-cover-preview .no-cover {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        color: #aaa;
+    }
+
+    .epub-cover-preview .no-cover span:first-child {
+        font-size: 24px;
+    }
+
+    .cover-hint {
+        position: absolute;
+        bottom: 0;
+        width: 100%;
+        background: rgba(0,0,0,0.5);
+        color: white;
+        font-size: 11px;
+        padding: 4px 0;
+        text-align: center;
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+
+    .epub-cover-preview:hover .cover-hint {
+        opacity: 1;
+    }
+
+    /* 高级选项区 */
+    .epub-advanced-area {
+        background: #f8f8f8;
+        border-radius: 8px;
+        padding: 16px;
+        margin-top: 10px;
+        margin-bottom: 20px;
+        border: 1px solid #eee;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .epub-input-readonly {
+        background: #eee !important;
+        color: #888;
+        font-size: 11px !important;
+        cursor: default;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 4px 8px;
+        width: 100%;
+    }
+
+    /* 自定义元数据 */
+    .epub-custom-meta-section {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px dashed #ddd;
+    }
+
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        font-weight: bold;
+        color: #555;
+        font-size: 12px;
+    }
+
+    .custom-meta-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .custom-meta-row input {
+        flex: 1;
+        height: 28px;
+        font-size: 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 0 8px;
+    }
+
+    .mini-icon-btn {
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        border: 1px solid #ddd;
+        background: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: #666;
+    }
+
+    .mini-icon-btn:hover {
+        background: #f5f5f5;
+        border-color: #bbb;
+    }
+
+    .mini-icon-btn.remove {
+        color: #ff4444;
+    }
+
+    .mini-icon-btn.remove:hover {
+        background: #fff5f5;
+        border-color: #ffcccc;
+    }
+
+    /* 底部操作 */
+    .epub-footer-actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 10px;
+    }
+
+    .epub-footer-actions .grid-btn {
+        flex: 1;
+        height: 40px;
+        font-size: 14px;
     }
 </style>
