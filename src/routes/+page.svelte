@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, tick } from "svelte";
-    import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+    import { invoke } from "@tauri-apps/api/core";
     import { listen, emit } from "@tauri-apps/api/event";
     import { open, save, message, ask } from "@tauri-apps/plugin-dialog";
     // import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs"; // Removed to force use of custom backend
@@ -141,6 +141,7 @@
         styles: { "main.css": "", "font.css": "" },
         assets: [] as { name: string, path: string, category: string }[],
     };
+    let coverPreviewUrl: string | null = null;
     let showAdvancedEpub = false;
     let customMetadata: { key: string; value: string }[] = [];
     let appSettings = { ...DEFAULT_SETTINGS };
@@ -241,6 +242,7 @@
         });
 
         let unlistenClose: any;
+        let unlistenDragDrop: any;
 
         const init = async () => {
             const { getCurrentWindow, LogicalPosition } = await import("@tauri-apps/api/window");
@@ -270,6 +272,19 @@
                 await appWindow.show();
                 await appWindow.setFocus();
             });
+
+            // 监听系统文件拖放：将 txt/md/epub 直接拖到窗口即可打开
+            try {
+                unlistenDragDrop = await appWindow.onDragDropEvent(async (event: any) => {
+                    const payload = event?.payload;
+                    if (!payload || payload.type !== "drop") return;
+                    const paths: string[] = Array.isArray(payload.paths) ? payload.paths : [];
+                    if (paths.length === 0) return;
+                    await openDroppedFile(paths);
+                });
+            } catch (e) {
+                console.warn("注册拖放监听失败:", e);
+            }
 
             // 2. 移动端检测
             if (window.innerWidth < 768) {
@@ -382,6 +397,7 @@
 
         return () => {
             if (unlistenClose) unlistenClose();
+            if (unlistenDragDrop) unlistenDragDrop();
             window.removeEventListener("editor-select-all", handleSelectAll);
         };
     });
@@ -481,6 +497,52 @@
         if (!epubMeta.uuid) epubMeta.uuid = fresh.uuid;
         // 强制重新计算 MD5
         updateMd5(fileContent);
+    }
+
+    async function loadCoverPreview() {
+        if (!epubMeta.cover_path) {
+            if (coverPreviewUrl) {
+                URL.revokeObjectURL(coverPreviewUrl);
+                coverPreviewUrl = null;
+            }
+            return;
+        }
+        try {
+            const normalizedPath = normalizeLocalPath(epubMeta.cover_path);
+            if (normalizedPath !== epubMeta.cover_path) {
+                epubMeta.cover_path = normalizedPath;
+            }
+            const data = await invoke<number[]>("read_binary_file", { path: normalizedPath });
+            const ext = normalizedPath.split('.').pop()?.toLowerCase() || 'jpg';
+            const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+            const mime = mimeMap[ext] || 'image/jpeg';
+            const blob = new Blob([new Uint8Array(data)], { type: mime });
+            if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
+            coverPreviewUrl = URL.createObjectURL(blob);
+        } catch (e) {
+            console.error('封面预览加载失败:', e);
+            coverPreviewUrl = null;
+        }
+    }
+
+    function normalizeLocalPath(path: string): string {
+        if (!path || !path.startsWith("file://")) return path;
+        try {
+            const url = new URL(path);
+            if (url.protocol !== "file:") return path;
+            let pathname = decodeURIComponent(url.pathname || "");
+            if (/^\/[A-Za-z]:/.test(pathname)) {
+                pathname = pathname.slice(1);
+            }
+            return pathname || path;
+        } catch {
+            return path;
+        }
+    }
+
+    function extractPickedPath(selection: string | string[]): string {
+        const raw = Array.isArray(selection) ? selection[0] : selection;
+        return normalizeLocalPath(raw);
     }
 
     async function openAdvancedEpubMetadata() {
@@ -595,7 +657,7 @@
                                 title: "TEpub-Editor-EPUB",
                                 width: 1200,
                                 height: 740,
-                                dragDropEnabled: false,
+                                dragDropEnabled: true,
                                 center: true, // Center the window
                             },
                         );
@@ -699,6 +761,16 @@
             console.error("Open file failed:", e);
             message(`打开文件失败: ${e}`, { kind: "error" });
         }
+    }
+
+    async function openDroppedFile(paths: string[]) {
+        if (!paths || paths.length === 0) return;
+        const firstSupported = paths.find((p) => /\.(txt|md|epub)$/i.test(p));
+        if (!firstSupported) {
+            await message("仅支持拖入 TXT/MD/EPUB 文件", { kind: "warning" });
+            return;
+        }
+        await openLocalFile(firstSupported);
     }
 
     async function selectFile() {
@@ -1362,6 +1434,7 @@
                     showEpubModal = true;
                     // 重置EPUB制作状态
                     epubGenerationStatus = "idle";
+                    loadCoverPreview();
                 }}>📚</button
             >
             <button
@@ -1705,15 +1778,23 @@
                                         const s = await open({
                                             filters: [{ name: "Image", extensions: ["jpg", "png", "jpeg", "webp"] }],
                                         });
-                                        if (s) epubMeta.cover_path = s as string;
+                                        if (s) {
+                                            epubMeta.cover_path = extractPickedPath(s as string | string[]);
+                                            await loadCoverPreview();
+                                        }
                                     }}
                                     role="button"
                                     tabindex="0"
                                     on:keydown={(e) => e.key === 'Enter' && (e.target as HTMLElement).click()}
                                 >
-                                    {#if epubMeta.cover_path}
-                                        <img src={convertFileSrc(epubMeta.cover_path)} alt="封面预检" />
+                                    {#if coverPreviewUrl}
+                                        <img src={coverPreviewUrl} alt="封面预检" />
                                         <div class="cover-hint">点击更换封面</div>
+                                    {:else if epubMeta.cover_path}
+                                        <div class="no-cover">
+                                            <span>⏳</span>
+                                            <span>加载中...</span>
+                                        </div>
                                     {:else}
                                         <div class="no-cover">
                                             <span>➕</span>

@@ -615,6 +615,53 @@ fn normalize_line_endings(s: String) -> String {
         .replace('\u{2029}', "\n")
 }
 
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let h1 = bytes[i + 1] as char;
+            let h2 = bytes[i + 2] as char;
+            if let (Some(a), Some(b)) = (h1.to_digit(16), h2.to_digit(16)) {
+                out.push(((a << 4) as u8) | (b as u8));
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn normalize_local_file_path(path: &str) -> String {
+    if let Some(raw) = path.strip_prefix("file://") {
+        let mut decoded = percent_decode(raw);
+        if cfg!(windows) && decoded.starts_with('/') {
+            decoded = decoded.trim_start_matches('/').to_string();
+        }
+        decoded
+    } else {
+        path.to_string()
+    }
+}
+
+fn get_history_base_dir() -> PathBuf {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            return exe_dir.join(".history");
+        }
+    }
+    PathBuf::from(".history")
+}
+
+fn history_key_for_path(original_path: &str) -> String {
+    // Keep names deterministic and avoid collisions for files that share the same stem.
+    let digest = format!("{:x}", md5::compute(original_path.as_bytes()));
+    digest[..8].to_string()
+}
+
 // --- 指令区域 ---
 
 #[tauri::command]
@@ -706,15 +753,16 @@ fn calculate_md5(content: String) -> String {
 #[tauri::command]
 async fn save_history(original_path: String, content: String) -> Result<(), String> {
     let path = Path::new(&original_path);
-    let parent = path.parent().unwrap_or(Path::new("."));
     let file_stem = path.file_stem().unwrap().to_string_lossy();
-    let history_dir = parent.join(".history");
+    let history_dir = get_history_base_dir();
     if !history_dir.exists() {
         fs::create_dir_all(&history_dir).map_err(|e| e.to_string())?;
     }
     let now = SystemTime::now();
     let timestamp = now.duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let backup_name = format!("{}.{}.bak", file_stem, timestamp);
+    let path_key = history_key_for_path(&original_path);
+    let file_prefix = format!("{}-{}", file_stem, path_key);
+    let backup_name = format!("{}.{}.bak", file_prefix, timestamp);
     let backup_path = history_dir.join(backup_name);
     let mut file = fs::File::create(&backup_path).map_err(|e| e.to_string())?;
     file.write_all(content.as_bytes())
@@ -722,7 +770,12 @@ async fn save_history(original_path: String, content: String) -> Result<(), Stri
     if let Ok(entries) = fs::read_dir(&history_dir) {
         let mut backups: Vec<_> = entries
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().starts_with(&*file_stem))
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                // Read hashed names first; keep compatibility with old naming.
+                name.starts_with(&file_prefix)
+                    || (name.starts_with(&format!("{}.", file_stem)) && name.ends_with(".bak"))
+            })
             .collect();
         backups.sort_by_key(|e| {
             e.metadata()
@@ -741,14 +794,17 @@ async fn save_history(original_path: String, content: String) -> Result<(), Stri
 #[tauri::command]
 async fn get_history_list(original_path: String) -> Vec<HistoryMeta> {
     let path = Path::new(&original_path);
-    let parent = path.parent().unwrap_or(Path::new("."));
     let file_stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let history_dir = parent.join(".history");
+    let history_dir = get_history_base_dir();
+    let file_prefix = format!("{}-{}", file_stem, history_key_for_path(&original_path));
     let mut list = Vec::new();
     if let Ok(entries) = fs::read_dir(history_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let fname = entry.file_name().to_string_lossy().to_string();
-            if fname.starts_with(&*file_stem) && fname.ends_with(".bak") {
+            if (fname.starts_with(&file_prefix)
+                || fname.starts_with(&format!("{}.", file_stem)))
+                && fname.ends_with(".bak")
+            {
                 if let Ok(meta) = entry.metadata() {
                     list.push(HistoryMeta {
                         filename: fname,
@@ -975,19 +1031,20 @@ async fn export_epub(
 
     let mut has_cover = false;
     let mut cover_ext = "jpg".to_string();
-    if !metadata.cover_path.is_empty() {
-        if let Ok(img_bytes) = fs::read(&metadata.cover_path) {
-            cover_ext = Path::new(&metadata.cover_path)
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("jpg")
-                .to_lowercase();
-            let cover_filename = format!("OEBPS/Images/cover.{}", cover_ext);
-            zip.start_file(&cover_filename, options)
-                .map_err(|e| e.to_string())?;
-            zip.write_all(&img_bytes).map_err(|e| e.to_string())?;
-            has_cover = true;
-        }
+    let normalized_cover_path = normalize_local_file_path(&metadata.cover_path);
+    if !normalized_cover_path.trim().is_empty() {
+        let img_bytes = fs::read(&normalized_cover_path)
+            .map_err(|e| format!("读取封面失败: {} ({})", normalized_cover_path, e))?;
+        cover_ext = Path::new(&normalized_cover_path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("jpg")
+            .to_lowercase();
+        let cover_filename = format!("OEBPS/Images/cover.{}", cover_ext);
+        zip.start_file(&cover_filename, options)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(&img_bytes).map_err(|e| e.to_string())?;
+        has_cover = true;
     }
 
     let lines: Vec<&str> = content.lines().collect();
@@ -997,10 +1054,13 @@ async fn export_epub(
     let mut play_order = 1;
 
     if has_cover {
-        let mime = if cover_ext == "png" {
-            "image/png"
-        } else {
-            "image/jpeg"
+        let mime = match cover_ext.as_str() {
+            "png" => "image/png",
+            "webp" => "image/webp",
+            "gif" => "image/gif",
+            "bmp" => "image/bmp",
+            "jpg" | "jpeg" => "image/jpeg",
+            _ => "image/jpeg",
         };
         manifest_items.push_str(&format!(r#"<item id="cover-image" href="Images/cover.{}" media-type="{}" properties="cover-image"/>"#, cover_ext, mime));
     }
@@ -1056,8 +1116,10 @@ async fn export_epub(
         };
         let safe_end = end_line.min(lines.len() - 1);
         let safe_start = start_line.min(safe_end);
-        let body_lines = if safe_start + 1 <= safe_end {
-            &lines[safe_start + 1..=safe_end] // 使用 ..= 包含 safe_end
+        let body_lines = if safe_start <= safe_end {
+            // `line_number` already points to the first body line (next line after title),
+            // so do not skip one more line here.
+            &lines[safe_start..=safe_end] // 使用 ..= 包含 safe_end
         } else {
             &[]
         };

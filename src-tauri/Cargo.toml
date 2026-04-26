@@ -1,6 +1,6 @@
 [package]
 name = "epub-editor"
-version = "0.3.6"
+version = "0.3.7"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -44,4 +44,3 @@ encoding_rs = "0.8"
 tempfile = "3.24.0"
 walkdir = "2.5.0"
 image = "0.24"
-

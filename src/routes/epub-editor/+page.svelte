@@ -1743,9 +1743,7 @@
         doc.head.appendChild(globalStyle);
 
         // 注入滚动同步脚本：监听来自父窗口的滚动消息
-        const syncScript = doc.createElement("script");
-        syncScript.textContent = `
-
+        const syncScriptCode = `
             // 接收父窗口消息
             // 自动处理头图全宽 (三面贴边)
             function fixHeaderImage() {
@@ -2047,6 +2045,13 @@
             });
 
         `;
+        
+        // 使用 Blob URL 注入脚本，规避 Tauri v2 会自动添加 Hash 导致 'unsafe-inline' 失效的问题
+        const syncScriptBlob = new Blob([syncScriptCode], { type: "application/javascript" });
+        const syncScriptUrl = URL.createObjectURL(syncScriptBlob);
+        
+        const syncScript = doc.createElement("script");
+        syncScript.src = syncScriptUrl;
         doc.head.appendChild(syncScript);
 
         return doc.documentElement.outerHTML;
