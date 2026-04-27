@@ -1915,7 +1915,7 @@
             class="check-panel"
             style="left: {checkPanelPos.x}px; top: {checkPanelPos.y}px;"
         >
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
             <div
                 class="find-header"
                 on:mousedown={(e) => startDrag(e, "check")}

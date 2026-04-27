@@ -11,12 +11,15 @@
     import FileTreeItem from "$lib/FileTreeItem.svelte";
 
     // Setup Close Listener
-    onMount(async () => {
+    onMount(() => {
         const win = getCurrentWindow();
+        let unlistenClose: (() => void) | null = null;
+        let isUnmounted = false;
+
         // NOTE: Do NOT emit restore-main-window here. It should only be emitted
         // after the user confirms closing (or if there are no unsaved changes).
         // The actual restoration is handled by the confirmation dialog logic.
-        const unlisten = await win.listen(
+        win.listen(
             "tauri://close-requested",
             async (event) => {
                 // Prevent default close, show confirmation if needed
@@ -24,7 +27,13 @@
                 console.log("EPUB window close requested");
                 // Do NOT emit restore-main-window here as it's too early
             },
-        );
+        ).then((unlisten) => {
+            if (isUnmounted) {
+                unlisten();
+            } else {
+                unlistenClose = unlisten;
+            }
+        });
 
         // 监听来自 Preview Iframe 的消息
         const handleMessage = (event: MessageEvent) => {
@@ -52,7 +61,8 @@
         window.addEventListener("message", handleMessage);
 
         return () => {
-            unlisten();
+            isUnmounted = true;
+            unlistenClose?.();
             window.removeEventListener("message", handleMessage);
         };
     });
@@ -86,7 +96,8 @@
 
     let editorSelectionTimeout: any;
     function handleEditorSelection(text: string) {
-        if (!previewIframe?.contentWindow) return;
+        const iframeWindow = previewIframe?.contentWindow;
+        if (!iframeWindow) return;
 
         if (editorSelectionTimeout) clearTimeout(editorSelectionTimeout);
         editorSelectionTimeout = setTimeout(() => {
@@ -98,7 +109,7 @@
             // Prevent flashing on short selections
             if (!cleanText || cleanText.length < 2) return;
 
-            previewIframe.contentWindow.postMessage(
+            iframeWindow.postMessage(
                 {
                     type: "editorSelection",
                     text: cleanText,
@@ -126,6 +137,7 @@
     }
 
     let epubPath = "";
+    let sourceEpubPath = "";
     let fileTree: EpubFileNode[] = [];
     let selectedFile: EpubFileNode | null = null;
     let fileContent = "";
@@ -155,6 +167,7 @@
     let blobUrls: string[] = [];
     // 缓存: 绝对路径 -> Blob URL
     let assetCache: Map<string, string> = new Map();
+    let fontBinaryCache: Map<string, Uint8Array> = new Map();
     // 缓存: 绝对路径 -> 文件纯文本内容 (HTML, CSS, XML...)
     let fileContentCache: Map<string, string> = new Map();
     // 缓存: 绝对路径 -> 处理后的预览HTML
@@ -206,9 +219,182 @@
 
     // 查找替换状态
     let currentImageSrc: string | null = null;
+    let currentFontSrc: string | null = null;
+    let currentFontFamily = "";
+    let currentFontInternalName = "";
+    const DEFAULT_FONT_PREVIEW_TEXT =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n简介 第 章 卷 我 你 他 的\n0123456789 ~!@#$%^&*()";
+    let fontPreviewText = DEFAULT_FONT_PREVIEW_TEXT;
+    let fontStatsLoading = false;
+    let fontUsedCharCount = 0;
+    let fontMissingGlyphCharCount = 0;
+    let fontMissingChars: string[] = [];
+    let fontStatsError = "";
+    let currentFontStatsToken = 0;
+    let currentFontFace: FontFace | null = null;
 
     function isImageFile(name: string) {
         return /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(name);
+    }
+
+    function isFontFile(name: string) {
+        return /\.(ttf|otf|woff|woff2|eot)$/i.test(name);
+    }
+
+    function getBinaryMimeType(fileName: string): string {
+        const lower = fileName.toLowerCase();
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".woff2")) return "font/woff2";
+        if (lower.endsWith(".woff")) return "font/woff";
+        if (lower.endsWith(".ttf")) return "font/ttf";
+        if (lower.endsWith(".otf")) return "font/otf";
+        if (lower.endsWith(".eot")) return "application/vnd.ms-fontobject";
+        return "application/octet-stream";
+    }
+
+    interface FontGlyphAnalyzeResult {
+        internal_names: string[];
+        missing_chars: string[];
+        unsupported_reason: string | null;
+    }
+
+    interface EpubPrepareResult {
+        source_path: string;
+        processed_path: string;
+        changed: boolean;
+        action: string;
+    }
+
+    function showEpubPrepareNotice(prepared: EpubPrepareResult) {
+        if (window.self !== window.top) {
+            return;
+        }
+
+        if (
+            !prepared.changed ||
+            !prepared.processed_path ||
+            prepared.processed_path === prepared.source_path
+        ) {
+            return;
+        }
+
+        alert(
+            [
+                "检测到当前 EPUB 需要自动处理。",
+                prepared.action || "已自动生成可正常读取的文件。",
+                "原始文件不会被修改，当前已打开处理后的文件副本。",
+                `原始文件: ${prepared.source_path}`,
+                `当前文件: ${prepared.processed_path}`,
+            ].join("\n"),
+        );
+    }
+
+    function resetFontPreviewState() {
+        currentFontStatsToken++;
+        if (currentFontFace) {
+            document.fonts.delete(currentFontFace);
+            currentFontFace = null;
+        }
+        currentFontSrc = null;
+        currentFontFamily = "";
+        currentFontInternalName = "";
+        fontStatsLoading = false;
+        fontUsedCharCount = 0;
+        fontMissingGlyphCharCount = 0;
+        fontMissingChars = [];
+        fontStatsError = "";
+    }
+
+    function normalizeZipPath(path: string): string {
+        return path.replace(/\\/g, "/").replace(/^\/+/, "");
+    }
+
+    function stripQueryAndHash(path: string): string {
+        return path.split("#")[0].split("?")[0];
+    }
+
+    function normalizeFontFamilyName(name: string): string {
+        return name.replace(/^['"]|['"]$/g, "").trim().toLowerCase();
+    }
+
+    function parseFontFamilyList(value: string): string[] {
+        const chunks = value.match(/\"[^\"]*\"|'[^']*'|[^,]+/g) || [];
+        return chunks
+            .map((item) => normalizeFontFamilyName(item))
+            .filter(Boolean);
+    }
+
+    function collectSelectorsUsingFont(
+        cssContent: string,
+        targetFamilies: Set<string>,
+    ): string[] {
+        const selectors: string[] = [];
+        const ruleRegex = /([^{}]+)\{([^{}]*)\}/g;
+        let match: RegExpExecArray | null;
+
+        while ((match = ruleRegex.exec(cssContent)) !== null) {
+            const selectorPart = match[1].trim();
+            const body = match[2];
+            if (!selectorPart || selectorPart.startsWith("@")) continue;
+
+            const familyMatch = body.match(/font-family\s*:\s*([^;]+);?/i);
+            if (!familyMatch) continue;
+
+            const families = parseFontFamilyList(familyMatch[1]);
+            if (!families.some((f) => targetFamilies.has(f))) continue;
+
+            selectorPart
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)
+                .forEach((s) => selectors.push(s));
+        }
+
+        return selectors;
+    }
+
+    function collectFontFaceFamiliesByFontPath(
+        cssPath: string,
+        cssContent: string,
+        targetFontPath: string,
+    ): string[] {
+        const result: string[] = [];
+        const target = normalizeZipPath(stripQueryAndHash(targetFontPath));
+        const faceRegex = /@font-face\s*\{([\s\S]*?)\}/gi;
+        let faceMatch: RegExpExecArray | null;
+
+        while ((faceMatch = faceRegex.exec(cssContent)) !== null) {
+            const block = faceMatch[1];
+            const srcMatch = block.match(/src\s*:\s*([^;]+);?/i);
+            const familyMatch = block.match(/font-family\s*:\s*([^;]+);?/i);
+            if (!srcMatch || !familyMatch) continue;
+
+            const srcValue = srcMatch[1];
+            const urls = [...srcValue.matchAll(/url\(([^)]+)\)/gi)].map((m) =>
+                m[1].trim().replace(/^['"]|['"]$/g, ""),
+            );
+
+            const matched = urls.some((u) => {
+                if (!u || u.startsWith("data:") || u.startsWith("http")) {
+                    return false;
+                }
+                const abs = normalizeZipPath(
+                    stripQueryAndHash(resolvePath(cssPath, u)),
+                );
+                return abs === target;
+            });
+
+            if (!matched) continue;
+
+            parseFontFamilyList(familyMatch[1]).forEach((family) => {
+                if (family) result.push(family);
+            });
+        }
+
+        return result;
     }
 
     // 自定义输入对话框状态 (替代 JavaScript prompt，因为在 Tauri 中 prompt 不工作)
@@ -218,6 +404,7 @@
     let promptOptions = false; // 是否显示额外选项 (如：自动更新链接)
     let promptCheckValue = true; // 额外选项的勾选状态
     let isPromptBusy = false; // 是否正在处理中 (如：更新链接)
+    let promptInput: HTMLInputElement | null = null;
     let promptResolve:
         | ((value: { value: string; confirmRefactor: boolean } | null) => void)
         | null = null;
@@ -242,6 +429,7 @@
             isPromptBusy = false;
             promptResolve = resolve;
             showPrompt = true;
+            setTimeout(() => promptInput?.focus(), 0);
             console.log("[DEBUG] showPrompt set to true");
         });
     }
@@ -291,6 +479,30 @@
         if (confirmResolve) confirmResolve(false);
         showConfirm = false;
         confirmResolve = null;
+    }
+
+    function handlePromptOverlayClick(e: MouseEvent) {
+        if (e.target === e.currentTarget) {
+            handlePromptCancel();
+        }
+    }
+
+    function handlePromptOverlayKeydown(e: KeyboardEvent) {
+        if (e.key === "Escape") {
+            handlePromptCancel();
+        }
+    }
+
+    function handleConfirmOverlayClick(e: MouseEvent) {
+        if (e.target === e.currentTarget) {
+            handleConfirmCancel();
+        }
+    }
+
+    function handleConfirmOverlayKeydown(e: KeyboardEvent) {
+        if (e.key === "Escape") {
+            handleConfirmCancel();
+        }
     }
 
     let showFindReplace = true; // 默认显示查找替换面板
@@ -402,9 +614,219 @@
         return result;
     }
 
+    async function computeFontUsageStats(
+        fontFile: EpubFileNode,
+        fontFamily: string,
+        extraAliases: string[] = [],
+    ): Promise<void> {
+        const token = ++currentFontStatsToken;
+        fontStatsLoading = true;
+        fontStatsError = "";
+        fontUsedCharCount = 0;
+        fontMissingGlyphCharCount = 0;
+        fontMissingChars = [];
+
+        try {
+            const allFiles = getAllFiles(fileTree);
+            const htmlFiles = allFiles.filter(
+                (f) =>
+                    f.file_type === "html" ||
+                    f.name.endsWith(".xhtml") ||
+                    f.name.endsWith(".html"),
+            );
+            const cssFiles = allFiles.filter(
+                (f) => f.file_type === "css" || f.name.endsWith(".css"),
+            );
+
+            const htmlPaths = htmlFiles.map((f) => f.path);
+            const cssPaths = cssFiles.map((f) => f.path);
+
+            let htmlContents: Record<string, string> = {};
+            let cssContents: Record<string, string> = {};
+
+            if (htmlPaths.length > 0) {
+                htmlContents = await invoke<Record<string, string>>(
+                    "read_epub_files_batch",
+                    {
+                        epubPath,
+                        filePaths: htmlPaths,
+                    },
+                );
+            }
+
+            if (cssPaths.length > 0) {
+                cssContents = await invoke<Record<string, string>>(
+                    "read_epub_files_batch",
+                    {
+                        epubPath,
+                        filePaths: cssPaths,
+                    },
+                );
+            }
+
+            if (token !== currentFontStatsToken) return;
+
+            const familyAliases = new Set<string>();
+            familyAliases.add(normalizeFontFamilyName(fontFamily));
+            familyAliases.add(
+                normalizeFontFamilyName(fontFile.name.replace(/\.[^.]+$/, "")),
+            );
+            extraAliases.forEach((name) => {
+                familyAliases.add(normalizeFontFamilyName(name));
+            });
+
+            for (const cssPath of cssPaths) {
+                const cssContent = cssContents[cssPath] || "";
+                const linkedFamilies = collectFontFaceFamiliesByFontPath(
+                    cssPath,
+                    cssContent,
+                    fontFile.path,
+                );
+                linkedFamilies.forEach((f) =>
+                    familyAliases.add(normalizeFontFamilyName(f)),
+                );
+            }
+
+            const parser = new DOMParser();
+            const usageMap = new Map<string, number>();
+
+            for (const htmlFile of htmlFiles) {
+                const htmlPath = htmlFile.path;
+                const html = htmlContents[htmlPath] || "";
+                if (!html) continue;
+
+                const doc = parser.parseFromString(html, "text/html");
+                const matchedElements = new Set<Element>();
+                const selectors: string[] = [];
+
+                for (const styleEl of Array.from(doc.querySelectorAll("style"))) {
+                    selectors.push(
+                        ...collectSelectorsUsingFont(
+                            styleEl.textContent || "",
+                            familyAliases,
+                        ),
+                    );
+                }
+
+                for (const linkEl of Array.from(
+                    doc.querySelectorAll('link[rel="stylesheet"]'),
+                )) {
+                    const href = linkEl.getAttribute("href") || "";
+                    if (!href) continue;
+                    const cssPath = normalizeZipPath(
+                        stripQueryAndHash(resolvePath(htmlPath, href)),
+                    );
+                    const cssContent = cssContents[cssPath] || "";
+                    if (!cssContent) continue;
+                    selectors.push(
+                        ...collectSelectorsUsingFont(cssContent, familyAliases),
+                    );
+                }
+
+                selectors.forEach((selector) => {
+                    try {
+                        doc.querySelectorAll(selector).forEach((el) =>
+                            matchedElements.add(el),
+                        );
+                    } catch {
+                        // ignore invalid selectors
+                    }
+                });
+
+                doc.querySelectorAll("[style]").forEach((el) => {
+                    const style = el.getAttribute("style") || "";
+                    const familyMatch = style.match(/font-family\s*:\s*([^;]+);?/i);
+                    if (!familyMatch) return;
+                    const families = parseFontFamilyList(familyMatch[1]);
+                    if (families.some((f) => familyAliases.has(f))) {
+                        matchedElements.add(el);
+                    }
+                });
+
+                const walker = doc.createTreeWalker(
+                    doc.body || doc.documentElement,
+                    NodeFilter.SHOW_TEXT,
+                );
+                let node: Node | null = walker.nextNode();
+
+                while (node) {
+                    const textNode = node as Text;
+                    const parent = textNode.parentElement;
+                    if (parent) {
+                        let cursor: Element | null = parent;
+                        let isCovered = false;
+                        while (cursor) {
+                            if (matchedElements.has(cursor)) {
+                                isCovered = true;
+                                break;
+                            }
+                            if (cursor === doc.body) {
+                                break;
+                            }
+                            cursor = cursor.parentElement;
+                        }
+
+                        if (isCovered) {
+                            for (const ch of textNode.nodeValue || "") {
+                                if (/\s/u.test(ch)) continue;
+                                usageMap.set(ch, (usageMap.get(ch) || 0) + 1);
+                            }
+                        }
+                    }
+
+                    node = walker.nextNode();
+                }
+            }
+
+            const analyze = await invoke<FontGlyphAnalyzeResult>(
+                "analyze_epub_font_glyphs",
+                {
+                    epubPath,
+                    filePath: fontFile.path,
+                    chars: Array.from(usageMap.keys()),
+                },
+            );
+
+            if (token !== currentFontStatsToken) return;
+
+            if (analyze.internal_names?.length) {
+                currentFontInternalName = analyze.internal_names[0];
+            }
+
+            if (analyze.unsupported_reason) {
+                fontStatsError = `Stats failed: ${analyze.unsupported_reason}`;
+                return;
+            }
+
+            const missingSet = new Set(analyze.missing_chars || []);
+            let usedCount = 0;
+            let missingCount = 0;
+            for (const [ch, count] of usageMap.entries()) {
+                usedCount += count;
+                if (missingSet.has(ch)) {
+                    missingCount += count;
+                }
+            }
+
+            fontUsedCharCount = usedCount;
+            fontMissingGlyphCharCount = missingCount;
+            fontMissingChars = Array.from(missingSet.values());
+        } catch (e) {
+            fontStatsError = `Stats failed: ${e}`;
+        } finally {
+            if (token === currentFontStatsToken) {
+                fontStatsLoading = false;
+            }
+        }
+    }
+
     const loadEpub = async () => {
-        epubPath = $page.url.searchParams.get("file") || "";
-        if (!epubPath) {
+        const routePath = $page.url.searchParams.get("file") || "";
+        const isNewRoutePath =
+            routePath && routePath !== sourceEpubPath && routePath !== epubPath;
+        const requestedPath = isNewRoutePath ? routePath : epubPath || routePath;
+        fontPreviewText = DEFAULT_FONT_PREVIEW_TEXT;
+        if (!requestedPath) {
             error = "未指定 EPUB 文件路径";
             isLoading = false;
             return;
@@ -415,12 +837,24 @@
             blobUrls.forEach((url) => URL.revokeObjectURL(url));
             blobUrls = [];
             assetCache.clear();
+            fontBinaryCache.clear();
             fileContentCache.clear();
             previewCache.clear();
+            resetFontPreviewState();
+
+            const prepared = await invoke<EpubPrepareResult>(
+                "prepare_epub_for_open",
+                {
+                    epubPath: requestedPath,
+                },
+            );
+            epubPath = prepared.processed_path || requestedPath;
+            sourceEpubPath = prepared.source_path || requestedPath;
 
             fileTree = await invoke<EpubFileNode[]>("extract_epub", {
                 epubPath: epubPath,
             });
+            showEpubPrepareNotice(prepared);
 
             // 确保标准 EPUB 文件夹在 UI 中总是可见（类似 Sigil 的行为）
             const ensureStandardFolders = (nodes: EpubFileNode[]) => {
@@ -445,9 +879,6 @@
                                 name: folderName,
                                 path: `OEBPS/${folderName}`,
                                 file_type: "folder",
-                                size: null,
-                                title: null,
-                                resolution: null,
                                 children: [],
                             });
                         }
@@ -1454,8 +1885,10 @@
         blobUrls.forEach((url) => URL.revokeObjectURL(url));
         blobUrls = [];
         assetCache.clear();
+        fontBinaryCache.clear();
         fileContentCache.clear();
         previewCache.clear();
+        resetFontPreviewState();
     }
 
     // 解析相对路径
@@ -1729,6 +2162,10 @@
                 pointer-events: auto;
                 animation: fadeIn 0.2s ease;
             }
+            .footnote-popup img {
+                max-width: 100%;
+                height: auto;
+            }
             @keyframes fadeIn {
                 from { opacity: 0; transform: translateY(5px); }
                 to { opacity: 1; transform: translateY(0); }
@@ -1983,65 +2420,143 @@
                 }, 300); // 300ms debounce
             });
 
+            function getFootnoteIdFromHref(href) {
+                if (!href) return '';
+                const hashIndex = href.indexOf('#');
+                if (hashIndex < 0) return '';
+                try {
+                    return decodeURIComponent(href.slice(hashIndex + 1));
+                } catch (e) {
+                    return href.slice(hashIndex + 1);
+                }
+            }
+
+            function findFootnoteTrigger(target) {
+                let cursor = target;
+                while (cursor && cursor !== document.body) {
+                    if (cursor.getAttribute && cursor.getAttribute('zy-footnote')) {
+                        return cursor;
+                    }
+
+                    if (cursor.tagName === 'A') {
+                        const href = cursor.getAttribute('href') || '';
+                        const epubType = cursor.getAttribute('epub:type') || '';
+                        const className = cursor.getAttribute('class') || '';
+                        if (
+                            cursor.getAttribute('zy-footnote') ||
+                            cursor.querySelector('[zy-footnote]') ||
+                            epubType.indexOf('noteref') >= 0 ||
+                            className.indexOf('footnote') >= 0 ||
+                            (href.indexOf('#') >= 0 && document.getElementById(getFootnoteIdFromHref(href)))
+                        ) {
+                            return cursor;
+                        }
+                    }
+
+                    cursor = cursor.parentElement;
+                }
+                return null;
+            }
+
+            function getFootnoteContent(trigger) {
+                if (!trigger) return null;
+
+                const direct = trigger.getAttribute && trigger.getAttribute('zy-footnote');
+                if (direct) return { text: direct };
+
+                const nested = trigger.querySelector && trigger.querySelector('[zy-footnote]');
+                if (nested) {
+                    const nestedText = nested.getAttribute('zy-footnote');
+                    if (nestedText) return { text: nestedText };
+                }
+
+                if (trigger.tagName === 'A') {
+                    const noteId = getFootnoteIdFromHref(trigger.getAttribute('href'));
+                    const noteEl = noteId ? document.getElementById(noteId) : null;
+                    if (noteEl) {
+                        return { html: noteEl.innerHTML || noteEl.textContent || '' };
+                    }
+                }
+
+                return null;
+            }
+
+            function showFootnotePopup(trigger, content, sticky) {
+                if (!trigger || !content) return false;
+
+                let popup = document.querySelector('.footnote-popup');
+                if (!popup) {
+                    popup = document.createElement('div');
+                    popup.className = 'footnote-popup';
+                    document.body.appendChild(popup);
+                }
+
+                if (content.html) {
+                    popup.innerHTML = content.html;
+                } else {
+                    popup.textContent = content.text || '';
+                }
+
+                if (sticky) {
+                    popup.setAttribute('data-sticky', 'true');
+                } else {
+                    popup.removeAttribute('data-sticky');
+                }
+
+                const rect = trigger.getBoundingClientRect();
+                popup.style.top = Math.min(window.innerHeight - 20, rect.bottom + 5) + 'px';
+                popup.style.left = Math.max(10, Math.min(window.innerWidth - 300, rect.left)) + 'px';
+                popup.style.display = 'block';
+                return true;
+            }
+
+            function hideFootnotePopup(force) {
+                const popup = document.querySelector('.footnote-popup');
+                if (popup && (force || popup.getAttribute('data-sticky') !== 'true')) {
+                    popup.style.display = 'none';
+                    popup.removeAttribute('data-sticky');
+                }
+            }
+
+            document.addEventListener('click', function(e) {
+                const link = e.target.closest && e.target.closest('a');
+                const footnoteTrigger = findFootnoteTrigger(e.target);
+
+                if (link || footnoteTrigger) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    if (footnoteTrigger) {
+                        const content = getFootnoteContent(footnoteTrigger);
+                        if (showFootnotePopup(footnoteTrigger, content, true)) {
+                            return;
+                        }
+                    }
+
+                    hideFootnotePopup(true);
+                    return;
+                }
+
+                hideFootnotePopup(true);
+            }, true);
+
             // 注脚处理 (Hover)
             // 使用 mouseover/mouseout 代理
             document.addEventListener('mouseover', function(e) {
-                let target = e.target;
-                
-                // 检查是否是注脚触发器
-                let footnoteTrigger = null;
-                let cursor = target;
-                while (cursor && cursor !== document.body) {
-                    if (cursor.getAttribute('zy-footnote') || (cursor.tagName === 'A' && cursor.getAttribute('epub:type') === 'noteref')) {
-                        footnoteTrigger = cursor;
-                        break;
-                    }
-                    cursor = cursor.parentElement;
-                }
-
+                const footnoteTrigger = findFootnoteTrigger(e.target);
                 if (footnoteTrigger) {
-                    // 显示弹窗
-                    let content = footnoteTrigger.getAttribute('zy-footnote');
-                    if (!content && footnoteTrigger.tagName === 'A') {
-                         const href = footnoteTrigger.getAttribute('href');
-                         if (href && href.startsWith('#')) {
-                             const noteEl = document.getElementById(href.substring(1));
-                             if (noteEl) content = noteEl.innerText;
-                         }
-                    }
-
-                    if (content) {
-                        // 检查是否已存在
-                        let popup = document.querySelector('.footnote-popup');
-                        if (!popup) {
-                            popup = document.createElement('div');
-                            popup.className = 'footnote-popup';
-                            document.body.appendChild(popup);
-                        }
-                        popup.innerText = content;
-                        
-                        // Positioning
-                        const rect = footnoteTrigger.getBoundingClientRect();
-                        popup.style.top = (rect.bottom + 5) + 'px';
-                        popup.style.left = Math.max(10, Math.min(window.innerWidth - 300, rect.left)) + 'px';
-                        popup.style.display = 'block';
-                    }
+                    showFootnotePopup(
+                        footnoteTrigger,
+                        getFootnoteContent(footnoteTrigger),
+                        false
+                    );
                 }
             });
 
             document.addEventListener('mouseout', function(e) {
-                 // 简单的隐藏逻辑：如果在弹窗外移动，且移出的元素是注脚
-                 // 更好的方式：检查鼠标是否进入了弹窗？
-                 // 简化实现：移出 footnoteTrigger 就隐藏，除非移入的是 popup (太复杂了)
-                 // 先简单实现：主要针对 footnoteTrigger 的 mouseleave
-                 
-                 let target = e.target;
-                 if (target.getAttribute('zy-footnote') || (target.tagName === 'A' && target.getAttribute('epub:type') === 'noteref')) {
-                     const popup = document.querySelector('.footnote-popup');
-                     if (popup) {
-                         popup.style.display = 'none';
-                     }
-                 }
+                if (findFootnoteTrigger(e.target)) {
+                    hideFootnotePopup(false);
+                }
             });
 
         `;
@@ -2399,6 +2914,7 @@
         try {
             // 图片处理逻辑
             if (isImageFile(file.name)) {
+                resetFontPreviewState();
                 currentImageSrc = null;
                 // 检查资源缓存
                 if (assetCache.has(file.path)) {
@@ -2415,18 +2931,8 @@
                         const data = binaryData[file.path];
                         if (data) {
                             const uint8Array = new Uint8Array(data);
-                            let mimeType = "image/jpeg";
-                            const lower = file.name.toLowerCase();
-                            if (lower.endsWith(".png")) mimeType = "image/png";
-                            else if (lower.endsWith(".gif"))
-                                mimeType = "image/gif";
-                            else if (lower.endsWith(".svg"))
-                                mimeType = "image/svg+xml";
-                            else if (lower.endsWith(".webp"))
-                                mimeType = "image/webp";
-
                             const blob = new Blob([uint8Array], {
-                                type: mimeType,
+                                type: getBinaryMimeType(file.name),
                             });
                             const url = URL.createObjectURL(blob);
                             assetCache.set(file.path, url);
@@ -2442,6 +2948,78 @@
                 return;
             } else {
                 currentImageSrc = null;
+            }
+
+            if (isFontFile(file.name)) {
+                resetFontPreviewState();
+
+                let fontBinary = fontBinaryCache.get(file.path);
+                if (!fontBinary) {
+                    const binaryData = await invoke<Record<string, number[]>>(
+                        "read_epub_binary_batch",
+                        {
+                            epubPath,
+                            filePaths: [file.path],
+                        },
+                    );
+                    const data = binaryData[file.path];
+                    if (!data) {
+                        throw new Error("font binary data missing");
+                    }
+                    fontBinary = new Uint8Array(data);
+                    fontBinaryCache.set(file.path, fontBinary);
+                }
+
+                if (assetCache.has(file.path)) {
+                    currentFontSrc = assetCache.get(file.path)!;
+                } else {
+                    const blob = new Blob([fontBinary], {
+                        type: getBinaryMimeType(file.name),
+                    });
+                    const url = URL.createObjectURL(blob);
+                    assetCache.set(file.path, url);
+                    currentFontSrc = url;
+                }
+
+                let internalNames: string[] = [];
+                try {
+                    const inspect = await invoke<FontGlyphAnalyzeResult>(
+                        "analyze_epub_font_glyphs",
+                        {
+                            epubPath,
+                            filePath: file.path,
+                            chars: [],
+                        },
+                    );
+                    internalNames = inspect.internal_names || [];
+                    if (internalNames.length > 0) {
+                        currentFontInternalName = internalNames[0];
+                    }
+                } catch (inspectErr) {
+                    console.warn("Failed to read font internal names", inspectErr);
+                }
+
+                const renderFamily = `tepub-font-${Date.now()}-${Math.random()
+                    .toString(36)
+                    .slice(2, 8)}`;
+                const buffer = fontBinary.buffer.slice(
+                    fontBinary.byteOffset,
+                    fontBinary.byteOffset + fontBinary.byteLength,
+                );
+                const fontFace = new FontFace(renderFamily, buffer);
+                await fontFace.load();
+                document.fonts.add(fontFace);
+                currentFontFace = fontFace;
+                currentFontFamily = renderFamily;
+
+                const statFamily =
+                    internalNames[0] || file.name.replace(/\.[^.]+$/, "");
+                await computeFontUsageStats(file, statFamily, internalNames);
+
+                fileContent = "";
+                return;
+            } else {
+                resetFontPreviewState();
             }
 
             let content = "";
@@ -4332,16 +4910,27 @@
 
 <!-- 自定义输入对话框 (替代 JavaScript prompt) -->
 {#if showPrompt}
-    <div class="prompt-overlay" on:click={handlePromptCancel}>
-        <div class="prompt-dialog" on:click|stopPropagation>
+    <div
+        class="prompt-overlay"
+        role="button"
+        tabindex="-1"
+        on:click={handlePromptOverlayClick}
+        on:keydown={handlePromptOverlayKeydown}
+    >
+        <div
+            class="prompt-dialog"
+            role="dialog"
+            aria-modal="true"
+            tabindex="-1"
+        >
             <div class="prompt-title">{promptTitle}</div>
             <input
                 type="text"
                 class="prompt-input"
+                bind:this={promptInput}
                 bind:value={promptValue}
                 on:keydown={(e) => e.key === "Enter" && handlePromptConfirm()}
                 disabled={isPromptBusy}
-                autofocus
             />
 
             {#if promptOptions}
@@ -4379,14 +4968,16 @@
 {#if showConfirm}
     <div
         class="prompt-overlay"
-        on:click={handleConfirmCancel}
-        role="presentation"
+        role="button"
+        tabindex="-1"
+        on:click={handleConfirmOverlayClick}
+        on:keydown={handleConfirmOverlayKeydown}
     >
         <div
             class="prompt-dialog"
-            on:click|stopPropagation
             role="dialog"
             aria-modal="true"
+            tabindex="-1"
         >
             <div class="prompt-title">{confirmTitle}</div>
             <div
@@ -4501,6 +5092,53 @@
                         {:else}
                             <div class="loading">加载图片中...</div>
                         {/if}
+                    </div>
+                {:else if isFontFile(selectedFile.name)}
+                    <div class="font-preview-container">
+                        <div class="font-preview-header">
+                            <div class="font-preview-title">
+                                {selectedFile.name}
+                                {#if currentFontInternalName}
+                                    <span class="font-internal-name">
+                                        ({currentFontInternalName})
+                                    </span>
+                                {/if}
+                            </div>
+                            <div class="font-preview-tip">
+                                Rendered with embedded font
+                            </div>
+                        </div>
+                        <textarea
+                            class="font-preview-sample"
+                            style={`font-family: "${currentFontFamily}";`}
+                            bind:value={fontPreviewText}
+                            spellcheck="false"
+                            wrap="off"
+                        ></textarea>
+                        <div class="font-stats">
+                            {#if fontStatsLoading}
+                                <div class="font-stats-line">Analyzing...</div>
+                            {:else if fontStatsError}
+                                <div class="font-stats-line font-stats-error">
+                                    {fontStatsError}
+                                </div>
+                            {:else}
+                                <div class="font-stats-line">
+                                    Used character count: {fontUsedCharCount}
+                                </div>
+                                <div class="font-stats-line">
+                                    Missing glyph count: {fontMissingGlyphCharCount}
+                                </div>
+                                {#if fontMissingChars.length > 0}
+                                    <div class="font-stats-line font-stats-missing-title">
+                                        Missing characters ({fontMissingChars.length}):
+                                    </div>
+                                    <div class="font-missing-chars">
+                                        {fontMissingChars.join(" ")}
+                                    </div>
+                                {/if}
+                            {/if}
+                        </div>
                     </div>
                 {:else}
                     <div class="editor-content" bind:this={editorContentDiv}>
@@ -5313,18 +5951,6 @@
         display: none;
     }
 
-    /* 封面专用框架：自动高度，无固定比例 */
-    .mobile-frame-cover {
-        height: auto !important;
-        max-height: none !important;
-        flex: 0 0 auto !important;
-    }
-
-    .mobile-frame-cover iframe {
-        height: auto !important;
-        min-height: 200px;
-    }
-
     .preview-container iframe {
         width: 100%;
         height: 100%;
@@ -5641,6 +6267,102 @@
             0 10px,
             10px -10px,
             -10px 0px;
+    }
+
+    .font-preview-container {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: auto;
+        background: #fafbfc;
+        padding: 24px;
+        gap: 16px;
+    }
+
+    .font-preview-header {
+        flex-shrink: 0;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+        border-bottom: 1px solid #e6e9ef;
+        padding-bottom: 12px;
+    }
+
+    .font-preview-title {
+        color: #1f2d3d;
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1.3;
+    }
+
+    .font-internal-name {
+        color: #5f6b7a;
+        font-size: 16px;
+        font-weight: 600;
+        margin-left: 8px;
+    }
+
+    .font-preview-tip {
+        color: #7a8699;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+
+    .font-preview-sample {
+        flex: 1 1 420px;
+        width: 100%;
+        min-height: 360px;
+        box-sizing: border-box;
+        color: #13233a;
+        background: #fff;
+        border: 1px solid #e6e9ef;
+        border-radius: 10px;
+        padding: 20px;
+        resize: vertical;
+        outline: none;
+        overflow: auto;
+        white-space: pre;
+        font-size: 46px;
+        line-height: 1.45;
+        letter-spacing: 0.02em;
+    }
+
+    .font-preview-sample:focus {
+        border-color: #4a90d9;
+        box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.16);
+    }
+
+    .font-stats {
+        flex-shrink: 0;
+        border-top: 1px solid #e6e9ef;
+        padding-top: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .font-stats-line {
+        color: #3a4a5f;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    .font-stats-error {
+        color: #c0392b;
+    }
+
+    .font-stats-missing-title {
+        margin-top: 4px;
+        font-weight: 600;
+    }
+
+    .font-missing-chars {
+        color: #a73838;
+        font-size: 15px;
+        line-height: 1.6;
+        word-break: break-all;
     }
 
     .loading {

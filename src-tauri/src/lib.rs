@@ -3,7 +3,7 @@ use fancy_regex::Regex;
 use md5;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -567,6 +567,13 @@ struct EpubFileNode {
     children: Option<Vec<EpubFileNode>>,
 }
 
+#[derive(Serialize, Debug)]
+struct FontGlyphAnalyzeResult {
+    internal_names: Vec<String>,
+    missing_chars: Vec<String>,
+    unsupported_reason: Option<String>,
+}
+
 // --- 辅助函数 ---
 
 fn escape_xml(input: &str) -> String {
@@ -645,6 +652,593 @@ fn normalize_local_file_path(path: &str) -> String {
     } else {
         path.to_string()
     }
+}
+
+fn is_zip_archive_bytes(data: &[u8]) -> bool {
+    let cursor = std::io::Cursor::new(data);
+    zip::ZipArchive::new(cursor).is_ok()
+}
+
+fn is_zip_archive_path(path: &Path) -> bool {
+    if let Ok(file) = fs::File::open(path) {
+        zip::ZipArchive::new(file).is_ok()
+    } else {
+        false
+    }
+}
+
+fn clear_zip_encryption_flags(data: &mut [u8]) -> bool {
+    let mut changed = false;
+    let mut i = 0usize;
+    while i + 10 < data.len() {
+        // Local file header: PK\x03\x04, flag at +6
+        if data[i] == 0x50 && data[i + 1] == 0x4B && data[i + 2] == 0x03 && data[i + 3] == 0x04
+        {
+            let flag = u16::from_le_bytes([data[i + 6], data[i + 7]]);
+            if flag & 0x0001 != 0 {
+                let new_flag = (flag & !0x0001).to_le_bytes();
+                data[i + 6] = new_flag[0];
+                data[i + 7] = new_flag[1];
+                changed = true;
+            }
+        }
+        // Central directory header: PK\x01\x02, flag at +8
+        if data[i] == 0x50 && data[i + 1] == 0x4B && data[i + 2] == 0x01 && data[i + 3] == 0x02
+        {
+            let flag = u16::from_le_bytes([data[i + 8], data[i + 9]]);
+            if flag & 0x0001 != 0 {
+                let new_flag = (flag & !0x0001).to_le_bytes();
+                data[i + 8] = new_flag[0];
+                data[i + 9] = new_flag[1];
+                changed = true;
+            }
+        }
+        i += 1;
+    }
+    changed
+}
+
+fn xor_bytes(data: &[u8], key: u8) -> Vec<u8> {
+    data.iter().map(|b| b ^ key).collect()
+}
+
+fn build_processed_epub_path(original: &Path, suffix: &str) -> PathBuf {
+    let parent = original.parent().unwrap_or(Path::new("."));
+    let stem = original
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("book");
+    let ext = original.extension().and_then(|s| s.to_str()).unwrap_or("epub");
+
+    let mut candidate = parent.join(format!("{}{}.{}", stem, suffix, ext));
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let mut index = 2usize;
+    loop {
+        candidate = parent.join(format!("{}{}_{}.{}", stem, suffix, index, ext));
+        if !candidate.exists() {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
+fn has_windows_invalid_component(path: &str) -> bool {
+    let invalid = ['<', '>', ':', '"', '\\', '|', '?', '*'];
+    for raw in path.replace('\\', "/").split('/') {
+        let part = raw.trim();
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            return true;
+        }
+        if part.chars().any(|c| c.is_control() || invalid.contains(&c)) {
+            return true;
+        }
+        if part.ends_with(' ') || part.ends_with('.') {
+            return true;
+        }
+    }
+    false
+}
+
+fn sanitize_windows_component(part: &str) -> String {
+    let invalid = ['<', '>', ':', '"', '\\', '|', '?', '*'];
+    let mut out = String::with_capacity(part.len());
+    for c in part.chars() {
+        if c.is_control() || invalid.contains(&c) {
+            out.push('_');
+        } else {
+            out.push(c);
+        }
+    }
+    while out.ends_with(' ') || out.ends_with('.') {
+        out.pop();
+    }
+    if out.is_empty() {
+        out = "_".to_string();
+    }
+    let upper = out.to_ascii_uppercase();
+    let reserved = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
+        "LPT9",
+    ];
+    if reserved.contains(&upper.as_str()) {
+        out.push('_');
+    }
+    out
+}
+
+fn sanitize_zip_entry_name(name: &str) -> String {
+    let normalized = name.replace('\\', "/").trim_start_matches('/').to_string();
+    let is_dir = normalized.ends_with('/');
+    let mut parts: Vec<String> = Vec::new();
+    for raw in normalized.split('/') {
+        if raw.is_empty() || raw == "." {
+            continue;
+        }
+        if raw == ".." {
+            continue;
+        }
+        parts.push(sanitize_windows_component(raw));
+    }
+    let mut out = parts.join("/");
+    if out.is_empty() {
+        out = "_".to_string();
+    }
+    if is_dir {
+        out.push('/');
+    }
+    out
+}
+
+fn looks_obfuscated_basename(raw_name: &str) -> bool {
+    let base = Path::new(raw_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if base.is_empty() {
+        return true;
+    }
+    let mut total = 0usize;
+    let mut allowed = 0usize;
+    for c in base.chars() {
+        total += 1;
+        if c.is_ascii_alphanumeric()
+            || c == '_'
+            || c == '-'
+            || ('\u{4e00}'..='\u{9fff}').contains(&c)
+        {
+            allowed += 1;
+        }
+    }
+    if total == 0 {
+        return true;
+    }
+    let bad_ratio = 1.0 - (allowed as f64 / total as f64);
+    bad_ratio > 0.35 || base.contains("____") || base.len() > 40
+}
+
+fn friendly_name_for_path(path: &str, index: usize) -> String {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let prefix = match ext.as_str() {
+        "xhtml" | "html" | "htm" => "chapter",
+        "css" => "style",
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "svg" => "image",
+        "ttf" | "otf" | "woff" | "woff2" => "font",
+        "ncx" => "toc",
+        "opf" => "content",
+        "xml" => "meta",
+        _ => "file",
+    };
+    if ext.is_empty() {
+        format!("{}{:03}", prefix, index)
+    } else {
+        format!("{}{:03}.{}", prefix, index, ext)
+    }
+}
+
+fn zip_join(base_dir: &str, rel: &str) -> String {
+    let rel = rel.replace('\\', "/");
+    let rel = rel.trim();
+    if rel.is_empty() {
+        return base_dir.to_string();
+    }
+    if rel.starts_with('/') {
+        return rel.trim_start_matches('/').to_string();
+    }
+    let mut parts: Vec<String> = base_dir
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    for seg in rel.split('/') {
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            let _ = parts.pop();
+        } else {
+            parts.push(seg.to_string());
+        }
+    }
+    parts.join("/")
+}
+
+fn build_name_from_id(item_id: &str, href: &str) -> String {
+    let href_name = Path::new(href)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let href_ext = Path::new(href_name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let id_file_name = Path::new(item_id)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(item_id);
+
+    let (mut id_stem, id_ext_opt) = if let Some(dot) = id_file_name.rfind('.') {
+        (
+            id_file_name[..dot].to_string(),
+            Some(id_file_name[dot + 1..].to_ascii_lowercase()),
+        )
+    } else {
+        (id_file_name.to_string(), None)
+    };
+
+    let mut image_slim = String::new();
+    if id_stem.to_ascii_lowercase().contains("slim") || href_name.to_ascii_lowercase().contains("slim")
+    {
+        let lower = id_stem.to_ascii_lowercase();
+        let mut cut = None;
+        for suffix in ["~slim", "-slim", "_slim", "slim"] {
+            if lower.ends_with(suffix) {
+                cut = Some(id_stem.len().saturating_sub(suffix.len()));
+                break;
+            }
+        }
+        if let Some(pos) = cut {
+            id_stem = id_stem[..pos].to_string();
+        }
+        image_slim = "~slim".to_string();
+    }
+
+    if id_stem.is_empty() {
+        id_stem = "file".to_string();
+    }
+    id_stem = sanitize_windows_component(&id_stem);
+
+    let ext = match id_ext_opt {
+        Some(id_ext) if !id_ext.is_empty() => {
+            if !href_ext.is_empty() && id_ext != href_ext {
+                href_ext
+            } else {
+                id_ext
+            }
+        }
+        _ => {
+            if href_ext.is_empty() {
+                "bin".to_string()
+            } else {
+                href_ext
+            }
+        }
+    };
+    format!("{}{}.{}", id_stem, image_slim, ext)
+}
+
+fn collect_opf_id_hints(bytes: &[u8]) -> HashMap<String, String> {
+    let mut hints: HashMap<String, String> = HashMap::new();
+    let cursor = std::io::Cursor::new(bytes.to_vec());
+    let mut archive = match zip::ZipArchive::new(cursor) {
+        Ok(a) => a,
+        Err(_) => return hints,
+    };
+
+    let mut opf_paths: Vec<String> = Vec::new();
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index(i) {
+            let name = file.name().replace('\\', "/");
+            if name.to_ascii_lowercase().ends_with(".opf") {
+                opf_paths.push(name);
+            }
+        }
+    }
+
+    for opf_path in opf_paths {
+        let mut opf_data: Vec<u8> = Vec::new();
+        if let Ok(mut f) = archive.by_name(&opf_path) {
+            let _ = f.read_to_end(&mut opf_data);
+        } else {
+            continue;
+        }
+        let opf_text = String::from_utf8_lossy(&opf_data).to_string();
+        let item_re = match Regex::new(
+            r#"(?is)<item\b[^>]*\bid\s*=\s*["']([^"']+)["'][^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>"#,
+        ) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let opf_dir = zip_parent(&opf_path);
+        for caps in item_re.captures_iter(&opf_text).flatten() {
+            let item_id = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+            let href_raw = caps.get(2).map(|m| m.as_str()).unwrap_or("").trim();
+            if item_id.is_empty() || href_raw.is_empty() {
+                continue;
+            }
+            let href_decoded = percent_decode(href_raw);
+            let abs = zip_join(&opf_dir, &href_decoded);
+            let name_hint = build_name_from_id(item_id, &href_decoded);
+            hints.insert(abs.clone(), name_hint.clone());
+            hints.insert(abs.to_ascii_lowercase(), name_hint);
+        }
+    }
+    hints
+}
+
+fn ensure_unique_zip_name(name: &str, used: &mut HashSet<String>) -> String {
+    if !used.contains(name) {
+        used.insert(name.to_string());
+        return name.to_string();
+    }
+    let is_dir = name.ends_with('/');
+    let base_name = if is_dir {
+        name.trim_end_matches('/').to_string()
+    } else {
+        name.to_string()
+    };
+    let mut stem = base_name.clone();
+    let mut ext = String::new();
+    if !is_dir {
+        if let Some(idx) = base_name.rfind('.') {
+            stem = base_name[..idx].to_string();
+            ext = base_name[idx..].to_string();
+        }
+    }
+    let mut i = 2usize;
+    loop {
+        let mut candidate = if is_dir {
+            format!("{}_{}", stem, i)
+        } else {
+            format!("{}_{}{}", stem, i, ext)
+        };
+        if is_dir {
+            candidate.push('/');
+        }
+        if !used.contains(&candidate) {
+            used.insert(candidate.clone());
+            return candidate;
+        }
+        i += 1;
+    }
+}
+
+fn zip_parent(path: &str) -> String {
+    if let Some(idx) = path.rfind('/') {
+        path[..idx].to_string()
+    } else {
+        "".to_string()
+    }
+}
+
+fn zip_relative_path(from_file: &str, to_file: &str) -> String {
+    let from_dir = zip_parent(from_file);
+    let from_parts: Vec<&str> = from_dir.split('/').filter(|s| !s.is_empty()).collect();
+    let to_parts: Vec<&str> = to_file.split('/').filter(|s| !s.is_empty()).collect();
+    let mut i = 0usize;
+    while i < from_parts.len() && i < to_parts.len() && from_parts[i] == to_parts[i] {
+        i += 1;
+    }
+    let mut rel_parts: Vec<String> = Vec::new();
+    for _ in i..from_parts.len() {
+        rel_parts.push("..".to_string());
+    }
+    for part in to_parts.iter().skip(i) {
+        rel_parts.push((*part).to_string());
+    }
+    if rel_parts.is_empty() {
+        ".".to_string()
+    } else {
+        rel_parts.join("/")
+    }
+}
+
+fn is_text_like_entry(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".xhtml")
+        || lower.ends_with(".html")
+        || lower.ends_with(".htm")
+        || lower.ends_with(".xml")
+        || lower.ends_with(".opf")
+        || lower.ends_with(".ncx")
+        || lower.ends_with(".css")
+        || lower.ends_with(".svg")
+}
+
+fn rewrite_text_links(
+    text: String,
+    current_old_path: &str,
+    current_new_path: &str,
+    path_map: &HashMap<String, String>,
+) -> String {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for (old_abs, new_abs) in path_map {
+        if old_abs.ends_with('/') || new_abs.ends_with('/') {
+            continue;
+        }
+        let old_rel = zip_relative_path(current_old_path, old_abs);
+        let new_rel = zip_relative_path(current_new_path, new_abs);
+        if old_rel == "." || new_rel == "." {
+            continue;
+        }
+        pairs.push((old_rel.clone(), new_rel.clone()));
+        pairs.push((old_rel.replace(' ', "%20"), new_rel.replace(' ', "%20")));
+        if !old_rel.starts_with("./") {
+            pairs.push((format!("./{}", old_rel), format!("./{}", new_rel)));
+            pairs.push((
+                format!("./{}", old_rel.replace(' ', "%20")),
+                format!("./{}", new_rel.replace(' ', "%20")),
+            ));
+        }
+    }
+
+    pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    let mut out = text;
+    for (from, to) in pairs {
+        if from != to {
+            out = out.replace(&from, &to);
+        }
+    }
+    out
+}
+
+fn rebuild_epub_with_sanitized_names_from_bytes(
+    source: &Path,
+    bytes: &[u8],
+    suffix: &str,
+) -> Result<Option<PathBuf>, String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+
+    let mut path_map: HashMap<String, String> = HashMap::new();
+    let mut used: HashSet<String> = HashSet::new();
+    let opf_name_hints = collect_opf_id_hints(bytes);
+    let mut friendly_counter: usize = 1;
+    let mut changed = false;
+
+    for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        let old_name = file.name().replace('\\', "/");
+        let mut sanitized = sanitize_zip_entry_name(&old_name);
+        let old_invalid = has_windows_invalid_component(&old_name);
+        let old_obfuscated = looks_obfuscated_basename(&old_name);
+
+        if !sanitized.ends_with('/') {
+            let parent = zip_parent(&sanitized);
+            let hint = opf_name_hints
+                .get(&old_name)
+                .or_else(|| opf_name_hints.get(&old_name.to_ascii_lowercase()))
+                .cloned();
+
+            if old_obfuscated {
+                if let Some(hint_name) = hint {
+                    let target = if parent.is_empty() {
+                        hint_name
+                    } else {
+                        format!("{}/{}", parent, hint_name)
+                    };
+                    if target != sanitized {
+                        sanitized = target;
+                        changed = true;
+                    }
+                } else {
+                    let friendly = friendly_name_for_path(&sanitized, friendly_counter);
+                    friendly_counter += 1;
+                    sanitized = if parent.is_empty() {
+                        friendly
+                    } else {
+                        format!("{}/{}", parent, friendly)
+                    };
+                    changed = true;
+                }
+            }
+        }
+        let unique = ensure_unique_zip_name(&sanitized, &mut used);
+        if old_name != unique {
+            changed = true;
+        }
+        if old_invalid {
+            changed = true;
+        }
+        path_map.insert(old_name, unique);
+    }
+
+    if !changed {
+        return Ok(None);
+    }
+
+    let out_path = build_processed_epub_path(source, suffix);
+    let out_file = fs::File::create(&out_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
+    let mut writer = zip::ZipWriter::new(out_file);
+    let mut archive2 = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+
+    let mut opf_old_to_new: HashMap<String, String> = HashMap::new();
+    for (old, newp) in &path_map {
+        if old.to_ascii_lowercase().ends_with(".opf") && newp.to_ascii_lowercase().ends_with(".opf")
+        {
+            opf_old_to_new.insert(old.clone(), newp.clone());
+        }
+    }
+
+    for i in 0..archive2.len() {
+        let mut file = archive2
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        let old_name = file.name().replace('\\', "/");
+        let new_name = path_map
+            .get(&old_name)
+            .cloned()
+            .unwrap_or_else(|| old_name.clone());
+
+        let options = FileOptions::default().compression_method(file.compression());
+
+        if new_name.ends_with('/') {
+            writer
+                .add_directory(&new_name, options)
+                .map_err(|e| format!("写入目录失败: {}", e))?;
+            continue;
+        }
+
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)
+            .map_err(|e| format!("读取条目数据失败: {}", e))?;
+
+        if old_name.eq_ignore_ascii_case("META-INF/container.xml") {
+            let mut text = String::from_utf8_lossy(&data).to_string();
+            for (opf_old, opf_new) in &opf_old_to_new {
+                text = text.replace(opf_old, opf_new);
+            }
+            text = rewrite_text_links(text, &old_name, &new_name, &path_map);
+            data = text.into_bytes();
+        } else if is_text_like_entry(&old_name) {
+            let text = String::from_utf8_lossy(&data).to_string();
+            let rewritten = rewrite_text_links(text, &old_name, &new_name, &path_map);
+            data = rewritten.into_bytes();
+        }
+
+        writer
+            .start_file(&new_name, options)
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+        writer
+            .write_all(&data)
+            .map_err(|e| format!("写入文件内容失败: {}", e))?;
+    }
+
+    writer.finish().map_err(|e| format!("完成写入失败: {}", e))?;
+    Ok(Some(out_path))
+}
+
+#[derive(Serialize)]
+struct EpubPrepareResult {
+    source_path: String,
+    processed_path: String,
+    changed: bool,
+    action: String,
 }
 
 fn get_history_base_dir() -> PathBuf {
@@ -730,6 +1324,98 @@ fn read_text_file(path: String) -> Result<String, String> {
 
     // println!("Selected encoding: {} (errors: {})", best_encoding, min_errors);
     Ok(normalize_line_endings(best_content))
+}
+
+#[tauri::command]
+fn prepare_epub_for_open(epub_path: String) -> Result<EpubPrepareResult, String> {
+    let source = PathBuf::from(&epub_path);
+    if !source.exists() {
+        return Err(format!("文件不存在: {}", epub_path));
+    }
+
+    // Case 1: valid ZIP/EPUB, only repair pseudo-encryption bit if needed.
+    if is_zip_archive_path(&source) {
+        let mut bytes = fs::read(&source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+        let fixed_encryption_flag = clear_zip_encryption_flags(&mut bytes);
+
+        if let Some(out_path) =
+            rebuild_epub_with_sanitized_names_from_bytes(&source, &bytes, "_deobf")?
+        {
+            return Ok(EpubPrepareResult {
+                source_path: source.to_string_lossy().to_string(),
+                processed_path: out_path.to_string_lossy().to_string(),
+                changed: true,
+                action: if fixed_encryption_flag {
+                    "已自动解除伪加密并修复文件名混淆".to_string()
+                } else {
+                    "已自动修复文件名混淆".to_string()
+                },
+            });
+        }
+
+        if fixed_encryption_flag {
+            let out_path = build_processed_epub_path(&source, "_decrypted");
+            fs::write(&out_path, &bytes).map_err(|e| format!("写入修复文件失败: {}", e))?;
+            return Ok(EpubPrepareResult {
+                source_path: source.to_string_lossy().to_string(),
+                processed_path: out_path.to_string_lossy().to_string(),
+                changed: true,
+                action: "已自动解除伪加密".to_string(),
+            });
+        }
+        return Ok(EpubPrepareResult {
+            source_path: source.to_string_lossy().to_string(),
+            processed_path: source.to_string_lossy().to_string(),
+            changed: false,
+            action: "无需处理".to_string(),
+        });
+    }
+
+    // Case 2: try simple XOR obfuscation recovery.
+    let bytes = fs::read(&source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let mut candidate_keys: Vec<u8> = vec![0xFF, 0xA5, 0x5A];
+    if bytes.len() >= 4 {
+        let k0 = bytes[0] ^ 0x50;
+        if (bytes[1] ^ 0x4B) == k0 && (bytes[2] ^ 0x03) == k0 && (bytes[3] ^ 0x04) == k0 {
+            if !candidate_keys.contains(&k0) {
+                candidate_keys.insert(0, k0);
+            }
+        }
+    }
+
+    for key in candidate_keys {
+        let mut decoded = xor_bytes(&bytes, key);
+        let fixed_encryption_flag = clear_zip_encryption_flags(&mut decoded);
+        if is_zip_archive_bytes(&decoded) {
+            let suffix = if fixed_encryption_flag {
+                "_deobf_decrypted"
+            } else {
+                "_deobf"
+            };
+
+            if let Some(out_path) =
+                rebuild_epub_with_sanitized_names_from_bytes(&source, &decoded, suffix)?
+            {
+                return Ok(EpubPrepareResult {
+                    source_path: source.to_string_lossy().to_string(),
+                    processed_path: out_path.to_string_lossy().to_string(),
+                    changed: true,
+                    action: "已自动解混淆并修复可读格式".to_string(),
+                });
+            }
+
+            let out_path = build_processed_epub_path(&source, suffix);
+            fs::write(&out_path, &decoded).map_err(|e| format!("写入解混淆文件失败: {}", e))?;
+            return Ok(EpubPrepareResult {
+                source_path: source.to_string_lossy().to_string(),
+                processed_path: out_path.to_string_lossy().to_string(),
+                changed: true,
+                action: "已自动解混淆并修复可读格式".to_string(),
+            });
+        }
+    }
+
+    Err("该 EPUB 可能经过非通用加密/混淆，当前版本暂无法自动处理".to_string())
 }
 
 #[tauri::command]
@@ -2175,6 +2861,361 @@ async fn rename_epub_file(
     Ok(())
 }
 
+fn be_u16(data: &[u8], offset: usize) -> Option<u16> {
+    if offset + 2 > data.len() {
+        return None;
+    }
+    Some(u16::from_be_bytes([data[offset], data[offset + 1]]))
+}
+
+fn be_u32(data: &[u8], offset: usize) -> Option<u32> {
+    if offset + 4 > data.len() {
+        return None;
+    }
+    Some(u32::from_be_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ]))
+}
+
+fn sfnt_table<'a>(font_data: &'a [u8], tag: &[u8; 4]) -> Option<&'a [u8]> {
+    if font_data.len() < 12 {
+        return None;
+    }
+    let num_tables = be_u16(font_data, 4)? as usize;
+    let mut rec_off = 12usize;
+    for _ in 0..num_tables {
+        if rec_off + 16 > font_data.len() {
+            return None;
+        }
+        if &font_data[rec_off..rec_off + 4] == tag {
+            let table_offset = be_u32(font_data, rec_off + 8)? as usize;
+            let table_len = be_u32(font_data, rec_off + 12)? as usize;
+            if table_offset + table_len > font_data.len() {
+                return None;
+            }
+            return Some(&font_data[table_offset..table_offset + table_len]);
+        }
+        rec_off += 16;
+    }
+    None
+}
+
+fn decode_utf16be(raw: &[u8]) -> Option<String> {
+    if raw.is_empty() || raw.len() % 2 != 0 {
+        return None;
+    }
+    let mut units = Vec::with_capacity(raw.len() / 2);
+    let mut idx = 0usize;
+    while idx + 1 < raw.len() {
+        units.push(u16::from_be_bytes([raw[idx], raw[idx + 1]]));
+        idx += 2;
+    }
+    String::from_utf16(&units).ok()
+}
+
+fn parse_font_internal_names(font_data: &[u8]) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut dedup = HashSet::new();
+    let table = match sfnt_table(font_data, b"name") {
+        Some(t) => t,
+        None => return names,
+    };
+    if table.len() < 6 {
+        return names;
+    }
+
+    let count = match be_u16(table, 2) {
+        Some(v) => v as usize,
+        None => return names,
+    };
+    let string_offset = match be_u16(table, 4) {
+        Some(v) => v as usize,
+        None => return names,
+    };
+
+    for i in 0..count {
+        let rec_off = 6 + i * 12;
+        if rec_off + 12 > table.len() {
+            break;
+        }
+        let platform_id = be_u16(table, rec_off).unwrap_or(0);
+        let name_id = be_u16(table, rec_off + 6).unwrap_or(0);
+        if name_id != 1 && name_id != 4 && name_id != 16 {
+            continue;
+        }
+        let length = be_u16(table, rec_off + 8).unwrap_or(0) as usize;
+        let offset = be_u16(table, rec_off + 10).unwrap_or(0) as usize;
+        let start = string_offset + offset;
+        let end = start + length;
+        if end > table.len() || start >= end {
+            continue;
+        }
+        let raw = &table[start..end];
+        let value = if platform_id == 0 || platform_id == 3 {
+            decode_utf16be(raw)
+        } else {
+            Some(String::from_utf8_lossy(raw).to_string())
+        };
+        if let Some(mut v) = value {
+            v = v.trim().to_string();
+            if !v.is_empty() && dedup.insert(v.clone()) {
+                names.push(v);
+            }
+        }
+    }
+    names
+}
+
+fn cmap_has_glyph_format4(subtable: &[u8], codepoint: u16) -> Option<bool> {
+    if subtable.len() < 16 {
+        return None;
+    }
+    let seg_count_x2 = be_u16(subtable, 6)? as usize;
+    if seg_count_x2 == 0 || seg_count_x2 % 2 != 0 {
+        return None;
+    }
+    let seg_count = seg_count_x2 / 2;
+    let end_codes_off = 14usize;
+    let start_codes_off = end_codes_off + seg_count * 2 + 2;
+    let id_delta_off = start_codes_off + seg_count * 2;
+    let id_range_off = id_delta_off + seg_count * 2;
+    if id_range_off + seg_count * 2 > subtable.len() {
+        return None;
+    }
+
+    for i in 0..seg_count {
+        let end_code = be_u16(subtable, end_codes_off + i * 2)? as u32;
+        if (codepoint as u32) > end_code {
+            continue;
+        }
+        let start_code = be_u16(subtable, start_codes_off + i * 2)? as u32;
+        if (codepoint as u32) < start_code {
+            return Some(false);
+        }
+        let id_delta = be_u16(subtable, id_delta_off + i * 2)?;
+        let id_range_offset = be_u16(subtable, id_range_off + i * 2)? as usize;
+        if id_range_offset == 0 {
+            let glyph = codepoint.wrapping_add(id_delta);
+            return Some(glyph != 0);
+        }
+
+        let glyph_index_off =
+            id_range_off + i * 2 + id_range_offset + ((codepoint as u32 - start_code) as usize) * 2;
+        if glyph_index_off + 2 > subtable.len() {
+            return Some(false);
+        }
+        let glyph_index = be_u16(subtable, glyph_index_off)?;
+        if glyph_index == 0 {
+            return Some(false);
+        }
+        let glyph = glyph_index.wrapping_add(id_delta);
+        return Some(glyph != 0);
+    }
+    Some(false)
+}
+
+fn cmap_has_glyph_format12(subtable: &[u8], codepoint: u32) -> Option<bool> {
+    if subtable.len() < 16 {
+        return None;
+    }
+    let n_groups = be_u32(subtable, 12)? as usize;
+    let groups_off = 16usize;
+    for i in 0..n_groups {
+        let off = groups_off + i * 12;
+        if off + 12 > subtable.len() {
+            break;
+        }
+        let start_char = be_u32(subtable, off)?;
+        let end_char = be_u32(subtable, off + 4)?;
+        let start_glyph = be_u32(subtable, off + 8)?;
+        if codepoint < start_char {
+            return Some(false);
+        }
+        if codepoint <= end_char {
+            return Some(start_glyph + (codepoint - start_char) != 0);
+        }
+    }
+    Some(false)
+}
+
+fn cmap_has_glyph_format13(subtable: &[u8], codepoint: u32) -> Option<bool> {
+    if subtable.len() < 16 {
+        return None;
+    }
+    let n_groups = be_u32(subtable, 12)? as usize;
+    let groups_off = 16usize;
+    for i in 0..n_groups {
+        let off = groups_off + i * 12;
+        if off + 12 > subtable.len() {
+            break;
+        }
+        let start_char = be_u32(subtable, off)?;
+        let end_char = be_u32(subtable, off + 4)?;
+        let glyph_id = be_u32(subtable, off + 8)?;
+        if codepoint < start_char {
+            return Some(false);
+        }
+        if codepoint <= end_char {
+            return Some(glyph_id != 0);
+        }
+    }
+    Some(false)
+}
+
+fn font_has_glyph(font_data: &[u8], codepoint: u32) -> Result<bool, String> {
+    let cmap = sfnt_table(font_data, b"cmap").ok_or_else(|| "字体缺少 cmap 表".to_string())?;
+    if cmap.len() < 4 {
+        return Err("字体 cmap 表无效".to_string());
+    }
+    let num_tables = be_u16(cmap, 2).ok_or_else(|| "字体 cmap 表无效".to_string())? as usize;
+    let mut checked_any = false;
+
+    for i in 0..num_tables {
+        let rec_off = 4 + i * 8;
+        if rec_off + 8 > cmap.len() {
+            break;
+        }
+        let sub_offset = match be_u32(cmap, rec_off + 4) {
+            Some(v) => v as usize,
+            None => continue,
+        };
+        if sub_offset + 2 > cmap.len() {
+            continue;
+        }
+        let format = be_u16(cmap, sub_offset).unwrap_or(0);
+        match format {
+            4 => {
+                if codepoint > 0xFFFF {
+                    continue;
+                }
+                checked_any = true;
+                let res = cmap_has_glyph_format4(&cmap[sub_offset..], codepoint as u16)
+                    .ok_or_else(|| "字体 cmap format 4 解析失败".to_string())?;
+                if res {
+                    return Ok(true);
+                }
+            }
+            12 => {
+                checked_any = true;
+                let res = cmap_has_glyph_format12(&cmap[sub_offset..], codepoint)
+                    .ok_or_else(|| "字体 cmap format 12 解析失败".to_string())?;
+                if res {
+                    return Ok(true);
+                }
+            }
+            13 => {
+                checked_any = true;
+                let res = cmap_has_glyph_format13(&cmap[sub_offset..], codepoint)
+                    .ok_or_else(|| "字体 cmap format 13 解析失败".to_string())?;
+                if res {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !checked_any {
+        return Err("字体 cmap 子表格式暂不支持".to_string());
+    }
+    Ok(false)
+}
+
+fn read_epub_binary_cached(epub_path: &str, file_path: &str) -> Result<Vec<u8>, String> {
+    {
+        let cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(cache) = cache_guard.as_ref() {
+            if cache.epub_path == epub_path {
+                if let Some(data) = cache.binary_cache.get(file_path) {
+                    return Ok(data.clone());
+                }
+            }
+        }
+    }
+
+    let file = fs::File::open(epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("无效 EPUB 文件: {}", e))?;
+    let mut zip_file = archive
+        .by_name(file_path)
+        .map_err(|e| format!("字体文件未找到: {}", e))?;
+
+    let mut buffer = Vec::new();
+    zip_file
+        .read_to_end(&mut buffer)
+        .map_err(|e| format!("读取字体文件失败: {}", e))?;
+
+    {
+        let mut cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(cache) = cache_guard.as_mut() {
+            if cache.epub_path == epub_path {
+                cache
+                    .binary_cache
+                    .insert(file_path.to_string(), buffer.clone());
+            }
+        }
+    }
+
+    Ok(buffer)
+}
+
+#[tauri::command]
+async fn analyze_epub_font_glyphs(
+    epub_path: String,
+    file_path: String,
+    chars: Vec<String>,
+) -> Result<FontGlyphAnalyzeResult, String> {
+    let font_data = read_epub_binary_cached(&epub_path, &file_path)?;
+    let internal_names = parse_font_internal_names(&font_data);
+
+    if font_data.starts_with(b"wOFF") || font_data.starts_with(b"wOF2") {
+        return Ok(FontGlyphAnalyzeResult {
+            internal_names,
+            missing_chars: Vec::new(),
+            unsupported_reason: Some("当前暂不支持 WOFF/WOFF2 的字形统计".to_string()),
+        });
+    }
+
+    if font_data.starts_with(b"ttcf") {
+        return Ok(FontGlyphAnalyzeResult {
+            internal_names,
+            missing_chars: Vec::new(),
+            unsupported_reason: Some("当前暂不支持 TTC 字体集合的字形统计".to_string()),
+        });
+    }
+
+    let mut missing_chars: Vec<String> = Vec::new();
+    for ch in chars {
+        let c = match ch.chars().next() {
+            Some(v) => v,
+            None => continue,
+        };
+        if c.is_whitespace() {
+            continue;
+        }
+        let codepoint = c as u32;
+        match font_has_glyph(&font_data, codepoint) {
+            Ok(true) => {}
+            Ok(false) => missing_chars.push(ch),
+            Err(reason) => {
+                return Ok(FontGlyphAnalyzeResult {
+                    internal_names,
+                    missing_chars: Vec::new(),
+                    unsupported_reason: Some(reason),
+                });
+            }
+        }
+    }
+
+    Ok(FontGlyphAnalyzeResult {
+        internal_names,
+        missing_chars,
+        unsupported_reason: None,
+    })
+}
+
 #[tauri::command]
 fn get_launch_args() -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
@@ -2209,6 +3250,7 @@ pub fn run() {
             read_epub_file_binary,
             read_epub_files_batch,
             read_epub_binary_batch,
+            analyze_epub_font_glyphs,
             save_epub_file_content,
             save_epub_to_disk,
             search_in_files,
@@ -2219,6 +3261,7 @@ pub fn run() {
             delete_epub_file,
             rename_epub_file,
             get_launch_args, // Register new command
+            prepare_epub_for_open,
             exit_app
         ])
         .run(tauri::generate_context!())

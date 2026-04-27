@@ -68,6 +68,13 @@
     );
   }
 
+  function handleMenuItemKeydown(e: KeyboardEvent, action: string) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleAction(action);
+    }
+  }
+
   function onContextMenu(e: MouseEvent) {
     // 1. Check for Context Data Attribute (File Tree / TOC)
     const target = e.target as HTMLElement;
@@ -80,7 +87,8 @@
       target.tagName === "INPUT" ||
       target.tagName === "TEXTAREA" ||
       target.isContentEditable;
-    const hasSelection = window.getSelection()?.toString().length > 0;
+    const hasSelection =
+      (window.getSelection()?.toString().length ?? 0) > 0;
 
     if (contextNode) {
       e.preventDefault();
@@ -219,7 +227,9 @@
     class="context-menu"
     bind:this={menuElement}
     style="top: {pos.y}px; left: {pos.x}px;"
-    on:click|stopPropagation
+    role="menu"
+    aria-label="上下文菜单"
+    tabindex="-1"
   >
     {#each currentItems as item}
       {#if item.separator}
@@ -228,7 +238,10 @@
         <div
           class="menu-item"
           class:danger={item.danger}
+          role="menuitem"
+          tabindex="0"
           on:click={() => handleAction(item.action)}
+          on:keydown={(e) => handleMenuItemKeydown(e, item.action)}
         >
           <span class="icon">{item.icon}</span>
           <span>{item.label}</span>
