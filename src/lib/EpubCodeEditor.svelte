@@ -241,17 +241,17 @@
                 EditorView.theme({
                     "&": {
                         height: "100%",
-                        backgroundColor: "#fff",
+                        backgroundColor: "var(--color-surface)",
                     },
                     ".cm-content": {
                         fontFamily:
-                            '"Consolas", "Monaco", "Courier New", monospace',
+                            "var(--font-code)",
                         lineHeight: "1.6",
                     },
                     ".cm-gutters": {
-                        backgroundColor: "#f8f8f8",
-                        color: "#858585",
-                        borderRight: "1px solid #e0e0e0",
+                        backgroundColor: "var(--color-surface-soft)",
+                        color: "var(--color-muted)",
+                        borderRight: "1px solid var(--color-border)",
                     },
                     ".cm-scroller": {
                         overflow: "auto",
@@ -261,24 +261,24 @@
                         height: "8px",
                     },
                     ".cm-scroller::-webkit-scrollbar-track": {
-                        background: "#f1f1f1",
+                        background: "rgba(226, 235, 244, 0.72)",
                     },
                     ".cm-scroller::-webkit-scrollbar-thumb": {
-                        background: "#888",
-                        borderRadius: "4px",
+                        background: "linear-gradient(180deg, #bacbda, #93a8bb)",
+                        borderRadius: "999px",
                     },
                     ".cm-scroller::-webkit-scrollbar-thumb:hover": {
-                        background: "#555",
+                        background: "linear-gradient(180deg, #9dafc0, #748b9f)",
                     },
                     // 选中高亮样式 - 明亮的黄色背景
                     ".cm-selectionBackground": {
-                        backgroundColor: "#ffeb3b !important",
+                        backgroundColor: "rgba(22, 119, 184, 0.28) !important",
                     },
                     "&.cm-focused .cm-selectionBackground": {
-                        backgroundColor: "#ffeb3b !important",
+                        backgroundColor: "rgba(22, 119, 184, 0.36) !important",
                     },
                     ".cm-selectionMatch": {
-                        backgroundColor: "#b3e5fc !important",
+                        backgroundColor: "rgba(233, 155, 47, 0.28) !important",
                     },
                 }),
                 themeCompartment.of(

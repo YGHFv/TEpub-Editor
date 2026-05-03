@@ -5,6 +5,7 @@
     import { open, save, message, ask } from "@tauri-apps/plugin-dialog";
     // import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs"; // Removed to force use of custom backend
     import { getCurrentWindow } from "@tauri-apps/api/window";
+    import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
     import Editor from "$lib/Editor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
 
@@ -67,22 +68,30 @@
         pattern: string;
     }
 
+    const DEFAULT_META_REGEX =
+        "^\\s*(?:内容)?(?:简介|序(?:章|言)?|前言|楔子|后记|完本感言|尾声)\\s*(?:[:：].*)?$";
+    const DEFAULT_VOLUME_REGEX =
+        "^\\s*第[零〇一二两三四五六七八九十百千万0-9]+\\s*[卷部].*";
+    const DEFAULT_CHAPTER_REGEX =
+        "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+).*";
+
     const DEFAULT_SETTINGS = {
         customRegexRules: [
-            { level: 1, pattern: "^\\s*(内容)?(简介|序[章言]?|前言|楔子|后记|完本感言).*" },
-            { level: 1, pattern: "^\\s*第[零一二三四五六七八九十百千万0-9]+[卷部].*" },
-            { level: 3, pattern: "^\\s*(第[一二三四五六七八九十百千万0-9]+(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+).*" }
+            { level: 1, pattern: DEFAULT_META_REGEX },
+            { level: 1, pattern: DEFAULT_VOLUME_REGEX },
+            { level: 3, pattern: DEFAULT_CHAPTER_REGEX }
         ] as CustomRegexRule[],
         wordCountThreshold: 8000,
         clearHistoryOnSave: false,
         defaultEpubStyles: { "main.css": "", "font.css": "" },
+        uiTheme: "modern" as "modern" | "classic" | "dark",
         wordWrap: true,
         showWhitespace: false,
         showLineBreaks: false,
         // Legacy fallbacks for compatibility
-        volRegex: "^\\s*第[零一二三四五六七八九十百千万0-9]+[卷部].*",
-        chapRegex: "^\\s*(第[一二三四五六七八九十百千万0-9]+(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+).*",
-        metaRegex: "^\\s*(内容)?(简介|序[章言]?|前言|楔子|后记|完本感言).*",
+        volRegex: DEFAULT_VOLUME_REGEX,
+        chapRegex: DEFAULT_CHAPTER_REGEX,
+        metaRegex: DEFAULT_META_REGEX,
     };
 
     const REGEX_PRESETS = [
@@ -92,9 +101,91 @@
         { label: "^\\s*第[一二三..]+回.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+回.*$" },
         { label: "^\\s*第[一二三..]+节.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+节.*$" },
         { label: "^\\s*第\\d+章.*$", value: "^\\s*第\\d+章.*$" },
-        { label: "^\\s*(序[1-9言曲]?|(内容)?简介|后记|尾声)$", value: "^\\s*(序[1-9言曲]?|(内容)?简介|后记|尾声)$" },
+        { label: "^\\s*(内容)?(简介|序章|序言|前言|楔子|后记|尾声)$", value: DEFAULT_META_REGEX },
+        { label: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$", value: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$" },
         { label: "^\\s*\\d+\\s*$", value: "^\\s*\\d+\\s*$" }
     ];
+
+    function isLegacyLooseMetaRegex(pattern: string | undefined) {
+        if (!pattern) return false;
+        const compact = pattern.replace(/\s+/g, "");
+        return (
+            compact ===
+                "^\\s*(内容)?(简介|序[章言]?|前言|楔子|后记|完本感言).*" ||
+            (compact.includes("序[章言]?") &&
+                compact.includes("简介") &&
+                compact.endsWith(".*"))
+        );
+    }
+
+    function normalizeTocRegexRule(rule: any): CustomRegexRule {
+        let level = Number(rule?.level ?? 3);
+        let pattern = String(rule?.pattern ?? "");
+
+        if (typeof rule?.type === "string") {
+            level = rule.type === "Volume" || rule.type === "Meta" ? 1 : 3;
+        }
+
+        if (isLegacyLooseMetaRegex(pattern)) {
+            level = 1;
+            pattern = DEFAULT_META_REGEX;
+        }
+
+        if (pattern.includes("[章回]")) {
+            pattern = pattern.replace("[章回]", "(?:[章节]|回(?:[^合]|$))");
+        }
+
+        return { level, pattern };
+    }
+
+    function isLikelyTocTitle(title: string, level: number) {
+        const trimmed = title.trim();
+        if (!trimmed) return false;
+
+        // Old loose "序" rules used to catch normal prose such as "序列8时...".
+        if (level === 1 && /^序(?!\s*(?:章|言)?\s*(?:[:：]|$))/.test(trimmed)) {
+            return false;
+        }
+
+        // A legitimate "序列8" heading should stop after the number or use a separator.
+        // "序列8时..." / "序列7后..." are prose and should not become TOC entries.
+        if (
+            /^序列\s*[0-9零〇一二两三四五六七八九十百千万]+[\u4e00-\u9fff]/.test(
+                trimmed,
+            ) &&
+            !/^序列\s*[0-9零〇一二两三四五六七八九十百千万]+(?:\s|[:：、.．\-—]|$)/.test(
+                trimmed,
+            )
+        ) {
+            return false;
+        }
+
+        const chapterTail = trimmed.match(
+            /^第\s*[0-9零〇一二两三四五六七八九十百千万]+\s*(章|节|回)(\S?)/,
+        );
+        if (chapterTail) {
+            const keyword = chapterTail[1]; // 章 / 节 / 回
+            const nextChar = chapterTail[2];
+
+            // "第X节" immediately followed by Chinese text (no separator) is almost
+            // always prose (e.g. 第二节课, 第一节内容), not a section heading.
+            if (keyword === "节" && nextChar && /^[一-鿿]/.test(nextChar)) {
+                return false;
+            }
+
+            if (
+                nextChar &&
+                !/^[：:、.．\-—]/.test(nextChar) &&
+                /^[的了时侯候后前中里内外上下来去得地着过将把被与和及都也才只能已会在是有为对从用以课程数次目期]/.test(
+                    nextChar,
+                )
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     // --- [3. 核心状态] ---
     let filePath = "请打开一本小说...";
@@ -103,6 +194,7 @@
     let flatToc: FlatNode[] = [];
     let stats = { volumes: 0, chapters: 0 };
     let activeChapterId = "";
+    let userCollapsedVolumeKeys = new Set<string>();
     let editorComponent: Editor;
 
     let showSidebar = true; // State
@@ -146,6 +238,105 @@
     let customMetadata: { key: string; value: string }[] = [];
     let appSettings = { ...DEFAULT_SETTINGS };
     let historyList: HistoryMeta[] = [];
+
+    function getVolumeCollapseKey(node: Pick<TocNode, "line_number" | "title">) {
+        return `${node.line_number}:${node.title}`;
+    }
+
+    function toggleVolumeNode(node: TocNode) {
+        node.expanded = !node.expanded;
+        const key = getVolumeCollapseKey(node);
+
+        if (node.expanded) {
+            userCollapsedVolumeKeys.delete(key);
+        } else {
+            userCollapsedVolumeKeys.add(key);
+        }
+
+        userCollapsedVolumeKeys = new Set(userCollapsedVolumeKeys);
+        tocTree = [...tocTree];
+    }
+
+    // 目录查找状态：匹配列表 + 当前索引，支持 find-next / find-prev
+    let tocSearchMatches: TocNode[] = [];
+    let tocSearchIndex = -1;
+    let lastTocSearchKey = "";
+
+    function buildTocTestFn(query: string, searchMode: string): ((title: string) => boolean) | null {
+        if (searchMode === "regex") {
+            try { const regex = new RegExp(query, "i"); return (t) => regex.test(t); }
+            catch { return null; }
+        } else if (searchMode === "extended") {
+            const literal = query.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r");
+            const lower = literal.toLowerCase();
+            return (t) => t.toLowerCase().includes(lower);
+        } else {
+            const lower = query.toLowerCase();
+            return (t) => t.toLowerCase().includes(lower);
+        }
+    }
+
+    function findAllTocMatches(query: string, searchMode: string): TocNode[] {
+        const testFn = buildTocTestFn(query, searchMode);
+        if (!testFn) return [];
+        const matches: TocNode[] = [];
+        for (const vol of tocTree) {
+            if (testFn(vol.title)) matches.push(vol);
+            if (vol.children) {
+                for (const ch of vol.children) {
+                    if (testFn(ch.title)) matches.push(ch);
+                }
+            }
+        }
+        return matches;
+    }
+
+    function navigateToTocMatch(match: TocNode) {
+        // 如果是子节点，确保父卷已展开
+        const parentVol = tocTree.find((v) =>
+            v.children?.some((c) => c.id === match.id),
+        );
+        if (parentVol && !parentVol.expanded) {
+            parentVol.expanded = true;
+            userCollapsedVolumeKeys.delete(getVolumeCollapseKey(parentVol));
+            tocTree = [...tocTree];
+        }
+        if (editorComponent) {
+            console.log("[PAGE] navigateToTocMatch scrolling to line " + match.line_number + " title=" + match.title);
+            editorComponent.scrollToLine(match.line_number);
+            activeChapterId = match.id;
+        }
+    }
+
+    function handleTocSearch(query: string, actionType: string, searchMode: string) {
+        console.log("[PAGE] handleTocSearch query=" + JSON.stringify(query) + " type=" + actionType + " mode=" + searchMode + " tocTreeLen=" + tocTree.length);
+        if (!query) return;
+
+        const searchKey = query + ":::" + searchMode;
+        const isNewSearch = searchKey !== lastTocSearchKey;
+
+        if (isNewSearch) {
+            tocSearchMatches = findAllTocMatches(query, searchMode);
+            tocSearchIndex = tocSearchMatches.length > 0 ? 0 : -1;
+            lastTocSearchKey = searchKey;
+            console.log("[PAGE] new search: " + tocSearchMatches.length + " matches");
+        } else if (actionType === "find-next") {
+            if (tocSearchMatches.length > 0) {
+                tocSearchIndex = (tocSearchIndex + 1) % tocSearchMatches.length;
+            }
+        } else if (actionType === "find-prev") {
+            if (tocSearchMatches.length > 0) {
+                tocSearchIndex = (tocSearchIndex - 1 + tocSearchMatches.length) % tocSearchMatches.length;
+            }
+        }
+
+        if (tocSearchIndex >= 0 && tocSearchIndex < tocSearchMatches.length) {
+            navigateToTocMatch(tocSearchMatches[tocSearchIndex]);
+            emit("search-status", { count: tocSearchMatches.length, current: tocSearchIndex + 1 });
+        } else {
+            emit("search-status", { count: 0 });
+        }
+    }
 
     // 查找替换状态
     let findPattern = "";
@@ -298,6 +489,10 @@
                 try {
                     let parsed = JSON.parse(stored);
                     appSettings = { ...DEFAULT_SETTINGS, ...parsed };
+
+                    if (isLegacyLooseMetaRegex(appSettings.metaRegex)) {
+                        appSettings.metaRegex = DEFAULT_META_REGEX;
+                    }
                     
                     // 核心初始化：确保 customRegexRules 存在并按照预期结构映射
                     if (!appSettings.customRegexRules || !Array.isArray(appSettings.customRegexRules)) {
@@ -305,27 +500,20 @@
                             { level: 1, pattern: appSettings.metaRegex || DEFAULT_SETTINGS.metaRegex },
                             { level: 1, pattern: appSettings.volRegex || DEFAULT_SETTINGS.volRegex },
                             { level: 3, pattern: appSettings.chapRegex || DEFAULT_SETTINGS.chapRegex }
-                        ];
+                        ].map(normalizeTocRegexRule);
                     } else {
                         // 迁移：如果包含 type，无缝转换为 level
-                        appSettings.customRegexRules = appSettings.customRegexRules.map((r: any) => {
-                            if (typeof r.type === "string") {
-                                let level = 3;
-                                if (r.type === "Volume" || r.type === "Meta") level = 1;
-                                return { level, pattern: r.pattern };
-                            }
-                            return r;
-                        });
+                        appSettings.customRegexRules =
+                            appSettings.customRegexRules.map(normalizeTocRegexRule);
                     }
-
-                    // 迁移旧版正则：将 [章回] 替换为排除"回合"的模式
-                    appSettings.customRegexRules.forEach(r => {
-                        if (r.pattern && r.pattern.includes("[章回]")) {
-                            r.pattern = r.pattern.replace("[章回]", "(?:[章节]|回(?:[^合]|$))");
-                        }
-                    });
                 } catch (e) {}
             }
+
+            // 应用主题设置
+            if (!appSettings.uiTheme) appSettings.uiTheme = "modern";
+            applyTheme(appSettings.uiTheme);
+
+            // 目录查找通过 onTocSearch 回调处理（见 Editor 组件绑定）
 
             // 4. 崩溃恢复逻辑
             const savedState = localStorage.getItem("app-crash-recovery");
@@ -547,8 +735,6 @@
 
     async function openAdvancedEpubMetadata() {
         try {
-            const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-            
             // 检查窗口是否已存在
             const existing = await WebviewWindow.getByLabel("epub-metadata");
             if (existing) {
@@ -643,10 +829,6 @@
 
                     try {
                         // 打开新窗口显示 EPUB 编辑器
-                        const { WebviewWindow } = await import(
-                            "@tauri-apps/api/webviewWindow"
-                        );
-
                         // 确保路径正确编码
                         console.log("编码后路径:", encodedPath);
 
@@ -845,6 +1027,9 @@
                 content: text,
                 rules: appSettings.customRegexRules,
             });
+            const tocItems = rawList.filter((item) =>
+                isLikelyTocTitle(item.title, item.level),
+            );
 
             const tree: TocNode[] = [];
             flatToc = [];
@@ -852,7 +1037,7 @@
             let parentStack: TocNode[] = [];
 
             // 构建嵌套树
-            for (const item of rawList) {
+            for (const item of tocItems) {
                 // Determine legacy type for UI styling backward compatibility
                 const computedType = item.is_meta ? "Meta" : (item.level === 1 ? "Volume" : "Chapter");
                 
@@ -863,7 +1048,12 @@
                     type: computedType,
                     word_count: item.word_count,
                     children: [],
-                    expanded: true,
+                    expanded:
+                        computedType === "Volume"
+                            ? !userCollapsedVolumeKeys.has(
+                                  `${item.line_number}:${item.title}`,
+                              )
+                            : true,
                 };
 
                 const flatNode: FlatNode = {
@@ -971,7 +1161,11 @@
             // 如果是卷内章节，确保父卷展开
             if (found.parentId) {
                 const p = tocTree.find((n) => n.id === found!.parentId);
-                if (p && !p.expanded) {
+                if (
+                    p &&
+                    !p.expanded &&
+                    !userCollapsedVolumeKeys.has(getVolumeCollapseKey(p))
+                ) {
                     p.expanded = true;
                     tocTree = [...tocTree];
                     await tick();
@@ -1139,7 +1333,19 @@
             // 中文数字
             return chineseToNum(raw);
         }
-        // 2. 降级：标题以纯数字开头（如 "101 黑暗"）
+
+        // 2. 支持克系/玄幻常见等级标题："序列 8：小丑"、"序列八 小丑"。
+        // 必须在序号后结束或出现分隔符，避免把正文 "序列8时..." 当标题序号。
+        const seq = title.match(
+            /^序列\s*([0-9零一二三四五六七八九十百千万〇两]+)(?=\s|[:：、.．\-—]|$)/,
+        );
+        if (seq) {
+            const raw = seq[1];
+            if (/^\d+$/.test(raw)) return parseInt(raw);
+            return chineseToNum(raw);
+        }
+
+        // 3. 降级：标题以纯数字开头（如 "101 黑暗"）
         const m2 = title.match(/^(\d+)/);
         if (m2) return parseInt(m2[1]);
         return -1;
@@ -1171,6 +1377,9 @@
                 // 空标题检查: 仅包含数字、序号，没有具体内容
                 if (
                     /^第\s*[0-9零一二三四五六七八九十百千万]+\s*[章卷回节]\s*$/.test(
+                        node.title.trim(),
+                    ) ||
+                    /^序列\s*[0-9零一二三四五六七八九十百千万〇两]+\s*$/.test(
                         node.title.trim(),
                     ) ||
                     /^\d+$/.test(node.title.trim())
@@ -1313,6 +1522,9 @@
                 content: fileContent,
                 rules: appSettings.customRegexRules,
             });
+            chapters = chapters.filter((chapter) =>
+                isLikelyTocTitle(chapter.title, chapter.level),
+            );
 
             // 智能清洗
             const cleanRegex =
@@ -1383,6 +1595,19 @@
             await scanToc();
         } catch (e) {
             await message("回退失败: " + e, { kind: "error" });
+        }
+    }
+
+    function applyTheme(theme: string) {
+        document.documentElement.setAttribute("data-theme", theme);
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) {
+            const colors: Record<string, string> = {
+                classic: "#f3f3f3",
+                dark: "#14181d",
+                modern: "#eef4f8",
+            };
+            meta.setAttribute("content", colors[theme] || "#eef4f8");
         }
     }
 
@@ -1477,9 +1702,23 @@
                                 class="icon-btn"
                                 title="全部展开/折叠"
                                 on:click={() => {
-                                    const anyExpanded = tocTree.some(n => n.expanded);
+                                    const anyExpanded = tocTree.some(
+                                        (n) => n.type === "Volume" && n.expanded,
+                                    );
                                     const targetState = !anyExpanded;
-                                    tocTree.forEach(n => n.expanded = targetState);
+                                    tocTree.forEach((n) => {
+                                        if (n.type !== "Volume") return;
+                                        n.expanded = targetState;
+                                        const key = getVolumeCollapseKey(n);
+                                        if (targetState) {
+                                            userCollapsedVolumeKeys.delete(key);
+                                        } else {
+                                            userCollapsedVolumeKeys.add(key);
+                                        }
+                                    });
+                                    userCollapsedVolumeKeys = new Set(
+                                        userCollapsedVolumeKeys,
+                                    );
                                     tocTree = [...tocTree];
                                 }}>⇅</button
                             >
@@ -1508,8 +1747,7 @@
                                 : ''}"
                             on:click={() =>
                                 node.type === "Volume"
-                                    ? ((node.expanded = !node.expanded),
-                                      (tocTree = [...tocTree]))
+                                    ? toggleVolumeNode(node)
                                     : editorComponent.scrollToLine(
                                           node.line_number,
                                       )}
@@ -1586,6 +1824,7 @@
                 wordWrap={appSettings.wordWrap}
                 showWhitespace={appSettings.showWhitespace}
                 showLineBreaks={appSettings.showLineBreaks}
+                onTocSearch={handleTocSearch}
             />
         </section>
     </div>
@@ -1615,6 +1854,14 @@
                     </div>
                     <div class="p-body">
                         {#if settingsActiveTab === 'display'}
+                            <div class="set-row">
+                                <label for="uiTheme">界面主题:</label>
+                                <select id="uiTheme" bind:value={appSettings.uiTheme} on:change={(e) => applyTheme(e.currentTarget.value)} style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; background: #fff;">
+                                    <option value="modern">现代</option>
+                                    <option value="classic">经典</option>
+                                    <option value="dark">深色</option>
+                                </select>
+                            </div>
                             <div class="set-row">
                                 <label for="wordWrap">自动换行:</label>
                                 <input id="wordWrap" type="checkbox" bind:checked={appSettings.wordWrap} style="width: auto;"/>
@@ -2735,5 +2982,405 @@
     .scroll-p::-webkit-scrollbar-thumb {
         background: #ddd;
         border-radius: 3px;
+    }
+
+    /* Modern UI overrides */
+    :global(body) {
+        background: var(--gradient-app);
+        color: var(--color-text);
+        font-family: var(--font-ui);
+    }
+
+    .app-container {
+        background: rgba(246, 250, 253, 0.68);
+    }
+
+    .toolbar {
+        height: 52px;
+        padding: env(safe-area-inset-top) 14px 0;
+        background: rgba(255, 255, 255, 0.78);
+        border-bottom: 1px solid var(--color-border);
+        box-shadow: var(--shadow-xs);
+        backdrop-filter: blur(18px) saturate(1.15);
+    }
+
+    .btn-group {
+        gap: 8px;
+    }
+
+    button {
+        height: var(--control-height);
+        min-width: 38px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        color: var(--color-text-soft);
+        box-shadow: var(--shadow-xs);
+        cursor: pointer;
+        transition:
+            transform var(--transition-fast),
+            border-color var(--transition-fast),
+            background var(--transition-fast),
+            box-shadow var(--transition-fast),
+            color var(--transition-fast);
+    }
+
+    button:hover:not(:disabled) {
+        border-color: var(--color-border-strong);
+        background: var(--color-hover);
+        color: var(--color-text);
+        box-shadow: var(--shadow-sm);
+    }
+
+    button:active:not(:disabled) {
+        background: var(--color-active);
+        transform: translateY(1px) scale(0.98);
+        box-shadow: var(--shadow-xs);
+    }
+
+    button:disabled {
+        opacity: 0.52;
+        box-shadow: none;
+    }
+
+    .btn-primary,
+    .btn.primary,
+    .epub-confirm {
+        background: var(--gradient-accent);
+        border-color: transparent;
+        color: #fff;
+        box-shadow: 0 10px 22px rgba(22, 119, 184, 0.2);
+    }
+
+    .btn-secondary,
+    .btn-save-default,
+    .btn.secondary,
+    .epub-cancel,
+    .btn-small {
+        background: rgba(255, 255, 255, 0.84);
+        color: var(--color-text-soft);
+    }
+
+    .btn-save-modified,
+    .btn.danger {
+        background: var(--gradient-danger);
+        border-color: transparent;
+        color: #fff;
+        animation: pulse 2s infinite;
+    }
+
+    .main-body {
+        background: rgba(239, 245, 250, 0.78);
+    }
+
+    .sidebar {
+        width: 292px;
+        background: rgba(255, 255, 255, 0.82);
+        border-right: 1px solid var(--color-border);
+        box-shadow: 10px 0 30px rgba(23, 36, 52, 0.05);
+        backdrop-filter: blur(16px);
+    }
+
+    .sidebar-mask {
+        background: rgba(23, 36, 52, 0.28);
+        backdrop-filter: blur(4px);
+    }
+
+    .sidebar-header-fixed {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 252, 0.92));
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .sidebar-header-row {
+        padding: 12px;
+        color: var(--color-text-soft);
+        letter-spacing: 0.02em;
+    }
+
+    .icon-btn,
+    .mini-btn,
+    .rule-btn {
+        border: 1px solid var(--color-border);
+        background: rgba(255, 255, 255, 0.86);
+        color: var(--color-text-soft);
+        border-radius: var(--radius-xs);
+        box-shadow: none;
+    }
+
+    .icon-btn {
+        width: 30px;
+        height: 30px;
+        min-width: 30px;
+    }
+
+    .mini-btn {
+        height: 28px;
+        border-radius: 999px;
+        padding: 0 12px;
+    }
+
+    .mini-btn.active {
+        background: var(--gradient-accent);
+        border-color: transparent;
+        color: #fff;
+    }
+
+    .toc-list {
+        padding: 8px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(246, 249, 252, 0.64));
+    }
+
+    .toc-item {
+        margin: 2px 0;
+        padding: 10px 12px;
+        border-bottom: 0;
+        border-left: 3px solid transparent;
+        border-radius: var(--radius-sm);
+        color: var(--color-text-soft);
+        transition:
+            background var(--transition-fast),
+            color var(--transition-fast),
+            border-color var(--transition-fast),
+            transform var(--transition-fast);
+    }
+
+    .toc-item:hover {
+        background: var(--color-hover);
+        color: var(--color-text);
+    }
+
+    .indent {
+        background: transparent;
+    }
+
+    .toc-item.active {
+        background: var(--color-accent-soft);
+        color: var(--color-accent-deep);
+        border-left-color: var(--color-accent);
+        box-shadow: inset 0 0 0 1px rgba(22, 119, 184, 0.12);
+        font-weight: 700;
+    }
+
+    .vol-title {
+        background: rgba(255, 255, 255, 0.88);
+        color: var(--color-text);
+        box-shadow: 0 8px 18px rgba(23, 36, 52, 0.06);
+        backdrop-filter: blur(14px);
+    }
+
+    .toc-count,
+    .arrow {
+        color: var(--color-muted);
+    }
+
+    .editor-wrapper {
+        background: var(--color-surface);
+        box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.7);
+    }
+
+    .loading {
+        background: rgba(255, 255, 255, 0.72);
+        color: var(--color-muted);
+        backdrop-filter: blur(8px);
+    }
+
+    .dialog-overlay,
+    .modal-overlay {
+        background: rgba(14, 24, 36, 0.36);
+        backdrop-filter: blur(10px);
+    }
+
+    .dialog,
+    .modal-content,
+    .check-panel {
+        background: var(--color-surface-raised);
+        border: 1px solid rgba(255, 255, 255, 0.78);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-pop);
+        color: var(--color-text);
+        backdrop-filter: blur(18px) saturate(1.08);
+    }
+
+    .dialog {
+        min-width: 340px;
+        padding: 24px;
+    }
+
+    .dialog-header,
+    .find-title {
+        color: var(--color-text);
+        letter-spacing: 0.01em;
+    }
+
+    .dialog-content,
+    .set-row label,
+    .rules-header,
+    .sec-title {
+        color: var(--color-text-soft);
+    }
+
+    .p-header,
+    .find-header {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 252, 0.9));
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .settings-tabs {
+        gap: 8px;
+        padding: 8px 18px 12px;
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .settings-tabs .tab-btn {
+        height: auto;
+        min-width: 0;
+        border-radius: 999px;
+        color: var(--color-muted);
+    }
+
+    .settings-tabs .tab-btn:hover {
+        background: var(--color-hover);
+    }
+
+    .settings-tabs .tab-btn.active {
+        background: var(--color-accent-soft);
+        color: var(--color-accent-deep);
+    }
+
+    .set-row input,
+    .epub-input-small,
+    .epub-textarea,
+    .rule-type,
+    .rule-input {
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--color-text);
+        transition:
+            border-color var(--transition-fast),
+            box-shadow var(--transition-fast),
+            background var(--transition-fast);
+    }
+
+    .set-row input:focus,
+    .epub-input-small:focus,
+    .epub-textarea:focus,
+    .rule-type:focus,
+    .rule-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+        box-shadow: var(--focus-ring);
+        background: #fff;
+    }
+
+    .rule-arrow-visual {
+        border-color: var(--color-border);
+        background: var(--color-surface-soft);
+        color: var(--color-muted);
+    }
+
+    .rule-btn:hover {
+        background: var(--color-danger-soft);
+        border-color: rgba(215, 68, 82, 0.3);
+        color: var(--color-danger);
+    }
+
+    .epub-cover-preview {
+        border-color: var(--color-border);
+        border-radius: var(--radius-md);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(226, 243, 255, 0.54));
+    }
+
+    .epub-cover-preview:hover {
+        border-color: var(--color-accent);
+        background: var(--color-accent-quiet);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .check-panel {
+        width: 320px;
+        overflow: hidden;
+    }
+
+    .check-sec {
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .err-tag {
+        background: var(--color-danger-soft);
+        border-color: rgba(215, 68, 82, 0.22);
+        border-radius: var(--radius-sm);
+        color: var(--color-danger);
+    }
+
+    .err-tag:hover {
+        background: #ffe7eb;
+        border-color: rgba(215, 68, 82, 0.38);
+    }
+
+    .err-tag-msg {
+        color: var(--color-danger);
+        font-family: var(--font-code);
+    }
+
+    .icon-close {
+        width: 30px;
+        height: 30px;
+        min-width: 30px;
+        border-radius: 999px;
+        color: var(--color-muted);
+        box-shadow: none;
+    }
+
+    .icon-close:hover {
+        background: var(--color-danger-soft);
+        color: var(--color-danger);
+    }
+
+    .epub-modal-footer button,
+    .dialog-actions .btn,
+    .btn-small {
+        height: 38px;
+        border-radius: var(--radius-sm);
+    }
+
+    .scroll-p::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, #bacbda, #93a8bb);
+        border-radius: 999px;
+    }
+
+    /* Keep TXT volume folding and sticky headers precise. */
+    .toc-list {
+        position: relative;
+        padding: 0;
+        scroll-padding-top: 42px;
+    }
+
+    .toc-item {
+        margin: 2px 8px;
+    }
+
+    .vol-title {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        margin: 0;
+        border-radius: 0;
+        border-bottom: 1px solid var(--color-border);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 6px 14px rgba(23, 36, 52, 0.08);
+    }
+
+    .vol-title:hover {
+        background: rgba(246, 249, 252, 0.98);
+    }
+
+    .vol-title.active {
+        border-left-color: var(--color-accent);
+    }
+
+    .indent {
+        margin-left: 14px;
+        padding-left: 24px;
     }
 </style>

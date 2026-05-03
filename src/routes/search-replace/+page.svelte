@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -8,8 +8,8 @@
 
   // 选项
   let matchCase = false;
-  let wholeWord = false;
-  let wrapAround = true; 
+  let searchInToc = false;
+  let wrapAround = true;
 
   // 模式: "normal", "extended", "regex"
   let searchMode = "normal";
@@ -28,30 +28,27 @@
   let unlistenFocus: UnlistenFn | null = null;
 
   let syncTimer: any;
-  async function syncState() {
-    // 立即发送 sync-only 保存参数设置（但后端并不会触发高亮扫描导致卡顿）
+  async function emitSearchEvents(actionType: string) {
+    console.log("[SR] emitSearchEvents type=" + actionType + " searchInToc=" + searchInToc + " searchQuery=" + JSON.stringify(searchQuery));
     await emit("search-action", {
-      type: "sync-only",
+      type: actionType,
       search: searchQuery,
       replace: replaceQuery,
       matchCase,
-      wholeWord,
+      searchInToc,
       searchMode,
       wrapAround
     });
+  }
+
+  async function syncState() {
+    await tick(); // 确保 Svelte bindings (尤其是 radio bind:group) 已更新
+    await emitSearchEvents("sync-only");
 
     // 防抖发送真正的渲染查询（比如用户停下手 500ms 后才开始高亮背景）
     clearTimeout(syncTimer);
     syncTimer = setTimeout(async () => {
-      await emit("search-action", {
-        type: "update-highlight",
-        search: searchQuery,
-        replace: replaceQuery,
-        matchCase,
-        wholeWord,
-        searchMode,
-        wrapAround
-      });
+      await emitSearchEvents("update-highlight");
     }, 500);
   }
 
@@ -66,17 +63,9 @@
   }
 
   async function performAction(actionType: string) {
+    await tick(); // 确保 Svelte bindings 已更新
     saveHistory();
-    // 把当前状态全部带上发送
-    await emit("search-action", {
-      type: actionType,
-      search: searchQuery,
-      replace: replaceQuery,
-      matchCase,
-      wholeWord,
-      searchMode,
-      wrapAround
-    });
+    await emitSearchEvents(actionType);
   }
 
   async function findNext() {
@@ -236,7 +225,7 @@
 
     <!-- 中间的复选框 -->
     <div class="checkbox-row">
-      <label class="checkbox" title="必须匹配完整的单词"><input type="checkbox" bind:checked={wholeWord} on:change={syncState} /> 全词匹配</label>
+      <label class="checkbox" title="同时高亮匹配的目录项"><input type="checkbox" bind:checked={searchInToc} on:change={syncState} /> 在目录中查找</label>
       <label class="checkbox" title="区分英文字母大小写"><input type="checkbox" bind:checked={matchCase} on:change={syncState} /> 区分大小写</label>
       <label class="checkbox" title="到达文件末尾时从头继续"><input type="checkbox" bind:checked={wrapAround} /> 循环查找</label>
     </div>
@@ -445,4 +434,143 @@
     padding-left: 40px;
     padding-bottom: 2px;
   }
+
+  /* Modern UI overrides */
+  :global(body) {
+    background: var(--gradient-app);
+    color: var(--color-text);
+    font-family: var(--font-ui);
+  }
+
+  .search-window {
+    padding: 14px;
+    gap: 14px;
+    background: rgba(246, 250, 253, 0.68);
+  }
+
+  .left-panel,
+  .right-panel {
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(16px);
+  }
+
+  .left-panel {
+    padding: 14px;
+  }
+
+  .right-panel {
+    width: 118px;
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .row {
+    gap: 8px;
+  }
+
+  .row label {
+    color: var(--color-text-soft);
+    font-weight: 700;
+  }
+
+  input[type="text"] {
+    min-height: 34px;
+    padding: 7px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--color-text);
+    box-shadow: var(--shadow-xs);
+    transition:
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      background var(--transition-fast);
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring);
+    background: #fff;
+  }
+
+  .history-dropdown {
+    margin-top: 4px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+  }
+
+  .history-dropdown li {
+    color: var(--color-text-soft);
+  }
+
+  .history-dropdown li:hover {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
+  }
+
+  .checkbox-row {
+    gap: 14px;
+  }
+
+  .checkbox,
+  .radio {
+    color: var(--color-text-soft);
+  }
+
+  .mode-group {
+    border-color: var(--color-border);
+    border-radius: var(--radius-md);
+    background: rgba(246, 249, 252, 0.78);
+  }
+
+  .mode-group legend {
+    color: var(--color-accent-deep);
+    font-weight: 700;
+  }
+
+  button {
+    min-height: 34px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+    color: var(--color-text-soft);
+    box-shadow: var(--shadow-xs);
+    font-weight: 700;
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      color var(--transition-fast),
+      transform var(--transition-fast),
+      box-shadow var(--transition-fast);
+  }
+
+  button:hover:not(:disabled) {
+    background: var(--color-hover);
+    border-color: var(--color-border-strong);
+    color: var(--color-text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  button:active:not(:disabled) {
+    background: var(--color-active);
+    transform: translateY(1px);
+  }
+
+  button:disabled {
+    color: var(--color-muted);
+    background: rgba(246, 249, 252, 0.66);
+    border-color: var(--color-border);
+    box-shadow: none;
+    opacity: 0.62;
+  }
+
+  .status-bar {
+    color: var(--color-muted);
+  }
+
 </style>

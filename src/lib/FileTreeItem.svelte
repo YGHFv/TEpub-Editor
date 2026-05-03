@@ -172,4 +172,85 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+
+    /* Modern UI overrides */
+    .tree-node {
+        margin: 3px 0;
+    }
+
+    .node-label {
+        padding: 8px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.58);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.62);
+        color: var(--color-text-soft);
+        box-shadow: var(--shadow-xs);
+        transition:
+            background var(--transition-fast),
+            border-color var(--transition-fast),
+            color var(--transition-fast),
+            transform var(--transition-fast);
+    }
+
+    .node-label:hover {
+        background: var(--color-hover);
+        border-color: var(--color-border);
+        color: var(--color-text);
+    }
+
+    .expand-icon {
+        color: var(--color-muted);
+    }
+
+    .children {
+        margin-left: 15px;
+        border-left: 1px solid var(--color-border);
+    }
+
+    .folder-node.subpath > .node-label {
+        background: transparent;
+        border-color: transparent;
+        box-shadow: none;
+    }
+
+    .folder-node.subpath > .node-label:hover {
+        background: var(--color-hover);
+    }
+
+    .file-node {
+        padding: 7px 9px 7px 20px;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        color: var(--color-text-soft);
+        transition:
+            background var(--transition-fast),
+            border-color var(--transition-fast),
+            color var(--transition-fast),
+            transform var(--transition-fast);
+    }
+
+    .file-node:hover {
+        background: var(--color-hover);
+        border-color: rgba(22, 119, 184, 0.1);
+        color: var(--color-text);
+    }
+
+    .file-node.selected {
+        background: var(--color-accent-soft);
+        border-color: rgba(22, 119, 184, 0.18);
+        color: var(--color-accent-deep);
+        box-shadow: inset 3px 0 0 var(--color-accent);
+    }
+
+    .icon {
+        color: var(--color-muted);
+    }
+
+    .name {
+        font-weight: 650;
+    }
+
+    .description {
+        color: var(--color-muted);
+    }
 </style>

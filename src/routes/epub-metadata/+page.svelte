@@ -1081,4 +1081,225 @@ div.roundsolid2 {
         background: #ddd;
         border-radius: 3px;
     }
+
+    /* Modern UI overrides */
+    :global(body) {
+        background: var(--gradient-app);
+        color: var(--color-text);
+        font-family: var(--font-ui);
+    }
+
+    .metadata-container {
+        padding: 14px;
+        background: rgba(246, 250, 253, 0.72);
+    }
+
+    .tabs {
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 6px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: var(--shadow-xs);
+        backdrop-filter: blur(14px);
+    }
+
+    .tab-btn {
+        padding: 8px 16px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        color: var(--color-text-soft);
+        font-weight: 700;
+    }
+
+    .tab-btn:hover {
+        background: var(--color-hover);
+        color: var(--color-text);
+    }
+
+    .tab-btn.active {
+        background: var(--color-accent-soft);
+        border-color: rgba(22, 119, 184, 0.18);
+        color: var(--color-accent-deep);
+    }
+
+    .tab-content {
+        background: rgba(255, 255, 255, 0.66);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: 16px;
+        box-shadow: var(--shadow-sm);
+        box-sizing: border-box;
+    }
+
+    .tab-content.style-manager {
+        padding: 0;
+    }
+
+    .input-group label,
+    .asset-group h3,
+    .persist-cb,
+    .empty-hint {
+        color: var(--color-text-soft);
+    }
+
+    .section-header h3 {
+        color: var(--color-text);
+        font-weight: 800;
+        letter-spacing: 0.01em;
+    }
+
+    .input-group input,
+    .custom-row,
+    .css-editor {
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--color-text);
+        transition:
+            border-color var(--transition-fast),
+            box-shadow var(--transition-fast),
+            background var(--transition-fast);
+    }
+
+    .input-group input:focus,
+    .custom-row input:focus,
+    .css-editor:focus {
+        outline: none;
+        border-color: var(--color-accent);
+        box-shadow: var(--focus-ring);
+        background: #fff;
+    }
+
+    .custom-row {
+        padding: 6px 8px;
+        box-shadow: var(--shadow-xs);
+    }
+
+    .custom-row input {
+        color: var(--color-text);
+    }
+
+    .divider,
+    .footer {
+        border-color: var(--color-border);
+    }
+
+    .add-btn,
+    .btn-save {
+        background: var(--gradient-accent);
+        color: #fff;
+        box-shadow: 0 10px 22px rgba(22, 119, 184, 0.18);
+    }
+
+    .add-btn {
+        border: 0;
+    }
+
+    .add-btn:hover,
+    .btn-save:hover {
+        background: linear-gradient(135deg, var(--color-accent-deep), var(--color-teal));
+        transform: translateY(-1px);
+    }
+
+    .remove-btn {
+        border-radius: 999px;
+        color: var(--color-danger);
+    }
+
+    .remove-btn:hover {
+        background: var(--color-danger-soft);
+    }
+
+    .asset-item {
+        background: var(--color-surface-soft);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-soft);
+    }
+
+    .file-name {
+        color: var(--color-text);
+    }
+
+    .footer {
+        margin-top: 12px;
+        padding-top: 12px;
+    }
+
+    .btn-cancel,
+    .btn-save,
+    .mini-btn,
+    .sub-tab {
+        border-radius: var(--radius-sm);
+        transition:
+            background var(--transition-fast),
+            border-color var(--transition-fast),
+            color var(--transition-fast),
+            transform var(--transition-fast),
+            box-shadow var(--transition-fast);
+    }
+
+    .btn-cancel,
+    .mini-btn {
+        border: 1px solid var(--color-border);
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--color-text-soft);
+    }
+
+    .btn-cancel:hover,
+    .mini-btn:hover {
+        background: var(--color-hover);
+        border-color: var(--color-border-strong);
+        color: var(--color-text);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .style-manager {
+        border-color: var(--color-border);
+        border-radius: var(--radius-lg);
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .style-sub-tabs {
+        gap: 6px;
+        padding: 8px 8px 0;
+        background: rgba(246, 249, 252, 0.9);
+        border-bottom-color: var(--color-border);
+    }
+
+    .sub-tab {
+        border: 1px solid transparent;
+        border-bottom: 0;
+        background: transparent;
+        color: var(--color-text-soft);
+    }
+
+    .sub-tab:hover {
+        background: var(--color-hover);
+    }
+
+    .sub-tab.active {
+        background: #fff;
+        border-color: var(--color-border);
+        color: var(--color-accent-deep);
+        box-shadow: 0 -6px 16px rgba(23, 36, 52, 0.05);
+    }
+
+    .modified-dot {
+        color: var(--color-warning);
+    }
+
+    .css-editor {
+        font-family: var(--font-code);
+        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        box-shadow: inset 0 1px 3px rgba(23, 36, 52, 0.06);
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, #bacbda, #93a8bb);
+        border-radius: 999px;
+    }
 </style>

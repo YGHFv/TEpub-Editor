@@ -124,4 +124,40 @@
     .node-content:hover .label {
         color: #2196f3;
     }
+
+    /* Modern UI overrides */
+    .node-content {
+        margin: 2px 8px;
+        padding-top: 7px;
+        padding-bottom: 7px;
+        border-radius: var(--radius-sm);
+        color: var(--color-text-soft);
+        transition:
+            background var(--transition-fast),
+            color var(--transition-fast),
+            box-shadow var(--transition-fast);
+    }
+
+    .node-content:hover {
+        background: var(--color-hover);
+        color: var(--color-accent-deep);
+        box-shadow: inset 3px 0 0 rgba(22, 119, 184, 0.24);
+    }
+
+    .expand-icon {
+        color: var(--color-muted);
+    }
+
+    .expand-icon:hover {
+        color: var(--color-accent-deep);
+    }
+
+    .label {
+        color: inherit;
+        font-weight: 650;
+    }
+
+    .node-content:hover .label {
+        color: var(--color-accent-deep);
+    }
 </style>

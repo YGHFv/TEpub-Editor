@@ -4,7 +4,7 @@
   import { EditorState, Compartment, Prec } from "@codemirror/state";
   import { keymap, drawSelection, Decoration, highlightWhitespace } from "@codemirror/view";
   import { undo, redo, indentWithTab } from "@codemirror/commands";
-  import { search, setSearchQuery, SearchQuery, findNext, findPrevious, replaceNext, replaceAll, getSearchQuery } from "@codemirror/search";
+  import { search, setSearchQuery, SearchQuery, findNext, findPrevious, replaceNext, replaceAll } from "@codemirror/search";
   import { listen, emit } from "@tauri-apps/api/event";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
@@ -20,6 +20,7 @@
   export let wordWrap: boolean = true;
   export let showWhitespace: boolean = false;
   export let showLineBreaks: boolean = false;
+  export let onTocSearch: ((query: string, actionType: string, searchMode: string) => void) | null = null;
 
   let editorElement: HTMLElement;
   let view: EditorView;
@@ -151,6 +152,16 @@
       if (!view) return;
 
       try {
+        // 目录查找模式：完全跳过 CM，直接回调父组件处理目录搜索
+        if (p.searchInToc) {
+          console.log("[EDITOR] searchInToc=true, onTocSearch=" + typeof onTocSearch + " search=" + JSON.stringify(p.search) + " type=" + p.type);
+          if (onTocSearch && p.search) {
+            console.log("[EDITOR] calling onTocSearch");
+            onTocSearch(p.search, p.type, p.searchMode || "normal");
+          }
+          return;
+        }
+
         let searchStr = p.search || "";
         let replaceStr = p.replace || "";
         let isRegex = p.searchMode === "regex";
@@ -158,11 +169,9 @@
         let wholeWord = !!p.wholeWord;
 
         if (p.searchMode === "extended") {
-          // 解析 \n, \r, \t 扩展字符
           searchStr = searchStr.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r");
           replaceStr = replaceStr.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r");
         } else if (p.searchMode === "normal" && wholeWord) {
-          // 全词匹配：自动转为等价的正则
           const escapeRegex = (s: string) => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
           searchStr = `\\b${escapeRegex(searchStr)}\\b`;
           isRegex = true;
@@ -175,71 +184,50 @@
           regexp: isRegex
         });
 
-        // =========================================================
-        // 核心修复1：不在每次由于输入引发的 sync-only 时刻更新底层搜索！
-        // 频繁更新底层搜索会导致 CM6 立刻执行高亮渲染并扫描全文档，带来巨大卡顿
-        // 我们改为：只有在真正尝试 Find Next, Prev, Replace, Replace-all
-        // 或者用户停止输入一段时间后（通过防抖在前端触发的），再予以执行。
-        // =========================================================
+        const hasQuery = searchStr !== "";
+        const isSyncOnly = p.type === "sync-only";
 
-        if (searchStr !== "" && p.type !== "sync-only") {
+        if (hasQuery && !isSyncOnly) {
            view.dispatch({ effects: setSearchQuery.of(query) });
         }
 
-        // 为了极大提升上千万字长文在文件尾部处的搜索速度，坚决【不能用】 query.getCursor(doc) 做任何能够积累到上千次循环的 while(true) 动作。
-        // 我们利用偷跑检测法判断是否发生了 Wrap，从而阻止循环搜索：
-        
-        let shouldBypassDefaultSearch = false;
-        
-        if (!shouldBypassDefaultSearch) {
-            const oldHead = view.state.selection.main.head;
-            
-            if (p.type === "find-next") {
-              findNext(view);
-            } else if (p.type === "find-prev") {
-              findPrevious(view);
-            } else if (p.type === "replace") {
-              replaceNext(view);
-            }
+        const oldHead = view.state.selection.main.head;
 
-            const newHead = view.state.selection.main.head;
-            
-            // 如果没勾选允许循环，我们要判断是否发生了循环绕回：
-            // 向下找：如果新的光标比老的光标还靠前，说明兜圈回到头部了！
-            if (!p.wrapAround && searchStr !== "" && query.valid) {
-                 if (p.type === "find-next" || p.type === "replace") {
-                      if (newHead < oldHead) {
-                          // 发生了 wrap 回滚，拒绝该动作，把光标置回
-                          view.dispatch({ selection: { anchor: oldHead } });
-                      }
-                 } else if (p.type === "find-prev") {
-                      // 向上找：如果新光标比老光标还靠后，说明兜圈回到尾部了！
-                      if (newHead > oldHead) {
-                          view.dispatch({ selection: { anchor: oldHead } });
-                      }
-                 }
-            }
-            
-            // 查完之后强迫将视窗居中对齐现在的高亮词，防止它贴在最上方或最下方
-            const finalHead = view.state.selection.main.head;
-            // 只有当有东西且找到了不同位置时才滚
-            if (finalHead !== oldHead && (p.type === "find-next" || p.type === "find-prev" || p.type === "replace")) {
-                view.dispatch({
-                    effects: EditorView.scrollIntoView(finalHead, { y: "center" })
-                });
-            }
+        if (p.type === "find-next") {
+          findNext(view);
+        } else if (p.type === "find-prev") {
+          findPrevious(view);
+        } else if (p.type === "replace") {
+          replaceNext(view);
         }
-        
+
+        const newHead = view.state.selection.main.head;
+
+        if (!p.wrapAround && hasQuery && query.valid) {
+             if (p.type === "find-next" || p.type === "replace") {
+                  if (newHead < oldHead) {
+                      view.dispatch({ selection: { anchor: oldHead } });
+                  }
+             } else if (p.type === "find-prev") {
+                  if (newHead > oldHead) {
+                      view.dispatch({ selection: { anchor: oldHead } });
+                  }
+             }
+        }
+
+        const finalHead = view.state.selection.main.head;
+        if (finalHead !== oldHead && (p.type === "find-next" || p.type === "find-prev" || p.type === "replace")) {
+            view.dispatch({
+                effects: EditorView.scrollIntoView(finalHead, { y: "center" })
+            });
+        }
+
         if (p.type === "replace-all") {
           replaceAll(view);
         }
 
-        // 彻底移除全量匹配统计以根治卡顿！！！
-        // 极长的小说（几百万字）在正文或正则表达式下会直接让 UI 挂起几十秒
-        // 所以我们现在只汇报目前是否能找到结果，不再汇报诸如 "1/10000" 的数量
-        
         let hasMatch = false;
-        if (searchStr !== "" && query.valid) {
+        if (hasQuery && query.valid) {
              const cursor = query.getCursor(view.state.doc);
              const first = cursor.next();
              hasMatch = !first.done;
@@ -297,10 +285,10 @@
         EditorView.theme({
           "&": {
             height: "100%",
-            backgroundColor: "#fff",
+            backgroundColor: "var(--color-surface)",
           },
           ".cm-content": {
-            fontFamily: "serif",
+            fontFamily: "var(--font-reading)",
             // [极其关键的核心修正]：强制行高为绝对的数字像素(36px)，对应 18px 刚好是 2.0 倍。
             // 绝不允许使用 1.8 这种产生 32.4px 亚像素亚小数的高度，它会导致十万行计算积累出巨大的浮点跳变误差，最后触发 Viewport failed to stabilize
             lineHeight: "36px",
@@ -313,15 +301,15 @@
           },
           // 选中色
           ".cm-selectionBackground": {
-            backgroundColor: "rgba(0, 102, 184, 0.45) !important",
+            backgroundColor: "rgba(22, 119, 184, 0.34) !important",
           },
           "&.cm-focused .cm-selectionBackground": {
-            backgroundColor: "rgba(0, 102, 184, 0.55) !important",
+            backgroundColor: "rgba(22, 119, 184, 0.42) !important",
           },
           ".cm-gutters": {
-            backgroundColor: "#f5f5f5",
-            color: "#999",
-            borderRight: "1px solid #ddd",
+            backgroundColor: "var(--color-surface-soft)",
+            color: "var(--color-muted)",
+            borderRight: "1px solid var(--color-border)",
           },
           ".cm-scroller": {
             overflowX: "hidden",
@@ -329,20 +317,24 @@
             overflowY: "scroll",
           },
           ".cm-scroller::-webkit-scrollbar": { width: "14px" },
-          ".cm-scroller::-webkit-scrollbar-track": { background: "#f1f1f1" },
-          ".cm-scroller::-webkit-scrollbar-thumb": {
-            background: "#888",
-            borderRadius: "7px",
-            border: "3px solid #f1f1f1",
+          ".cm-scroller::-webkit-scrollbar-track": {
+            background: "rgba(226, 235, 244, 0.72)",
           },
-          ".cm-scroller::-webkit-scrollbar-thumb:hover": { background: "#555" },
+          ".cm-scroller::-webkit-scrollbar-thumb": {
+            background: "linear-gradient(180deg, #bacbda, #93a8bb)",
+            borderRadius: "7px",
+            border: "3px solid rgba(226, 235, 244, 0.72)",
+          },
+          ".cm-scroller::-webkit-scrollbar-thumb:hover": {
+            background: "linear-gradient(180deg, #9dafc0, #748b9f)",
+          },
           ".cm-scroller::-webkit-scrollbar-thumb:active": {
-            background: "#333",
+            background: "#748b9f",
           },
           // 纯净的着色标题，禁止任何 padding/margin/fontSize 扰乱物理行高
           ".cm-title-line": {
-            color: "#0066b8",
-            background: "#e8f0fe",
+            color: "var(--color-accent-deep)",
+            background: "var(--color-accent-soft)",
             mixBlendMode: "multiply" // 让标题行的底色与后方的选区底色进行正片叠底，从而透出选区颜色
           }
         }),
@@ -519,8 +511,8 @@
       searchWin = new WebviewWindow("search-replace", {
         url: "/search-replace",
         title: "查找与替换",
-        width: 480,
-        height: 220,
+        width: 550,
+        height: 250,
         alwaysOnTop: true,
         resizable: true,
         minimizable: false,

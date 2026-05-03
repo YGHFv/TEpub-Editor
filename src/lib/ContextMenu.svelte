@@ -300,4 +300,45 @@
     background: #eee;
     margin: 4px 0;
   }
+
+  /* Modern UI overrides */
+  .context-menu {
+    min-width: 176px;
+    padding: 6px;
+    background: var(--color-surface-raised);
+    border: 1px solid rgba(255, 255, 255, 0.78);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-pop);
+    font-family: var(--font-ui);
+    color: var(--color-text);
+    backdrop-filter: blur(18px) saturate(1.08);
+  }
+
+  .menu-item {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-soft);
+  }
+
+  .menu-item:hover {
+    background: var(--color-hover);
+    color: var(--color-text);
+  }
+
+  .menu-item.danger {
+    color: var(--color-danger);
+  }
+
+  .menu-item.danger:hover {
+    background: var(--color-danger-soft);
+  }
+
+  .menu-item .icon {
+    color: var(--color-muted);
+  }
+
+  .separator {
+    background: var(--color-border);
+    margin: 5px 4px;
+  }
 </style>
