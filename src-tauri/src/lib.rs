@@ -3228,6 +3228,1349 @@ fn get_launch_args() -> Option<String> {
     None
 }
 
+// ============================================================
+// ===== Library (书库) - Phase 1: 数据结构 / load / save =====
+// ============================================================
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct LibraryConfig {
+    #[serde(default)]
+    storage_mode: String,
+    #[serde(default)]
+    custom_work_dir: String,
+    /// 编辑元数据保存时是否把 epub 内的 dcterms:modified 改成"现在"。
+    /// 默认 false：保存元数据不改修改日期。
+    #[serde(default)]
+    update_modified_on_edit: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct BookEntry {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    author: String,
+    #[serde(default)]
+    file_path: String,
+    #[serde(default)]
+    file_type: String,
+    #[serde(default)]
+    cover_path: String,
+    #[serde(default)]
+    added_at: u64,
+    #[serde(default)]
+    file_size: u64,
+    #[serde(default)]
+    subtitle: String,
+    #[serde(default)]
+    filename: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    modified_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    publisher: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default)]
+    epub_uuid: String,
+    #[serde(default)]
+    maker: String,
+    #[serde(default)]
+    series: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct LibraryData {
+    #[serde(default)]
+    config: LibraryConfig,
+    #[serde(default)]
+    books: Vec<BookEntry>,
+}
+
+// 默认根：%APPDATA%/<bundle-identifier>（即 Tauri app_data_dir）。
+fn library_app_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("无法获取 app_data_dir: {}", e))
+}
+
+// 指针文件：永远住在 app_data_dir，记录当前书库的真实根目录。
+fn library_pointer_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_app_data_root(app)?.join("library.pointer"))
+}
+
+// 读指针：有则按指针走（便携版指向 exe_dir 等），无则回退 app_data_dir。
+fn library_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let pointer = library_pointer_path(app)?;
+    if pointer.exists() {
+        if let Ok(s) = fs::read_to_string(&pointer) {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                let p = PathBuf::from(trimmed);
+                if p.exists() {
+                    return Ok(p);
+                }
+            }
+        }
+    }
+    library_app_data_root(app)
+}
+
+fn library_json_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root_dir(app)?.join("library.json"))
+}
+
+fn library_covers_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root_dir(app)?.join("covers"))
+}
+
+fn library_files_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root_dir(app)?.join("files"))
+}
+
+fn ensure_dir(p: &Path) -> Result<(), String> {
+    if !p.exists() {
+        fs::create_dir_all(p).map_err(|e| format!("创建目录失败 {}: {}", p.display(), e))?;
+    }
+    Ok(())
+}
+
+fn read_library_data(app: &tauri::AppHandle) -> Result<LibraryData, String> {
+    let path = library_json_path(app)?;
+    if !path.exists() {
+        return Ok(LibraryData::default());
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("读取 library.json 失败: {}", e))?;
+    let data: LibraryData =
+        serde_json::from_slice(&bytes).map_err(|e| format!("解析 library.json 失败: {}", e))?;
+    Ok(data)
+}
+
+// 写入策略：customWorkDir 非空则写到那里，否则写到 app_data_dir；
+// 同时把真实根目录写进 app_data_dir/library.pointer 给下次冷启动用。
+fn write_library_data_atomic(app: &tauri::AppHandle, data: &LibraryData) -> Result<(), String> {
+    let target_root = if !data.config.custom_work_dir.trim().is_empty() {
+        PathBuf::from(data.config.custom_work_dir.trim())
+    } else {
+        library_app_data_root(app)?
+    };
+    ensure_dir(&target_root)?;
+
+    let target = target_root.join("library.json");
+    let tmp = target.with_extension("json.tmp");
+    let json =
+        serde_json::to_vec_pretty(data).map_err(|e| format!("序列化 library.json 失败: {}", e))?;
+    {
+        let mut f =
+            fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {}", e))?;
+        f.write_all(&json)
+            .map_err(|e| format!("写入临时文件失败: {}", e))?;
+        f.sync_all().ok();
+    }
+    // Windows 下 rename 会原子替换已有文件
+    if target.exists() {
+        let _ = fs::remove_file(&target);
+    }
+    fs::rename(&tmp, &target).map_err(|e| format!("替换 library.json 失败: {}", e))?;
+
+    // 更新指针
+    let app_root = library_app_data_root(app)?;
+    ensure_dir(&app_root)?;
+    let pointer = app_root.join("library.pointer");
+    let _ = fs::write(&pointer, target_root.to_string_lossy().as_bytes());
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn load_library(app: tauri::AppHandle) -> Result<LibraryData, String> {
+    read_library_data(&app)
+}
+
+#[tauri::command]
+async fn save_library(app: tauri::AppHandle, data: LibraryData) -> Result<(), String> {
+    write_library_data_atomic(&app, &data)
+}
+
+// ============================================================
+// ===== Library - Phase 2: add / remove =====
+// ============================================================
+
+struct EpubParsedMeta {
+    title: String,
+    author: String,
+    publisher: Option<String>,
+    description: Option<String>,
+    epub_uuid: String,
+    cover_bytes: Option<Vec<u8>>,
+    cover_ext: String, // "jpg" / "png"
+    pub_date: Option<u64>,      // <dc:date> 解析后的 unix 秒
+    modified_date: Option<u64>, // <meta property="dcterms:modified"> 解析后的 unix 秒
+    // 我们写入 OPF 时用的扩展字段，导入时也要读回来
+    subtitle: Option<String>,   // <meta name="calibre:subtitle" content="..."/>
+    series: Option<String>,     // <meta name="calibre:series" content="..."/>
+    maker: Option<String>,      // <meta name="maker" content="..."/>
+    tags: Vec<String>,          // 所有 <dc:subject>
+}
+
+// fancy_regex 没有 escape 工具，自己写一个最简版
+fn re_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        match c {
+            '.' | '+' | '*' | '?' | '^' | '$' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+// 标准化 zip 内部路径（去掉 ./ 与 ../，统一正斜杠）
+fn normalize_zip_path(p: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for seg in p.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    parts.join("/")
+}
+
+// 从 OPF XML 里抽出第一个 <{tag}>...</{tag}> 的内容（容忍属性、容忍换行）
+fn extract_first_tag(xml: &str, tag: &str) -> Option<String> {
+    let pat = format!(
+        r#"<{0}(?:\s[^>]*)?>([\s\S]*?)</{0}>"#,
+        re_escape(tag)
+    );
+    let re = Regex::new(&pat).ok()?;
+    match re.captures(xml) {
+        Ok(Some(c)) => c.get(1).map(|m| xml_unescape(m.as_str().trim())),
+        _ => None,
+    }
+}
+
+// 抽取所有 <{tag}>...</{tag}> 的内容，返回 Vec（用于多个 dc:subject 这类）
+fn extract_all_tags(xml: &str, tag: &str) -> Vec<String> {
+    let pat = format!(
+        r#"<{0}(?:\s[^>]*)?>([\s\S]*?)</{0}>"#,
+        re_escape(tag)
+    );
+    let re = match Regex::new(&pat) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for c in re.captures_iter(xml).flatten() {
+        if let Some(m) = c.get(1) {
+            let s = xml_unescape(m.as_str().trim());
+            if !s.is_empty() {
+                out.push(s);
+            }
+        }
+    }
+    out
+}
+
+// 抽取 <meta name="X" content="Y"/> 里的 Y（属性顺序无关，先定位 tag 再抽 content）
+fn extract_meta_by_name(xml: &str, name: &str) -> Option<String> {
+    let outer_pat = format!(
+        r#"<meta\s+[^>]*name="{}"[^>]*/?>"#,
+        re_escape(name)
+    );
+    let outer_re = Regex::new(&outer_pat).ok()?;
+    let m = match outer_re.find(xml) {
+        Ok(Some(m)) => m,
+        _ => return None,
+    };
+    let inner = m.as_str();
+    let content_re = Regex::new(r#"content="([^"]*)""#).ok()?;
+    match content_re.captures(inner) {
+        Ok(Some(c)) => c
+            .get(1)
+            .map(|m| xml_unescape(m.as_str().trim()))
+            .filter(|s| !s.is_empty()),
+        _ => None,
+    }
+}
+
+// XML 反转义（对应 xml_escape）
+fn xml_unescape(s: &str) -> String {
+    s.replace("&apos;", "'")
+        .replace("&quot;", "\"")
+        .replace("&gt;", ">")
+        .replace("&lt;", "<")
+        .replace("&amp;", "&")
+}
+
+// 从路径名猜图片扩展（用于落盘和前端 MIME 推断）
+fn ext_from_path(p: &str) -> &'static str {
+    let lower = p.to_lowercase();
+    if lower.ends_with(".png") {
+        "png"
+    } else if lower.ends_with(".webp") {
+        "webp"
+    } else if lower.ends_with(".gif") {
+        "gif"
+    } else if lower.ends_with(".jpeg") || lower.ends_with(".jpg") {
+        "jpg"
+    } else {
+        "jpg"
+    }
+}
+
+// 在 OPF 中定位封面 href，三层兜底
+fn find_cover_href(opf_xml: &str) -> Option<String> {
+    let href_re = Regex::new(r#"href="([^"]+)""#).ok()?;
+
+    // 1. EPUB 3：<item ... properties="cover-image" ...>
+    if let Ok(prop_re) = Regex::new(r#"<item\s+[^>]*properties="cover-image"[^>]*/?>"#) {
+        if let Ok(Some(m)) = prop_re.find(opf_xml) {
+            if let Ok(Some(c)) = href_re.captures(m.as_str()) {
+                if let Some(href) = c.get(1) {
+                    return Some(href.as_str().to_string());
+                }
+            }
+        }
+    }
+
+    // 2. EPUB 2：<meta name="cover" content="ID"/>（任意属性顺序），manifest 里 id="ID" 的 item
+    if let Some(cover_id) = extract_meta_by_name(opf_xml, "cover") {
+        if let Ok(id_re) = Regex::new(&format!(
+            r#"<item\s+[^>]*id="{}"[^>]*/?>"#,
+            re_escape(&cover_id)
+        )) {
+            if let Ok(Some(m)) = id_re.find(opf_xml) {
+                if let Ok(Some(c)) = href_re.captures(m.as_str()) {
+                    if let Some(href) = c.get(1) {
+                        return Some(href.as_str().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. 兜底：扫 manifest 找像封面的 image 项（href 含 "cover." 且 media-type 是 image/*）
+    if let Ok(item_re) = Regex::new(r#"<item\s+[^>]*/?>"#) {
+        for m in item_re.find_iter(opf_xml).flatten() {
+            let s = m.as_str();
+            let lower = s.to_lowercase();
+            if !lower.contains("media-type=\"image/") {
+                continue;
+            }
+            if !(lower.contains(r#"id="cover""#) || lower.contains("cover.")) {
+                continue;
+            }
+            if let Ok(Some(c)) = href_re.captures(s) {
+                if let Some(href) = c.get(1) {
+                    return Some(href.as_str().to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+// 从 zip 里读一个 entry 的字节；找不到精确名时尝试 percent-decode 与忽略大小写
+fn try_read_zip_entry(
+    archive: &mut zip::ZipArchive<fs::File>,
+    name: &str,
+) -> Option<Vec<u8>> {
+    fn try_one(a: &mut zip::ZipArchive<fs::File>, n: &str) -> Option<Vec<u8>> {
+        let mut zf = a.by_name(n).ok()?;
+        let mut buf = Vec::new();
+        zf.read_to_end(&mut buf).ok()?;
+        Some(buf)
+    }
+
+    if let Some(b) = try_one(archive, name) {
+        return Some(b);
+    }
+    let decoded = percent_decode(name);
+    if decoded != name {
+        if let Some(b) = try_one(archive, &decoded) {
+            return Some(b);
+        }
+    }
+    // 大小写不敏感扫描
+    let target = decoded.to_lowercase();
+    let all_names: Vec<String> = archive.file_names().map(|s| s.to_string()).collect();
+    for n in all_names {
+        if n.to_lowercase() == target {
+            if let Some(b) = try_one(archive, &n) {
+                return Some(b);
+            }
+        }
+    }
+    None
+}
+
+// EPUB 中 dc:date 与 dcterms:modified 的字符串通常是 ISO 8601。容忍年/年月/年月日/带时区。
+fn parse_epub_date(s: &str) -> Option<u64> {
+    use chrono::NaiveDate;
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // 完整 RFC3339（带时区）
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        let ts = dt.timestamp();
+        return if ts >= 0 { Some(ts as u64) } else { None };
+    }
+    // 不带 Z 的本地日期时间（按 UTC 解释）
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        let ts = dt.and_utc().timestamp();
+        return if ts >= 0 { Some(ts as u64) } else { None };
+    }
+    // 仅日期 YYYY-MM-DD
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return d
+            .and_hms_opt(0, 0, 0)
+            .map(|dt| dt.and_utc().timestamp())
+            .filter(|ts| *ts >= 0)
+            .map(|ts| ts as u64);
+    }
+    // YYYY-MM
+    if s.len() == 7 {
+        if let Ok(d) = NaiveDate::parse_from_str(&format!("{}-01", s), "%Y-%m-%d") {
+            return d
+                .and_hms_opt(0, 0, 0)
+                .map(|dt| dt.and_utc().timestamp())
+                .filter(|ts| *ts >= 0)
+                .map(|ts| ts as u64);
+        }
+    }
+    // YYYY
+    if s.len() == 4 {
+        if let Ok(d) = NaiveDate::parse_from_str(&format!("{}-01-01", s), "%Y-%m-%d") {
+            return d
+                .and_hms_opt(0, 0, 0)
+                .map(|dt| dt.and_utc().timestamp())
+                .filter(|ts| *ts >= 0)
+                .map(|ts| ts as u64);
+        }
+    }
+    None
+}
+
+fn parse_epub_metadata(epub_path: &Path) -> Result<EpubParsedMeta, String> {
+    let file = fs::File::open(epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("无效的 EPUB: {}", e))?;
+
+    // 1. container.xml -> OPF 路径
+    let container_xml = {
+        let mut f = archive
+            .by_name("META-INF/container.xml")
+            .map_err(|_| "缺少 META-INF/container.xml".to_string())?;
+        let mut s = String::new();
+        f.read_to_string(&mut s).map_err(|e| e.to_string())?;
+        s
+    };
+    let opf_re = Regex::new(r#"full-path="([^"]+)""#).map_err(|e| e.to_string())?;
+    let opf_path = match opf_re.captures(&container_xml) {
+        Ok(Some(c)) => c.get(1).map(|m| m.as_str().to_string()),
+        _ => None,
+    }
+    .ok_or_else(|| "container.xml 缺少 full-path".to_string())?;
+
+    // 2. 读 OPF
+    let opf_xml = {
+        let mut f = archive
+            .by_name(&opf_path)
+            .map_err(|_| format!("缺少 OPF 文件: {}", opf_path))?;
+        let mut s = String::new();
+        f.read_to_string(&mut s).map_err(|e| e.to_string())?;
+        s
+    };
+
+    let title = extract_first_tag(&opf_xml, "dc:title").unwrap_or_default();
+    let author = extract_first_tag(&opf_xml, "dc:creator").unwrap_or_default();
+    let publisher = extract_first_tag(&opf_xml, "dc:publisher");
+    let description = extract_first_tag(&opf_xml, "dc:description");
+    let epub_uuid = extract_first_tag(&opf_xml, "dc:identifier").unwrap_or_default();
+
+    // 我们的扩展字段（与 write_opf_metadata 写入约定一一对应）
+    let subtitle = extract_meta_by_name(&opf_xml, "calibre:subtitle");
+    let series = extract_meta_by_name(&opf_xml, "calibre:series");
+    let maker = extract_meta_by_name(&opf_xml, "maker");
+    let tags = extract_all_tags(&opf_xml, "dc:subject");
+
+    // dc:date 作为"制作时间"（出版/创建日期）
+    let pub_date =
+        extract_first_tag(&opf_xml, "dc:date").and_then(|s| parse_epub_date(&s));
+
+    // EPUB 3：<meta property="dcterms:modified">YYYY-MM-DDTHH:MM:SSZ</meta>
+    let modified_date = match Regex::new(
+        r#"<meta\s+[^>]*property="dcterms:modified"[^>]*>([\s\S]*?)</meta>"#,
+    ) {
+        Ok(re) => match re.captures(&opf_xml) {
+            Ok(Some(c)) => c.get(1).and_then(|m| parse_epub_date(m.as_str().trim())),
+            _ => None,
+        },
+        Err(_) => None,
+    };
+
+    // 3. 找封面 href（多层兜底）
+    let cover_href = find_cover_href(&opf_xml);
+
+    // 4. 抽封面字节（容忍 URL 编码 / 大小写差异）
+    let mut cover_bytes: Option<Vec<u8>> = None;
+    let mut cover_ext = String::from("jpg");
+    if let Some(href) = cover_href {
+        // href 相对 OPF 所在目录
+        let opf_dir = Path::new(&opf_path)
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let cover_full = if opf_dir.is_empty() {
+            href.clone()
+        } else {
+            format!("{}/{}", opf_dir, href)
+        };
+        let cover_full = normalize_zip_path(&cover_full);
+        if let Some(buf) = try_read_zip_entry(&mut archive, &cover_full) {
+            // 优先按路径名定扩展（用于前端 MIME），用 magic bytes 兜底
+            cover_ext = match ext_from_path(&cover_full) {
+                "jpg" => detect_image_ext(&buf).to_string(),
+                other => other.to_string(),
+            };
+            cover_bytes = Some(buf);
+        }
+    }
+
+    Ok(EpubParsedMeta {
+        title,
+        author,
+        publisher,
+        description,
+        epub_uuid,
+        cover_bytes,
+        cover_ext,
+        pub_date,
+        modified_date,
+        subtitle,
+        series,
+        maker,
+        tags,
+    })
+}
+
+fn detect_book_file_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .as_deref()
+    {
+        Some("epub") => "epub",
+        Some("txt") => "txt",
+        _ => "",
+    }
+}
+
+fn system_time_to_secs(t: SystemTime) -> Option<u64> {
+    t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())
+}
+
+#[tauri::command]
+async fn add_book_to_library(
+    app: tauri::AppHandle,
+    file_path: String,
+    config: LibraryConfig,
+) -> Result<BookEntry, String> {
+    let src = PathBuf::from(&file_path);
+    if !src.exists() {
+        return Err(format!("文件不存在: {}", file_path));
+    }
+    let file_type = detect_book_file_type(&src);
+    if file_type.is_empty() {
+        return Err("仅支持 .epub / .txt 文件".to_string());
+    }
+
+    // 读已有 library，把传入的 config 作为权威值同步进去
+    let mut data = read_library_data(&app)?;
+    data.config = config.clone();
+
+    // 校验自定义模式
+    let storage_mode = config.storage_mode.as_str();
+    if storage_mode == "copy_custom" && config.custom_work_dir.trim().is_empty() {
+        return Err("自定义存储模式下必须先在设置中指定工作目录".to_string());
+    }
+    let should_copy = matches!(storage_mode, "copy_portable" | "copy_custom");
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = system_time_to_secs(SystemTime::now()).unwrap_or(0);
+    let metadata = fs::metadata(&src).map_err(|e| format!("读取文件元数据失败: {}", e))?;
+    let file_size = metadata.len();
+    let created_at = metadata.created().ok().and_then(system_time_to_secs);
+    let modified_at = metadata.modified().ok().and_then(system_time_to_secs);
+    let filename = src
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // 决定文件最终位置
+    let final_file_path = if should_copy {
+        let files_dir = library_files_dir(&app)?;
+        ensure_dir(&files_dir)?;
+        let dest = files_dir.join(format!("{}.{}", id, file_type));
+        fs::copy(&src, &dest).map_err(|e| format!("复制文件失败: {}", e))?;
+        dest.to_string_lossy().to_string()
+    } else {
+        // ref_only：保持原绝对路径
+        src.to_string_lossy().to_string()
+    };
+
+    let mut entry = BookEntry {
+        id: id.clone(),
+        file_path: final_file_path,
+        file_type: file_type.to_string(),
+        added_at: now,
+        file_size,
+        filename,
+        created_at,
+        modified_at,
+        ..Default::default()
+    };
+
+    if file_type == "epub" {
+        match parse_epub_metadata(&src) {
+            Ok(meta) => {
+                entry.title = if meta.title.is_empty() {
+                    src.file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                } else {
+                    meta.title
+                };
+                entry.author = meta.author;
+                entry.publisher = meta.publisher;
+                entry.description = meta.description;
+                entry.epub_uuid = meta.epub_uuid;
+
+                // 扩展字段：subtitle/series/maker/tags 与写入约定对称读回
+                entry.subtitle = meta.subtitle.unwrap_or_default();
+                entry.series = meta.series.unwrap_or_default();
+                entry.maker = meta.maker.unwrap_or_default();
+                entry.tags = if meta.tags.is_empty() {
+                    None
+                } else {
+                    Some(meta.tags)
+                };
+
+                // 制作时间 / 修改时间 联合规则：
+                //  - OPF 两者都有：各自独立
+                //  - OPF 仅一个：两边都用该值（用户期望两个时间同显示这一个）
+                //  - OPF 都没：保留前面从 fs 读到的 ctime / mtime（不再覆盖）
+                match (meta.pub_date, meta.modified_date) {
+                    (Some(p), Some(m)) => {
+                        entry.created_at = Some(p);
+                        entry.modified_at = Some(m);
+                    }
+                    (Some(p), None) => {
+                        entry.created_at = Some(p);
+                        entry.modified_at = Some(p);
+                    }
+                    (None, Some(m)) => {
+                        entry.created_at = Some(m);
+                        entry.modified_at = Some(m);
+                    }
+                    (None, None) => {
+                        // 保留 fs 兜底
+                    }
+                }
+
+                if let Some(bytes) = meta.cover_bytes {
+                    let covers_dir = library_covers_dir(&app)?;
+                    ensure_dir(&covers_dir)?;
+                    let cover_path = covers_dir.join(format!("{}.{}", id, meta.cover_ext));
+                    fs::write(&cover_path, &bytes)
+                        .map_err(|e| format!("写入封面失败: {}", e))?;
+                    entry.cover_path = cover_path.to_string_lossy().to_string();
+                }
+            }
+            Err(e) => {
+                // 解析失败不阻断入库，回退到文件名作为标题
+                entry.title = src
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                eprintln!("[library] 解析 epub 元数据失败: {}", e);
+            }
+        }
+    } else {
+        // txt
+        entry.title = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+    }
+
+    data.books.push(entry.clone());
+    write_library_data_atomic(&app, &data)?;
+    Ok(entry)
+}
+
+#[tauri::command]
+async fn remove_book_from_library(
+    app: tauri::AppHandle,
+    book_id: String,
+) -> Result<(), String> {
+    let mut data = read_library_data(&app)?;
+    let idx = data
+        .books
+        .iter()
+        .position(|b| b.id == book_id)
+        .ok_or_else(|| format!("未找到图书: {}", book_id))?;
+    let book = data.books[idx].clone();
+
+    // 仅清理位于 files_dir 内的副本（ref_only 模式下原文件不动）
+    let files_dir = library_files_dir(&app)?;
+    if !book.file_path.is_empty() {
+        let book_path = PathBuf::from(&book.file_path);
+        if book_path.starts_with(&files_dir) && book_path.exists() {
+            let _ = fs::remove_file(&book_path);
+        }
+    }
+
+    // 封面无论哪种模式都是我们生成的，删除
+    if !book.cover_path.is_empty() {
+        let cover_path = PathBuf::from(&book.cover_path);
+        if cover_path.exists() {
+            let _ = fs::remove_file(&cover_path);
+        }
+    }
+
+    data.books.remove(idx);
+    write_library_data_atomic(&app, &data)?;
+    Ok(())
+}
+
+// ============================================================
+// ===== Library - Phase 3: cover data / refresh metadata =====
+// ============================================================
+
+#[tauri::command]
+fn get_library_cover_data(cover_path: String) -> Result<Vec<u8>, String> {
+    if cover_path.trim().is_empty() {
+        return Err("封面路径为空".to_string());
+    }
+    fs::read(&cover_path).map_err(|e| format!("读取封面失败: {}", e))
+}
+
+#[tauri::command]
+async fn refresh_book_metadata(
+    app: tauri::AppHandle,
+    book_id: String,
+) -> Result<BookEntry, String> {
+    let mut data = read_library_data(&app)?;
+    let idx = data
+        .books
+        .iter()
+        .position(|b| b.id == book_id)
+        .ok_or_else(|| format!("未找到图书: {}", book_id))?;
+
+    // 克隆当前条目，只覆盖元数据 + 封面
+    let mut entry = data.books[idx].clone();
+    let src = PathBuf::from(&entry.file_path);
+    if !src.exists() {
+        return Err(format!("源文件不存在: {}", entry.file_path));
+    }
+
+    // 同步源文件 size；时间字段统一交给后面的 OPF 联合规则处理（详见 epub 块）。
+    // txt 没有 OPF，沿用 fs mtime。
+    if let Ok(meta) = fs::metadata(&src) {
+        entry.file_size = meta.len();
+        if entry.file_type == "txt" {
+            entry.modified_at = meta.modified().ok().and_then(system_time_to_secs);
+        }
+        // created_at 不再更新（保持入库时记录的最早值）
+    }
+
+    if entry.file_type == "epub" {
+        match parse_epub_metadata(&src) {
+            Ok(meta) => {
+                if !meta.title.is_empty() {
+                    entry.title = meta.title;
+                }
+                entry.author = meta.author;
+                entry.publisher = meta.publisher;
+                entry.description = meta.description;
+                if !meta.epub_uuid.is_empty() {
+                    entry.epub_uuid = meta.epub_uuid;
+                }
+
+                // 扩展字段：刷新意味着把库内字段同步成源文件中的值（包括清空）
+                entry.subtitle = meta.subtitle.unwrap_or_default();
+                entry.series = meta.series.unwrap_or_default();
+                entry.maker = meta.maker.unwrap_or_default();
+                entry.tags = if meta.tags.is_empty() {
+                    None
+                } else {
+                    Some(meta.tags)
+                };
+
+                // 制作时间 / 修改时间 联合规则（与 add_book_to_library 一致）：
+                //  - OPF 两者都有：各自独立
+                //  - OPF 仅一个：两边都用该值
+                //  - OPF 都没：保留库内旧值（不动）
+                match (meta.pub_date, meta.modified_date) {
+                    (Some(p), Some(m)) => {
+                        entry.created_at = Some(p);
+                        entry.modified_at = Some(m);
+                    }
+                    (Some(p), None) => {
+                        entry.created_at = Some(p);
+                        entry.modified_at = Some(p);
+                    }
+                    (None, Some(m)) => {
+                        entry.created_at = Some(m);
+                        entry.modified_at = Some(m);
+                    }
+                    (None, None) => {
+                        // 保留库内旧值
+                    }
+                }
+
+                // 重新写封面：先删旧封面（哪怕扩展名不同），再写新的
+                if let Some(bytes) = meta.cover_bytes {
+                    if !entry.cover_path.is_empty() {
+                        let old = PathBuf::from(&entry.cover_path);
+                        if old.exists() {
+                            let _ = fs::remove_file(&old);
+                        }
+                    }
+                    let covers_dir = library_covers_dir(&app)?;
+                    ensure_dir(&covers_dir)?;
+                    let cover_path =
+                        covers_dir.join(format!("{}.{}", entry.id, meta.cover_ext));
+                    fs::write(&cover_path, &bytes)
+                        .map_err(|e| format!("写入封面失败: {}", e))?;
+                    entry.cover_path = cover_path.to_string_lossy().to_string();
+                }
+            }
+            Err(e) => {
+                return Err(format!("解析 epub 元数据失败: {}", e));
+            }
+        }
+    } else {
+        // txt：仅刷新文件名/标题（如果用户在外部改名了）
+        if let Some(stem) = src.file_stem() {
+            entry.title = stem.to_string_lossy().to_string();
+        }
+        if let Some(name) = src.file_name() {
+            entry.filename = name.to_string_lossy().to_string();
+        }
+    }
+
+    data.books[idx] = entry.clone();
+    write_library_data_atomic(&app, &data)?;
+    Ok(entry)
+}
+
+// ============================================================
+// ===== Library - Phase 4: update metadata / update cover =====
+// ============================================================
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+// 检测图片类型，仅依据 magic bytes，未识别则按 jpg 处理
+fn detect_image_ext(bytes: &[u8]) -> &'static str {
+    if bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
+        "jpg"
+    } else if bytes.len() >= 8
+        && bytes[0] == 0x89
+        && bytes[1] == 0x50
+        && bytes[2] == 0x4E
+        && bytes[3] == 0x47
+    {
+        "png"
+    } else if bytes.len() >= 12
+        && &bytes[0..4] == b"RIFF"
+        && &bytes[8..12] == b"WEBP"
+    {
+        "webp"
+    } else if bytes.len() >= 6
+        && (&bytes[0..6] == b"GIF87a" || &bytes[0..6] == b"GIF89a")
+    {
+        "gif"
+    } else {
+        "jpg"
+    }
+}
+
+// 替换 OPF 中 <{tag}>...</{tag}> 的内容；不存在则在 </metadata> 前插入
+fn replace_or_insert_dc(opf: &str, tag: &str, value: &str) -> String {
+    let pat = format!(r#"<{0}((?:\s[^>]*)?)>([\s\S]*?)</{0}>"#, re_escape(tag));
+    if let Ok(re) = Regex::new(&pat) {
+        if let Ok(Some(c)) = re.captures(opf) {
+            let attrs = c.get(1).map(|m| m.as_str()).unwrap_or("");
+            let full = c.get(0).unwrap();
+            let replacement = format!("<{0}{1}>{2}</{0}>", tag, attrs, xml_escape(value));
+            let mut out = String::with_capacity(opf.len() + replacement.len());
+            out.push_str(&opf[..full.start()]);
+            out.push_str(&replacement);
+            out.push_str(&opf[full.end()..]);
+            return out;
+        }
+    }
+    // 回退：在 </metadata> 前插入
+    let inject = format!("    <{0}>{1}</{0}>\n  ", tag, xml_escape(value));
+    insert_before_metadata_close(opf, &inject)
+}
+
+// 在 </metadata> 前插入一段（已含缩进/换行的）内容
+fn insert_before_metadata_close(opf: &str, content: &str) -> String {
+    if let Some(pos) = opf.find("</metadata>") {
+        let mut out = String::with_capacity(opf.len() + content.len());
+        out.push_str(&opf[..pos]);
+        out.push_str(content);
+        out.push_str(&opf[pos..]);
+        return out;
+    }
+    opf.to_string()
+}
+
+// 删除 OPF 中所有匹配某 pattern 的片段（用于多个 dc:subject、旧 calibre meta 等清理）
+fn remove_all_matches(opf: &str, pattern: &str) -> String {
+    let re = match Regex::new(pattern) {
+        Ok(r) => r,
+        Err(_) => return opf.to_string(),
+    };
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for m in re.find_iter(opf).flatten() {
+        ranges.push((m.start(), m.end()));
+    }
+    if ranges.is_empty() {
+        return opf.to_string();
+    }
+    let mut out = String::with_capacity(opf.len());
+    let mut cursor = 0;
+    for (s, e) in &ranges {
+        out.push_str(&opf[cursor..*s]);
+        cursor = *e;
+    }
+    out.push_str(&opf[cursor..]);
+    out
+}
+
+// 通用：把"<meta name=NAME content=VALUE/>"风格的字段先全部删掉、再按需插入
+fn replace_meta_by_name(opf: &str, name: &str, value: &str) -> String {
+    let rm_pat = format!(
+        r#"\s*<meta\s+(?:[^>]*\s)?name="{}"[^>]*/?>"#,
+        re_escape(name)
+    );
+    let mut s = remove_all_matches(opf, &rm_pat);
+    if !value.trim().is_empty() {
+        let inject = format!(
+            "    <meta name=\"{}\" content=\"{}\"/>\n  ",
+            name,
+            xml_escape(value)
+        );
+        s = insert_before_metadata_close(&s, &inject);
+    }
+    s
+}
+
+// EPUB 3 修改时间：<meta property="dcterms:modified">YYYY-MM-DDTHH:MM:SSZ</meta>。
+// 先删掉所有现有的，再插入一个新的。iso 应是 "2024-01-15T12:00:00Z" 格式。
+fn set_dcterms_modified(opf: &str, iso: &str) -> String {
+    let rm_pat = r#"\s*<meta\s+(?:[^>]*\s)?property="dcterms:modified"[^>]*>[\s\S]*?</meta>"#;
+    let s = remove_all_matches(opf, rm_pat);
+    let inject = format!(
+        "    <meta property=\"dcterms:modified\">{}</meta>\n  ",
+        xml_escape(iso)
+    );
+    insert_before_metadata_close(&s, &inject)
+}
+
+fn write_opf_metadata(
+    opf: &str,
+    title: &str,
+    author: &str,
+    description: &str,
+    epub_uuid: &str,
+    publisher: Option<&str>,
+    subtitle: &str,
+    maker: &str,
+    series: &str,
+    tags: &[String],
+) -> String {
+    let mut s = opf.to_string();
+
+    // 标准 dc:* 字段
+    if !title.is_empty() {
+        s = replace_or_insert_dc(&s, "dc:title", title);
+    }
+    if !author.is_empty() {
+        s = replace_or_insert_dc(&s, "dc:creator", author);
+    }
+    s = replace_or_insert_dc(&s, "dc:description", description);
+    if !epub_uuid.is_empty() {
+        s = replace_or_insert_dc(&s, "dc:identifier", epub_uuid);
+    }
+    if let Some(p) = publisher {
+        s = replace_or_insert_dc(&s, "dc:publisher", p);
+    }
+
+    // tags → 多个 dc:subject（EPUB 标准）。先删后插。
+    s = remove_all_matches(
+        &s,
+        r#"\s*<dc:subject(?:\s[^>]*)?>[\s\S]*?</dc:subject>"#,
+    );
+    if !tags.is_empty() {
+        let mut block = String::new();
+        for t in tags {
+            let trimmed = t.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            block.push_str(&format!(
+                "    <dc:subject>{}</dc:subject>\n  ",
+                xml_escape(trimmed)
+            ));
+        }
+        if !block.is_empty() {
+            s = insert_before_metadata_close(&s, &block);
+        }
+    }
+
+    // calibre 风格 meta：subtitle / series；自定义 maker
+    s = replace_meta_by_name(&s, "calibre:subtitle", subtitle);
+    s = replace_meta_by_name(&s, "calibre:series", series);
+    s = replace_meta_by_name(&s, "maker", maker);
+
+    s
+}
+
+// 读 epub 内 OPF 文本及其在 zip 内的路径（解析 container.xml）
+fn read_opf_from_epub(epub_path: &Path) -> Result<(String, String), String> {
+    let file = fs::File::open(epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("无效 EPUB: {}", e))?;
+
+    let opf_path = {
+        let mut f = archive
+            .by_name("META-INF/container.xml")
+            .map_err(|_| "缺少 META-INF/container.xml".to_string())?;
+        let mut s = String::new();
+        f.read_to_string(&mut s).map_err(|e| e.to_string())?;
+        let re = Regex::new(r#"full-path="([^"]+)""#).map_err(|e| e.to_string())?;
+        match re.captures(&s) {
+            Ok(Some(c)) => c.get(1).unwrap().as_str().to_string(),
+            _ => return Err("container.xml 缺少 full-path".to_string()),
+        }
+    };
+    let opf_xml = {
+        let mut f = archive
+            .by_name(&opf_path)
+            .map_err(|_| format!("缺少 OPF 文件: {}", opf_path))?;
+        let mut s = String::new();
+        f.read_to_string(&mut s).map_err(|e| e.to_string())?;
+        s
+    };
+    Ok((opf_path, opf_xml))
+}
+
+// 在 OPF 文本中定位封面在 zip 内的完整路径
+fn locate_cover_in_opf(opf_path: &str, opf_xml: &str) -> Option<String> {
+    let mut cover_href: Option<String> = None;
+    let href_re = Regex::new(r#"href="([^"]+)""#).ok()?;
+
+    if let Ok(prop_re) = Regex::new(r#"<item\s+[^>]*properties="cover-image"[^>]*>"#) {
+        if let Ok(Some(m)) = prop_re.find(opf_xml) {
+            if let Ok(Some(c)) = href_re.captures(m.as_str()) {
+                cover_href = c.get(1).map(|x| x.as_str().to_string());
+            }
+        }
+    }
+    if cover_href.is_none() {
+        if let Ok(meta_re) = Regex::new(r#"<meta\s+[^>]*name="cover"\s+content="([^"]+)""#) {
+            if let Ok(Some(c)) = meta_re.captures(opf_xml) {
+                if let Some(id_m) = c.get(1) {
+                    let cover_id = id_m.as_str();
+                    if let Ok(id_re) = Regex::new(&format!(
+                        r#"<item\s+[^>]*id="{}"[^>]*>"#,
+                        re_escape(cover_id)
+                    )) {
+                        if let Ok(Some(m)) = id_re.find(opf_xml) {
+                            if let Ok(Some(c)) = href_re.captures(m.as_str()) {
+                                cover_href = c.get(1).map(|x| x.as_str().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    cover_href.map(|href| {
+        let opf_dir = Path::new(opf_path)
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let full = if opf_dir.is_empty() {
+            href
+        } else {
+            format!("{}/{}", opf_dir, href)
+        };
+        normalize_zip_path(&full)
+    })
+}
+
+struct EpubRewrite {
+    opf_replacement: Option<String>,
+    cover_replacement: Option<Vec<u8>>,
+}
+
+// 流式重打包：拷贝原 zip 所有项，遇到 OPF / 封面则替换
+fn rewrite_epub(epub_path: &Path, changes: &EpubRewrite) -> Result<(), String> {
+    use zip::write::FileOptions;
+
+    let (opf_path, opf_xml) = read_opf_from_epub(epub_path)?;
+    let cover_internal = if changes.cover_replacement.is_some() {
+        locate_cover_in_opf(&opf_path, &opf_xml)
+    } else {
+        None
+    };
+
+    let src = fs::File::open(epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(src).map_err(|e| format!("无效 EPUB: {}", e))?;
+
+    let tmp_path = format!("{}.tmp", epub_path.to_string_lossy());
+    let tmp_file =
+        fs::File::create(&tmp_path).map_err(|e| format!("创建临时 zip 失败: {}", e))?;
+    let mut zw = zip::ZipWriter::new(tmp_file);
+    let opts_deflated =
+        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let opts_stored =
+        FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+    let count = archive.len();
+    for i in 0..count {
+        let mut zf = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 zip 项失败: {}", e))?;
+        if !zf.is_file() {
+            continue;
+        }
+        let name = zf.name().to_string();
+        let opts = if name == "mimetype" {
+            opts_stored
+        } else {
+            opts_deflated
+        };
+        zw.start_file(&name, opts)
+            .map_err(|e| format!("写入 zip 项失败: {}", e))?;
+
+        let mut handled = false;
+        if name == opf_path {
+            if let Some(ref new_opf) = changes.opf_replacement {
+                zw.write_all(new_opf.as_bytes())
+                    .map_err(|e| e.to_string())?;
+                handled = true;
+            }
+        }
+        if !handled {
+            if let (Some(ci), Some(bytes)) = (
+                cover_internal.as_ref(),
+                changes.cover_replacement.as_ref(),
+            ) {
+                if &name == ci {
+                    zw.write_all(bytes).map_err(|e| e.to_string())?;
+                    handled = true;
+                }
+            }
+        }
+        if !handled {
+            let mut buf = Vec::new();
+            zf.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+            zw.write_all(&buf).map_err(|e| e.to_string())?;
+        }
+    }
+
+    zw.finish().map_err(|e| format!("完成 zip 失败: {}", e))?;
+    drop(archive); // Windows 上必须释放原 zip 句柄再 rename
+
+    fs::rename(&tmp_path, epub_path)
+        .map_err(|e| format!("替换 EPUB 失败: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn update_book_metadata(
+    app: tauri::AppHandle,
+    book_id: String,
+    title: String,
+    author: String,
+    subtitle: String,
+    description: String,
+    maker: String,
+    series: String,
+    tags: Vec<String>,
+    epub_uuid: String,
+) -> Result<BookEntry, String> {
+    let mut data = read_library_data(&app)?;
+    let idx = data
+        .books
+        .iter()
+        .position(|b| b.id == book_id)
+        .ok_or_else(|| format!("未找到图书: {}", book_id))?;
+
+    let mut entry = data.books[idx].clone();
+    entry.title = title.clone();
+    entry.author = author.clone();
+    entry.subtitle = subtitle;
+    entry.description = if description.is_empty() {
+        None
+    } else {
+        Some(description.clone())
+    };
+    entry.maker = maker;
+    entry.series = series;
+    entry.tags = if tags.is_empty() { None } else { Some(tags) };
+    entry.epub_uuid = epub_uuid.clone();
+
+    // 仅 epub 写回 OPF；txt 只更新库
+    if entry.file_type == "epub" {
+        let src = PathBuf::from(&entry.file_path);
+        if src.exists() {
+            let (_opf_path, opf_xml) = read_opf_from_epub(&src)?;
+            let mut new_opf = write_opf_metadata(
+                &opf_xml,
+                &title,
+                &author,
+                &description,
+                &epub_uuid,
+                entry.publisher.as_deref(),
+                &entry.subtitle,
+                &entry.maker,
+                &entry.series,
+                entry.tags.as_deref().unwrap_or(&[]),
+            );
+
+            // 默认不动 dcterms:modified；仅当 config.updateModifiedOnEdit=true 才覆盖为现在
+            if data.config.update_modified_on_edit {
+                let now = chrono::Utc::now();
+                let now_iso = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+                new_opf = set_dcterms_modified(&new_opf, &now_iso);
+                let ts = now.timestamp();
+                if ts >= 0 {
+                    entry.modified_at = Some(ts as u64);
+                }
+            }
+
+            // zip 重打包是同步阻塞 IO，丢到 blocking pool 不卡 async runtime
+            let src_clone = src.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                rewrite_epub(
+                    &src_clone,
+                    &EpubRewrite {
+                        opf_replacement: Some(new_opf),
+                        cover_replacement: None,
+                    },
+                )
+            })
+            .await
+            .map_err(|e| format!("写回 EPUB 任务失败: {}", e))??;
+        }
+    }
+
+    data.books[idx] = entry.clone();
+    write_library_data_atomic(&app, &data)?;
+    Ok(entry)
+}
+
+#[tauri::command]
+async fn update_book_cover(
+    app: tauri::AppHandle,
+    book_id: String,
+    cover_data: Vec<u8>,
+) -> Result<String, String> {
+    if cover_data.is_empty() {
+        return Err("封面数据为空".to_string());
+    }
+    let mut data = read_library_data(&app)?;
+    let idx = data
+        .books
+        .iter()
+        .position(|b| b.id == book_id)
+        .ok_or_else(|| format!("未找到图书: {}", book_id))?;
+    let mut entry = data.books[idx].clone();
+
+    // 删旧封面文件
+    if !entry.cover_path.is_empty() {
+        let old = PathBuf::from(&entry.cover_path);
+        if old.exists() {
+            let _ = fs::remove_file(&old);
+        }
+    }
+
+    // 写新封面到 covers 目录
+    let ext = detect_image_ext(&cover_data);
+    let covers_dir = library_covers_dir(&app)?;
+    ensure_dir(&covers_dir)?;
+    let cover_path = covers_dir.join(format!("{}.{}", entry.id, ext));
+    fs::write(&cover_path, &cover_data)
+        .map_err(|e| format!("写入封面失败: {}", e))?;
+    let cover_path_str = cover_path.to_string_lossy().to_string();
+    entry.cover_path = cover_path_str.clone();
+
+    // epub：替换内部封面（失败仅日志，不阻断库内封面更新）
+    if entry.file_type == "epub" {
+        let src = PathBuf::from(&entry.file_path);
+        if src.exists() {
+            let src_clone = src.clone();
+            let bytes_for_zip = cover_data.clone();
+            let join = tauri::async_runtime::spawn_blocking(move || {
+                rewrite_epub(
+                    &src_clone,
+                    &EpubRewrite {
+                        opf_replacement: None,
+                        cover_replacement: Some(bytes_for_zip),
+                    },
+                )
+            })
+            .await;
+            match join {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    eprintln!("[library] 写回 epub 内部封面失败（库内封面已更新）: {}", e);
+                }
+                Err(e) => {
+                    eprintln!("[library] spawn_blocking 异常（库内封面已更新）: {}", e);
+                }
+            }
+        }
+    }
+
+    data.books[idx] = entry;
+    write_library_data_atomic(&app, &data)?;
+    Ok(cover_path_str)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -3262,7 +4605,19 @@ pub fn run() {
             rename_epub_file,
             get_launch_args, // Register new command
             prepare_epub_for_open,
-            exit_app
+            exit_app,
+            // ===== Library Phase 1 =====
+            load_library,
+            save_library,
+            // ===== Library Phase 2 =====
+            add_book_to_library,
+            remove_book_from_library,
+            // ===== Library Phase 3 =====
+            get_library_cover_data,
+            refresh_book_metadata,
+            // ===== Library Phase 4 =====
+            update_book_metadata,
+            update_book_cover
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
