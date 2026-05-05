@@ -901,32 +901,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "epub-editor"
-version = "0.4.2"
-dependencies = [
- "chardetng",
- "chrono",
- "encoding_rs",
- "fancy-regex",
- "image",
- "md5",
- "once_cell",
- "quick-xml 0.36.2",
- "rayon",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-opener",
- "tempfile",
- "uuid",
- "walkdir",
- "zip",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4063,6 +4037,32 @@ dependencies = [
  "futf",
  "mac",
  "utf-8",
+]
+
+[[package]]
+name = "tepub-editor"
+version = "0.4.4"
+dependencies = [
+ "chardetng",
+ "chrono",
+ "encoding_rs",
+ "fancy-regex",
+ "image",
+ "md5",
+ "once_cell",
+ "quick-xml 0.36.2",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-opener",
+ "tempfile",
+ "uuid",
+ "walkdir",
+ "zip",
 ]
 
 [[package]]

@@ -35,6 +35,10 @@
     customWorkDir: string;
     /** 编辑元数据保存时是否把 epub 内的修改时间改成"现在"，默认 false */
     updateModifiedOnEdit: boolean;
+    /** 文件关联开关：是否注册 EPUB→阅读 / EPUB→编辑 / TXT→制作 EPUB */
+    assocEpubRead?: boolean;
+    assocEpubEdit?: boolean;
+    assocTxtMakeEpub?: boolean;
   }
 
   interface LibraryData {
@@ -53,6 +57,19 @@
   let showSettings = false;
   let showMetaEditor = false;
   let savingMetadata = false;
+
+  // 首次启动书库目录选择
+  interface AppModeInfo {
+    isPortable: boolean;
+    suggestedLibraryDir: string;
+    isLibraryConfigured: boolean;
+    portableMarkerPath: string;
+    appDataDir: string;
+  }
+  let appMode: AppModeInfo | null = null;
+  let firstLaunchOpen = false;
+  let firstLaunchInput = "";
+  let firstLaunchSaving = false;
   let coverCache: Map<string, string> = new Map();
   let contextMenuPos = { x: 0, y: 0 };
   let showContextMenu = false;
@@ -194,6 +211,63 @@
     activeTagFilters = [];
   }
 
+  // 启动入口：先确认应用模式 + 是否首次启动
+  async function bootLibrary() {
+    try {
+      appMode = await invoke<AppModeInfo>("get_app_mode_info");
+    } catch (e) {
+      console.error("获取应用模式失败:", e);
+      // 取不到也别卡死，按"已配置"流程走
+      appMode = { isPortable: false, suggestedLibraryDir: "", isLibraryConfigured: true, portableMarkerPath: "", appDataDir: "" };
+    }
+    if (!appMode.isLibraryConfigured) {
+      firstLaunchInput = appMode.isPortable ? appMode.suggestedLibraryDir : "";
+      firstLaunchOpen = true;
+      isLoading = false; // 解开 loading 让弹窗能显示
+      return;
+    }
+    await loadLibrary();
+  }
+
+  async function browseFirstLaunchDir() {
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === "string") {
+        firstLaunchInput = selected;
+      }
+    } catch (e) {
+      console.error("选择目录失败:", e);
+    }
+  }
+
+  async function confirmFirstLaunchDir() {
+    const trimmed = firstLaunchInput.trim();
+    if (!trimmed) {
+      await message("请选择书库存放目录", { title: "需要选择目录", kind: "warning" });
+      return;
+    }
+    if (firstLaunchSaving) return;
+    firstLaunchSaving = true;
+    try {
+      libraryConfig = {
+        storageMode: appMode?.isPortable ? "copy_portable" : "copy_custom",
+        customWorkDir: trimmed,
+        updateModifiedOnEdit: libraryConfig.updateModifiedOnEdit ?? false,
+      };
+      // 写一份空 library.json 到该目录，建立 pointer
+      await invoke("save_library", { data: { config: libraryConfig, books: [] } });
+      firstLaunchOpen = false;
+      isLoading = true;
+      await loadLibrary();
+      try { appMode = await invoke<AppModeInfo>("get_app_mode_info"); } catch {}
+    } catch (e: any) {
+      console.error("保存书库目录失败:", e);
+      await message(`保存失败: ${e}`, { title: "错误", kind: "error" });
+    } finally {
+      firstLaunchSaving = false;
+    }
+  }
+
   async function loadLibrary() {
     try {
       const data = await invoke<LibraryData>("load_library");
@@ -209,6 +283,14 @@
       if (typeof libraryConfig.updateModifiedOnEdit !== "boolean") {
         libraryConfig.updateModifiedOnEdit = false;
       }
+      // 安装版没有 copy_portable 选项，旧配置或异常状态下自动迁移到 copy_custom
+      if (appMode && !appMode.isPortable && libraryConfig.storageMode === "copy_portable") {
+        libraryConfig.storageMode = "copy_custom";
+        // 持久化迁移
+        try { await saveLibraryConfig(); } catch {}
+      }
+      // 同步存储模式跟踪变量
+      prevStorageMode = libraryConfig.storageMode;
       // 预加载封面
       for (const book of books) {
         if (book.coverPath && !coverCache.has(book.id)) {
@@ -310,7 +392,7 @@
     const ext = filePath.split(".").pop()?.toLowerCase();
     const isEpub = ext === "epub";
     const encoded = encodeURIComponent(filePath);
-    const url = isEpub ? `/epub-editor?file=${encoded}` : `/?file=${encoded}`;
+    const url = isEpub ? `/epub-editor?file=${encoded}` : `/editor?file=${encoded}`;
     const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
 
     try {
@@ -318,8 +400,8 @@
       const win = new WebviewWindow(`editor-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, {
         url,
         title,
-        width: isEpub ? 1200 : 800,
-        height: isEpub ? 740 : 600,
+        width: isEpub ? 1200 : 1200,
+        height: isEpub ? 740 : 740,
         dragDropEnabled: true,
         center: true,
       });
@@ -351,7 +433,7 @@
   async function openBook(book: BookEntry) {
     const encoded = encodeURIComponent(book.filePath);
     const isEpub = book.fileType === "epub";
-    const url = isEpub ? `/epub-editor?file=${encoded}` : `/?file=${encoded}`;
+    const url = isEpub ? `/epub-editor?file=${encoded}` : `/editor?file=${encoded}`;
     const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
 
     try {
@@ -359,8 +441,8 @@
       const win = new WebviewWindow(`editor-${Date.now()}`, {
         url,
         title,
-        width: isEpub ? 1200 : 800,
-        height: isEpub ? 740 : 600,
+        width: isEpub ? 1200 : 1200,
+        height: isEpub ? 740 : 740,
         dragDropEnabled: true,
         center: true,
       });
@@ -416,12 +498,35 @@
     }
   }
 
+  // 简介在 textarea 里显示带首行缩进（每段两个全角空格），与右侧预览的
+  // splitDescription 完全一致：按 \n+ 切段、trim、过滤空行，每段前置两个全角空格。
+  // 注意 Rust 端 extract_first_tag 会对 dc:description 做 trim()（包含 U+3000），
+  // 因此第一段的缩进通常被剥掉，由前端在显示时统一补回。
+  // 保存时再剥掉首行的全角空格还原成纯文本写回 OPF。
+  const DESC_INDENT = "　　";
+  function descToForm(desc: string): string {
+    if (!desc) return "";
+    const paras = desc
+      .split(/\r?\n+/)
+      .map(p => p.replace(/^[　\s ]+/, "").replace(/[　\s ]+$/, ""))
+      .filter(p => p.length > 0);
+    if (paras.length === 0) return "";
+    return paras.map(p => DESC_INDENT + p).join("\n");
+  }
+  function descFromForm(form: string): string {
+    if (!form) return "";
+    return form
+      .split(/\r?\n/)
+      .map(line => line.replace(/^[　\s ]+/, ""))
+      .join("\n");
+  }
+
   function openEditMetadata(book: BookEntry) {
     metaForm = {
       title: book.title,
       author: book.author,
       subtitle: book.subtitle || "",
-      description: book.description || "",
+      description: descToForm(book.description || ""),
       maker: book.maker || "",
       series: book.series || "",
       tags: Array.isArray((book as any).tags) ? [...(book as any).tags] : [],
@@ -444,7 +549,7 @@
         title: metaForm.title,
         author: metaForm.author,
         subtitle: metaForm.subtitle,
-        description: metaForm.description,
+        description: descFromForm(metaForm.description),
         maker: metaForm.maker,
         series: metaForm.series,
         tags: metaForm.tags,
@@ -619,7 +724,7 @@
       // 同步表单中已为空的字段（不覆盖用户正在输入的内容）
       if (!metaForm.title) metaForm.title = updated.title;
       if (!metaForm.author) metaForm.author = updated.author;
-      if (!metaForm.description) metaForm.description = updated.description || "";
+      if (!metaForm.description) metaForm.description = descToForm(updated.description || "");
       if (!metaForm.epubUuid) metaForm.epubUuid = updated.epubUuid || "";
     } catch (e: any) {
       console.error("重新提取元数据失败:", e);
@@ -759,27 +864,97 @@
     }
   }
 
+  // 跟踪上一次成功设置的 storageMode，用于"切到 copy_custom 但取消选目录"时回滚
+  let prevStorageMode = libraryConfig.storageMode;
+
+  async function pickCustomWorkDir(): Promise<boolean> {
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === "string" && selected.trim()) {
+        libraryConfig.customWorkDir = selected;
+        await saveLibraryConfig();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("选择目录失败:", e);
+      return false;
+    }
+  }
+
+  async function onStorageModeChange() {
+    const newMode = libraryConfig.storageMode;
+    // 第一次切到 copy_custom 自动弹文件夹选择器；取消则回滚到之前的模式
+    if (newMode === "copy_custom" && prevStorageMode !== "copy_custom") {
+      const ok = await pickCustomWorkDir();
+      if (!ok) {
+        libraryConfig.storageMode = prevStorageMode;
+        return;
+      }
+    }
+    prevStorageMode = newMode;
+    await saveLibraryConfig();
+  }
+
+  // 文件关联：写注册表 + 持久化到 libraryConfig
+  async function toggleFileAssoc(verb: "epub-read" | "epub-edit" | "txt-make-epub", enabled: boolean) {
+    try {
+      await invoke("set_file_assoc", { verb, enabled });
+    } catch (e: any) {
+      console.error("设置文件关联失败:", e);
+      await message(`设置失败: ${e}`, { title: "错误", kind: "error" });
+      // 写注册表失败：把 toggle 状态回滚
+      if (verb === "epub-read") libraryConfig.assocEpubRead = !enabled;
+      else if (verb === "epub-edit") libraryConfig.assocEpubEdit = !enabled;
+      else if (verb === "txt-make-epub") libraryConfig.assocTxtMakeEpub = !enabled;
+      return;
+    }
+    await saveLibraryConfig();
+  }
+
   onMount(async () => {
     loadShelfSettings();
-    await loadLibrary();
+    await bootLibrary();
 
-    // 检查启动参数（文件关联）
+    // 检查启动参数（文件关联，支持 --action= 路由）
     try {
-      const launchArgs = await invoke<string | null>("get_launch_args");
-      if (launchArgs) {
-        const ext = launchArgs.split(".").pop()?.toLowerCase();
+      const launchInfo = await invoke<{ filePath: string | null; action: string | null }>("get_launch_info");
+      const filePath = launchInfo?.filePath;
+      if (filePath) {
+        const ext = filePath.split(".").pop()?.toLowerCase();
         const isEpub = ext === "epub";
-        const url = isEpub
-          ? `/epub-editor?file=${encodeURIComponent(launchArgs)}`
-          : `/?file=${encodeURIComponent(launchArgs)}`;
-        const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
+        const action = launchInfo?.action || "";
+        const encoded = encodeURIComponent(filePath);
+
+        let url: string;
+        let title: string;
+        let width = 1200;
+        let height = 740;
+        if (isEpub) {
+          if (action === "reader") {
+            url = `/reader?file=${encoded}`;
+            title = "TEpub-Editor-Reader";
+            width = 500;
+            height = 800;
+          } else {
+            // 默认 / --action=epub-editor → 编辑器
+            url = `/epub-editor?file=${encoded}`;
+            title = "TEpub-Editor-EPUB";
+          }
+        } else {
+          // .txt 默认或 --action=make-epub 都进 TXT 编辑器（编辑器内部有制作 EPUB 入口）
+          url = `/editor?file=${encoded}`;
+          title = "TEpub-Editor-TXT";
+          width = 1200;
+          height = 740;
+        }
 
         const appWindow = getCurrentWindow();
         const win = new WebviewWindow(`editor-${Date.now()}`, {
           url,
           title,
-          width: isEpub ? 1200 : 800,
-          height: isEpub ? 740 : 600,
+          width,
+          height,
           dragDropEnabled: true,
           center: true,
         });
@@ -966,8 +1141,10 @@
             <div class="section-title">文件存储</div>
             <div class="set-row">
               <label class="set-label">存储方式</label>
-              <select class="set-control" bind:value={libraryConfig.storageMode} on:change={saveLibraryConfig}>
-                <option value="copy_portable">复制到 books/ 文件夹（绿色版推荐）</option>
+              <select class="set-control" bind:value={libraryConfig.storageMode} on:change={onStorageModeChange}>
+                {#if appMode?.isPortable}
+                  <option value="copy_portable">复制到 books/ 文件夹</option>
+                {/if}
                 <option value="index">仅索引文件位置（不复制）</option>
                 <option value="copy_custom">复制到指定工作目录</option>
               </select>
@@ -975,12 +1152,43 @@
             {#if libraryConfig.storageMode === "copy_custom"}
               <div class="set-row">
                 <label class="set-label">工作目录</label>
-                <input class="set-control" type="text" bind:value={libraryConfig.customWorkDir} placeholder="选择或输入目录路径..." />
+                <span class="custom-dir-display" title={libraryConfig.customWorkDir}>{libraryConfig.customWorkDir || "未选择"}</span>
+                <button class="tb-btn" on:click={pickCustomWorkDir}>更改</button>
               </div>
             {/if}
             <label class="set-row toggle-row">
-              <span class="set-label">编辑元数据时同步更新修改日期</span>
+              <span class="set-label">保存时更新修改日期</span>
               <input type="checkbox" bind:checked={libraryConfig.updateModifiedOnEdit} on:change={saveLibraryConfig} />
+            </label>
+          </section>
+
+          <!-- 文件关联 -->
+          <section class="settings-section">
+            <div class="section-title">注册文件打开方式</div>
+            <p class="section-hint">右键 .epub / .txt 文件时显示的菜单项。</p>
+            <label class="set-row toggle-row">
+              <span class="set-label">EPUB 阅读 <small>(.epub)</small></span>
+              <input
+                type="checkbox"
+                bind:checked={libraryConfig.assocEpubRead}
+                on:change={(e) => toggleFileAssoc("epub-read", (e.currentTarget as HTMLInputElement).checked)}
+              />
+            </label>
+            <label class="set-row toggle-row">
+              <span class="set-label">EPUB 编辑 <small>(.epub)</small></span>
+              <input
+                type="checkbox"
+                bind:checked={libraryConfig.assocEpubEdit}
+                on:change={(e) => toggleFileAssoc("epub-edit", (e.currentTarget as HTMLInputElement).checked)}
+              />
+            </label>
+            <label class="set-row toggle-row">
+              <span class="set-label">制作 EPUB <small>(.txt)</small></span>
+              <input
+                type="checkbox"
+                bind:checked={libraryConfig.assocTxtMakeEpub}
+                on:change={(e) => toggleFileAssoc("txt-make-epub", (e.currentTarget as HTMLInputElement).checked)}
+              />
             </label>
           </section>
 
@@ -1026,6 +1234,50 @@
 
         <div class="settings-footer">
           <button class="tb-btn primary" on:click={() => showSettings = false}>完成</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- 首次启动：选择书库存放目录 -->
+  {#if firstLaunchOpen}
+    <div class="settings-overlay first-launch-overlay">
+      <div class="settings-panel first-launch-panel">
+        <div class="settings-header">
+          <h3>选择书库存放目录</h3>
+        </div>
+        <div class="settings-body">
+          <p class="first-launch-hint">
+            {#if appMode?.isPortable}
+              检测到 <strong>绿色版</strong>。书库默认存放在程序同级目录的 <code>EPUB</code> 文件夹下，可改成任意路径。
+            {:else}
+              检测到 <strong>安装版</strong>。请选择一个目录用来存放书库（library.json、封面缓存、复制进来的图书副本都会放在这里）。
+            {/if}
+          </p>
+          <div class="set-row">
+            <label class="set-label">书库目录</label>
+            <input
+              class="set-control"
+              type="text"
+              bind:value={firstLaunchInput}
+              placeholder={appMode?.isPortable ? appMode.suggestedLibraryDir : "点击右侧选择目录..."}
+              disabled={firstLaunchSaving}
+            />
+            <button class="tb-btn" on:click={browseFirstLaunchDir} disabled={firstLaunchSaving}>浏览...</button>
+          </div>
+          <p class="first-launch-tip">
+            后续可在「设置」里调整。如果想让安装版变绿色版（数据全部跟随程序），在程序所在目录创建一个 <code>portable.txt</code> 空文件即可。
+          </p>
+        </div>
+        <div class="meta-edit-actions">
+          <button class="tb-btn primary" on:click={confirmFirstLaunchDir} disabled={firstLaunchSaving}>
+            {#if firstLaunchSaving}
+              <span class="saving-spinner" aria-hidden="true"></span>
+              保存中...
+            {:else}
+              确定
+            {/if}
+          </button>
         </div>
       </div>
     </div>
@@ -2368,5 +2620,61 @@
   }
   @keyframes saving-spin {
     to { transform: rotate(360deg); }
+  }
+
+  /* 首次启动弹窗 */
+  .first-launch-overlay {
+    z-index: 2000;
+  }
+  .first-launch-panel {
+    min-width: 520px;
+    max-width: 640px;
+  }
+  .first-launch-hint {
+    margin: 0 0 14px 0;
+    color: var(--color-text);
+    line-height: 1.6;
+    font-size: 13px;
+  }
+  .first-launch-hint code,
+  .first-launch-tip code {
+    background: var(--color-hover);
+    padding: 1px 6px;
+    border-radius: var(--radius-xs);
+    font-size: 12px;
+  }
+  .first-launch-tip {
+    margin: 12px 0 0 0;
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  /* copy_custom 工作目录的只读显示 */
+  .custom-dir-display {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-canvas);
+    color: var(--color-text);
+    font-size: 13px;
+    font-family: var(--font-mono, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .section-hint {
+    margin: -4px 0 8px 0;
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .toggle-row .set-label small {
+    color: var(--color-muted);
+    font-size: 11px;
+    margin-left: 4px;
   }
 </style>

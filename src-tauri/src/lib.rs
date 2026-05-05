@@ -547,6 +547,8 @@ struct EpubMetadata {
     #[serde(default)]
     description: String,
     #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
     main_css: String,
     #[serde(default)]
     font_css: String,
@@ -1241,12 +1243,61 @@ struct EpubPrepareResult {
     action: String,
 }
 
-fn get_history_base_dir() -> PathBuf {
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            return exe_dir.join(".history");
+// ============================================================
+// ===== App Data Layout (绿色版 vs 安装版自动路由) =====
+// ============================================================
+//
+// 判定方式：exe 同级目录存在 `portable.txt` 标记文件即视为绿色版。
+// 绿色版数据目录：<exe_dir>/data/
+// 安装版数据目录：Tauri app_data_dir (%APPDATA%/<bundle-id>)
+//
+// 凡是落到这个目录的内容：app 配置、TXT 编辑器 .history、library.pointer 等。
+// 书库的 epub 副本与封面是另一回事，由用户在书库设置里指定的 customWorkDir 决定。
+
+fn portable_marker_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    Some(dir.join("portable.txt"))
+}
+
+fn is_portable() -> bool {
+    portable_marker_path()
+        .map(|p| p.exists())
+        .unwrap_or(false)
+}
+
+fn portable_data_root() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    Some(dir.join("data"))
+}
+
+fn app_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if is_portable() {
+        if let Some(p) = portable_data_root() {
+            return Ok(p);
         }
     }
+    use tauri::Manager;
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("无法获取 app_data_dir: {}", e))
+}
+
+fn get_history_base_dir(app: Option<&tauri::AppHandle>) -> PathBuf {
+    // 绿色版：exe_dir/.history
+    if is_portable() {
+        if let Some(p) = portable_data_root() {
+            return p.join("history");
+        }
+    }
+    // 安装版：app_data_root/history
+    if let Some(app) = app {
+        if let Ok(p) = app_data_root(app) {
+            return p.join("history");
+        }
+    }
+    // 终极兜底：相对路径
     PathBuf::from(".history")
 }
 
@@ -1437,10 +1488,14 @@ fn calculate_md5(content: String) -> String {
 }
 
 #[tauri::command]
-async fn save_history(original_path: String, content: String) -> Result<(), String> {
+async fn save_history(
+    app: tauri::AppHandle,
+    original_path: String,
+    content: String,
+) -> Result<(), String> {
     let path = Path::new(&original_path);
     let file_stem = path.file_stem().unwrap().to_string_lossy();
-    let history_dir = get_history_base_dir();
+    let history_dir = get_history_base_dir(Some(&app));
     if !history_dir.exists() {
         fs::create_dir_all(&history_dir).map_err(|e| e.to_string())?;
     }
@@ -1478,10 +1533,13 @@ async fn save_history(original_path: String, content: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-async fn get_history_list(original_path: String) -> Vec<HistoryMeta> {
+async fn get_history_list(
+    app: tauri::AppHandle,
+    original_path: String,
+) -> Vec<HistoryMeta> {
     let path = Path::new(&original_path);
     let file_stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let history_dir = get_history_base_dir();
+    let history_dir = get_history_base_dir(Some(&app));
     let file_prefix = format!("{}-{}", file_stem, history_key_for_path(&original_path));
     let mut list = Vec::new();
     if let Ok(entries) = fs::read_dir(history_dir) {
@@ -1993,6 +2051,16 @@ async fn export_epub(
     };
 
     let mut extra_metadata = String::new();
+    for tag in &metadata.tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        extra_metadata.push_str(&format!(
+            "    <dc:subject>{}</dc:subject>\n",
+            escape_xml(trimmed)
+        ));
+    }
     for (k, v) in &metadata.extra {
         extra_metadata.push_str(&format!(
             "    <dc:{} pub-type=\"zdy\">{}</dc:{}>\n",
@@ -3222,10 +3290,154 @@ fn get_launch_args() -> Option<String> {
     // Index 0 is the executable path
     // Index 1 is usually the file path for file associations on Windows/Linux
     if args.len() > 1 {
-        // Filter out common Tauri debug flags if necessary, though simple direct file opening usually puts file at index 1
-        return Some(args[1].clone());
+        // 跳过我们注入的 --action= 之类的 flag
+        for a in args.iter().skip(1) {
+            if a.starts_with("--") {
+                continue;
+            }
+            return Some(a.clone());
+        }
     }
     None
+}
+
+// 启动信息：file_path + 可选 action (来自 --action=X 标志，决定路由到 reader/editor/epub-editor)
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct LaunchInfo {
+    file_path: Option<String>,
+    action: Option<String>,
+}
+
+#[tauri::command]
+fn get_launch_info() -> LaunchInfo {
+    let args: Vec<String> = std::env::args().collect();
+    let mut file: Option<String> = None;
+    let mut action: Option<String> = None;
+    for a in args.iter().skip(1) {
+        if let Some(stripped) = a.strip_prefix("--action=") {
+            action = Some(stripped.to_string());
+        } else if a.starts_with("--") {
+            // ignore unknown flags
+        } else if file.is_none() {
+            file = Some(a.clone());
+        }
+    }
+    LaunchInfo {
+        file_path: file,
+        action,
+    }
+}
+
+// ============================================================
+// ===== Windows 文件关联（注册右键菜单 verb） =====
+// ============================================================
+//
+// 三个 verb：
+//   epub-read  → .epub 上的"EPUB 阅读"，启动时带 --action=reader
+//   epub-edit  → .epub 上的"EPUB 编辑"，启动时带 --action=epub-editor
+//   txt-make-epub → .txt 上的"制作 EPUB"，启动时带 --action=make-epub
+//
+// 写到 HKCU\Software\Classes（用户级，无需管理员），与安装版的 HKLM 注册并存且优先生效。
+// 用 reg.exe 命令实现，避免引入 winreg crate 依赖。
+
+#[cfg(target_os = "windows")]
+fn run_reg_command(args: &[&str]) -> Result<(), String> {
+    use std::process::Command;
+    let out = Command::new("reg")
+        .args(args)
+        .output()
+        .map_err(|e| format!("调用 reg.exe 失败: {}", e))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        // reg.exe DELETE 在 key 不存在时也返回非零，对我们而言不算真正失败
+        if stderr.contains("找不到") || stderr.to_lowercase().contains("unable to find") {
+            return Ok(());
+        }
+        Err(format!("reg 操作失败: {}", stderr))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn current_exe_quoted() -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("获取 exe 路径失败: {}", e))?;
+    Ok(exe.to_string_lossy().to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn install_verb(
+    progid: &str,
+    ext: &str,
+    verb: &str,
+    display: &str,
+    action_flag: &str,
+) -> Result<(), String> {
+    let exe = current_exe_quoted()?;
+    // 1. 把扩展名指到我们的 ProgID（HKCU 优先于 HKLM）
+    let ext_key = format!(r"HKCU\Software\Classes\{}", ext);
+    run_reg_command(&["ADD", &ext_key, "/ve", "/d", progid, "/f"])?;
+    // 2. ProgID 友好名（已存在则覆盖无影响）
+    let progid_key = format!(r"HKCU\Software\Classes\{}", progid);
+    run_reg_command(&["ADD", &progid_key, "/ve", "/d", "TEpub-Editor File", "/f"])?;
+    // 3. verb MUIVerb（右键菜单显示文字）
+    let verb_key = format!(r"HKCU\Software\Classes\{}\shell\{}", progid, verb);
+    run_reg_command(&["ADD", &verb_key, "/v", "MUIVerb", "/d", display, "/f"])?;
+    // 4. verb 的 command
+    let cmd_key = format!(r"HKCU\Software\Classes\{}\shell\{}\command", progid, verb);
+    let cmd_value = format!(r#""{}" {} "%1""#, exe, action_flag);
+    run_reg_command(&["ADD", &cmd_key, "/ve", "/d", &cmd_value, "/f"])?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn uninstall_verb(progid: &str, verb: &str) -> Result<(), String> {
+    let verb_key = format!(r"HKCU\Software\Classes\{}\shell\{}", progid, verb);
+    run_reg_command(&["DELETE", &verb_key, "/f"])
+}
+
+#[tauri::command]
+fn set_file_assoc(verb: String, enabled: bool) -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (verb, enabled);
+        return Err("文件关联仅支持 Windows".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // verb -> (ProgID, 扩展名, shell verb 名, 显示文字, --action= 值)
+        let (progid, ext, shell_verb, display, action) = match verb.as_str() {
+            "epub-read" => (
+                "TEpubEditor.epub",
+                ".epub",
+                "tepub_read",
+                "EPUB 阅读",
+                "--action=reader",
+            ),
+            "epub-edit" => (
+                "TEpubEditor.epub",
+                ".epub",
+                "tepub_edit",
+                "EPUB 编辑",
+                "--action=epub-editor",
+            ),
+            "txt-make-epub" => (
+                "TEpubEditor.txt",
+                ".txt",
+                "tepub_make_epub",
+                "制作 EPUB",
+                "--action=make-epub",
+            ),
+            _ => return Err(format!("未知的关联 verb: {}", verb)),
+        };
+
+        if enabled {
+            install_verb(progid, ext, shell_verb, display, action)
+        } else {
+            uninstall_verb(progid, shell_verb)
+        }
+    }
 }
 
 // ============================================================
@@ -3295,12 +3507,9 @@ struct LibraryData {
     books: Vec<BookEntry>,
 }
 
-// 默认根：%APPDATA%/<bundle-identifier>（即 Tauri app_data_dir）。
+// library 模块的"app 数据根"：直接复用顶层 app_data_root（绿色版/安装版自动）
 fn library_app_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    use tauri::Manager;
-    app.path()
-        .app_data_dir()
-        .map_err(|e| format!("无法获取 app_data_dir: {}", e))
+    app_data_root(app)
 }
 
 // 指针文件：永远住在 app_data_dir，记录当前书库的真实根目录。
@@ -3394,6 +3603,70 @@ fn write_library_data_atomic(app: &tauri::AppHandle, data: &LibraryData) -> Resu
 #[tauri::command]
 async fn load_library(app: tauri::AppHandle) -> Result<LibraryData, String> {
     read_library_data(&app)
+}
+
+// 启动时给前端的"应用模式 + 是否首次启动"信息
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct AppModeInfo {
+    /// 是否绿色版（exe 同级目录有 portable.txt 标记文件即为 true）
+    is_portable: bool,
+    /// 给首次启动弹窗预填的建议路径：portable→<exe>/EPUB；installed→空字符串
+    suggested_library_dir: String,
+    /// 是否已经配置过书库（library.pointer 存在且指向的目录存在）
+    is_library_configured: bool,
+    /// portable.txt 应在的位置（用于在 UI 里告诉用户怎么切到绿色版）
+    portable_marker_path: String,
+    /// 当前应用数据根目录（绿色版=<exe>/data，安装版=app_data_dir），UI 展示用
+    app_data_dir: String,
+}
+
+#[tauri::command]
+fn get_app_mode_info(app: tauri::AppHandle) -> Result<AppModeInfo, String> {
+    let portable = is_portable();
+
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.to_path_buf()));
+
+    let suggested = if portable {
+        exe_dir
+            .as_ref()
+            .map(|d| d.join("EPUB").to_string_lossy().to_string())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let marker = exe_dir
+        .as_ref()
+        .map(|d| d.join("portable.txt").to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let data_root = app_data_root(&app)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // 是否已配置：library.pointer 存在 且其指向的目录还存在
+    let pointer = library_pointer_path(&app).ok();
+    let configured = match pointer {
+        Some(p) if p.exists() => match fs::read_to_string(&p) {
+            Ok(s) => {
+                let target = PathBuf::from(s.trim());
+                !s.trim().is_empty() && target.exists()
+            }
+            Err(_) => false,
+        },
+        _ => false,
+    };
+
+    Ok(AppModeInfo {
+        is_portable: portable,
+        suggested_library_dir: suggested,
+        is_library_configured: configured,
+        portable_marker_path: marker,
+        app_data_dir: data_root,
+    })
 }
 
 #[tauri::command]
@@ -4235,24 +4508,22 @@ fn write_opf_metadata(
         s = replace_or_insert_dc(&s, "dc:publisher", p);
     }
 
-    // tags → 多个 dc:subject（EPUB 标准）。先删后插。
+    // tags → 多个 dc:subject（EPUB 标准）。先删后插，**所有 tag 拼到同一行**。
     s = remove_all_matches(
         &s,
         r#"\s*<dc:subject(?:\s[^>]*)?>[\s\S]*?</dc:subject>"#,
     );
     if !tags.is_empty() {
-        let mut block = String::new();
+        let mut chunks: Vec<String> = Vec::new();
         for t in tags {
             let trimmed = t.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            block.push_str(&format!(
-                "    <dc:subject>{}</dc:subject>\n  ",
-                xml_escape(trimmed)
-            ));
+            chunks.push(format!("<dc:subject>{}</dc:subject>", xml_escape(trimmed)));
         }
-        if !block.is_empty() {
+        if !chunks.is_empty() {
+            let block = format!("    {}\n  ", chunks.join(""));
             s = insert_before_metadata_close(&s, &block);
         }
     }
@@ -4604,11 +4875,14 @@ pub fn run() {
             delete_epub_file,
             rename_epub_file,
             get_launch_args, // Register new command
+            get_launch_info,
+            set_file_assoc,
             prepare_epub_for_open,
             exit_app,
             // ===== Library Phase 1 =====
             load_library,
             save_library,
+            get_app_mode_info,
             // ===== Library Phase 2 =====
             add_book_to_library,
             remove_book_from_library,

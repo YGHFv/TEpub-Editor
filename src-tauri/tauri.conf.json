@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "TEpub-Editor",
-  "version": "0.4.2",
-  "identifier": "com.epubeditor.app",
+  "version": "0.4.4",
+  "identifier": "com.tepubeditor.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -44,7 +44,7 @@
           "txt"
         ],
         "name": "Text File",
-        "description": "Open Text File with TEpub-Editor",
+        "description": "用 TEpub-Editor 打开文本文件",
         "role": "Editor"
       },
       {
@@ -52,9 +52,18 @@
           "epub"
         ],
         "name": "EPUB File",
-        "description": "Open EPUB File with TEpub-Editor",
+        "description": "用 TEpub-Editor 打开 EPUB 文件",
         "role": "Editor"
       }
-    ]
+    ],
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      },
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

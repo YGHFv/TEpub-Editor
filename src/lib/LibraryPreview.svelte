@@ -222,8 +222,8 @@
     font-size: 12px;
     color: var(--color-text-soft);
     line-height: 1.5;
-    max-height: 80px;
-    overflow-y: auto;
+    /* 不再限制高度 / 不再单独滚动；交给外层 .preview-panel 整体滚 */
+    margin-top: 4px;
   }
 
   /* 简介每段段间间距；缩进通过预置全角空格实现，不再依赖 text-indent */

@@ -8,6 +8,7 @@
     import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
     import Editor from "$lib/Editor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
+    import TagsEditor from "$lib/TagsEditor.svelte";
 
     // --- [1. 完整的接口定义] ---
     interface RawChapter {
@@ -230,6 +231,7 @@
         md5: "",
         cover_path: "",
         description: "",
+        tags: [] as string[],
         styles: { "main.css": "", "font.css": "" },
         assets: [] as { name: string, path: string, category: string }[],
     };
@@ -556,10 +558,23 @@
                 }
             }
 
-            // 5. 文件关联启动
+            // 5. 文件关联启动 / 由书库子窗口传入的 ?file= 参数
             setTimeout(async () => {
-                const launchArg = await invoke<string | null>("get_launch_args");
-                if (launchArg) openLocalFile(launchArg, true);
+                // 优先 URL 查询参数（书库 openFilePathInEditor / openBook 用 /editor?file=... 创建子窗口）
+                let urlFile: string | null = null;
+                try {
+                    const sp = new URLSearchParams(window.location.search);
+                    const f = sp.get("file");
+                    if (f) urlFile = decodeURIComponent(f);
+                } catch (e) {
+                    console.warn("解析 URL ?file= 失败:", e);
+                }
+                if (urlFile) {
+                    openLocalFile(urlFile, true);
+                } else {
+                    const launchArg = await invoke<string | null>("get_launch_args");
+                    if (launchArg) openLocalFile(launchArg, true);
+                }
                 hasInitialized = true;
             }, 500);
 
@@ -1547,6 +1562,7 @@
                     md5: epubMeta.md5,
                     cover_path: epubMeta.cover_path,
                     description: epubMeta.description,
+                    tags: epubMeta.tags,
                     main_css: epubMeta.styles["main.css"],
                     font_css: epubMeta.styles["font.css"],
                     assets: epubMeta.assets,
@@ -2014,6 +2030,10 @@
                                         class="epub-textarea"
                                         placeholder="请输入书籍简介..."
                                     ></textarea>
+                                </div>
+                                <div class="set-row compact align-start">
+                                    <label>标签:</label>
+                                    <TagsEditor bind:tags={epubMeta.tags} suggestions={[]} />
                                 </div>
                             </div>
 
@@ -2808,7 +2828,9 @@
         padding: 0 10px !important;
         border: 1px solid #ddd;
         border-radius: 4px;
-        width: 100%;
+        flex: 1;
+        min-width: 0;
+        width: auto;
     }
 
     .epub-cover-preview {
