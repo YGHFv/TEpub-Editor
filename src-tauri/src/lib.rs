@@ -2365,6 +2365,19 @@ async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
 }
 
 #[tauri::command]
+async fn get_epub_temp_dir_path(epub_path: String) -> Result<String, String> {
+    let cache_guard = EPUB_CACHE.lock().unwrap();
+    if let Some(ref cache) = *cache_guard {
+        if cache.epub_path == epub_path {
+            if let Some(ref temp) = cache.temp_dir {
+                return Ok(temp.path().to_string_lossy().to_string());
+            }
+        }
+    }
+    Err("EPUB 未加载或缓存失效".to_string())
+}
+
+#[tauri::command]
 async fn read_epub_file_content(epub_path: String, file_path: String) -> Result<String, String> {
     // 1. 获取临时目录路径
     let temp_path: PathBuf = {
@@ -4862,6 +4875,7 @@ pub fn run() {
             extract_epub,
             read_epub_file_content,
             read_epub_file_binary,
+            get_epub_temp_dir_path,
             read_epub_files_batch,
             read_epub_binary_batch,
             analyze_epub_font_glyphs,
