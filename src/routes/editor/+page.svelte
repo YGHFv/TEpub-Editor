@@ -1593,8 +1593,8 @@
         try {
             // 1. 先保存当前版本为新历史
             if (filePath && fileContent) {
-                await invoke("save_snapshot", {
-                    path: filePath,
+                await invoke("save_history", {
+                    originalPath: filePath,
                     content: fileContent,
                 });
             }

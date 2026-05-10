@@ -206,11 +206,19 @@
       } catch (e) {
         console.warn("get_epub_temp_dir_path 失败，回退到 IPC 文本读取:", e);
       }
-      const sep = tempDirPath.includes("\\") ? "\\" : "/";
+      // 统一用正斜杠拼路径。Windows 上 convertFileSrc 也接受正斜杠，且这样
+      // 生成的 asset URL 路径里仍保留 `/` 作为段分隔符 —— 浏览器在解析 EPUB
+      // 自带 CSS 里的 `@import url("fonts.css")` / `@font-face src:url("../Fonts/x.ttf")`
+      // / `background:url("../Images/x.jpg")` 时，按 URL 相对路径规则正常退回上级目录。
+      // 旧实现把 tempDir 转成反斜杠再 convertFileSrc，整条 path 被 %5C 编码成
+      // 单 segment（asset.localhost/C%3A%5C...%5Cfonts.css），相对 url 用 `..`
+      // 一退就退到 root，于是出现 GET asset.localhost/Fonts/x.ttf 之类 500，
+      // 全屏背景图也因此加载不出来。
+      const tempDirSlash = tempDirPath.replace(/\\/g, "/").replace(/\/+$/, "");
       function toAssetUrl(absInEpub: string): string {
         if (!tempDirPath) return absInEpub;
-        const native = absInEpub.replace(/\//g, sep);
-        return convertFileSrc(`${tempDirPath}${sep}${native}`, "asset");
+        const cleaned = absInEpub.replace(/\\/g, "/").replace(/^\/+/, "");
+        return convertFileSrc(`${tempDirSlash}/${cleaned}`, "asset");
       }
 
       // 文本读取统一接口：优先 fetch，失败回退 IPC（保证健壮性）
@@ -470,9 +478,9 @@
         } catch {
           doc = new DOMParser().parseFromString(raw, "text/html");
         }
-        // 移除 script（安全）；保留 <style> 标签和 inline style 让 EPUB 自带的
+        // 移除 script（安全）；保留 style 标签和 inline style 让 EPUB 自带的
         // 颜色 / 对齐 / 字体规则生效。link[rel=stylesheet] 不直接移除，下面会
-        // IPC 读其内容并替换为 <style>，连带把 url() 字体文件转成 blob URL。
+        // IPC 读其内容并替换为 style 标签，连带把 url() 字体文件转成 blob URL。
         doc.querySelectorAll('script').forEach(n => n.remove());
 
         Array.from(doc.querySelectorAll('link[rel="stylesheet"]')).forEach(link => {
@@ -513,6 +521,8 @@
       // tempDirPath / toAssetUrl / fetchText 已在第 2.5 步定义并被前面的
       // container/OPF/Nav/NCX/spine 使用，这里直接复用。
       const URL_RE = /url\s*\(\s*(['"]?)([^'")]+?)\1\s*\)/g;
+      // @import 两种语法：@import url("x.css") 或 @import "x.css"。带可选 media list。
+      const IMPORT_RE = /@import\s+(?:url\s*\(\s*(['"]?)([^'")]+?)\1\s*\)|(['"])([^'"]+?)\3)\s*[^;]*;/g;
 
       // —— CSS 文件并行 fetch（不再用 batch IPC，避免一次返回所有 CSS 字符串）
       const cssPaths = Array.from(cssPathSet);
@@ -532,6 +542,80 @@
           }
         }));
         for (const [p, content] of cssEntries) cssContent.set(p, content);
+      }
+
+      // —— 递归拉平所有 CSS 的 @import：被 @import 引用的子样式表也提前 fetch 进来
+      // 进 cssContent。否则浏览器加载主 CSS 后会自己去 asset:// 拉子表，子表里
+      // url(../Fonts/x.ttf) 走浏览器 URL 相对解析。Tauri 在 Windows 上的 asset
+      // URL 是 `https://asset.localhost/{encodeURIComponent(path)}` —— 整条路径
+      // 被 %2F / %5C 编码成单 segment，浏览器相对解析时 `..` 会一退到 root，
+      // 实际请求变成 `asset.localhost/Fonts/x.ttf` → 500（找不到文件）。
+      // 解决：所有 @import 提前 fetch 入内存，processCss 时把 @import 整句替换
+      // 为对应已处理（含 url() 改写、body→.epub-body）的内容内联进来。
+      // 浏览器拿到的最终样式里没有 @import，绝对不会再触发相对解析问题。
+      async function ensureCssLoaded(absPath: string): Promise<void> {
+        if (cssContent.has(absPath)) return;
+        try {
+          cssContent.set(absPath, await fetchText(absPath));
+        } catch (e) {
+          console.warn(`@import 子样式表 fetch 失败 ${absPath}:`, e);
+          cssContent.set(absPath, "");
+        }
+      }
+      // BFS：对每个已知 CSS 扫 @import，把新发现的 abs 路径加进 fetch 队列
+      {
+        const seen = new Set<string>(cssContent.keys());
+        // 起点除已加载的 link CSS 外，还要把章节内嵌 style 块里的 @import 算上 ——
+        // 它们指向的子表同样要预拉，否则 processCss 内联时拿不到内容。
+        // 用一个临时 Map 暂存内嵌 style 的"虚拟 base 路径 → 文本"以参与 BFS。
+        const inlineStyleSources: { base: string; txt: string }[] = [];
+        for (let i = 0; i < spine.length; i++) {
+          const doc = parsedDocs[i];
+          if (!doc) continue;
+          Array.from(doc.querySelectorAll("style")).forEach((s) => {
+            const t = s.textContent || "";
+            if (t) inlineStyleSources.push({ base: spine[i].path, txt: t });
+          });
+        }
+        // 把内嵌 style 的 @import 直接加到第一轮 frontier
+        const initialFromInline: string[] = [];
+        for (const src of inlineStyleSources) {
+          IMPORT_RE.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = IMPORT_RE.exec(src.txt)) !== null) {
+            const rel = ((m[2] || m[4]) || "").trim();
+            if (!rel || rel.startsWith("data:") || /^https?:/i.test(rel)) continue;
+            const abs = resolveRelative(src.base, rel);
+            if (!seen.has(abs)) {
+              seen.add(abs);
+              initialFromInline.push(abs);
+            }
+          }
+        }
+        if (initialFromInline.length > 0) {
+          await Promise.all(initialFromInline.map(ensureCssLoaded));
+        }
+        let frontier = [...Array.from(cssContent.keys()), ...initialFromInline];
+        while (frontier.length > 0) {
+          const newAbs: string[] = [];
+          for (const cur of frontier) {
+            const txt = cssContent.get(cur) || "";
+            IMPORT_RE.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = IMPORT_RE.exec(txt)) !== null) {
+              const rel = (m[2] || m[4] || "").trim();
+              if (!rel || rel.startsWith("data:") || /^https?:/i.test(rel)) continue;
+              const abs = resolveRelative(cur, rel);
+              if (!seen.has(abs)) {
+                seen.add(abs);
+                newAbs.push(abs);
+              }
+            }
+          }
+          if (newAbs.length === 0) break;
+          await Promise.all(newAbs.map(ensureCssLoaded));
+          frontier = newAbs;
+        }
       }
 
       // —— 把 EPUB 章节里的图片 src 直接指向 asset URL
@@ -559,8 +643,28 @@
       // 上 → .rd-chapter.full 拿到 background 即可在每列重复绘制实现"全屏背景"。
       const BODY_RE = /(^|[\s,>+~(])(?:body|html)(?=[\s,{:.\[#)])/g;
       const BODY_REPLACE = "$1.epub-body, $1.rd-chapter";
-      function processCss(css: string, cssPath: string): string {
-        return css
+      // processedCssCache 记忆每个 CSS 已经处理（含递归内联）的最终文本。
+      // 同一文件可能被多个 link / @import 引用，避免重复处理。
+      const processedCssCache = new Map<string, string>();
+      function processCss(css: string, cssPath: string, visiting: Set<string>): string {
+        // 1) 先把 @import 整句替换为已处理的子表内容（递归内联）
+        //    用 replace + 函数回调一次扫完，避免在循环里改字符串导致 lastIndex 错位
+        const inlined = css.replace(IMPORT_RE, (match, _q1, u1, _q2, u2) => {
+          const rel = ((u1 || u2) || "").trim();
+          if (!rel || rel.startsWith("data:") || /^https?:/i.test(rel)) return match;
+          const abs = resolveRelative(cssPath, rel);
+          if (visiting.has(abs)) return ""; // 循环引用：丢掉本次 @import
+          const sub = cssContent.get(abs);
+          if (sub === undefined) return ""; // 没拉到内容也丢掉，避免浏览器再去 fetch
+          if (processedCssCache.has(abs)) return processedCssCache.get(abs)!;
+          const next = new Set(visiting);
+          next.add(abs);
+          const out = processCss(sub, abs, next);
+          processedCssCache.set(abs, out);
+          return out;
+        });
+        // 2) 在已无 @import 的文本上做 url() 与 body/html 改写
+        return inlined
           .replace(URL_RE, (match, _q, url) => {
             const trimmed = url.trim();
             if (!trimmed || trimmed.startsWith("data:") || /^https?:/i.test(trimmed) || trimmed.startsWith("#")) {
@@ -572,16 +676,25 @@
           .replace(BODY_RE, BODY_REPLACE);
       }
       for (const ref of cssLinkRefs) {
-        const css = cssContent.has(ref.abs) ? processCss(cssContent.get(ref.abs)!, ref.abs) : "";
+        let css = "";
+        if (cssContent.has(ref.abs)) {
+          if (processedCssCache.has(ref.abs)) {
+            css = processedCssCache.get(ref.abs)!;
+          } else {
+            css = processCss(cssContent.get(ref.abs)!, ref.abs, new Set([ref.abs]));
+            processedCssCache.set(ref.abs, css);
+          }
+        }
         const ownerDoc = ref.el.ownerDocument || document;
         const styleEl = ownerDoc.createElement("style");
         styleEl.textContent = css;
         ref.el.parentNode?.replaceChild(styleEl, ref.el);
       }
 
-      // 同样处理章节内嵌 <style>：
-      //   - body/html 改写为 .epub-body
-      //   - url() 中相对资源改写为 asset URL（解析锚点是该章节自己的路径）
+      // 同样处理章节内嵌 style 块：走 processCss（含 @import 内联、url() 改写、
+      // body→.epub-body）。某些 EPUB 在章节里直接写 inline style 块带 @import "../Styles/x.css"，
+      // 必须把子表也内联进来，避免浏览器自己 fetch 时被 asset URL 单 segment
+      // 路径绊倒（详见上面 ensureCssLoaded 注释）。
       for (let i = 0; i < spine.length; i++) {
         const doc = parsedDocs[i];
         if (!doc) continue;
@@ -589,21 +702,12 @@
         Array.from(doc.querySelectorAll("style")).forEach((styleEl) => {
           const txt = styleEl.textContent || "";
           if (!txt) return;
-          styleEl.textContent = txt
-            .replace(URL_RE, (match, _q, url) => {
-              const trimmed = url.trim();
-              if (!trimmed || trimmed.startsWith("data:") || /^https?:/i.test(trimmed) || trimmed.startsWith("#")) {
-                return match;
-              }
-              const abs = resolveRelative(chapterPath, trimmed);
-              return `url("${toAssetUrl(abs)}")`;
-            })
-            .replace(BODY_RE, BODY_REPLACE);
+          styleEl.textContent = processCss(txt, chapterPath, new Set([chapterPath]));
         });
       }
 
       // 11) 序列化各章节为完整 HTML（仅生成数组，不立刻拼接）
-      // 关键修复：head 里的 <style> 标签（含 link 替换来的）必须显式提取注入到
+      // 关键修复：head 里的 style 标签（含 link 替换来的）必须显式提取注入到
       // section 内 —— body.innerHTML 不会包含 head 的内容，否则 EPUB 自带的字体
       // 定义、颜色、对齐等 CSS 全部失效（用户看到"样式直接全没了"）。
       //
@@ -810,7 +914,7 @@
    *
    * 第二步：提取完成后，用 inline !important 把 .epub-body 的 background 强制
    * 透明 —— EPUB CSS body 选择器经 BODY_REPLACE 落在 .epub-body 上的 bg-color
-   * 也借此让位给主题色。inline style 在 EPUB <style> 之上，能稳赢 cascade。
+   * 也借此让位给主题色。inline style 在 EPUB style 之上，能稳赢 cascade。
    */
   function extractChapterBgFromCss(idx: number, sectionEl: HTMLElement) {
     const epubBody = sectionEl.querySelector<HTMLElement>(".epub-body");

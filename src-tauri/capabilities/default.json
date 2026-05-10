@@ -4,8 +4,10 @@
   "description": "Capability for the main window",
   "windows": [
     "main",
+    "editor-*",
     "epub-editor-*",
     "epub-metadata",
+    "reader-*",
     "search-replace"
   ],
   "permissions": [

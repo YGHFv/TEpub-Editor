@@ -916,6 +916,11 @@
     loadShelfSettings();
     await bootLibrary();
 
+    // 主窗口固定标题为 TEpub-Editor（避免被 editor/reader 子流程残留的 TXT/EPUB 标题污染）
+    try {
+      await getCurrentWindow().setTitle("TEpub-Editor");
+    } catch (_) {}
+
     // 检查启动参数（文件关联，支持 --action= 路由）
     try {
       const launchInfo = await invoke<{ filePath: string | null; action: string | null }>("get_launch_info");
