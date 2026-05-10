@@ -3594,6 +3594,155 @@ async fn rename_book_file(
     Ok(updated)
 }
 
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct RebuildSummary {
+    renamed: u32,
+    skipped: u32,
+    failed: u32,
+    failures: Vec<String>,
+}
+
+// 按当前 LibraryConfig 的 naming_template 把 books_dir 内所有书重命名一遍。
+// - 仅处理位于 books_dir 内的副本（ref_only 不动用户原文件）
+// - 同名冲突自动加 " (2)"、" (3)"… 后缀
+// - 命名模式 = "source" 时跳过（保持当前文件名）
+// - 处理过程中如果某本失败，记录到 failures 但不中断
+#[tauri::command]
+async fn rebuild_book_filenames(
+    app: tauri::AppHandle,
+    config: LibraryConfig,
+) -> Result<RebuildSummary, String> {
+    let mut data = read_library_data(&app)?;
+    // 把传入的（可能比 disk 上更新的）config 同步进去，确保使用最新模板
+    data.config = config.clone();
+    let books_dir = library_books_dir(&app)?;
+
+    let mut summary = RebuildSummary::default();
+    if config.naming_mode.trim() == "source" {
+        // 源文件名模式：不重命名任何已入库的书
+        summary.skipped = data.books.len() as u32;
+        write_library_data_atomic(&app, &data)?;
+        return Ok(summary);
+    }
+    let template = effective_naming_template(&config);
+
+    // 第一遍：决定每本书的目标文件名（含 (2)/(3) 防冲突）
+    // 用 in-memory set 跟踪本批次会出现的新名，避免 a→b 和 c→b 撞车
+    let mut planned: HashSet<String> = HashSet::new();
+    // 把当前所有非本批次目标的文件名先收进去，避免目标 与 别的没动到的文件 撞车
+    if let Ok(entries) = fs::read_dir(&books_dir) {
+        for e in entries.flatten() {
+            if let Some(name) = e.file_name().to_str() {
+                planned.insert(name.to_string());
+            }
+        }
+    }
+
+    // 收集需要做的重命名：(idx, from_path, target_name)
+    let mut plan: Vec<(usize, PathBuf, String)> = Vec::new();
+    for (i, book) in data.books.iter().enumerate() {
+        let cur_path = PathBuf::from(&book.file_path);
+        if !cur_path.starts_with(&books_dir) || !cur_path.exists() {
+            summary.skipped += 1;
+            continue;
+        }
+        let ext = book.file_type.clone();
+        let stem = render_filename_template(&template, book);
+        let stem = if stem.is_empty() {
+            sanitize_filename_part(&format!("{}-{}", book.title, book.author))
+        } else {
+            stem
+        };
+        let stem = if stem.is_empty() { "未命名".to_string() } else { stem };
+        let mut target = format!("{}.{}", stem, ext);
+        // 如果目标 == 当前名，不需要改
+        if let Some(cur_name) = cur_path.file_name().and_then(|s| s.to_str()) {
+            if cur_name == target {
+                summary.skipped += 1;
+                continue;
+            }
+            // 把当前名先从 planned 里抠掉，否则下面 (2) 后缀会从 2 起步
+            planned.remove(cur_name);
+        }
+        // 解决与 planned 中其它名字的冲突
+        if planned.contains(&target) {
+            let mut n = 2;
+            loop {
+                let candidate = format!("{} ({}).{}", stem, n, ext);
+                if !planned.contains(&candidate) {
+                    target = candidate;
+                    break;
+                }
+                n += 1;
+                if n > 999 {
+                    break;
+                }
+            }
+        }
+        planned.insert(target.clone());
+        plan.push((i, cur_path, target));
+    }
+
+    // 第二遍：执行重命名并更新 entry
+    // 为避免 A→B 同时 B→C 时 A→B 先执行覆盖了 B，先把所有被改动的文件改成临时名，再改成最终名
+    let mut staged: Vec<(usize, PathBuf, PathBuf)> = Vec::new(); // (idx, tmp_path, final_path)
+    for (idx, from, target_name) in plan {
+        let tmp_name = format!(
+            ".__rename_tmp_{}_{}",
+            idx,
+            uuid::Uuid::new_v4().simple()
+        );
+        let tmp_path = books_dir.join(&tmp_name);
+        let final_path = books_dir.join(&target_name);
+        if let Err(e) = fs::rename(&from, &tmp_path) {
+            summary.failed += 1;
+            summary.failures.push(format!(
+                "{}: {}",
+                from.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(""),
+                e
+            ));
+            continue;
+        }
+        staged.push((idx, tmp_path, final_path));
+    }
+    for (idx, tmp_path, final_path) in staged {
+        match fs::rename(&tmp_path, &final_path) {
+            Ok(_) => {
+                let entry = &mut data.books[idx];
+                entry.file_path = final_path.to_string_lossy().to_string();
+                entry.filename = final_path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                summary.renamed += 1;
+            }
+            Err(e) => {
+                summary.failed += 1;
+                summary.failures.push(format!(
+                    "{} → {}: {}",
+                    tmp_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(""),
+                    final_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(""),
+                    e
+                ));
+                // 尝试还原，失败的话只能在 failures 里留个记录
+                let _ = fs::rename(&tmp_path, &final_path);
+            }
+        }
+    }
+
+    write_library_data_atomic(&app, &data)?;
+    Ok(summary)
+}
+
 // ============================================================
 // ===== Library (书库) - Phase 1: 数据结构 / load / save =====
 // ============================================================
@@ -3609,6 +3758,18 @@ struct LibraryConfig {
     /// 默认 false：保存元数据不改修改日期。
     #[serde(default)]
     update_modified_on_edit: bool,
+    /// 入库时新书文件的命名方式：
+    ///   "source"   = 沿用源文件名
+    ///   "template" = 按 naming_template 渲染（默认）
+    /// 空字符串等同于 "template"。
+    #[serde(default)]
+    naming_mode: String,
+    /// 命名模板，支持占位符：
+    ///   {title} {author} {subtitle} {series} {maker} {publisher}
+    ///   {tags}  自动展开为 [标签1][标签2]…，无 tag 时为空串
+    /// 空字符串时回退到 "{title}-{author}"。
+    #[serde(default)]
+    naming_template: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -3756,6 +3917,107 @@ fn build_book_filename(title: &str, author: &str, ext: &str) -> String {
         (false, false) => format!("{}-{}", t, a),
     };
     format!("{}.{}", stem, ext)
+}
+
+// 默认命名模板
+const DEFAULT_NAMING_TEMPLATE: &str = "{title}-{author}";
+
+// 把模板字符串里的占位符替换成 entry 对应字段；
+// {tags} 展开为 "[标签1][标签2]…"；{title}/{author} 永远会被替换。
+// 渲染结果再走 sanitize_filename_part。
+fn render_filename_template(template: &str, entry: &BookEntry) -> String {
+    let tags_brackets: String = entry
+        .tags
+        .as_ref()
+        .map(|ts| ts.iter().map(|t| format!("[{}]", t)).collect::<String>())
+        .unwrap_or_default();
+    let publisher = entry.publisher.as_deref().unwrap_or("");
+    let result = template
+        .replace("{title}", &entry.title)
+        .replace("{author}", &entry.author)
+        .replace("{subtitle}", &entry.subtitle)
+        .replace("{series}", &entry.series)
+        .replace("{maker}", &entry.maker)
+        .replace("{publisher}", publisher)
+        .replace("{tags}", &tags_brackets);
+    sanitize_filename_part(&result)
+}
+
+// 选用配置生效的模板字符串（空 → 默认）
+fn effective_naming_template(cfg: &LibraryConfig) -> String {
+    let t = cfg.naming_template.trim();
+    if t.is_empty() {
+        DEFAULT_NAMING_TEMPLATE.to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+// 用解析出的元数据构造一个临时 BookEntry，专供 render_filename_template 使用。
+// EPUB 元数据缺失时按文件名 stem 兜底；非 EPUB（txt）只填 title=stem。
+fn template_entry_from_parsed(
+    file_type: &str,
+    file_stem: &str,
+    parsed: Option<&EpubParsedMeta>,
+) -> BookEntry {
+    let mut e = BookEntry::default();
+    e.file_type = file_type.to_string();
+    if let Some(meta) = parsed {
+        e.title = if meta.title.is_empty() {
+            file_stem.to_string()
+        } else {
+            meta.title.clone()
+        };
+        e.author = meta.author.clone();
+        e.publisher = meta.publisher.clone();
+        e.subtitle = meta.subtitle.clone().unwrap_or_default();
+        e.series = meta.series.clone().unwrap_or_default();
+        e.maker = meta.maker.clone().unwrap_or_default();
+        if !meta.tags.is_empty() {
+            e.tags = Some(meta.tags.clone());
+        }
+    } else {
+        e.title = file_stem.to_string();
+    }
+    e
+}
+
+// 选定入库目标文件名（不含路径）：override 优先 → naming_mode 决定 → 兜底
+fn pick_book_filename(
+    cfg: &LibraryConfig,
+    file_type: &str,
+    src_stem: &str,
+    parsed: Option<&EpubParsedMeta>,
+    override_filename: Option<&str>,
+) -> String {
+    if let Some(n) = override_filename {
+        let n = n.trim();
+        if !n.is_empty() {
+            let stripped = n
+                .strip_suffix(&format!(".{}", file_type))
+                .or_else(|| n.strip_suffix(&format!(".{}", file_type.to_uppercase())))
+                .unwrap_or(n);
+            let stem = sanitize_filename_part(stripped);
+            if !stem.is_empty() {
+                return format!("{}.{}", stem, file_type);
+            }
+        }
+    }
+    let mode = cfg.naming_mode.trim();
+    if mode == "source" {
+        let stem = sanitize_filename_part(src_stem);
+        if !stem.is_empty() {
+            return format!("{}.{}", stem, file_type);
+        }
+    }
+    // 默认/template
+    let template = effective_naming_template(cfg);
+    let entry = template_entry_from_parsed(file_type, src_stem, parsed);
+    let stem = render_filename_template(&template, &entry);
+    if stem.is_empty() {
+        return build_book_filename(&entry.title, &entry.author, file_type);
+    }
+    format!("{}.{}", stem, file_type)
 }
 
 
@@ -4419,45 +4681,32 @@ async fn add_book_to_library(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    // 先解析元数据拿 title/author 用来命名（即便不复制也用得到）
-    let mut tentative_title = String::new();
-    let mut tentative_author = String::new();
-    if file_type == "epub" {
-        if let Ok(meta) = parse_epub_metadata(&src) {
-            tentative_title = if meta.title.is_empty() {
-                src.file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            } else {
-                meta.title.clone()
-            };
-            tentative_author = meta.author.clone();
-        }
-    }
-    if tentative_title.is_empty() {
-        tentative_title = src
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-    }
+    // 提前解析一次 EPUB 元数据，用来：
+    // 1) 渲染命名模板（{title}/{author}/{tags}…）
+    // 2) 后续填充 BookEntry，省一次 IO
+    let parsed_meta: Option<EpubParsedMeta> = if file_type == "epub" {
+        parse_epub_metadata(&src).ok()
+    } else {
+        None
+    };
+    let src_stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
 
     // 决定文件最终位置
     let final_file_path = if should_copy {
         let books_dir = library_books_dir(&app)?;
         ensure_dir(&books_dir)?;
 
-        // 选定目标文件名：优先 override，否则按 title-author 拼
-        let target_name = match override_filename {
-            Some(ref n) if !n.trim().is_empty() => {
-                let stem = sanitize_filename_part(n.trim().trim_end_matches(&format!(".{}", file_type)));
-                if stem.is_empty() {
-                    build_book_filename(&tentative_title, &tentative_author, file_type)
-                } else {
-                    format!("{}.{}", stem, file_type)
-                }
-            }
-            _ => build_book_filename(&tentative_title, &tentative_author, file_type),
-        };
+        // 按 override → naming_mode → 默认 模板顺序选名
+        let target_name = pick_book_filename(
+            &config,
+            file_type,
+            &src_stem,
+            parsed_meta.as_ref(),
+            override_filename.as_deref(),
+        );
 
         let dest = books_dir.join(&target_name);
         // 冲突 → 返回结构化错误
@@ -4493,12 +4742,10 @@ async fn add_book_to_library(
     };
 
     if file_type == "epub" {
-        match parse_epub_metadata(&src) {
-            Ok(meta) => {
+        match parsed_meta {
+            Some(meta) => {
                 entry.title = if meta.title.is_empty() {
-                    src.file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_default()
+                    src_stem.clone()
                 } else {
                     meta.title
                 };
@@ -4548,13 +4795,10 @@ async fn add_book_to_library(
                     entry.cover_path = cover_path.to_string_lossy().to_string();
                 }
             }
-            Err(e) => {
+            None => {
                 // 解析失败不阻断入库，回退到文件名作为标题
-                entry.title = src
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                eprintln!("[library] 解析 epub 元数据失败: {}", e);
+                entry.title = src_stem.clone();
+                eprintln!("[library] EPUB 元数据解析失败，回退到文件名: {}", file_path);
             }
         }
     } else {
@@ -5254,6 +5498,7 @@ pub fn run() {
             set_file_assoc,
             reveal_in_explorer,
             rename_book_file,
+            rebuild_book_filenames,
             prepare_epub_for_open,
             exit_app,
             // ===== Library Phase 1 =====

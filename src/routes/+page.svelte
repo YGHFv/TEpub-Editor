@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { open, message } from "@tauri-apps/plugin-dialog";
+  import { open, message, ask } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import LibraryGrid from "$lib/LibraryGrid.svelte";
@@ -39,6 +39,10 @@
     assocEpubRead?: boolean;
     assocEpubEdit?: boolean;
     assocTxtMakeEpub?: boolean;
+    /** 入库命名模式："source"=源文件名 / "template"=按 namingTemplate 渲染 */
+    namingMode?: string;
+    /** 命名模板，支持 {title}{author}{subtitle}{series}{maker}{publisher}{tags} */
+    namingTemplate?: string;
   }
 
   interface LibraryData {
@@ -397,6 +401,9 @@
       if (typeof libraryConfig.updateModifiedOnEdit !== "boolean") {
         libraryConfig.updateModifiedOnEdit = false;
       }
+      if (!libraryConfig.namingMode) libraryConfig.namingMode = "template";
+      if (!libraryConfig.namingTemplate) libraryConfig.namingTemplate = "{title}-{author}";
+      syncNamingPresetFromConfig();
       // 安装版没有 copy_portable 选项，旧配置或异常状态下自动迁移到 copy_custom
       if (appMode && !appMode.isPortable && libraryConfig.storageMode === "copy_portable") {
         libraryConfig.storageMode = "copy_custom";
@@ -986,6 +993,65 @@
     }
   }
 
+  // ---- 入库命名模板 ----
+  const NAMING_PRESETS: { label: string; value: string }[] = [
+    { label: "{title}-{author}", value: "{title}-{author}" },
+    { label: "{title}[{author}]", value: "{title}[{author}]" },
+    { label: "{title}[{author}]{tags}", value: "{title}[{author}]{tags}" },
+    { label: "{series}-{title}[{author}]", value: "{series}-{title}[{author}]" },
+    { label: "{series}-{title}[{author}][{maker}]{tags}", value: "{series}-{title}[{author}][{maker}]{tags}" },
+  ];
+  // 当前下拉选中的预设；若库里存的模板不在预设里就显示 "custom"
+  let namingPresetSel: string = "{title}-{author}";
+  // 同步：libraryConfig 变 → 调整预设下拉
+  function syncNamingPresetFromConfig() {
+    const t = (libraryConfig.namingTemplate || "").trim();
+    if (!t) {
+      namingPresetSel = "{title}-{author}";
+      return;
+    }
+    namingPresetSel = NAMING_PRESETS.some(p => p.value === t) ? t : "custom";
+  }
+  // 命名模式或模板变更 → 保存配置 + 询问是否立即批量重命名
+  async function onNamingChanged() {
+    await saveLibraryConfig();
+    const localCount = books.filter(b =>
+      libraryConfig.customWorkDir
+        ? b.filePath.startsWith(libraryConfig.customWorkDir)
+        : true
+    ).length;
+    if (localCount === 0) return;
+    const yes = await ask(
+      `是否立即按新规则重命名书库中的 ${localCount} 本本地书文件？\n（仅会重命名复制进书库的副本，引用模式下的原文件不会动）`,
+      { kind: "info", title: "应用新命名" },
+    );
+    if (!yes) return;
+    try {
+      const summary = await invoke<{ renamed: number; skipped: number; failed: number; failures: string[] }>(
+        "rebuild_book_filenames",
+        { config: libraryConfig },
+      );
+      let msg = `已重命名 ${summary.renamed} 本，跳过 ${summary.skipped} 本`;
+      if (summary.failed > 0) {
+        msg += `，失败 ${summary.failed} 本：\n` + summary.failures.slice(0, 5).join("\n");
+      }
+      await message(msg, { title: "重命名完成", kind: summary.failed > 0 ? "warning" : "info" });
+      await loadLibrary();
+    } catch (e: any) {
+      await message(`重命名失败: ${e}`, { title: "错误", kind: "error" });
+    }
+  }
+  function onNamingPresetChange(v: string) {
+    namingPresetSel = v;
+    if (v === "custom") {
+      // 切到自定义但保留当前模板，让用户继续编辑
+      if (!libraryConfig.namingTemplate) libraryConfig.namingTemplate = "{title}-{author}";
+    } else {
+      libraryConfig.namingTemplate = v;
+    }
+    onNamingChanged();
+  }
+
   // 跟踪上一次成功设置的 storageMode，用于"切到 copy_custom 但取消选目录"时回滚
   let prevStorageMode = libraryConfig.storageMode;
 
@@ -1295,6 +1361,48 @@
               <span class="set-label">保存时更新修改日期</span>
               <input type="checkbox" bind:checked={libraryConfig.updateModifiedOnEdit} on:change={saveLibraryConfig} />
             </label>
+            <div class="set-row">
+              <label class="set-label">入库命名方式</label>
+              <select
+                class="set-control"
+                bind:value={libraryConfig.namingMode}
+                on:change={onNamingChanged}
+              >
+                <option value="template">按模板重命名</option>
+                <option value="source">使用源文件名</option>
+              </select>
+            </div>
+            {#if libraryConfig.namingMode === "template"}
+              <div class="set-row">
+                <label class="set-label">命名模板</label>
+                <select
+                  class="set-control"
+                  value={namingPresetSel}
+                  on:change={(e) => onNamingPresetChange((e.currentTarget as HTMLSelectElement).value)}
+                >
+                  {#each NAMING_PRESETS as p}
+                    <option value={p.value}>{p.label}</option>
+                  {/each}
+                  <option value="custom">自定义…</option>
+                </select>
+              </div>
+              {#if namingPresetSel === "custom"}
+                <div class="set-row">
+                  <label class="set-label" style="visibility: hidden;">_</label>
+                  <input
+                    type="text"
+                    class="set-control"
+                    bind:value={libraryConfig.namingTemplate}
+                    on:change={onNamingChanged}
+                    placeholder="例如: {`{title}-{author}`}"
+                  />
+                </div>
+              {/if}
+              <p class="section-hint" style="margin-top: 4px;">
+                可用占位符：<code>{`{title} {author} {subtitle} {series} {maker} {publisher} {tags}`}</code>。
+                <code>{`{tags}`}</code> 自动展开为 <code>[标签1][标签2]…</code>。
+              </p>
+            {/if}
           </section>
 
           <!-- 文件关联 -->
