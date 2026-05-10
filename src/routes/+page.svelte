@@ -108,22 +108,136 @@
   // 元数据编辑面板的 UI 状态
   let productionExpanded = false;   // "制作"分组默认折叠
   let subtitleShown = false;        // 副标题字段：仅在有值或用户点击"添加"时显示
+  // 入库时遇到「书名-作者.ext」同名冲突的弹框
+  interface CollisionPromptState {
+    open: boolean;
+    filePath: string;
+    suggested: string;
+    inputValue: string;
+    resolve: ((v: string | null) => void) | null;
+  }
+  let collisionPrompt: CollisionPromptState = {
+    open: false, filePath: "", suggested: "", inputValue: "", resolve: null,
+  };
+  function promptCollisionRename(filePath: string, suggested: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      collisionPrompt = { open: true, filePath, suggested, inputValue: suggested, resolve };
+    });
+  }
+  function confirmCollisionPrompt() {
+    const v = collisionPrompt.inputValue.trim();
+    const r = collisionPrompt.resolve;
+    collisionPrompt = { ...collisionPrompt, open: false, resolve: null };
+    r?.(v.length > 0 ? v : null);
+  }
+  function cancelCollisionPrompt() {
+    const r = collisionPrompt.resolve;
+    collisionPrompt = { ...collisionPrompt, open: false, resolve: null };
+    r?.(null);
+  }
+  // 包一层：遇 BOOK_FILE_COLLISION 错误自动弹框让用户改名后重试
+  async function addBookWithCollisionRetry(filePath: string): Promise<boolean> {
+    let overrideFilename: string | undefined = undefined;
+    for (let i = 0; i < 5; i++) {
+      try {
+        await invoke("add_book_to_library", {
+          filePath,
+          config: libraryConfig,
+          overrideFilename,
+        });
+        return true;
+      } catch (e: any) {
+        const msg = String(e);
+        if (msg.startsWith("BOOK_FILE_COLLISION:")) {
+          const suggested = msg.substring("BOOK_FILE_COLLISION:".length);
+          const userInput = await promptCollisionRename(filePath, suggested);
+          if (userInput == null) return false; // 用户取消
+          overrideFilename = userInput;
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw new Error("命名冲突重试次数过多");
+  }
+  // 重命名本地文件弹框
+  interface RenamePromptState {
+    open: boolean;
+    bookId: string;
+    oldFilename: string;
+    fileType: string;
+    inputValue: string;
+    error: string;
+  }
+  let renamePrompt: RenamePromptState = {
+    open: false, bookId: "", oldFilename: "", fileType: "", inputValue: "", error: "",
+  };
+  function openRenameDialog(book: BookEntry) {
+    const ft = book.fileType || "";
+    const stem = (book.filename || "").replace(new RegExp(`\\.${ft}$`, "i"), "");
+    renamePrompt = {
+      open: true,
+      bookId: book.id,
+      oldFilename: book.filename || "",
+      fileType: ft,
+      inputValue: stem,
+      error: "",
+    };
+  }
+  async function confirmRenameBook() {
+    const v = renamePrompt.inputValue.trim();
+    if (!v) {
+      renamePrompt = { ...renamePrompt, error: "文件名不能为空" };
+      return;
+    }
+    try {
+      await invoke("rename_book_file", {
+        bookId: renamePrompt.bookId,
+        newFilename: v,
+      });
+      renamePrompt = { ...renamePrompt, open: false, error: "" };
+      await loadLibrary();
+    } catch (e: any) {
+      const msg = String(e);
+      if (msg.startsWith("BOOK_FILE_COLLISION:")) {
+        const suggested = msg.substring("BOOK_FILE_COLLISION:".length);
+        renamePrompt = { ...renamePrompt, error: `已存在同名: ${suggested}` };
+        return;
+      }
+      renamePrompt = { ...renamePrompt, error: `重命名失败: ${e}` };
+    }
+  }
+  function cancelRenameBook() {
+    renamePrompt = { ...renamePrompt, open: false, error: "" };
+  }
+  // 在系统资源管理器中打开并选中
+  async function openFileLocation(book: BookEntry) {
+    try {
+      await invoke("reveal_in_explorer", { path: book.filePath });
+    } catch (e: any) {
+      await message(`打开文件位置失败: ${e}`, { title: "错误", kind: "error" });
+    }
+  }
   // 简洁列表列配置
   let listColumns: string[] = ["title", "author", "tags", "fileType", "fileSize", "modifiedAt"];
   // 书架设置
   // previewMode: "auto"=点击图书时显示(原默认行为)、"always"=始终显示、"never"=始终隐藏
   type PreviewMode = "auto" | "always" | "never";
+  // 双击图书时的默认动作
+  type DblClickAction = "read" | "edit" | "metadata";
   interface ShelfSettings {
     gridShowTitle: boolean;
     gridShowAuthor: boolean;
     newBookFirst: boolean;
     previewMode: PreviewMode;
+    dblClickAction: DblClickAction;
   }
   let shelfSettings: ShelfSettings = {
     gridShowTitle: true,
     gridShowAuthor: true,
     newBookFirst: true,
     previewMode: "auto",
+    dblClickAction: "read",
   };
   const VIEW_ICONS: Record<string, string> = { "grid": "▦", "list-cover": "☷", "list-simple": "☰" };
 
@@ -341,8 +455,8 @@
     let added = 0;
     for (const p of paths) {
       try {
-        await invoke("add_book_to_library", { filePath: p, config: libraryConfig });
-        added++;
+        const ok = await addBookWithCollisionRetry(p);
+        if (ok) added++;
       } catch (e: any) {
         const name = p.replace(/\\/g, "/").split("/").pop() || p;
         failures.push(`${name}: ${e}`);
@@ -813,9 +927,20 @@
     }
   }
 
-  function handleBookDoubleClick(book: BookEntry) {
-    // 双击默认是"阅读"动作；编辑由右键菜单触发
-    openReader(book);
+  function handleBookOpen(book: BookEntry) {
+    // 列表/网格双击或回车触发，按设置分派
+    switch (shelfSettings.dblClickAction) {
+      case "edit":
+        openBook(book);
+        break;
+      case "metadata":
+        openEditMetadata(book);
+        break;
+      case "read":
+      default:
+        openReader(book);
+        break;
+    }
   }
 
   function handleSort(col: string) {
@@ -835,10 +960,7 @@
       const path = (files[i] as any).path;
       if (path) {
         try {
-          await invoke("add_book_to_library", {
-            filePath: path,
-            config: libraryConfig,
-          });
+          await addBookWithCollisionRetry(path);
         } catch (e) {
           console.error("拖放添加失败:", e);
         }
@@ -977,11 +1099,16 @@
     const appWindow = getCurrentWindow();
     appWindow.onDragDropEvent((ev: any) => {
       if (ev.payload?.type === "drop" && ev.payload?.paths) {
-        for (const p of ev.payload.paths) {
-          invoke("add_book_to_library", { filePath: p, config: libraryConfig })
-            .then(() => loadLibrary())
-            .catch(e => console.error("拖放添加失败:", e));
-        }
+        (async () => {
+          for (const p of ev.payload.paths) {
+            try {
+              await addBookWithCollisionRetry(p);
+            } catch (e) {
+              console.error("拖放添加失败:", e);
+            }
+          }
+          await loadLibrary();
+        })();
       }
     });
   });
@@ -1064,7 +1191,7 @@
           showTitle={shelfSettings.gridShowTitle}
           showAuthor={shelfSettings.gridShowAuthor}
           on:select={(e) => selectedBook = e.detail}
-          on:open={(e) => openReader(e.detail)}
+          on:open={(e) => handleBookOpen(e.detail)}
           on:context={(e) => handleContextMenu(e.detail.event, e.detail.book)}
         />
       {:else if viewMode === "list-cover"}
@@ -1074,7 +1201,7 @@
           {selectedBook}
           {formatFileSize}
           on:select={(e) => selectedBook = e.detail}
-          on:open={(e) => openReader(e.detail)}
+          on:open={(e) => handleBookOpen(e.detail)}
           on:context={(e) => handleContextMenu(e.detail.event, e.detail.book)}
         />
       {:else}
@@ -1089,7 +1216,7 @@
           {activeTagFilters}
           onTagClick={toggleTagFilter}
           on:select={(e) => selectedBook = e.detail}
-          on:open={(e) => openReader(e.detail)}
+          on:open={(e) => handleBookOpen(e.detail)}
           on:context={(e) => handleContextMenu(e.detail.event, e.detail.book)}
           on:columnChange={(e) => listColumns = e.detail}
         />
@@ -1103,7 +1230,7 @@
           book={selectedBook}
           {coverCache}
           {formatFileSize}
-          on:open={selectedBook ? () => openReader(selectedBook) : undefined}
+          on:open={selectedBook ? () => handleBookOpen(selectedBook) : undefined}
           on:remove={selectedBook ? () => removeBook(selectedBook) : undefined}
         />
       </div>
@@ -1123,6 +1250,9 @@
         <button class="ctx-item" on:click={() => { openReader(selectedBook!); closeContextMenu(); }}>阅读</button>
         <button class="ctx-item" on:click={() => { openBook(selectedBook!); closeContextMenu(); }}>编辑文件</button>
         <button class="ctx-item" on:click={() => { openEditMetadata(selectedBook!); closeContextMenu(); }}>编辑元数据</button>
+        <div class="ctx-separator"></div>
+        <button class="ctx-item" on:click={() => { openFileLocation(selectedBook!); closeContextMenu(); }}>打开文件位置</button>
+        <button class="ctx-item" on:click={() => { openRenameDialog(selectedBook!); closeContextMenu(); }}>重命名本地文件</button>
         <div class="ctx-separator"></div>
         <button class="ctx-item danger" on:click={() => { removeBook(selectedBook!); closeContextMenu(); }}>从书库移除</button>
       </div>
@@ -1221,6 +1351,18 @@
               </select>
             </div>
             <div class="set-row">
+              <label class="set-label">双击图书时</label>
+              <select
+                class="set-control"
+                bind:value={shelfSettings.dblClickAction}
+                on:change={saveShelfSettings}
+              >
+                <option value="read">阅读</option>
+                <option value="edit">编辑</option>
+                <option value="metadata">编辑元数据</option>
+              </select>
+            </div>
+            <div class="set-row">
               <label class="set-label">新书排序</label>
               <select
                 class="set-control"
@@ -1283,6 +1425,79 @@
               确定
             {/if}
           </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- 入库时书名-作者重名弹框 -->
+  {#if collisionPrompt.open}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <div class="settings-overlay" on:click={(e) => { if (e.target === e.currentTarget) cancelCollisionPrompt(); }}>
+      <div class="settings-panel" style="max-width: 480px;">
+        <div class="settings-header">
+          <h3>同名文件已存在</h3>
+          <button class="settings-close" on:click={cancelCollisionPrompt} title="取消">×</button>
+        </div>
+        <div class="settings-body">
+          <p style="margin: 0 0 8px; color: var(--color-text-soft);">
+            工作目录中已存在 <code>{collisionPrompt.suggested}</code>，请输入新的文件名：
+          </p>
+          <input
+            type="text"
+            bind:value={collisionPrompt.inputValue}
+            style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;"
+            on:keydown={(e) => {
+              if (e.key === "Enter") confirmCollisionPrompt();
+              if (e.key === "Escape") cancelCollisionPrompt();
+            }}
+          />
+          <p style="margin: 8px 0 0; color: var(--color-muted); font-size: 12px;">
+            可省略扩展名，会自动按文件类型补回。
+          </p>
+        </div>
+        <div class="settings-footer" style="display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px;">
+          <button class="tb-btn" on:click={cancelCollisionPrompt}>取消</button>
+          <button class="tb-btn primary" on:click={confirmCollisionPrompt}>保存</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- 重命名本地文件弹框 -->
+  {#if renamePrompt.open}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <div class="settings-overlay" on:click={(e) => { if (e.target === e.currentTarget) cancelRenameBook(); }}>
+      <div class="settings-panel" style="max-width: 480px;">
+        <div class="settings-header">
+          <h3>重命名本地文件</h3>
+          <button class="settings-close" on:click={cancelRenameBook} title="取消">×</button>
+        </div>
+        <div class="settings-body">
+          <p style="margin: 0 0 8px; color: var(--color-text-soft);">
+            当前: <code>{renamePrompt.oldFilename}</code>
+          </p>
+          <input
+            type="text"
+            bind:value={renamePrompt.inputValue}
+            style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;"
+            on:keydown={(e) => {
+              if (e.key === "Enter") confirmRenameBook();
+              if (e.key === "Escape") cancelRenameBook();
+            }}
+          />
+          <p style="margin: 8px 0 0; color: var(--color-muted); font-size: 12px;">
+            可省略扩展名，会自动补 .{renamePrompt.fileType}。
+          </p>
+          {#if renamePrompt.error}
+            <p style="margin: 8px 0 0; color: #c62828; font-size: 13px;">{renamePrompt.error}</p>
+          {/if}
+        </div>
+        <div class="settings-footer" style="display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px;">
+          <button class="tb-btn" on:click={cancelRenameBook}>取消</button>
+          <button class="tb-btn primary" on:click={confirmRenameBook}>保存</button>
         </div>
       </div>
     </div>

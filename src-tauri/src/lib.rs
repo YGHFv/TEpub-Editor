@@ -1285,19 +1285,25 @@ fn app_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn get_history_base_dir(app: Option<&tauri::AppHandle>) -> PathBuf {
-    // 绿色版：exe_dir/.history
+    // 优先使用书库工作目录下的 _data/history（书库已配置时）
+    if let Some(app) = app {
+        if let Ok(p) = library_history_dir(app) {
+            return p;
+        }
+    }
+    // 回退：绿色版 exe_dir/data/history
     if is_portable() {
         if let Some(p) = portable_data_root() {
             return p.join("history");
         }
     }
-    // 安装版：app_data_root/history
+    // 回退：安装版 app_data_root/history
     if let Some(app) = app {
         if let Ok(p) = app_data_root(app) {
             return p.join("history");
         }
     }
-    // 终极兜底：相对路径
+    // 终极兜底
     PathBuf::from(".history")
 }
 
@@ -2140,7 +2146,10 @@ async fn export_epub(
 // --- EPUB 编辑器相关命令 ---
 
 #[tauri::command]
-async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
+async fn extract_epub(
+    app: tauri::AppHandle,
+    epub_path: String,
+) -> Result<Vec<EpubFileNode>, String> {
     // 1. 检查是否已经有缓存且临时内容未关闭
     let existing_temp_path = {
         let cache_guard = EPUB_CACHE.lock().unwrap();
@@ -2165,8 +2174,15 @@ async fn extract_epub(epub_path: String) -> Result<Vec<EpubFileNode>, String> {
     if let Some(path) = existing_temp_path {
         temp_path_buf = path;
     } else {
-        // 2. 创建临时目录并解压
-        let temp_dir = TempDir::new().map_err(|e| format!("无法创建临时目录: {}", e))?;
+        // 2. 在书库 _data/extract/ 下创建临时子目录并解压
+        let extract_root = library_extract_dir(&app)
+            .unwrap_or_else(|_| std::env::temp_dir().join("tepub-extract"));
+        ensure_dir(&extract_root).ok();
+        let temp_dir = tempfile::Builder::new()
+            .prefix("epub_")
+            .tempdir_in(&extract_root)
+            .or_else(|_| TempDir::new())
+            .map_err(|e| format!("无法创建临时目录: {}", e))?;
         temp_path_buf = temp_dir.path().to_path_buf();
 
         {
@@ -3381,37 +3397,46 @@ fn current_exe_quoted() -> Result<String, String> {
 
 #[cfg(target_os = "windows")]
 fn install_verb(
-    progid: &str,
     ext: &str,
     verb: &str,
     display: &str,
     action_flag: &str,
 ) -> Result<(), String> {
     let exe = current_exe_quoted()?;
-    // 1. 把扩展名指到我们的 ProgID（HKCU 优先于 HKLM）
-    let ext_key = format!(r"HKCU\Software\Classes\{}", ext);
-    run_reg_command(&["ADD", &ext_key, "/ve", "/d", progid, "/f"])?;
-    // 2. ProgID 友好名（已存在则覆盖无影响）
-    let progid_key = format!(r"HKCU\Software\Classes\{}", progid);
-    run_reg_command(&["ADD", &progid_key, "/ve", "/d", "TEpub-Editor File", "/f"])?;
-    // 3. verb MUIVerb（右键菜单显示文字）
-    let verb_key = format!(r"HKCU\Software\Classes\{}\shell\{}", progid, verb);
+    // 走 SystemFileAssociations：不依赖文件类型默认 ProgID，
+    // 用户即便把 .epub 默认设给 Calibre/SumatraPDF，我们的右键菜单依然会出现。
+    let verb_key = format!(
+        r"HKCU\Software\Classes\SystemFileAssociations\{}\shell\{}",
+        ext, verb
+    );
     run_reg_command(&["ADD", &verb_key, "/v", "MUIVerb", "/d", display, "/f"])?;
-    // 4. verb 的 command
-    let cmd_key = format!(r"HKCU\Software\Classes\{}\shell\{}\command", progid, verb);
+    let icon_value = format!(r#""{}",0"#, exe);
+    run_reg_command(&["ADD", &verb_key, "/v", "Icon", "/d", &icon_value, "/f"])?;
+    let cmd_key = format!("{}\\command", verb_key);
     let cmd_value = format!(r#""{}" {} "%1""#, exe, action_flag);
     run_reg_command(&["ADD", &cmd_key, "/ve", "/d", &cmd_value, "/f"])?;
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn uninstall_verb(progid: &str, verb: &str) -> Result<(), String> {
-    let verb_key = format!(r"HKCU\Software\Classes\{}\shell\{}", progid, verb);
-    run_reg_command(&["DELETE", &verb_key, "/f"])
+fn uninstall_verb(ext: &str, verb: &str, legacy_progid: &str) -> Result<(), String> {
+    // 新位置：SystemFileAssociations
+    let verb_key_new = format!(
+        r"HKCU\Software\Classes\SystemFileAssociations\{}\shell\{}",
+        ext, verb
+    );
+    let _ = run_reg_command(&["DELETE", &verb_key_new, "/f"]);
+    // 兼容旧版本：如果 0.4.6 之前曾把 verb 挂在自定义 ProgID 下，一并清掉
+    let verb_key_old = format!(
+        r"HKCU\Software\Classes\{}\shell\{}",
+        legacy_progid, verb
+    );
+    let _ = run_reg_command(&["DELETE", &verb_key_old, "/f"]);
+    Ok(())
 }
 
 #[tauri::command]
-fn set_file_assoc(verb: String, enabled: bool) -> Result<(), String> {
+async fn set_file_assoc(verb: String, enabled: bool) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (verb, enabled);
@@ -3419,38 +3444,154 @@ fn set_file_assoc(verb: String, enabled: bool) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // verb -> (ProgID, 扩展名, shell verb 名, 显示文字, --action= 值)
-        let (progid, ext, shell_verb, display, action) = match verb.as_str() {
-            "epub-read" => (
-                "TEpubEditor.epub",
-                ".epub",
-                "tepub_read",
-                "EPUB 阅读",
-                "--action=reader",
-            ),
-            "epub-edit" => (
-                "TEpubEditor.epub",
-                ".epub",
-                "tepub_edit",
-                "EPUB 编辑",
-                "--action=epub-editor",
-            ),
-            "txt-make-epub" => (
-                "TEpubEditor.txt",
-                ".txt",
-                "tepub_make_epub",
-                "制作 EPUB",
-                "--action=make-epub",
-            ),
-            _ => return Err(format!("未知的关联 verb: {}", verb)),
-        };
+        // 把 reg.exe 调用搬到 spawn_blocking，避免阻塞 Tauri IPC 线程导致 UI 卡顿
+        let res: Result<(), String> = tauri::async_runtime::spawn_blocking(move || {
+            // verb -> (扩展名, 旧 ProgID, shell verb 名, 显示文字, --action= 值)
+            let (ext, legacy_progid, shell_verb, display, action) = match verb.as_str() {
+                "epub-read" => (
+                    ".epub",
+                    "TEpubEditor.epub",
+                    "TEpubEditorRead",
+                    "用 TEpub-Editor 阅读",
+                    "--action=reader",
+                ),
+                "epub-edit" => (
+                    ".epub",
+                    "TEpubEditor.epub",
+                    "TEpubEditorEdit",
+                    "用 TEpub-Editor 编辑",
+                    "--action=epub-editor",
+                ),
+                "txt-make-epub" => (
+                    ".txt",
+                    "TEpubEditor.txt",
+                    "TEpubEditorMakeEpub",
+                    "用 TEpub-Editor 制作 EPUB",
+                    "--action=make-epub",
+                ),
+                _ => return Err(format!("未知的关联 verb: {}", verb)),
+            };
 
-        if enabled {
-            install_verb(progid, ext, shell_verb, display, action)
-        } else {
-            uninstall_verb(progid, shell_verb)
-        }
+            if enabled {
+                install_verb(ext, shell_verb, display, action)
+            } else {
+                uninstall_verb(ext, shell_verb, legacy_progid)
+            }
+        })
+        .await
+        .map_err(|e| format!("注册任务失败: {}", e))?;
+        res
     }
+}
+
+// 在系统文件管理器里打开并选中指定文件（Windows: explorer.exe /select,"path"）
+#[tauri::command]
+async fn reveal_in_explorer(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+    let res: Result<(), String> = tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        {
+            use std::process::Command;
+            // /select 后跟逗号 + 引号包路径
+            let arg = format!("/select,{}", path);
+            Command::new("explorer.exe")
+                .arg(&arg)
+                .spawn()
+                .map_err(|e| format!("打开资源管理器失败: {}", e))?;
+            Ok(())
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+            Command::new("open")
+                .args(["-R", &path])
+                .spawn()
+                .map_err(|e| format!("打开 Finder 失败: {}", e))?;
+            Ok(())
+        }
+        #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+        {
+            use std::process::Command;
+            // Linux: 打开父目录
+            let parent = std::path::Path::new(&path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| ".".to_string());
+            Command::new("xdg-open")
+                .arg(&parent)
+                .spawn()
+                .map_err(|e| format!("打开文件管理器失败: {}", e))?;
+            Ok(())
+        }
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?;
+    res
+}
+
+// 重命名书库内的本地文件，并同步 library.json 的 file_path / filename。
+// - 仅在「书在 books_dir」或「ref_only 文件可访问」时生效
+// - 同名冲突返回 BOOK_FILE_COLLISION:{suggested_filename}
+// - 自动按文件类型补回扩展名（用户输入"新名"或"新名.epub"都行）
+#[tauri::command]
+async fn rename_book_file(
+    app: tauri::AppHandle,
+    book_id: String,
+    new_filename: String,
+) -> Result<BookEntry, String> {
+    let mut data = read_library_data(&app)?;
+    let idx = data
+        .books
+        .iter()
+        .position(|b| b.id == book_id)
+        .ok_or_else(|| format!("未找到图书: {}", book_id))?;
+
+    let book = data.books[idx].clone();
+    let cur_path = PathBuf::from(&book.file_path);
+    if !cur_path.exists() {
+        return Err(format!("源文件不存在: {}", book.file_path));
+    }
+    let parent = cur_path
+        .parent()
+        .ok_or_else(|| "源文件无父目录".to_string())?
+        .to_path_buf();
+    let ext = book.file_type.clone();
+
+    // 清洗用户输入：去扩展名 + sanitize + 补扩展名
+    let raw = new_filename.trim();
+    if raw.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+    let stripped = raw
+        .strip_suffix(&format!(".{}", ext))
+        .or_else(|| raw.strip_suffix(&format!(".{}", ext.to_uppercase())))
+        .unwrap_or(raw);
+    let stem = sanitize_filename_part(stripped);
+    if stem.is_empty() {
+        return Err("文件名清洗后为空".to_string());
+    }
+    let target_name = format!("{}.{}", stem, ext);
+    let target_path = parent.join(&target_name);
+
+    if target_path == cur_path {
+        // 没变更，直接返回当前条目
+        return Ok(book);
+    }
+    if target_path.exists() {
+        return Err(format!("BOOK_FILE_COLLISION:{}", target_name));
+    }
+
+    fs::rename(&cur_path, &target_path).map_err(|e| format!("重命名失败: {}", e))?;
+
+    let entry = &mut data.books[idx];
+    entry.file_path = target_path.to_string_lossy().to_string();
+    entry.filename = target_name;
+    let updated = entry.clone();
+    write_library_data_atomic(&app, &data)?;
+    Ok(updated)
 }
 
 // ============================================================
@@ -3548,16 +3689,75 @@ fn library_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn library_json_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(library_root_dir(app)?.join("library.json"))
+    Ok(library_data_dir(app)?.join("library.json"))
+}
+
+// _data 子目录，存放所有内部数据（json、covers、history、extract）
+fn library_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root_dir(app)?.join("_data"))
+}
+
+// 图书 子目录：所有书文件按「书名-作者.ext」命名后存这里
+fn library_books_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root_dir(app)?.join("图书"))
 }
 
 fn library_covers_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_data_dir(app)?.join("covers"))
+}
+
+fn library_history_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_data_dir(app)?.join("history"))
+}
+
+fn library_extract_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_data_dir(app)?.join("extract"))
+}
+
+// 兼容旧路径：迁移时用来定位旧位置
+fn legacy_library_json_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root_dir(app)?.join("library.json"))
+}
+
+fn legacy_library_files_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root_dir(app)?.join("files"))
+}
+
+fn legacy_library_covers_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(library_root_dir(app)?.join("covers"))
 }
 
-fn library_files_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(library_root_dir(app)?.join("files"))
+// 文件名清洗：去掉 Windows 非法字符 + 控制字符 + 末尾点/空格，限制长度
+fn sanitize_filename_part(s: &str) -> String {
+    let mut out: String = s
+        .chars()
+        .filter_map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => Some('_'),
+            c if (c as u32) < 0x20 => None,
+            c => Some(c),
+        })
+        .collect();
+    out = out.trim().trim_end_matches('.').trim().to_string();
+    // 截断到 80 chars 避免过长 + 给「书名-作者-(2)」留余量
+    if out.chars().count() > 80 {
+        out = out.chars().take(80).collect::<String>().trim().to_string();
+    }
+    out
 }
+
+// 拼装「书名-作者.ext」基础文件名（不含目录）。
+fn build_book_filename(title: &str, author: &str, ext: &str) -> String {
+    let t = sanitize_filename_part(title);
+    let a = sanitize_filename_part(author);
+    let stem = match (t.is_empty(), a.is_empty()) {
+        (true, true) => "未命名".to_string(),
+        (false, true) => t,
+        (true, false) => a,
+        (false, false) => format!("{}-{}", t, a),
+    };
+    format!("{}.{}", stem, ext)
+}
+
 
 fn ensure_dir(p: &Path) -> Result<(), String> {
     if !p.exists() {
@@ -3567,6 +3767,9 @@ fn ensure_dir(p: &Path) -> Result<(), String> {
 }
 
 fn read_library_data(app: &tauri::AppHandle) -> Result<LibraryData, String> {
+    // 先做一次旧布局迁移（幂等，无旧文件时直接返回）
+    let _ = migrate_legacy_library_layout(app);
+
     let path = library_json_path(app)?;
     if !path.exists() {
         return Ok(LibraryData::default());
@@ -3577,7 +3780,109 @@ fn read_library_data(app: &tauri::AppHandle) -> Result<LibraryData, String> {
     Ok(data)
 }
 
+// 把旧布局（library.json/files/covers 直接放在 root + history 在 app_data）
+// 平滑迁移到新布局（_data/* + 图书/书名-作者.ext）。
+//
+// - 新 _data/library.json 已存在 → 已迁移过，直接返回
+// - 旧 root/library.json 不存在 → 全新库，无需迁移
+fn migrate_legacy_library_layout(app: &tauri::AppHandle) -> Result<(), String> {
+    let new_json = library_json_path(app)?;
+    if new_json.exists() {
+        return Ok(());
+    }
+    let old_json = legacy_library_json_path(app)?;
+    if !old_json.exists() {
+        return Ok(());
+    }
+
+    // 读旧 library.json
+    let bytes = fs::read(&old_json)
+        .map_err(|e| format!("迁移：读旧 library.json 失败: {}", e))?;
+    let mut data: LibraryData = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("迁移：解析旧 library.json 失败: {}", e))?;
+
+    let data_dir = library_data_dir(app)?;
+    ensure_dir(&data_dir)?;
+    let books_dir = library_books_dir(app)?;
+    let new_covers_dir = library_covers_dir(app)?;
+    let old_files_dir = legacy_library_files_dir(app)?;
+    let old_covers_dir = legacy_library_covers_dir(app)?;
+
+    // 1) 迁移每本书
+    let mut used_filenames: HashSet<String> = HashSet::new();
+    for book in data.books.iter_mut() {
+        // 1.1 书文件
+        if !book.file_path.is_empty() {
+            let cur = PathBuf::from(&book.file_path);
+            // 仅迁移落在旧 files_dir 内的副本（ref_only 不动用户原文件）
+            if cur.starts_with(&old_files_dir) && cur.exists() {
+                ensure_dir(&books_dir).ok();
+                let ext = book.file_type.clone();
+                let mut name = build_book_filename(&book.title, &book.author, &ext);
+                // 同名冲突 → 加 (n)
+                let mut n = 2;
+                while used_filenames.contains(&name) || books_dir.join(&name).exists() {
+                    let stem = build_book_filename(&book.title, &book.author, &ext)
+                        .trim_end_matches(&format!(".{}", ext))
+                        .to_string();
+                    name = format!("{} ({}).{}", stem, n, ext);
+                    n += 1;
+                }
+                let dest = books_dir.join(&name);
+                if fs::rename(&cur, &dest).is_ok() {
+                    book.file_path = dest.to_string_lossy().to_string();
+                    book.filename = name.clone();
+                    used_filenames.insert(name);
+                }
+            }
+        }
+        // 1.2 封面
+        if !book.cover_path.is_empty() {
+            let cur = PathBuf::from(&book.cover_path);
+            if cur.starts_with(&old_covers_dir) && cur.exists() {
+                ensure_dir(&new_covers_dir).ok();
+                if let Some(fname) = cur.file_name() {
+                    let dest = new_covers_dir.join(fname);
+                    if fs::rename(&cur, &dest).is_ok() {
+                        book.cover_path = dest.to_string_lossy().to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // 2) 迁移 history（从 app_data_root/history → _data/history）
+    let new_history = library_history_dir(app)?;
+    let old_history_app = app_data_root(app).ok().map(|p| p.join("history"));
+    if let Some(old) = old_history_app {
+        if old.exists() && old != new_history {
+            ensure_dir(&new_history).ok();
+            if let Ok(entries) = fs::read_dir(&old) {
+                for entry in entries.flatten() {
+                    let from = entry.path();
+                    if let Some(name) = from.file_name() {
+                        let to = new_history.join(name);
+                        let _ = fs::rename(&from, &to);
+                    }
+                }
+            }
+            let _ = fs::remove_dir(&old);
+        }
+    }
+
+    // 3) 写新 library.json，删旧
+    write_library_data_atomic(app, &data)?;
+    let _ = fs::remove_file(&old_json);
+
+    // 4) 收尾：旧 files/、旧 covers/ 目录若空则清理
+    let _ = fs::remove_dir(&old_files_dir);
+    let _ = fs::remove_dir(&old_covers_dir);
+
+    Ok(())
+}
+
 // 写入策略：customWorkDir 非空则写到那里，否则写到 app_data_dir；
+// library.json 实际落点是 {target_root}/_data/library.json。
 // 同时把真实根目录写进 app_data_dir/library.pointer 给下次冷启动用。
 fn write_library_data_atomic(app: &tauri::AppHandle, data: &LibraryData) -> Result<(), String> {
     let target_root = if !data.config.custom_work_dir.trim().is_empty() {
@@ -3586,8 +3891,10 @@ fn write_library_data_atomic(app: &tauri::AppHandle, data: &LibraryData) -> Resu
         library_app_data_root(app)?
     };
     ensure_dir(&target_root)?;
+    let target_data_dir = target_root.join("_data");
+    ensure_dir(&target_data_dir)?;
 
-    let target = target_root.join("library.json");
+    let target = target_data_dir.join("library.json");
     let tmp = target.with_extension("json.tmp");
     let json =
         serde_json::to_vec_pretty(data).map_err(|e| format!("序列化 library.json 失败: {}", e))?;
@@ -4079,6 +4386,7 @@ async fn add_book_to_library(
     app: tauri::AppHandle,
     file_path: String,
     config: LibraryConfig,
+    override_filename: Option<String>,
 ) -> Result<BookEntry, String> {
     let src = PathBuf::from(&file_path);
     if !src.exists() {
@@ -4106,21 +4414,70 @@ async fn add_book_to_library(
     let file_size = metadata.len();
     let created_at = metadata.created().ok().and_then(system_time_to_secs);
     let modified_at = metadata.modified().ok().and_then(system_time_to_secs);
-    let filename = src
+    let original_filename = src
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
+    // 先解析元数据拿 title/author 用来命名（即便不复制也用得到）
+    let mut tentative_title = String::new();
+    let mut tentative_author = String::new();
+    if file_type == "epub" {
+        if let Ok(meta) = parse_epub_metadata(&src) {
+            tentative_title = if meta.title.is_empty() {
+                src.file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            } else {
+                meta.title.clone()
+            };
+            tentative_author = meta.author.clone();
+        }
+    }
+    if tentative_title.is_empty() {
+        tentative_title = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+    }
+
     // 决定文件最终位置
     let final_file_path = if should_copy {
-        let files_dir = library_files_dir(&app)?;
-        ensure_dir(&files_dir)?;
-        let dest = files_dir.join(format!("{}.{}", id, file_type));
+        let books_dir = library_books_dir(&app)?;
+        ensure_dir(&books_dir)?;
+
+        // 选定目标文件名：优先 override，否则按 title-author 拼
+        let target_name = match override_filename {
+            Some(ref n) if !n.trim().is_empty() => {
+                let stem = sanitize_filename_part(n.trim().trim_end_matches(&format!(".{}", file_type)));
+                if stem.is_empty() {
+                    build_book_filename(&tentative_title, &tentative_author, file_type)
+                } else {
+                    format!("{}.{}", stem, file_type)
+                }
+            }
+            _ => build_book_filename(&tentative_title, &tentative_author, file_type),
+        };
+
+        let dest = books_dir.join(&target_name);
+        // 冲突 → 返回结构化错误
+        if dest.exists() {
+            return Err(format!("BOOK_FILE_COLLISION:{}", target_name));
+        }
         fs::copy(&src, &dest).map_err(|e| format!("复制文件失败: {}", e))?;
         dest.to_string_lossy().to_string()
     } else {
         // ref_only：保持原绝对路径
         src.to_string_lossy().to_string()
+    };
+
+    let saved_filename = if should_copy {
+        PathBuf::from(&final_file_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default()
+    } else {
+        original_filename
     };
 
     let mut entry = BookEntry {
@@ -4129,7 +4486,7 @@ async fn add_book_to_library(
         file_type: file_type.to_string(),
         added_at: now,
         file_size,
-        filename,
+        filename: saved_filename,
         created_at,
         modified_at,
         ..Default::default()
@@ -4226,11 +4583,15 @@ async fn remove_book_from_library(
         .ok_or_else(|| format!("未找到图书: {}", book_id))?;
     let book = data.books[idx].clone();
 
-    // 仅清理位于 files_dir 内的副本（ref_only 模式下原文件不动）
-    let files_dir = library_files_dir(&app)?;
+    // 仅清理位于 books_dir 内的副本（ref_only 模式下原文件不动）；
+    // 同时兼容老布局下还在 files/ 里的残留
+    let books_dir = library_books_dir(&app)?;
+    let legacy_files_dir = legacy_library_files_dir(&app)?;
     if !book.file_path.is_empty() {
         let book_path = PathBuf::from(&book.file_path);
-        if book_path.starts_with(&files_dir) && book_path.exists() {
+        let inside_managed = book_path.starts_with(&books_dir)
+            || book_path.starts_with(&legacy_files_dir);
+        if inside_managed && book_path.exists() {
             let _ = fs::remove_file(&book_path);
         }
     }
@@ -4891,6 +5252,8 @@ pub fn run() {
             get_launch_args, // Register new command
             get_launch_info,
             set_file_assoc,
+            reveal_in_explorer,
+            rename_book_file,
             prepare_epub_for_open,
             exit_app,
             // ===== Library Phase 1 =====
