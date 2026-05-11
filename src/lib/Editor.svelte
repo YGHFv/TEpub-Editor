@@ -444,6 +444,12 @@
     lastKnownDoc = n;
     view.setState(createEditorState(n));
   }
+  export function replaceAllContent(n: string) {
+    if (!view) return;
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: n },
+    });
+  }
   export function scrollToLine(l: number, toTop: boolean = false) {
     if (!view) return;
     try {

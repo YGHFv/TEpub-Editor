@@ -9,6 +9,24 @@
     import Editor from "$lib/Editor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
+    import {
+        applyTitleRewrite,
+        applyBuiltinRegexPreview,
+        buildProofPreviewSummary,
+        buildBuiltinRegexPreview,
+        buildTitleRewritePreview,
+        convertChineseText,
+        PROOF_BUILTIN_REGEX_RULES,
+        type ProofBuiltinRuleId,
+        type ProofConvertDirection,
+        type ProofNumberStyle,
+        type ProofRegexPreviewRow,
+        type ProofTitlePreviewRow,
+        type ProofTitleScope,
+        type ProofTitleRewriteOptions,
+        type ProofTocNode,
+        type ProofTransformResult,
+    } from "$lib/textProofing";
 
     // --- [1. 完整的接口定义] ---
     interface RawChapter {
@@ -216,6 +234,7 @@
     let settingsActiveTab = "display"; // 'display' | 'toc'
     let showEpubModal = false;
     let showCheckPanel = false;
+    let showProofPanel = false;
     let showHistoryPanel = false;
     let showRestoreConfirm = false;
     let restoreTargetSnapshot: any = null;
@@ -340,6 +359,155 @@
         }
     }
 
+    function getProofTocNodes(): ProofTocNode[] {
+        return flatToc.map((node) => ({
+            id: node.id,
+            title: node.title,
+            line: node.line,
+            type: node.type,
+            parentId: node.parentId,
+            level: node.level,
+        }));
+    }
+
+    function getProofTitleOptions(): ProofTitleRewriteOptions {
+        return {
+            scope: proofTitleScope,
+            regex: proofTitleRegex,
+            numberStyle: proofNumberStyle,
+            perVolume: proofPerVolume,
+        };
+    }
+
+    $: {
+        fileContent;
+        flatToc;
+        proofTitleScope;
+        proofTitleRegex;
+        proofNumberStyle;
+        proofPerVolume;
+        try {
+            proofPreviewRows = buildTitleRewritePreview(
+                fileContent,
+                getProofTocNodes(),
+                getProofTitleOptions(),
+            );
+            const summary = buildProofPreviewSummary(proofPreviewRows);
+            proofPreviewMessage =
+                proofActiveTab === "toc" && summary.total > 0
+                    ? `目录预览 ${summary.total} 项，预计修改 ${summary.changed} 项`
+                    : proofTitleScope === "regex" && proofTitleRegex.trim()
+                      ? "没有匹配到可重排标题"
+                      : proofActiveTab === "builtin"
+                        ? builtinRegexMessage
+                        : "没有可预览的标题";
+        } catch (e: any) {
+            proofPreviewRows = [];
+            proofPreviewMessage = `预览失败: ${e?.message || e}`;
+        }
+    }
+
+    $: {
+        fileContent;
+        flatToc;
+        proofBuiltinRule;
+        try {
+            proofRegexPreviewRows = buildBuiltinRegexPreview(
+                fileContent,
+                proofBuiltinRule,
+                getProofTocNodes(),
+            );
+            proofRegexSelectedIds = new Set(proofRegexPreviewRows.map((row) => row.id));
+            builtinRegexMessage =
+                proofRegexPreviewRows.length > 0
+                    ? `匹配 ${proofRegexPreviewRows.length} 项，已默认全选`
+                    : "没有匹配项";
+        } catch (e: any) {
+            proofRegexPreviewRows = [];
+            proofRegexSelectedIds = new Set();
+            builtinRegexMessage = `预览失败: ${e?.message || e}`;
+        }
+    }
+
+    async function applyProofResult(result: ProofTransformResult) {
+        proofMessage = result.message;
+        if (!fileContent) {
+            proofMessage = "请先打开文本文件";
+            return;
+        }
+        if (result.changedCount <= 0 || result.text === fileContent) {
+            return;
+        }
+
+        editorComponent?.replaceAllContent(result.text);
+        fileContent = result.text;
+        isModified = true;
+        allMatches = [];
+        currentMatchIndex = -1;
+        clearTimeout(autoRefreshTimer);
+        await tick();
+        await scanToc(result.text);
+        updateMd5(result.text);
+        saveStateToCache(0);
+    }
+
+    async function applyProofTitleRewrite() {
+        const result = applyTitleRewrite(
+            fileContent,
+            getProofTocNodes(),
+            getProofTitleOptions(),
+        );
+        await applyProofResult(result);
+    }
+
+    function toggleProofRegexRow(rowId: string, checked: boolean) {
+        const next = new Set(proofRegexSelectedIds);
+        if (checked) {
+            next.add(rowId);
+        } else {
+            next.delete(rowId);
+        }
+        proofRegexSelectedIds = next;
+    }
+
+    function setAllProofRegexRows(checked: boolean) {
+        proofRegexSelectedIds = checked
+            ? new Set(proofRegexPreviewRows.map((row) => row.id))
+            : new Set();
+    }
+
+    function jumpToProofRegexRow(row: ProofRegexPreviewRow) {
+        editorComponent?.scrollToLine(row.lineStart, true);
+        proofMessage =
+            row.lineEnd !== row.lineStart
+                ? `已定位到匹配范围 ${row.lineStart}-${row.lineEnd} 行`
+                : `已定位到匹配位置`;
+    }
+
+    async function applySelectedBuiltinRegex() {
+        const result = applyBuiltinRegexPreview(
+            fileContent,
+            proofRegexPreviewRows,
+            proofRegexSelectedIds,
+        );
+        await applyProofResult(result);
+    }
+
+    async function applyAllBuiltinRegex() {
+        const result = applyBuiltinRegexPreview(
+            fileContent,
+            proofRegexPreviewRows,
+            proofRegexPreviewRows.map((row) => row.id),
+        );
+        await applyProofResult(result);
+    }
+
+    async function runProofFullConvert() {
+        proofMessage = "正在转换繁简，请稍候...";
+        const result = await convertChineseText(fileContent, proofConvertDirection);
+        await applyProofResult(result);
+    }
+
     // 查找替换状态
     let findPattern = "";
     let replacePattern = "";
@@ -347,6 +515,21 @@
     let isRegex = false;
     let allMatches: MatchLocation[] = [];
     let currentMatchIndex = -1;
+
+    // 校对面板状态
+    let proofActiveTab: "toc" | "builtin" | "convert" = "toc";
+    let proofTitleScope: ProofTitleScope = "all";
+    let proofTitleRegex = "";
+    let proofNumberStyle: ProofNumberStyle = "chinese";
+    let proofPerVolume = false;
+    let proofPreviewRows: ProofTitlePreviewRow[] = [];
+    let proofPreviewMessage = "";
+    let proofBuiltinRule: ProofBuiltinRuleId = "title-brackets";
+    let proofRegexPreviewRows: ProofRegexPreviewRow[] = [];
+    let proofRegexSelectedIds = new Set<string>();
+    let builtinRegexMessage = "";
+    let proofConvertDirection: ProofConvertDirection = "traditional-to-simplified";
+    let proofMessage = "";
 
     // 内容检查状态
     let isCheckModeOn = true;
@@ -623,6 +806,7 @@
             md5: epubMeta.md5 || "",
             cover_path: epubMeta.cover_path || "",
             description: "",
+            tags: [...epubMeta.tags],
             styles: { ...epubMeta.styles },
             assets: [...epubMeta.assets] as { name: string, path: string, category: string }[],
         };
@@ -1631,6 +1815,7 @@
         showSettingsPanel = false;
         showEpubModal = false;
         showCheckPanel = false;
+        showProofPanel = false;
         showHistoryPanel = false;
     }
 </script>
@@ -1662,6 +1847,25 @@
             <button
                 class="btn-secondary"
                 on:click={() => editorComponent.triggerRedo()}>↪️</button
+            >
+            <button
+                class="btn-secondary proof-tool-btn"
+                title="校对"
+                aria-label="校对"
+                on:click={() => {
+                    closeAllPanels();
+                    showProofPanel = true;
+                }}
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 4.5h10.2a2.3 2.3 0 0 1 2.3 2.3v3.45" />
+                    <path d="M5 8.5h8.5" />
+                    <path d="M5 12.5h6.2" />
+                    <path d="M5 16.5h4.1" />
+                    <path d="m14.2 16.7 2.05 2.05L20.8 14.2" />
+                    <path d="M4.5 3.5h11.2a3.8 3.8 0 0 1 3.8 3.8v2.2" />
+                </svg>
+            </button
             >
             <button
                 class="btn-secondary"
@@ -1818,6 +2022,180 @@
                             {/each}
                         {/if}
                     {/each}
+                </div>
+            </aside>
+        {/if}
+
+        {#if showProofPanel}
+            <aside class="proof-panel">
+                <div class="proof-header">
+                    <div>
+                        <div class="proof-title">校对</div>
+                        <div class="proof-subtitle">{proofPreviewMessage}</div>
+                    </div>
+                    <button
+                        class="icon-close proof-close"
+                        title="关闭"
+                        on:click={() => (showProofPanel = false)}>✕</button
+                    >
+                </div>
+
+                <div class="proof-tabs">
+                    <button
+                        class:active={proofActiveTab === "toc"}
+                        on:click={() => (proofActiveTab = "toc")}>目录</button
+                    >
+                    <button
+                        class:active={proofActiveTab === "builtin"}
+                        on:click={() => (proofActiveTab = "builtin")}>内置正则</button
+                    >
+                    <button
+                        class:active={proofActiveTab === "convert"}
+                        on:click={() => (proofActiveTab = "convert")}>繁简</button
+                    >
+                </div>
+
+                <div class="proof-body">
+                    {#if proofActiveTab === "toc"}
+                        <div class="proof-section proof-toc-controls">
+                            <div class="proof-row">
+                                <label for="proof-title-scope">范围</label>
+                                <select id="proof-title-scope" bind:value={proofTitleScope}>
+                                    <option value="all">卷和章</option>
+                                    <option value="chapters">只排章节</option>
+                                    <option value="volumes">只排卷部</option>
+                                    <option value="regex">正则选取</option>
+                                </select>
+                            </div>
+                            {#if proofTitleScope === "regex"}
+                                <div class="proof-row vertical">
+                                    <label for="proof-title-regex">标题正则</label>
+                                    <input
+                                        id="proof-title-regex"
+                                        bind:value={proofTitleRegex}
+                                        placeholder="例如：^\\s*\\d+\\."
+                                    />
+                                </div>
+                            {/if}
+                            <div class="proof-row">
+                                <label for="proof-number-style">数字</label>
+                                <select id="proof-number-style" bind:value={proofNumberStyle}>
+                                    <option value="chinese">一二三四</option>
+                                    <option value="arabic">1234</option>
+                                </select>
+                            </div>
+                            <label class="proof-check">
+                                <input type="checkbox" bind:checked={proofPerVolume} />
+                                每卷章节都从第一章开始
+                            </label>
+                            <button
+                                class="proof-primary"
+                                disabled={proofPreviewRows.length === 0}
+                                on:click={applyProofTitleRewrite}
+                            >
+                                应用目录重排序
+                            </button>
+                        </div>
+
+                        <div class="proof-preview">
+                            <div class="proof-preview-head">
+                                <span>原标题</span>
+                                <span>修改后</span>
+                            </div>
+                            {#each proofPreviewRows as row}
+                                <div class:changed={row.changed} class="proof-preview-row">
+                                    <div title={row.original}>{row.original}</div>
+                                    <div title={row.replacement}>{row.replacement}</div>
+                                </div>
+                            {:else}
+                                <div class="proof-empty">暂无预览</div>
+                            {/each}
+                        </div>
+                    {:else if proofActiveTab === "builtin"}
+                        <div class="proof-section proof-regex-controls">
+                            <div class="proof-row">
+                                <label for="proof-builtin-rule">规则</label>
+                                <select id="proof-builtin-rule" bind:value={proofBuiltinRule}>
+                                    {#each PROOF_BUILTIN_REGEX_RULES as rule}
+                                        <option value={rule.id}>{rule.name}</option>
+                                    {/each}
+                                </select>
+                            </div>
+                            <div class="proof-rule-note">
+                                {PROOF_BUILTIN_REGEX_RULES.find((rule) => rule.id === proofBuiltinRule)?.description}
+                            </div>
+                            <div class="proof-actions-row">
+                                <button on:click={() => setAllProofRegexRows(true)}>全选</button>
+                                <button on:click={() => setAllProofRegexRows(false)}>全不选</button>
+                                <button
+                                    class="proof-primary inline"
+                                    disabled={proofRegexSelectedIds.size === 0}
+                                    on:click={applySelectedBuiltinRegex}
+                                >替换选中</button>
+                                <button
+                                    class="proof-primary inline"
+                                    disabled={proofRegexPreviewRows.length === 0}
+                                    on:click={applyAllBuiltinRegex}
+                                >全部替换</button>
+                            </div>
+                        </div>
+
+                        <div class="proof-regex-preview">
+                            <div class="proof-regex-head">
+                                <span></span>
+                                <span>匹配内容</span>
+                                <span>替换后</span>
+                            </div>
+                            {#each proofRegexPreviewRows as row}
+                                <label class="proof-regex-row">
+                                    <input
+                                        type="checkbox"
+                                        checked={proofRegexSelectedIds.has(row.id)}
+                                        on:change={(e) =>
+                                            toggleProofRegexRow(
+                                                row.id,
+                                                (e.currentTarget as HTMLInputElement).checked,
+                                            )}
+                                    />
+                                    <span
+                                        role="button"
+                                        tabindex="0"
+                                        title={row.original}
+                                        on:click|preventDefault={() => jumpToProofRegexRow(row)}
+                                        on:keydown|preventDefault={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                jumpToProofRegexRow(row);
+                                            }
+                                        }}
+                                    >
+                                        {row.original}
+                                    </span>
+                                    <span title={row.replacement || "删除"}>
+                                        {row.replacement || "删除"}
+                                    </span>
+                                </label>
+                            {:else}
+                                <div class="proof-empty">暂无匹配</div>
+                            {/each}
+                        </div>
+                    {:else}
+                        <div class="proof-section">
+                            <div class="proof-row">
+                                <label for="proof-convert-direction">方向</label>
+                                <select id="proof-convert-direction" bind:value={proofConvertDirection}>
+                                    <option value="traditional-to-simplified">繁体转简体</option>
+                                    <option value="simplified-to-traditional">简体转繁体</option>
+                                </select>
+                            </div>
+                            <button class="proof-primary" on:click={runProofFullConvert}>
+                                转换全文
+                            </button>
+                        </div>
+                    {/if}
+                </div>
+
+                <div class="proof-footer">
+                    {proofMessage || "处理结果会显示在这里，文本修改后可用撤销返回。"}
                 </div>
             </aside>
         {/if}
@@ -2480,6 +2858,344 @@
         flex-shrink: 0;
     }
 
+    .proof-panel {
+        width: 390px;
+        min-width: 340px;
+        max-width: min(440px, 46vw);
+        background: #fff;
+        border-right: 1px solid #ddd;
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        overflow: hidden;
+    }
+
+    .proof-tool-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+    }
+
+    .proof-tool-btn svg {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.9;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .proof-header {
+        height: 54px;
+        min-height: 54px;
+        padding: 6px 12px;
+        border-bottom: 1px solid #e5e5e5;
+        background: #f8fafc;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        box-sizing: border-box;
+    }
+
+    .proof-header > div:first-child {
+        min-width: 0;
+    }
+
+    .proof-title {
+        color: #333;
+        font-size: 16px;
+        font-weight: 800;
+        line-height: 1.4;
+    }
+
+    .proof-subtitle {
+        color: #777;
+        font-size: 12px;
+        line-height: 1.5;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .proof-close {
+        flex-shrink: 0;
+    }
+
+    .proof-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        padding: 8px 10px;
+        border-bottom: 1px solid #e7e7e7;
+        background: #fbfbfb;
+    }
+
+    .proof-tabs button {
+        height: 30px;
+        min-width: 0;
+        font-size: 12px;
+        border-radius: 6px;
+    }
+
+    .proof-tabs button.active {
+        background: #0066b8;
+        border-color: #0066b8;
+        color: #fff;
+    }
+
+    .proof-body {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        background: #fff;
+    }
+
+    .proof-section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        flex-shrink: 0;
+    }
+
+    .proof-toc-controls {
+        max-height: 232px;
+    }
+
+    .proof-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .proof-row.vertical {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .proof-row label,
+    .proof-check {
+        color: #555;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .proof-row label {
+        width: 64px;
+        flex-shrink: 0;
+    }
+
+    .proof-row.vertical label {
+        width: auto;
+    }
+
+    .proof-row input,
+    .proof-row select {
+        min-width: 0;
+        flex: 1;
+        box-sizing: border-box;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #fff;
+        color: #333;
+        padding: 7px 9px;
+        font-size: 13px;
+        outline: none;
+    }
+
+    .proof-row input:focus,
+    .proof-row select:focus {
+        border-color: #0066b8;
+        box-shadow: 0 0 0 2px rgba(0, 102, 184, 0.18);
+    }
+
+    .proof-check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 500;
+        cursor: pointer;
+        line-height: 1.5;
+    }
+
+    .proof-check input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: #0066b8;
+    }
+
+    .proof-primary {
+        width: 100%;
+        height: 36px;
+        background: #0066b8;
+        border-color: #0066b8;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .proof-primary:disabled {
+        opacity: 0.46;
+        cursor: not-allowed;
+    }
+
+    .proof-primary.inline {
+        width: auto;
+        min-width: 96px;
+        padding: 0 12px;
+    }
+
+    .proof-preview {
+        flex: 1;
+        min-height: 0;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        overflow: auto;
+        background: #fff;
+    }
+
+    .proof-preview-head,
+    .proof-preview-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+    }
+
+    .proof-preview-head {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #f4f6f8;
+        color: #555;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .proof-preview-head span,
+    .proof-preview-row div {
+        min-width: 0;
+        padding: 8px 10px;
+        border-right: 1px solid #eee;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .proof-preview-head span:last-child,
+    .proof-preview-row div:last-child {
+        border-right: 0;
+    }
+
+    .proof-preview-row {
+        border-top: 1px solid #f0f0f0;
+        color: #555;
+        font-size: 12px;
+    }
+
+    .proof-preview-row.changed {
+        background: #f3fbff;
+        color: #1f4f6b;
+    }
+
+    .proof-empty {
+        padding: 18px;
+        text-align: center;
+        color: #999;
+        font-size: 13px;
+    }
+
+    .proof-rule-note {
+        color: #666;
+        font-size: 12px;
+        line-height: 1.5;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: #f7f9fb;
+        border: 1px solid #e5e8ed;
+    }
+
+    .proof-actions-row {
+        display: grid;
+        grid-template-columns: 56px 68px 1fr 1fr;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .proof-actions-row button {
+        height: 34px;
+        font-size: 12px;
+    }
+
+    .proof-regex-preview {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .proof-regex-head,
+    .proof-regex-row {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1.15fr) minmax(0, 0.85fr);
+        align-items: stretch;
+    }
+
+    .proof-regex-head {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #f4f6f8;
+        color: #555;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .proof-regex-head span,
+    .proof-regex-row > span {
+        min-width: 0;
+        padding: 8px 10px;
+        border-right: 1px solid #eee;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .proof-regex-row {
+        border-top: 1px solid #f0f0f0;
+        color: #555;
+        font-size: 12px;
+        cursor: pointer;
+    }
+
+    .proof-regex-row input {
+        width: 16px;
+        height: 16px;
+        margin: auto;
+        accent-color: #0066b8;
+    }
+
+    .proof-footer {
+        min-height: 38px;
+        padding: 9px 12px;
+        border-top: 1px solid #e5e5e5;
+        background: #fafafa;
+        color: #0066b8;
+        font-size: 12px;
+        line-height: 1.5;
+        box-sizing: border-box;
+    }
+
     .sidebar-header-fixed {
         background: #eee;
         border-bottom: 1px solid #ddd;
@@ -3103,6 +3819,93 @@
         backdrop-filter: blur(16px);
     }
 
+    .proof-panel {
+        background: rgba(255, 255, 255, 0.86);
+        border-right: 1px solid var(--color-border);
+        box-shadow: 10px 0 30px rgba(23, 36, 52, 0.05);
+        backdrop-filter: blur(16px);
+    }
+
+    .proof-header,
+    .proof-tabs,
+    .proof-footer {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 252, 0.9));
+        border-color: var(--color-border);
+    }
+
+    .proof-title {
+        color: var(--color-text);
+    }
+
+    .proof-subtitle,
+    .proof-row label,
+    .proof-check,
+    .proof-rule-note {
+        color: var(--color-text-soft);
+    }
+
+    .proof-body {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(246, 249, 252, 0.64));
+    }
+
+    .proof-tabs button {
+        border-radius: var(--radius-xs);
+    }
+
+    .proof-tabs button.active,
+    .proof-primary {
+        background: var(--gradient-accent);
+        border-color: transparent;
+        color: #fff;
+        box-shadow: 0 10px 22px rgba(22, 119, 184, 0.18);
+    }
+
+    .proof-row input,
+    .proof-row select,
+    .proof-preview,
+    .proof-regex-preview,
+    .proof-rule-note {
+        border-color: var(--color-border);
+        background: rgba(255, 255, 255, 0.9);
+        color: var(--color-text);
+        border-radius: var(--radius-sm);
+    }
+
+    .proof-row input:focus,
+    .proof-row select:focus {
+        border-color: var(--color-accent);
+        box-shadow: var(--focus-ring);
+    }
+
+    .proof-preview-head,
+    .proof-regex-head {
+        background: var(--color-surface-soft);
+        color: var(--color-text-soft);
+    }
+
+    .proof-preview-head span,
+    .proof-preview-row div,
+    .proof-preview-row,
+    .proof-regex-head span,
+    .proof-regex-row > span,
+    .proof-regex-row {
+        border-color: var(--color-border);
+    }
+
+    .proof-preview-row,
+    .proof-regex-row {
+        color: var(--color-text-soft);
+    }
+
+    .proof-preview-row.changed {
+        background: var(--color-accent-quiet);
+        color: var(--color-accent-deep);
+    }
+
+    .proof-footer {
+        color: var(--color-accent-deep);
+    }
+
     .sidebar-mask {
         background: rgba(23, 36, 52, 0.28);
         backdrop-filter: blur(4px);
@@ -3404,5 +4207,15 @@
     .indent {
         margin-left: 14px;
         padding-left: 24px;
+    }
+
+    @media (max-width: 768px) {
+        .proof-panel {
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: min(92vw, 390px);
+            max-width: 92vw;
+            z-index: 80;
+        }
     }
 </style>
