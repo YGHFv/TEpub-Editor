@@ -1,7 +1,6 @@
 # TEpub Editor 📚
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
 ![Version](https://img.shields.io/badge/Version-0.1.0-orange)
 
 **TEpub Editor** 是一款基于 **Tauri + Svelte 5 + Rust** 构建的高性能小说编辑器。
