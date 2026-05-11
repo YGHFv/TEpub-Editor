@@ -10,6 +10,10 @@
   export let onSort: (col: string) => void = () => {};
   export let activeTagFilters: string[] = [];
   export let onTagClick: (tag: string) => void = () => {};
+  export let showCover: boolean = false;
+  export let coverCache: Map<string, string> = new Map();
+
+  const COVER_COL_WIDTH = "44px";
 
   const dispatch = createEventDispatcher();
 
@@ -247,7 +251,7 @@
   }
 
   // 直接内联 colWidths 引用，确保 Svelte 能正确追踪依赖（仅引用 colWidth 函数会丢失 colWidths 依赖）
-  $: gridCols = columns
+  $: gridCols = (showCover ? `${COVER_COL_WIDTH} ` : "") + columns
     .map(c => (colWidths[c] ? `${colWidths[c]}px` : (DEFAULT_WIDTHS[c] || "80px")))
     .join(" ");
 </script>
@@ -258,6 +262,7 @@
     style="grid-template-columns: {gridCols}"
     on:contextmenu={handleHeaderContextMenu}
   >
+    {#if showCover}<span class="col-hdr col-cover-hdr" aria-hidden="true"></span>{/if}
     {#each columns as col, i}
       <span
         class="col-hdr"
@@ -285,12 +290,22 @@
     <div
       class="book-row"
       class:selected={selectedBook?.id === book.id}
+      class:has-cover={showCover}
       style="grid-template-columns: {gridCols}"
       on:click={() => dispatch("select", book)}
       on:dblclick={() => dispatch("open", book)}
       on:contextmenu={(e) => dispatch("context", { event: e, book })}
       data-context-type="library-book"
     >
+      {#if showCover}
+        <span class="col-cell col-cover-cell">
+          {#if coverCache.get(book.id)}
+            <img src={coverCache.get(book.id)} alt={book.title} />
+          {:else}
+            <span class="col-cover-placeholder {book.fileType}">{book.title[0] || "?"}</span>
+          {/if}
+        </span>
+      {/if}
       {#each columns as col}
         {#if col === "tags"}
           <span
@@ -452,6 +467,40 @@
   .col-primary { color: var(--color-text); font-weight: 600; }
   .col-muted { color: var(--color-muted); font-size: 12px; }
   .col-accent { color: var(--color-accent); font-weight: 700; font-size: 11px; }
+
+  /* 封面列（list-cover 视图）：表头占位、行内渲染缩略图 */
+  .col-cover-hdr { cursor: default; }
+  .col-cover-hdr:hover { background: transparent; }
+  .book-row.has-cover { align-items: center; padding-top: 4px; padding-bottom: 4px; }
+  .col-cover-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 50px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--color-surface-soft);
+  }
+  .col-cover-cell img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .col-cover-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-muted);
+  }
+  .col-cover-placeholder.epub {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
+  }
 
   /* 标签列：内部多个小 chip，水平排列；列宽不足时允许指针拖动横向滚动揭露 */
   .col-tags-cell {

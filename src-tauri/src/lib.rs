@@ -1475,6 +1475,89 @@ fn prepare_epub_for_open(epub_path: String) -> Result<EpubPrepareResult, String>
     Err("该 EPUB 可能经过非通用加密/混淆，当前版本暂无法自动处理".to_string())
 }
 
+// 入库前自动检测并修复 EPUB 加密 / 混淆 / 错误文件名。
+// 处理结果落到系统临时目录，调用方负责通过 IngestTempFile 回收。
+// 返回值：
+//   Ok(None)  ：源文件已是合法 EPUB，无需处理
+//   Ok(Some)  ：(临时清洗文件 path, 动作描述)
+//   Err       ：检测到非 ZIP 且无法用通用密钥解混淆
+fn try_prepare_epub_for_ingest(source: &Path) -> Result<Option<(PathBuf, String)>, String> {
+    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+
+    // 在系统临时目录构造一个"虚拟 source"，使 build_processed_epub_path /
+    // rebuild_epub_with_sanitized_names_from_bytes 把输出落在临时目录而非源目录。
+    let temp_dir = std::env::temp_dir();
+    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("book");
+    let virtual_source = temp_dir.join(format!(
+        "tepub_ingest_{}_{}.epub",
+        uuid::Uuid::new_v4(),
+        stem
+    ));
+
+    // Case 1：源已是 ZIP，检查伪加密位 + 文件名混淆
+    if is_zip_archive_bytes(&bytes) {
+        let mut bytes_mut = bytes;
+        let fixed_encryption_flag = clear_zip_encryption_flags(&mut bytes_mut);
+
+        if let Some(out_path) =
+            rebuild_epub_with_sanitized_names_from_bytes(&virtual_source, &bytes_mut, "")?
+        {
+            let action = if fixed_encryption_flag {
+                "已自动解除伪加密并修复文件名混淆"
+            } else {
+                "已自动修复文件名混淆"
+            };
+            return Ok(Some((out_path, action.to_string())));
+        }
+
+        if fixed_encryption_flag {
+            let out_path = build_processed_epub_path(&virtual_source, "");
+            fs::write(&out_path, &bytes_mut)
+                .map_err(|e| format!("写入修复文件失败: {}", e))?;
+            return Ok(Some((out_path, "已自动解除伪加密".to_string())));
+        }
+        return Ok(None);
+    }
+
+    // Case 2：源非 ZIP，尝试 XOR 解混淆
+    let mut candidate_keys: Vec<u8> = vec![0xFF, 0xA5, 0x5A];
+    if bytes.len() >= 4 {
+        let k0 = bytes[0] ^ 0x50;
+        if (bytes[1] ^ 0x4B) == k0 && (bytes[2] ^ 0x03) == k0 && (bytes[3] ^ 0x04) == k0 {
+            if !candidate_keys.contains(&k0) {
+                candidate_keys.insert(0, k0);
+            }
+        }
+    }
+    for key in candidate_keys {
+        let mut decoded = xor_bytes(&bytes, key);
+        let _ = clear_zip_encryption_flags(&mut decoded);
+        if is_zip_archive_bytes(&decoded) {
+            if let Some(out_path) =
+                rebuild_epub_with_sanitized_names_from_bytes(&virtual_source, &decoded, "")?
+            {
+                return Ok(Some((out_path, "已自动解混淆并修复可读格式".to_string())));
+            }
+            let out_path = build_processed_epub_path(&virtual_source, "");
+            fs::write(&out_path, &decoded)
+                .map_err(|e| format!("写入解混淆文件失败: {}", e))?;
+            return Ok(Some((out_path, "已自动解混淆并修复可读格式".to_string())));
+        }
+    }
+
+    Err("该 EPUB 可能经过非通用加密/混淆，当前版本暂无法自动处理".to_string())
+}
+
+// RAII：函数结束时自动删除入库流程产生的临时清洗文件
+struct IngestTempFile(Option<PathBuf>);
+impl Drop for IngestTempFile {
+    fn drop(&mut self) {
+        if let Some(p) = self.0.take() {
+            let _ = fs::remove_file(p);
+        }
+    }
+}
+
 #[tauri::command]
 async fn save_text_file(path: String, content: String) -> Result<(), String> {
     let mut file = fs::File::create(&path).map_err(|e| format!("无法创建: {}", e))?;
@@ -4684,8 +4767,37 @@ async fn add_book_to_library(
     // 提前解析一次 EPUB 元数据，用来：
     // 1) 渲染命名模板（{title}/{author}/{tags}…）
     // 2) 后续填充 BookEntry，省一次 IO
+    //
+    // 入库前自动尝试解除伪加密 / XOR 解混淆 / 修复文件名混淆。
+    // 若处理成功，effective_src 指向临时干净副本，后续 parse 与 copy 都用它；
+    // 函数返回时由 _epub_cleanup_guard 自动清理临时文件。
+    let epub_prep_result: Option<(PathBuf, String)> = if file_type == "epub" {
+        match try_prepare_epub_for_ingest(&src) {
+            Ok(Some(r)) => Some(r),
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!(
+                    "[library] EPUB 入库前处理失败 ({})，按原文件继续: {}",
+                    file_path, e
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if let Some((_, action)) = &epub_prep_result {
+        eprintln!("[library] EPUB 入库自动处理: {} ({})", action, file_path);
+    }
+    let _epub_cleanup_guard =
+        IngestTempFile(epub_prep_result.as_ref().map(|(p, _)| p.clone()));
+    let effective_src: PathBuf = epub_prep_result
+        .as_ref()
+        .map(|(p, _)| p.clone())
+        .unwrap_or_else(|| src.clone());
+
     let parsed_meta: Option<EpubParsedMeta> = if file_type == "epub" {
-        parse_epub_metadata(&src).ok()
+        parse_epub_metadata(&effective_src).ok()
     } else {
         None
     };
@@ -4695,7 +4807,9 @@ async fn add_book_to_library(
         .unwrap_or_default();
 
     // 决定文件最终位置
-    let final_file_path = if should_copy {
+    // 若 EPUB 已被入库前处理过，即使配置是 ref_only 也强制复制 —— 否则引用的还是加密源，没意义。
+    let force_copy_due_to_prep = epub_prep_result.is_some();
+    let final_file_path = if should_copy || force_copy_due_to_prep {
         let books_dir = library_books_dir(&app)?;
         ensure_dir(&books_dir)?;
 
@@ -4713,14 +4827,14 @@ async fn add_book_to_library(
         if dest.exists() {
             return Err(format!("BOOK_FILE_COLLISION:{}", target_name));
         }
-        fs::copy(&src, &dest).map_err(|e| format!("复制文件失败: {}", e))?;
+        fs::copy(&effective_src, &dest).map_err(|e| format!("复制文件失败: {}", e))?;
         dest.to_string_lossy().to_string()
     } else {
         // ref_only：保持原绝对路径
         src.to_string_lossy().to_string()
     };
 
-    let saved_filename = if should_copy {
+    let saved_filename = if should_copy || force_copy_due_to_prep {
         PathBuf::from(&final_file_path)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
@@ -4728,6 +4842,11 @@ async fn add_book_to_library(
     } else {
         original_filename
     };
+
+    // 入库前若做过处理（解密/解混淆），实际落盘大小与源不同；以最终文件为准
+    let file_size = fs::metadata(&final_file_path)
+        .map(|m| m.len())
+        .unwrap_or(file_size);
 
     let mut entry = BookEntry {
         id: id.clone(),

@@ -5,7 +5,6 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import LibraryGrid from "$lib/LibraryGrid.svelte";
-  import LibraryListCover from "$lib/LibraryListCover.svelte";
   import LibraryListSimple from "$lib/LibraryListSimple.svelte";
   import LibraryPreview from "$lib/LibraryPreview.svelte";
 
@@ -263,18 +262,23 @@
         parsed.previewMode = parsed.alwaysHidePreview ? "never" : "auto";
         delete parsed.alwaysHidePreview;
       }
+      if (parsed.viewMode === "grid" || parsed.viewMode === "list-cover" || parsed.viewMode === "list-simple") {
+        viewMode = parsed.viewMode;
+      }
+      delete parsed.viewMode;
       shelfSettings = { ...shelfSettings, ...parsed };
     } catch {}
   }
 
   function saveShelfSettings() {
-    localStorage.setItem("shelf-settings", JSON.stringify(shelfSettings));
+    localStorage.setItem("shelf-settings", JSON.stringify({ ...shelfSettings, viewMode }));
   }
 
   function cycleViewMode() {
     if (viewMode === "grid") viewMode = "list-cover";
     else if (viewMode === "list-cover") viewMode = "list-simple";
     else viewMode = "grid";
+    saveShelfSettings();
   }
 
   let filteredBooks: BookEntry[] = [];
@@ -1261,14 +1265,22 @@
           on:context={(e) => handleContextMenu(e.detail.event, e.detail.book)}
         />
       {:else if viewMode === "list-cover"}
-        <LibraryListCover
+        <LibraryListSimple
           books={filteredBooks}
-          {coverCache}
           {selectedBook}
           {formatFileSize}
+          columns={listColumns}
+          {sortColumn}
+          {sortAsc}
+          onSort={handleSort}
+          {activeTagFilters}
+          onTagClick={toggleTagFilter}
+          showCover={true}
+          {coverCache}
           on:select={(e) => selectedBook = e.detail}
           on:open={(e) => handleBookOpen(e.detail)}
           on:context={(e) => handleContextMenu(e.detail.event, e.detail.book)}
+          on:columnChange={(e) => listColumns = e.detail}
         />
       {:else}
         <LibraryListSimple
