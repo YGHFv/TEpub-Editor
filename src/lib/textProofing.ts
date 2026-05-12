@@ -239,13 +239,24 @@ function stripTrailingPinyin(text: string) {
 
 function cleanTitleBracketsLine(line: string) {
   const cleaned = line
-    .replace(/[（(【\[][^（）()\[\]【】]*[）)】\]]/g, "")
+    .replace(/[\uFF08(\u3010\[]([^\uFF08\uFF09()\[\]\u3010\u3011]*)[\uFF09)\u3011\]]/g, (match, inner: string) =>
+      isTrivialBracketContent(inner) ? match : "",
+    )
     .replace(/[ \t\u3000]+/g, " ")
-    .replace(/\s*([：:、.．\-—])\s*/g, "$1")
+    .replace(/\s*([\uFF1A:\u3001\uFF0C,.\uFF0E\-\u2014])\s*/g, "$1")
     .trim();
   if (cleaned === line.trim()) return line;
-  const indent = line.match(/^[\s　]*/)?.[0] ?? "";
+  const indent = line.match(/^[\s\u3000]*/)?.[0] ?? "";
   return cleaned ? `${indent}${cleaned}` : indent.trimEnd();
+}
+
+function isTrivialBracketContent(inner: string) {
+  const compact = normalizeSpaces(inner).replace(/\s+/g, "");
+  return (
+    /^[\u4E0A\u4E0B]+$/.test(compact) ||
+    /^[0-9]+$/.test(compact) ||
+    /^[\u4E00\u4E8C\u4E09\u56DB]+$/.test(compact)
+  );
 }
 
 function cleanPinyinLine(line: string) {
@@ -423,6 +434,8 @@ function isIncludedByScope(
   options: ProofTitleRewriteOptions,
   regex: RegExp | null,
 ) {
+  if (!hasExplicitNumberedTitle(kind, original)) return false;
+
   switch (options.scope) {
     case "volumes":
       return kind === "volume";
@@ -436,6 +449,21 @@ function isIncludedByScope(
     default:
       return true;
   }
+}
+
+function hasExplicitNumberedTitle(kind: "volume" | "chapter", original: string) {
+  const text = normalizeSpaces(original);
+  const num = String.raw`[0-9零〇一二两三四五六七八九十百千万]+`;
+  const sep = String.raw`(?:\s|[:：、，,.\-—]|$)`;
+
+  if (kind === "volume") {
+    return new RegExp(String.raw`^(?:第\s*${num}\s*卷|卷\s*${num})${sep}`).test(text);
+  }
+
+  return (
+    new RegExp(String.raw`^第\s*${num}\s*章${sep}`).test(text) ||
+    new RegExp(String.raw`^\d{1,5}${sep}`).test(text)
+  );
 }
 
 function getNodeKind(node: ProofTocNode): "volume" | "chapter" | null {

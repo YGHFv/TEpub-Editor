@@ -4094,6 +4094,10 @@ async fn rebuild_book_filenames(
 // ===== Library (书库) - Phase 1: 数据结构 / load / save =====
 // ============================================================
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 struct LibraryConfig {
@@ -4117,6 +4121,12 @@ struct LibraryConfig {
     /// 空字符串时回退到 "{title}-{author}"。
     #[serde(default)]
     naming_template: String,
+    #[serde(default = "default_true")]
+    close_library_on_txt_open: bool,
+    #[serde(default = "default_true")]
+    close_library_on_epub_open: bool,
+    #[serde(default)]
+    txt_editor_close_action: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

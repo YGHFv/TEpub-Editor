@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
     import { onMount, tick } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { listen, emit } from "@tauri-apps/api/event";
@@ -93,6 +93,7 @@
         timestamp: number;
         size: number;
     }
+    type ManualTitleKind = "Volume" | "Chapter" | "Ignore";
 
     // --- [2. 默认配置 (三大正则回归 & 新增动态生成规则)] ---
     interface CustomRegexRule {
@@ -263,6 +264,7 @@
     let fileContent = "";
     let tocTree: TocNode[] = [];
     let flatToc: FlatNode[] = [];
+    let manualTitleOverrides: Record<string, ManualTitleKind> = {};
     let stats = { volumes: 0, chapters: 0 };
     let activeChapterId = "";
     let userCollapsedVolumeKeys = new Set<string>();
@@ -739,14 +741,27 @@
     let showCloseDialog = false;
     let isDialogSaving = false;
     let lastGeneratedEpubPath = ""; // New state variable
+    let openedFromLibrary = false;
+    let txtEditorCloseAction: "exit" | "library" = "library";
+
+    async function closeTxtEditorWindow() {
+        localStorage.removeItem("app-crash-recovery");
+        if (openedFromLibrary) {
+            await getCurrentWindow().close();
+            return;
+        }
+        if (txtEditorCloseAction === "library") {
+            window.location.href = "/";
+            return;
+        }
+        await invoke("exit_app");
+    }
 
     function handleDialogSave() {
         isDialogSaving = true;
         saveFile()
             .then(async () => {
-                // After save, exit
-                await invoke("exit_app");
-                // Window destroys, state doesn't matter much but good practice
+                await closeTxtEditorWindow();
             })
             .catch(() => {
                 isDialogSaving = false;
@@ -754,9 +769,7 @@
     }
 
     async function handleDialogDiscard() {
-        // Discard changes: Clear cache and exit
-        localStorage.removeItem("app-crash-recovery");
-        await invoke("exit_app");
+        await closeTxtEditorWindow();
     }
 
     function handleDialogCancel() {
@@ -957,12 +970,22 @@
 
             // 6. 关闭拦截
             await appWindow.setTitle("TEpub-Editor-TXT");
+            try {
+                const sp = new URLSearchParams(window.location.search);
+                openedFromLibrary = sp.get("fromLibrary") === "1";
+                const data = await invoke<any>("load_library");
+                const action = data?.config?.txtEditorCloseAction;
+                if (action === "exit" || action === "library") {
+                    txtEditorCloseAction = action;
+                }
+            } catch (_) {}
             unlistenClose = await appWindow.onCloseRequested(async (event) => {
                 if (isModified) {
                     event.preventDefault();
                     showCloseDialog = true;
                 } else {
-                    await invoke("exit_app");
+                    event.preventDefault();
+                    await closeTxtEditorWindow();
                 }
             });
         };
@@ -973,12 +996,20 @@
         const handleSelectAll = () => {
             editorComponent?.selectAll();
         };
+        const handleContextMenuAction = (event: Event) => {
+            const detail = (event as CustomEvent).detail || {};
+            if (["make-chapter-title", "make-volume-title", "remove-title"].includes(detail.action)) {
+                applyEditorLineTitleAction(detail.action, detail.context);
+            }
+        };
         window.addEventListener("editor-select-all", handleSelectAll);
+        window.addEventListener("context-menu-action", handleContextMenuAction);
 
         return () => {
             if (unlistenClose) unlistenClose();
             if (unlistenDragDrop) unlistenDragDrop();
             window.removeEventListener("editor-select-all", handleSelectAll);
+            window.removeEventListener("context-menu-action", handleContextMenuAction);
         };
     });
 
@@ -1149,6 +1180,9 @@
             coverSearchMessage = automatic
                 ? `已自动使用 ${result.source} 封面`
                 : `已使用《${result.title || epubMeta.title}》封面`;
+            if (!automatic) {
+                coverSearchResults = [];
+            }
         } catch (e) {
             console.error("应用远程封面失败:", e);
             coverSearchMessage = automatic
@@ -1178,11 +1212,7 @@
                 return;
             }
 
-            const preferred = results.find((item) => item.preferred);
             coverSearchMessage = `找到 ${results.length} 个封面`;
-            if (preferred) {
-                await applyRemoteCover(preferred, true);
-            }
         } catch (e) {
             coverSearchMessage = `搜索封面失败：${e}`;
         } finally {
@@ -1475,18 +1505,101 @@
     }
 
     // --- TOC 解析与同步 (含双向绑定) ---
+    function manualTitleStorageKey() {
+        if (!filePath || !/^[A-Za-z]:[\\/]|[\\/]/.test(filePath)) return "";
+        return `manual-title-overrides:${filePath}`;
+    }
+
+    function loadManualTitleOverrides() {
+        const key = manualTitleStorageKey();
+        if (!key) {
+            manualTitleOverrides = {};
+            return;
+        }
+        try {
+            const parsed = JSON.parse(localStorage.getItem(key) || "{}");
+            manualTitleOverrides = Object.fromEntries(
+                Object.entries(parsed).filter(([, value]) =>
+                    value === "Volume" || value === "Chapter" || value === "Ignore",
+                ),
+            ) as Record<string, ManualTitleKind>;
+        } catch (_) {
+            manualTitleOverrides = {};
+        }
+    }
+
+    function saveManualTitleOverrides() {
+        const key = manualTitleStorageKey();
+        if (!key) return;
+        const entries = Object.entries(manualTitleOverrides).filter(([, value]) =>
+            value === "Volume" || value === "Chapter" || value === "Ignore",
+        );
+        if (entries.length === 0) {
+            localStorage.removeItem(key);
+        } else {
+            localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+        }
+    }
+
+    function recomputeChapterWordCounts(text: string, chapters: RawChapter[]) {
+        const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
+        const sorted = [...chapters].sort((a, b) => a.line_number - b.line_number);
+        for (let i = 0; i < sorted.length; i += 1) {
+            const start = Math.min(lines.length, sorted[i].line_number);
+            const end = Math.max(
+                start,
+                Math.min(lines.length, (sorted[i + 1]?.line_number ?? lines.length + 1) - 1),
+            );
+            sorted[i].word_count = lines
+                .slice(start, end)
+                .reduce((sum, line) => sum + line.trim().length, 0);
+        }
+        return sorted;
+    }
+
+    function mergeManualTitleOverrides(text: string, chapters: RawChapter[]) {
+        const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
+        const byLine = new Map<number, RawChapter>();
+
+        for (const chapter of chapters) {
+            const override = manualTitleOverrides[String(chapter.line_number)];
+            if (override === "Ignore") continue;
+            if (override === "Volume" || override === "Chapter") continue;
+            byLine.set(chapter.line_number, chapter);
+        }
+
+        for (const [lineKey, kind] of Object.entries(manualTitleOverrides)) {
+            if (kind !== "Volume" && kind !== "Chapter") continue;
+            const lineNumber = Number(lineKey);
+            if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > lines.length) continue;
+            const title = lines[lineNumber - 1]?.trim();
+            if (!title) continue;
+            byLine.set(lineNumber, {
+                title,
+                line_number: lineNumber,
+                level: kind === "Volume" ? 1 : 3,
+                is_meta: false,
+                word_count: 0,
+            });
+        }
+
+        return recomputeChapterWordCounts(text, [...byLine.values()]);
+    }
+
     async function scanToc(textOverride?: string) {
         const text = textOverride ?? fileContent;
         if (!text) return;
         try {
             // 调用 Rust 正则扫描
+            loadManualTitleOverrides();
             const rawList = await invoke<RawChapter[]>("scan_chapters", {
                 content: text,
                 rules: appSettings.customRegexRules,
             });
-            const tocItems = rawList.filter((item) =>
-                isLikelyTocTitle(item.title, item.level),
-            );
+            const tocItems = mergeManualTitleOverrides(text, rawList).filter((item) => {
+                const override = manualTitleOverrides[String(item.line_number)];
+                return override === "Volume" || override === "Chapter" || isLikelyTocTitle(item.title, item.level);
+            });
 
             const tree: TocNode[] = [];
             flatToc = [];
@@ -1658,6 +1771,25 @@
         handleScroll({ top: line, bottom: line, isAtBottom: false });
     }
 
+    async function applyEditorLineTitleAction(action: string, context: any) {
+        if (!editorComponent || !context) return;
+        const line = editorComponent.getLineAtClientPos(Number(context.clientX), Number(context.clientY));
+        if (!line) return;
+
+        if (action === "make-volume-title") {
+            manualTitleOverrides[String(line.number)] = "Volume";
+        } else if (action === "make-chapter-title") {
+            manualTitleOverrides[String(line.number)] = "Chapter";
+        } else if (action === "remove-title") {
+            manualTitleOverrides[String(line.number)] = "Ignore";
+        } else {
+            return;
+        }
+
+        saveManualTitleOverrides();
+        await tick();
+        await scanToc();
+    }
     // 统一处理章节跳转点击
     function handleChapterClick(id: string, line: number) {
         console.log("handleChapterClick", id, line);
@@ -1976,6 +2108,7 @@
         // MD5 应该在文件加载时已计算，防卫性保留
         if (!epubMeta.md5) await updateMd5(fileContent);
 
+        coverSearchResults = [];
         epubGenerationStatus = "generating";
         isLoading = true;
         try {
@@ -1993,9 +2126,11 @@
                 content: fileContent,
                 rules: appSettings.customRegexRules,
             });
-            chapters = chapters.filter((chapter) =>
-                isLikelyTocTitle(chapter.title, chapter.level),
-            );
+            loadManualTitleOverrides();
+            chapters = mergeManualTitleOverrides(fileContent, chapters).filter((chapter) => {
+                const override = manualTitleOverrides[String(chapter.line_number)];
+                return override === "Volume" || override === "Chapter" || isLikelyTocTitle(chapter.title, chapter.level);
+            });
 
             // 智能清洗
             const cleanRegex =
@@ -2040,6 +2175,20 @@
             epubGenerationStatus = "idle";
         } finally {
             isLoading = false;
+        }
+    }
+
+    async function openGeneratedEpubInEditor() {
+        if (!lastGeneratedEpubPath) return;
+        await openLocalFile(lastGeneratedEpubPath);
+    }
+
+    async function revealGeneratedEpub() {
+        if (!lastGeneratedEpubPath) return;
+        try {
+            await invoke("reveal_in_explorer", { path: lastGeneratedEpubPath });
+        } catch (e) {
+            await message("打开文件位置失败: " + e, { kind: "error" });
         }
     }
 
@@ -2151,6 +2300,8 @@
                     showEpubModal = true;
                     // 重置EPUB制作状态
                     epubGenerationStatus = "idle";
+                    coverSearchResults = [];
+                    coverSearchMessage = "";
                     loadCoverPreview();
                 }}>📚</button
             >
@@ -2927,7 +3078,6 @@
                                 <div class="cover-result-grid" aria-label="封面搜索结果">
                                     {#each coverSearchResults as result (result.image_url)}
                                         <button
-                                            class:preferred={result.preferred}
                                             class="cover-result-card"
                                             disabled={isCoverApplying}
                                             title={`${result.title}${result.source ? ` / ${result.source}` : ""}`}
@@ -2935,9 +3085,6 @@
                                         >
                                             <span class="cover-result-image-wrap">
                                                 <img src={result.image_url} alt={result.title || "封面候选"} loading="lazy" />
-                                                {#if result.preferred}
-                                                    <span class="cover-result-badge">优先</span>
-                                                {/if}
                                             </span>
                                             <span class="cover-result-info">
                                                 <span class="cover-result-title">{result.title || "未命名"}</span>
@@ -2949,10 +3096,24 @@
                             </div>
                         {/if}
 
+                        {#if epubGenerationStatus !== "idle"}
+                            <div class="epub-status-line" class:success={epubGenerationStatus === "success"}>
+                                {epubGenerationStatus === "generating" ? "正在制作 EPUB..." : "EPUB 制作完成"}
+                            </div>
+                        {/if}
+
                         <div class="epub-modal-footer">
                             <button class="epub-cancel" on:click={openAdvancedEpubMetadata}>
                                 高级选项
                             </button>
+                            {#if epubGenerationStatus === "success"}
+                                <button class="epub-cancel" on:click={openGeneratedEpubInEditor}>
+                                    用 EPUB 编辑器打开
+                                </button>
+                                <button class="epub-cancel" on:click={revealGeneratedEpub}>
+                                    打开文件位置
+                                </button>
+                            {/if}
                             <button
                                 class="epub-confirm"
                                 disabled={epubGenerationStatus === "generating"}
@@ -3998,6 +4159,7 @@
 
     .epub-modal-shell .p-body {
         min-width: 0;
+        min-height: 0;
         overflow: auto;
     }
 
@@ -4238,13 +4400,18 @@
         box-sizing: border-box;
         font-size: 13px;
         color: #444;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        max-height: calc(100vh - 150px);
     }
 
     .epub-main-layout {
         display: flex;
         gap: 24px;
-        margin-bottom: 20px;
+        margin-bottom: 12px;
         min-width: 0;
+        flex: 0 0 auto;
     }
 
     .epub-fields-column {
@@ -4256,8 +4423,11 @@
     }
 
     .epub-cover-column {
-        width: 190px;
+        width: 176px;
         flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
     }
 
     .set-row.compact {
@@ -4294,7 +4464,7 @@
 
     .epub-cover-preview {
         width: 100%;
-        height: 220px;
+        height: 170px;
         border: 2px dashed #eee;
         border-radius: 8px;
         display: flex;
@@ -4316,7 +4486,7 @@
     .epub-cover-preview img {
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        object-fit: contain;
     }
 
     .epub-cover-preview .no-cover {
@@ -4395,12 +4565,18 @@
     }
 
     .cover-results-panel {
-        margin: -4px 0 18px;
+        margin: 0 0 12px;
         padding: 12px;
         border: 1px solid var(--color-border);
         border-radius: 10px;
         background: rgba(255, 255, 255, 0.76);
         box-shadow: var(--shadow-xs);
+        display: flex;
+        flex: 0 1 auto;
+        flex-direction: column;
+        min-height: 0;
+        max-height: clamp(190px, 30vh, 310px);
+        overflow: hidden;
     }
 
     .cover-results-head {
@@ -4428,16 +4604,27 @@
 
     .cover-result-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-        gap: 10px;
-        max-height: 310px;
+        grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+        gap: 12px;
+        align-content: start;
+        grid-auto-rows: max-content;
+        max-height: none;
         padding: 2px 2px 4px;
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
     }
 
     .cover-result-card {
         position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
         min-width: 0;
+        width: 100%;
+        height: auto;
+        min-height: 0 !important;
         padding: 0;
         border: 1px solid var(--color-border);
         border-radius: 10px;
@@ -4449,10 +4636,6 @@
         transition: all 0.18s ease;
     }
 
-    .cover-result-card.preferred {
-        border-color: rgba(20, 168, 157, 0.85);
-    }
-
     .cover-result-card:hover:not(:disabled) {
         border-color: var(--color-accent);
         transform: translateY(-1px);
@@ -4462,32 +4645,27 @@
     .cover-result-image-wrap {
         position: relative;
         display: block;
+        width: 100%;
+        height: 168px;
+        min-height: 168px;
+        flex: 0 0 168px;
         background: #f3f7fa;
     }
 
     .cover-result-card img {
         display: block;
         width: 100%;
-        aspect-ratio: 3 / 4;
-        object-fit: cover;
-    }
-
-    .cover-result-badge {
-        position: absolute;
-        top: 5px;
-        right: 5px;
-        padding: 3px 6px;
-        border-radius: 999px;
-        background: rgba(20, 168, 157, 0.92);
-        color: #fff;
-        font-size: 11px;
-        line-height: 1.2;
+        height: 100%;
+        object-fit: contain;
     }
 
     .cover-result-info {
         display: grid;
         gap: 2px;
         padding: 7px 8px 8px;
+        min-width: 0;
+        width: 100%;
+        box-sizing: border-box;
     }
 
     .cover-result-title {
@@ -4512,11 +4690,31 @@
         text-overflow: ellipsis;
     }
 
+    .epub-status-line {
+        margin: -2px 0 12px;
+        padding: 10px 12px;
+        border: 1px solid rgba(31, 142, 186, 0.24);
+        border-radius: 8px;
+        background: rgba(31, 142, 186, 0.08);
+        color: var(--color-accent-deep);
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .epub-status-line.success {
+        border-color: rgba(20, 168, 157, 0.3);
+        background: rgba(20, 168, 157, 0.1);
+        color: #0b776f;
+    }
+
     .epub-modal-footer {
         display: flex;
         gap: 12px;
-        margin-top: 10px;
+        margin-top: auto;
+        padding-top: 10px;
         min-width: 0;
+        flex: 0 0 auto;
+        background: #fff;
     }
 
     .epub-modal-footer button {

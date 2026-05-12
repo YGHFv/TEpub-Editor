@@ -450,6 +450,9 @@
       changes: { from: 0, to: view.state.doc.length, insert: n },
     });
   }
+  export function getContent() {
+    return view ? view.state.doc.toString() : lastKnownDoc;
+  }
   export function scrollToLine(l: number, toTop: boolean = false) {
     if (!view) return;
     try {
@@ -487,6 +490,18 @@
     if (!sel.empty) {
       view.dispatch({ changes: { from: sel.from, to: sel.to, insert: t } });
     }
+  }
+  export function getLineAtClientPos(clientX: number, clientY: number) {
+    if (!view) return null;
+    const pos = view.posAtCoords({ x: clientX, y: clientY });
+    if (pos == null) return null;
+    const line = view.state.doc.lineAt(pos);
+    return { number: line.number, text: line.text };
+  }
+  export function replaceLine(lineNumber: number, text: string) {
+    if (!view) return;
+    const line = view.state.doc.line(Math.max(1, Math.min(lineNumber, view.state.doc.lines)));
+    view.dispatch({ changes: { from: line.from, to: line.to, insert: text } });
   }
   export function triggerUndo() {
     undo(view);

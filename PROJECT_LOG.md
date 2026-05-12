@@ -32,6 +32,159 @@ Main areas:
 
 ## Change History
 
+### 2026-05-12 19:20 +08:00
+
+Request: fix TXT editor right-click title actions so they do not add or remove numbering, prevent the custom title menu from appearing on EPUB creation form fields, then release version 0.5.3.
+
+Changes:
+
+- Changed TXT editor right-click title actions to store manual TOC overrides instead of rewriting the clicked line text.
+- `Set chapter title` and `Set volume title` now keep the original line content unchanged.
+- `Cancel title` now only ignores that line in the TOC; it does not remove existing numbering or title text.
+- EPUB export now uses the same merged manual TOC overrides as the editor sidebar.
+- Prevented the custom editor context menu from opening on normal input and textarea controls.
+- Bumped app version from 0.5.2 to 0.5.3.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `src/lib/ContextMenu.svelte`
+- `package.json`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed before the version bump.
+- `cargo check` finished successfully before the version bump.
+- `pnpm build` passed after the version bump.
+- `cargo check` finished successfully after the version bump.
+- `pnpm tauri build` completed and produced MSI/NSIS release bundles for 0.5.3.
+- Version 0.5.3 changes are prepared for GitHub push and release workflow trigger.
+
+### 2026-05-12 19:08 +08:00
+
+Request: fix the EPUB creation modal becoming mostly blank after the previous footer/search-result layout change.
+
+Changes:
+
+- Removed the fixed height from the EPUB creation modal shell.
+- Restored modal body auto-sizing when no cover search results are visible.
+- Kept cover search results internally scrollable by limiting only the results panel height.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- Running dev server received the Svelte style HMR update.
+
+### 2026-05-12 19:06 +08:00
+
+Request: fix cover-search thumbnails being compressed again and prevent old search results from appearing when starting EPUB creation.
+
+Changes:
+
+- Cleared cover search results when the EPUB creation modal is opened.
+- Cleared cover search results when EPUB generation starts.
+- Changed cover result grid rows to natural content height.
+- Replaced result thumbnail aspect-ratio sizing with a fixed image area height so internal scrolling cannot squash images.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- Running dev server received Svelte HMR updates.
+
+### 2026-05-12 19:01 +08:00
+
+Request: adjust the EPUB creation cover preview/search layout so the Advanced Options and Start buttons remain visible when cover search results are shown.
+
+Changes:
+
+- Set the EPUB creation modal to a bounded height and made its body use an internal flex layout.
+- Reduced the cover preview height and switched its image fitting to contained display.
+- Made the cover-search results panel consume the remaining body space and scroll internally.
+- Kept the footer action row fixed within the modal body so Advanced Options and Start Creation remain visible.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- Running dev server received the Svelte style HMR update.
+
+### 2026-05-12 18:30 +08:00
+
+Request: automatically collapse cover search results after the user clicks a result and applies it.
+
+Changes:
+
+- Cleared `coverSearchResults` after a manually selected remote cover is downloaded and applied.
+- Kept the success status message visible so the user still gets feedback after the result panel closes.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+
+### 2026-05-12 18:24 +08:00
+
+Request: address six TXT/EPUB workflow issues, fix the cover-search thumbnail aspect ratio after visual review, and restart the development environment.
+
+Changes:
+
+- Changed EPUB cover search so the search button only refreshes candidates; it no longer auto-applies a preferred source.
+- Removed the preferred-source badge from cover search results.
+- Fixed cover result cards so global button styles no longer compress thumbnails into horizontal strips; thumbnails now keep a book-cover ratio and use contained image fitting.
+- Restricted title rewrite/reorder selection to explicit numbered titles:
+  - volumes: explicit numbered volume headings only
+  - chapters: explicit numbered chapter headings or numeric-only headings only
+- Added TXT editor right-click actions for setting a line as a chapter title, setting it as a volume title, or removing title numbering.
+- Added library settings for whether opening TXT/EPUB editors hides the library window, and whether closing the TXT editor returns to the library or exits the app.
+- Changed TXT editor close handling so closing a child editor window no longer exits the whole app by default.
+- Added EPUB creation status feedback and post-build actions to open the generated EPUB in the EPUB editor or reveal it in Explorer.
+- Updated title-bracket cleanup to preserve trivial bracket contents such as up/down markers, Arabic digits, or the first four Chinese numerals.
+- Restarted the Tauri dev environment after clearing the stale processes using port `1420`.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `src/routes/+page.svelte`
+- `src/lib/Editor.svelte`
+- `src/lib/ContextMenu.svelte`
+- `src/lib/textProofing.ts`
+- `src-tauri/src/lib.rs`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `pnpm tauri dev` was restarted successfully; Vite is serving `http://localhost:1420/`.
+
+Caveats:
+
+- `pnpm check` still reports existing unrelated Svelte/type issues and accessibility warnings.
+- `.codex-dev.log` was created as a local dev-server log and is not part of the source changes.
+- Existing untracked `.claude/` and `AGENTS.md` remain untouched.
+
 ### 2026-05-12 13:31 +08:00
 
 Request: fix the EPUB creation modal layout regression, bump the app to version `0.5.2`, build locally, and push the update to GitHub Actions.

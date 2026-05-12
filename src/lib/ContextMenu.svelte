@@ -87,6 +87,7 @@
       target.tagName === "INPUT" ||
       target.tagName === "TEXTAREA" ||
       target.isContentEditable;
+    if (isInput && !contextNode) return;
     const hasSelection =
       (window.getSelection()?.toString().length ?? 0) > 0;
 
@@ -169,8 +170,12 @@
     } else if (isInEditor || isInput || hasSelection) {
       if (!isInEditor && !isInput && !hasSelection) return;
       e.preventDefault();
-      currentContext = { type: "editor" };
+      currentContext = { type: "editor", clientX: e.clientX, clientY: e.clientY };
       currentItems = [
+        { label: "设为章节标题", action: "make-chapter-title", icon: "H" },
+        { label: "设为卷标题", action: "make-volume-title", icon: "H1" },
+        { label: "取消标题", action: "remove-title", icon: "T" },
+        { separator: true, label: "", action: "" },
         { label: "剪切", action: "cut", icon: "✂️" },
         { label: "复制", action: "copy", icon: "📋" },
         { label: "粘贴", action: "paste", icon: "📄" },

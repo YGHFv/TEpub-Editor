@@ -42,6 +42,12 @@
     namingMode?: string;
     /** 命名模板，支持 {title}{author}{subtitle}{series}{maker}{publisher}{tags} */
     namingTemplate?: string;
+    /** 打开 TXT 编辑器后是否自动隐藏书库窗口 */
+    closeLibraryOnTxtOpen?: boolean;
+    /** 打开 EPUB 编辑器后是否自动隐藏书库窗口 */
+    closeLibraryOnEpubOpen?: boolean;
+    /** TXT 编辑器主窗口关闭行为："exit"=退出应用 / "library"=返回书库 */
+    txtEditorCloseAction?: "exit" | "library";
   }
 
   interface LibraryData {
@@ -50,7 +56,14 @@
   }
 
   let books: BookEntry[] = [];
-  let libraryConfig: LibraryConfig = { storageMode: "copy_portable", customWorkDir: "", updateModifiedOnEdit: false };
+  let libraryConfig: LibraryConfig = {
+    storageMode: "copy_portable",
+    customWorkDir: "",
+    updateModifiedOnEdit: false,
+    closeLibraryOnTxtOpen: true,
+    closeLibraryOnEpubOpen: true,
+    txtEditorCloseAction: "library",
+  };
   let selectedBook: BookEntry | null = null;
   let viewMode: "grid" | "list-cover" | "list-simple" = "grid";
   let searchQuery = "";
@@ -441,6 +454,9 @@
         storageMode: appMode?.isPortable ? "copy_portable" : "copy_custom",
         customWorkDir: trimmed,
         updateModifiedOnEdit: libraryConfig.updateModifiedOnEdit ?? false,
+        closeLibraryOnTxtOpen: libraryConfig.closeLibraryOnTxtOpen ?? true,
+        closeLibraryOnEpubOpen: libraryConfig.closeLibraryOnEpubOpen ?? true,
+        txtEditorCloseAction: libraryConfig.txtEditorCloseAction ?? "library",
       };
       // 写一份空 library.json 到该目录，建立 pointer
       await invoke("save_library", { data: { config: libraryConfig, books: [] } });
@@ -473,6 +489,11 @@
       }
       if (!libraryConfig.namingMode) libraryConfig.namingMode = "template";
       if (!libraryConfig.namingTemplate) libraryConfig.namingTemplate = "{title}-{author}";
+      if (typeof libraryConfig.closeLibraryOnTxtOpen !== "boolean") libraryConfig.closeLibraryOnTxtOpen = true;
+      if (typeof libraryConfig.closeLibraryOnEpubOpen !== "boolean") libraryConfig.closeLibraryOnEpubOpen = true;
+      if (libraryConfig.txtEditorCloseAction !== "exit" && libraryConfig.txtEditorCloseAction !== "library") {
+        libraryConfig.txtEditorCloseAction = "library";
+      }
       syncNamingPresetFromConfig();
       // 安装版没有 copy_portable 选项，旧配置或异常状态下自动迁移到 copy_custom
       if (appMode && !appMode.isPortable && libraryConfig.storageMode === "copy_portable") {
@@ -583,7 +604,7 @@
     const ext = filePath.split(".").pop()?.toLowerCase();
     const isEpub = ext === "epub";
     const encoded = encodeURIComponent(filePath);
-    const url = isEpub ? `/epub-editor?file=${encoded}` : `/editor?file=${encoded}`;
+    const url = isEpub ? `/epub-editor?file=${encoded}` : `/editor?file=${encoded}&fromLibrary=1`;
     const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
 
     try {
@@ -597,7 +618,8 @@
         center: true,
       });
 
-      if (opts.hideMain) {
+      const shouldHideMain = opts.hideMain && (isEpub ? libraryConfig.closeLibraryOnEpubOpen !== false : libraryConfig.closeLibraryOnTxtOpen !== false);
+      if (shouldHideMain) {
         await appWindow.hide();
         win.once("tauri://destroyed", async () => {
           await appWindow.show();
@@ -624,7 +646,7 @@
   async function openBook(book: BookEntry) {
     const encoded = encodeURIComponent(book.filePath);
     const isEpub = book.fileType === "epub";
-    const url = isEpub ? `/epub-editor?file=${encoded}` : `/editor?file=${encoded}`;
+    const url = isEpub ? `/epub-editor?file=${encoded}` : `/editor?file=${encoded}&fromLibrary=1`;
     const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
 
     try {
@@ -638,12 +660,15 @@
         center: true,
       });
 
-      await appWindow.hide();
+      const shouldHideMain = isEpub ? libraryConfig.closeLibraryOnEpubOpen !== false : libraryConfig.closeLibraryOnTxtOpen !== false;
+      if (shouldHideMain) {
+        await appWindow.hide();
 
-      win.once("tauri://destroyed", async () => {
-        await appWindow.show();
-        await appWindow.setFocus();
-      });
+        win.once("tauri://destroyed", async () => {
+          await appWindow.show();
+          await appWindow.setFocus();
+        });
+      }
     } catch (e: any) {
       console.error("打开编辑器失败:", e);
       await message(`打开失败: ${e}`, { title: "错误", kind: "error" });
@@ -1207,7 +1232,7 @@
           }
         } else {
           // .txt 默认或 --action=make-epub 都进 TXT 编辑器（编辑器内部有制作 EPUB 入口）
-          url = `/editor?file=${encoded}`;
+          url = `/editor?file=${encoded}&fromLibrary=1`;
           title = "TEpub-Editor-TXT";
           width = 1200;
           height = 740;
@@ -1223,12 +1248,15 @@
           center: true,
         });
 
-        await appWindow.hide();
+        const shouldHideMain = isEpub ? libraryConfig.closeLibraryOnEpubOpen !== false : libraryConfig.closeLibraryOnTxtOpen !== false;
+        if (shouldHideMain) {
+          await appWindow.hide();
 
-        win.once("tauri://destroyed", async () => {
-          await appWindow.show();
-          await appWindow.setFocus();
-        });
+          win.once("tauri://destroyed", async () => {
+            await appWindow.show();
+            await appWindow.setFocus();
+          });
+        }
       }
     } catch {}
 
@@ -1520,6 +1548,37 @@
           </section>
 
           <!-- 书架显示 -->
+          <section class="settings-section">
+            <div class="section-title">编辑器窗口</div>
+            <label class="set-row toggle-row">
+              <span class="set-label">打开 TXT 编辑器时隐藏书库</span>
+              <input
+                type="checkbox"
+                bind:checked={libraryConfig.closeLibraryOnTxtOpen}
+                on:change={saveLibraryConfig}
+              />
+            </label>
+            <label class="set-row toggle-row">
+              <span class="set-label">打开 EPUB 编辑器时隐藏书库</span>
+              <input
+                type="checkbox"
+                bind:checked={libraryConfig.closeLibraryOnEpubOpen}
+                on:change={saveLibraryConfig}
+              />
+            </label>
+            <div class="set-row">
+              <label class="set-label">关闭 TXT 编辑器</label>
+              <select
+                class="set-control"
+                bind:value={libraryConfig.txtEditorCloseAction}
+                on:change={saveLibraryConfig}
+              >
+                <option value="library">返回书库</option>
+                <option value="exit">直接退出应用</option>
+              </select>
+            </div>
+          </section>
+
           <section class="settings-section">
             <div class="section-title">书架显示</div>
             <div class="set-row">
