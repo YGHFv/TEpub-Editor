@@ -32,6 +32,121 @@ Main areas:
 
 ## Change History
 
+### 2026-05-12 08:14 +08:00
+
+Request: bump the app to version 0.5.1, build locally, push updates to GitHub, and trigger GitHub Actions.
+
+Changes:
+
+- Updated app version from `0.5.0` to `0.5.1` in:
+  - `package.json`
+  - `src-tauri/tauri.conf.json`
+  - `src-tauri/Cargo.toml`
+  - `src-tauri/Cargo.lock`
+- Prepared the current proofreading panel improvements for release.
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm tauri build` completed successfully.
+- Local release artifacts were produced:
+  - `src-tauri/target/release/bundle/msi/TEpub-Editor_0.5.1_x64_zh-CN.msi`
+  - `src-tauri/target/release/bundle/nsis/TEpub-Editor_0.5.1_x64-setup.exe`
+
+Caveats:
+
+- Build still emits existing Svelte accessibility warnings.
+- Tauri still warns that bundle identifier `com.tepubeditor.app` ends with `.app`.
+
+### 2026-05-12 08:09 +08:00
+
+Request: refine the proofreading panel tabs, TOC check button feedback, word count checks, and directory rewrite sequence highlighting.
+
+Changes:
+
+- Reordered proofreading tabs to: title check, directory rewrite, text check, simplified/traditional conversion.
+- Made the TOC header Check button open the title-check panel on pointer down so the visual response appears before mouse release.
+- Moved visible word-count check controls from settings into the proofreading title-check panel.
+- Added separate low/high word-count thresholds, defaulting to 2000 and 6000.
+- Word-count checks now report chapters below the low threshold or above the high threshold.
+- Directory rewrite defaults now use Chinese numbers for volumes and Arabic numbers for chapters.
+- Directory rewrite preview now marks only the actual sequence break point instead of highlighting every following chapter.
+- Directory rewrite original-title cells no longer get normal change highlighting; they only turn red for broken sequence rows.
+
+Touched files:
+
+- `src/lib/textProofing.ts`
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+- `tauri dev` was already running and `/editor` remained reachable, but generic browser verification still hits expected non-Tauri API errors outside the desktop shell.
+
+Caveats:
+
+- `pnpm build` still emits existing Svelte accessibility warnings outside this feature area.
+
+### 2026-05-12 07:56 +08:00
+
+Request: refine the TXT proofreading directory preview and merge the old top TOC check popup into the proofreading panel.
+
+Changes:
+
+- Added a "Check" tab inside the proofreading panel and routed the TOC header Check button to that tab.
+- Moved broken sequence, title content, and word count checks into the proofreading panel.
+- Kept the existing check result click behavior so each item still jumps to the matching editor position.
+- Made directory preview highlighting column-scoped: the original-title and replacement-title cells highlight independently.
+- Kept broken sequence emphasis on the original-title cell only, using red instead of row-wide highlighting.
+- Made original-title cells clickable so preview rows can jump to their source position.
+- Adjusted volume preview rows so the collapse control and volume title align cleanly.
+- Disabled the old standalone check popup path.
+- Removed unused row-wide preview highlight styles.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still emits existing Svelte accessibility warnings outside this feature area.
+
+### 2026-05-12 07:45 +08:00
+
+Request: improve proofreading directory rewrite preview with broken sequence highlighting, sticky/collapsible volumes, and separate volume/chapter number styles.
+
+Changes:
+
+- Directory rewrite preview now parses original title numbers.
+- Chapter rows whose original number does not match the expected current order are marked as broken sequence.
+- Broken sequence chapter rows render in red in the preview.
+- Volume rows in the directory preview are sticky while scrolling and remain visible until the next volume reaches the same position.
+- Volume rows can be collapsed/expanded, hiding or showing their chapter rows.
+- Directory rewrite options now expose separate number styles for volumes and chapters.
+- Title rewrite generation now uses the separate volume/chapter number styles.
+
+Touched files:
+
+- `src/lib/textProofing.ts`
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+- Offline sample confirmed that `第3章` in the second chapter position is flagged as broken sequence, while volume/chapter number styles can differ.
+
+Caveats:
+
+- Build still emits existing Svelte accessibility warnings outside this feature area.
+- `.claude/` and `AGENTS.md` remain untracked and untouched.
+
 ### 2026-05-12 07:34 +08:00
 
 Request: bump the app to version 0.5.0, build locally, push updates to GitHub, and trigger GitHub Actions.

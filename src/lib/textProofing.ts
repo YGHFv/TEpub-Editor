@@ -15,16 +15,22 @@ export interface ProofTocNode {
 export interface ProofTitleRewriteOptions {
   scope: ProofTitleScope;
   regex: string;
-  numberStyle: ProofNumberStyle;
+  volumeNumberStyle: ProofNumberStyle;
+  chapterNumberStyle: ProofNumberStyle;
   perVolume: boolean;
 }
 
 export interface ProofTitlePreviewRow {
+  id: string;
   line: number;
   kind: "volume" | "chapter";
+  volumeKey: string;
   original: string;
   replacement: string;
   changed: boolean;
+  sequenceBroken: boolean;
+  originalIndex: number | null;
+  expectedIndex: number;
 }
 
 export interface ProofTransformResult {
@@ -215,6 +221,77 @@ function formatNumber(num: number, style: ProofNumberStyle) {
   return style === "chinese" ? toChineseNumber(num) : String(num);
 }
 
+const CHINESE_NUMBER_MAP: Record<string, number> = {
+  零: 0,
+  〇: 0,
+  一: 1,
+  二: 2,
+  两: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+};
+
+function parseChineseNumber(text: string): number | null {
+  const input = text.replace(/\s+/g, "");
+  if (!input) return null;
+  if (/^\d+$/.test(input)) return Number.parseInt(input, 10);
+  if (!/^[零〇一二两三四五六七八九十百千万]+$/.test(input)) return null;
+
+  let total = 0;
+  let section = 0;
+  let number = 0;
+  for (const char of input) {
+    const digit = CHINESE_NUMBER_MAP[char];
+    if (digit !== undefined) {
+      number = digit;
+      continue;
+    }
+
+    if (char === "十") {
+      section += (number || 1) * 10;
+    } else if (char === "百") {
+      section += (number || 1) * 100;
+    } else if (char === "千") {
+      section += (number || 1) * 1000;
+    } else if (char === "万") {
+      total += (section + number) * 10000;
+      section = 0;
+    }
+    number = 0;
+  }
+
+  return total + section + number || null;
+}
+
+function parseTitleNumber(original: string): number | null {
+  const text = normalizeSpaces(original);
+  const standard = text.match(
+    /^第\s*([0-9零〇一二两三四五六七八九十百千万]+)\s*(?:章|卷|部|回|节)(?:\s|[:：、.．\-—]|$)/,
+  );
+  if (standard) return parseChineseNumber(standard[1]);
+
+  const chapter = text.match(/^Chapter\s*(\d+)(?:\s|[:：、.．\-—]|$)/i);
+  if (chapter) return Number.parseInt(chapter[1], 10);
+
+  const sequence = text.match(
+    /^序列\s*([0-9零〇一二两三四五六七八九十百千万]+)(?:\s|[:：、.．\-—]|$)/,
+  );
+  if (sequence) return parseChineseNumber(sequence[1]);
+
+  const bracketed = text.match(/^[（(【\[]?\s*(\d{1,5})\s*[）)】\]]?(?:\s*[\.\．、:：\-—]\s*|\s+|(?=[\u4e00-\u9fff]))/);
+  if (bracketed) return Number.parseInt(bracketed[1], 10);
+
+  const chinese = text.match(/^([一二三四五六七八九十百千万零〇两]{1,8})(?:\s*[\.\．、:：\-—]\s*|\s+)/);
+  if (chinese) return parseChineseNumber(chinese[1]);
+
+  return null;
+}
+
 function extractTitleBody(original: string) {
   let text = normalizeSpaces(original);
 
@@ -268,10 +345,12 @@ function buildReplacementTitle(
   kind: "volume" | "chapter",
   index: number,
   original: string,
-  numberStyle: ProofNumberStyle,
+  options: ProofTitleRewriteOptions,
 ) {
   const body = extractTitleBody(original);
   const prefix = kind === "volume" ? "卷" : "章";
+  const numberStyle =
+    kind === "volume" ? options.volumeNumberStyle : options.chapterNumberStyle;
   const head = `第${formatNumber(index, numberStyle)}${prefix}`;
   return body ? `${head} ${body}` : head;
 }
@@ -299,6 +378,7 @@ export function buildTitleRewritePreview(
 
   let volumeIndex = 1;
   const chapterCounters = new Map<string, number>();
+  const previousOriginalIndexes = new Map<string, number>();
   let currentVolumeKey = "root";
 
   for (const node of tocNodes) {
@@ -310,24 +390,32 @@ export function buildTitleRewritePreview(
 
     const original = lines[lineIndex].trim();
     if (kind === "volume") {
+      const volumeKey = node.id || `${node.line}:${node.title}`;
       const included = isIncludedByScope(kind, original, options, regex);
       if (included) {
+        const expectedIndex = volumeIndex;
         const replacement = buildReplacementTitle(
           kind,
-          volumeIndex++,
+          expectedIndex,
           original,
-          options.numberStyle,
+          options,
         );
         rows.push({
+          id: node.id || `volume:${node.line}`,
           line: node.line,
           kind,
+          volumeKey,
           original,
           replacement,
           changed: replacement !== original,
+          sequenceBroken: false,
+          originalIndex: parseTitleNumber(original),
+          expectedIndex,
         });
+        volumeIndex++;
       }
 
-      currentVolumeKey = node.id || `${node.line}:${node.title}`;
+      currentVolumeKey = volumeKey;
       if (!chapterCounters.has(currentVolumeKey)) {
         chapterCounters.set(currentVolumeKey, 1);
       }
@@ -347,14 +435,29 @@ export function buildTitleRewritePreview(
       kind,
       nextIndex,
       original,
-      options.numberStyle,
+      options,
     );
+    const originalIndex = parseTitleNumber(original);
+    const previousOriginalIndex = previousOriginalIndexes.get(groupKey);
+    const sequenceBroken =
+      originalIndex !== null &&
+      (previousOriginalIndex === undefined
+        ? originalIndex !== nextIndex
+        : originalIndex !== previousOriginalIndex + 1);
+    if (originalIndex !== null) {
+      previousOriginalIndexes.set(groupKey, originalIndex);
+    }
     rows.push({
+      id: node.id || `chapter:${node.line}`,
       line: node.line,
       kind,
+      volumeKey: currentVolumeKey,
       original,
       replacement,
       changed: replacement !== original,
+      sequenceBroken,
+      originalIndex,
+      expectedIndex: nextIndex,
     });
   }
 

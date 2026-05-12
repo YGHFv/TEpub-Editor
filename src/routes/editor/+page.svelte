@@ -100,7 +100,9 @@
             { level: 1, pattern: DEFAULT_VOLUME_REGEX },
             { level: 3, pattern: DEFAULT_CHAPTER_REGEX }
         ] as CustomRegexRule[],
-        wordCountThreshold: 8000,
+        wordCountMinThreshold: 2000,
+        wordCountMaxThreshold: 6000,
+        wordCountThreshold: 6000,
         clearHistoryOnSave: false,
         defaultEpubStyles: { "main.css": "", "font.css": "" },
         uiTheme: "modern" as "modern" | "classic" | "dark",
@@ -374,7 +376,8 @@
         return {
             scope: proofTitleScope,
             regex: proofTitleRegex,
-            numberStyle: proofNumberStyle,
+            volumeNumberStyle: proofVolumeNumberStyle,
+            chapterNumberStyle: proofChapterNumberStyle,
             perVolume: proofPerVolume,
         };
     }
@@ -384,7 +387,8 @@
         flatToc;
         proofTitleScope;
         proofTitleRegex;
-        proofNumberStyle;
+        proofVolumeNumberStyle;
+        proofChapterNumberStyle;
         proofPerVolume;
         try {
             proofPreviewRows = buildTitleRewritePreview(
@@ -400,12 +404,20 @@
                       ? "没有匹配到可重排标题"
                       : proofActiveTab === "builtin"
                         ? builtinRegexMessage
-                        : "没有可预览的标题";
+                        : proofActiveTab === "check"
+                          ? proofCheckMessage
+                          : "没有可预览的标题";
         } catch (e: any) {
             proofPreviewRows = [];
             proofPreviewMessage = `预览失败: ${e?.message || e}`;
         }
     }
+
+    $: visibleProofPreviewRows = proofPreviewRows.filter(
+        (row) => row.kind === "volume" || !proofCollapsedVolumeKeys.has(row.volumeKey),
+    );
+
+    $: proofCheckMessage = `断序 ${sequenceErrors.length} 项，标题 ${titleErrors.length} 项，字数 ${wordCountErrors.length} 项`;
 
     $: {
         fileContent;
@@ -458,6 +470,21 @@
             getProofTitleOptions(),
         );
         await applyProofResult(result);
+    }
+
+    function toggleProofVolumeCollapse(volumeKey: string) {
+        const next = new Set(proofCollapsedVolumeKeys);
+        if (next.has(volumeKey)) {
+            next.delete(volumeKey);
+        } else {
+            next.add(volumeKey);
+        }
+        proofCollapsedVolumeKeys = next;
+    }
+
+    function jumpToProofTitleRow(row: ProofTitlePreviewRow) {
+        editorComponent?.scrollToLine(row.line, true);
+        proofMessage = "已定位到原标题位置";
     }
 
     function toggleProofRegexRow(rowId: string, checked: boolean) {
@@ -517,12 +544,16 @@
     let currentMatchIndex = -1;
 
     // 校对面板状态
-    let proofActiveTab: "toc" | "builtin" | "convert" = "toc";
+    let proofActiveTab: "toc" | "builtin" | "check" | "convert" = "check";
     let proofTitleScope: ProofTitleScope = "all";
     let proofTitleRegex = "";
-    let proofNumberStyle: ProofNumberStyle = "chinese";
+    let proofVolumeNumberStyle: ProofNumberStyle = "chinese";
+    let proofChapterNumberStyle: ProofNumberStyle = "arabic";
     let proofPerVolume = false;
     let proofPreviewRows: ProofTitlePreviewRow[] = [];
+    let visibleProofPreviewRows: ProofTitlePreviewRow[] = [];
+    let proofCollapsedVolumeKeys = new Set<string>();
+    let proofCheckMessage = "";
     let proofPreviewMessage = "";
     let proofBuiltinRule: ProofBuiltinRuleId = "title-brackets";
     let proofRegexPreviewRows: ProofRegexPreviewRow[] = [];
@@ -695,6 +726,12 @@
             }
 
             // 应用主题设置
+            if (!Number.isFinite(Number(appSettings.wordCountMinThreshold))) {
+                appSettings.wordCountMinThreshold = DEFAULT_SETTINGS.wordCountMinThreshold;
+            }
+            if (!Number.isFinite(Number(appSettings.wordCountMaxThreshold))) {
+                appSettings.wordCountMaxThreshold = DEFAULT_SETTINGS.wordCountMaxThreshold;
+            }
             if (!appSettings.uiTheme) appSettings.uiTheme = "modern";
             applyTheme(appSettings.uiTheme);
 
@@ -1452,14 +1489,33 @@
         }
     }
 
+    function openProofCheckPanel() {
+        closeAllPanels();
+        showProofPanel = true;
+        proofActiveTab = "check";
+        isCheckModeOn = true;
+        scanToc();
+        runFullCheck();
+    }
+
+    function normalizeWordCheckSettings() {
+        let min = Number(appSettings.wordCountMinThreshold);
+        let max = Number(appSettings.wordCountMaxThreshold);
+        if (!Number.isFinite(min) || min < 0) min = DEFAULT_SETTINGS.wordCountMinThreshold;
+        if (!Number.isFinite(max) || max < 0) max = DEFAULT_SETTINGS.wordCountMaxThreshold;
+        appSettings.wordCountMinThreshold = Math.floor(min);
+        appSettings.wordCountMaxThreshold = Math.floor(max);
+        localStorage.setItem("app-settings", JSON.stringify(appSettings));
+        runFullCheck();
+    }
+
     function startLongPress(e: Event) {
         if (isMobile) {
             e.preventDefault();
             (document.activeElement as HTMLElement)?.blur();
         }
         longPressTimer = setTimeout(() => {
-            closeAllPanels();
-            showCheckPanel = true;
+            openProofCheckPanel();
             runFullCheck();
         }, 600);
     }
@@ -1467,12 +1523,7 @@
     // PC 端鼠标长按支持
     function handleMouseDown() {
         longPressTimer = setTimeout(() => {
-            // closeAllPanels(); // 允许和其他面板共存
-            showCheckPanel = true;
-            // 初始化位置
-            if (checkPanelPos.x === 0 && checkPanelPos.y === 0) {
-                checkPanelPos = { x: window.innerWidth / 2 - 150, y: 100 };
-            }
+            openProofCheckPanel();
             runFullCheck();
         }, 600);
     }
@@ -1592,12 +1643,12 @@
                     });
                 }
 
-                if (node.word_count > appSettings.wordCountThreshold) {
+                if (node.word_count < appSettings.wordCountMinThreshold || node.word_count > appSettings.wordCountMaxThreshold) {
                     wordCountErrors.push({
                         id: node.id,
                         title: node.title,
                         line: node.line,
-                        msg: `超标`,
+                        msg: node.word_count < appSettings.wordCountMinThreshold ? `低于 ${appSettings.wordCountMinThreshold}` : `高于 ${appSettings.wordCountMaxThreshold}`,
                         val: node.word_count,
                     });
                 }
@@ -1943,12 +1994,9 @@
                                 }}>⇅</button
                             >
                             <button
-                                class="mini-btn {isCheckModeOn ? 'active' : ''}"
-                                on:mousedown={handleMouseDown}
-                                on:mouseup={() => clearTimeout(longPressTimer)}
-                                on:mouseleave={() =>
-                                    clearTimeout(longPressTimer)}
-                                on:click={toggleCheckMode}>检查</button
+                                class="mini-btn {(isCheckModeOn || (showProofPanel && proofActiveTab === 'check')) ? 'active' : ''}"
+                                on:pointerdown={openProofCheckPanel}
+                                on:click={openProofCheckPanel}>检查</button
                             >
                         </div>
                     </div>
@@ -2042,16 +2090,23 @@
 
                 <div class="proof-tabs">
                     <button
+                        class:active={proofActiveTab === "check"}
+                        on:click={() => {
+                            proofActiveTab = "check";
+                            runFullCheck();
+                        }}>标题检查</button
+                    >
+                    <button
                         class:active={proofActiveTab === "toc"}
-                        on:click={() => (proofActiveTab = "toc")}>目录</button
+                        on:click={() => (proofActiveTab = "toc")}>目录重排</button
                     >
                     <button
                         class:active={proofActiveTab === "builtin"}
-                        on:click={() => (proofActiveTab = "builtin")}>内置正则</button
+                        on:click={() => (proofActiveTab = "builtin")}>文本检查</button
                     >
                     <button
                         class:active={proofActiveTab === "convert"}
-                        on:click={() => (proofActiveTab = "convert")}>繁简</button
+                        on:click={() => (proofActiveTab = "convert")}>繁简转换</button
                     >
                 </div>
 
@@ -2077,13 +2132,24 @@
                                     />
                                 </div>
                             {/if}
-                            <div class="proof-row">
-                                <label for="proof-number-style">数字</label>
-                                <select id="proof-number-style" bind:value={proofNumberStyle}>
-                                    <option value="chinese">一二三四</option>
-                                    <option value="arabic">1234</option>
-                                </select>
-                            </div>
+                            {#if proofTitleScope === "all" || proofTitleScope === "volumes" || proofTitleScope === "regex"}
+                                <div class="proof-row">
+                                    <label for="proof-volume-number-style">卷数字</label>
+                                    <select id="proof-volume-number-style" bind:value={proofVolumeNumberStyle}>
+                                        <option value="chinese">一二三四</option>
+                                        <option value="arabic">1234</option>
+                                    </select>
+                                </div>
+                            {/if}
+                            {#if proofTitleScope === "all" || proofTitleScope === "chapters" || proofTitleScope === "regex"}
+                                <div class="proof-row">
+                                    <label for="proof-chapter-number-style">章数字</label>
+                                    <select id="proof-chapter-number-style" bind:value={proofChapterNumberStyle}>
+                                        <option value="chinese">一二三四</option>
+                                        <option value="arabic">1234</option>
+                                    </select>
+                                </div>
+                            {/if}
                             <label class="proof-check">
                                 <input type="checkbox" bind:checked={proofPerVolume} />
                                 每卷章节都从第一章开始
@@ -2102,10 +2168,33 @@
                                 <span>原标题</span>
                                 <span>修改后</span>
                             </div>
-                            {#each proofPreviewRows as row}
-                                <div class:changed={row.changed} class="proof-preview-row">
-                                    <div title={row.original}>{row.original}</div>
-                                    <div title={row.replacement}>{row.replacement}</div>
+                            {#each visibleProofPreviewRows as row}
+                                <div
+                                    class:volume={row.kind === "volume"}
+                                    class="proof-preview-row"
+                                >
+                                    <div
+                                        class:sequence-broken={row.sequenceBroken}
+                                        role="button"
+                                        tabindex="0"
+                                        title={row.sequenceBroken ? `断序：当前应为第 ${row.expectedIndex} 章，原标题为第 ${row.originalIndex} 章` : row.original}
+                                        on:click={() => jumpToProofTitleRow(row)}
+                                        on:keydown={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                jumpToProofTitleRow(row);
+                                            }
+                                        }}
+                                    >
+                                        {#if row.kind === "volume"}
+                                            <button
+                                                class="proof-volume-toggle"
+                                                title={proofCollapsedVolumeKeys.has(row.volumeKey) ? "展开本卷" : "折叠本卷"}
+                                                on:click|stopPropagation={() => toggleProofVolumeCollapse(row.volumeKey)}
+                                            >{proofCollapsedVolumeKeys.has(row.volumeKey) ? "▶" : "▼"}</button>
+                                        {/if}
+                                        <span>{row.original}</span>
+                                    </div>
+                                    <div class:cell-changed={row.changed} title={row.replacement}>{row.replacement}</div>
                                 </div>
                             {:else}
                                 <div class="proof-empty">暂无预览</div>
@@ -2177,6 +2266,107 @@
                             {:else}
                                 <div class="proof-empty">暂无匹配</div>
                             {/each}
+                        </div>
+                    {:else if proofActiveTab === "check"}
+                        <div class="proof-check-panel">
+                            <div class="proof-section proof-word-check-controls">
+                                <div class="proof-row">
+                                    <label for="proof-word-min">低于字数</label>
+                                    <input
+                                        id="proof-word-min"
+                                        type="number"
+                                        min="0"
+                                        bind:value={appSettings.wordCountMinThreshold}
+                                        on:change={normalizeWordCheckSettings}
+                                    />
+                                </div>
+                                <div class="proof-row">
+                                    <label for="proof-word-max">高于字数</label>
+                                    <input
+                                        id="proof-word-max"
+                                        type="number"
+                                        min="0"
+                                        bind:value={appSettings.wordCountMaxThreshold}
+                                        on:change={normalizeWordCheckSettings}
+                                    />
+                                </div>
+                            </div>
+                            <div class="proof-actions-row check-actions">
+                                <button class="proof-primary inline" on:click={runFullCheck}>
+                                    重新检查
+                                </button>
+                            </div>
+
+                            <div class="proof-check-list">
+                                <div class="check-sec">
+                                    <div
+                                        class="sec-title"
+                                        role="button"
+                                        tabindex="0"
+                                        on:click={() => (checkCollapseState.seq = !checkCollapseState.seq)}
+                                        on:keydown={(e) => e.key === "Enter" && (checkCollapseState.seq = !checkCollapseState.seq)}
+                                    >
+                                        <span>{checkCollapseState.seq ? "▶" : "▼"} 断序检查 ({sequenceErrors.length})</span>
+                                    </div>
+                                    {#if !checkCollapseState.seq}
+                                        <div class="tag-list">
+                                            {#each sequenceErrors as e}
+                                                <button
+                                                    class="err-tag"
+                                                    on:click={() => handleChapterClick(e.id, e.line)}
+                                                >
+                                                    <span class="err-tag-msg">{e.msg}</span>
+                                                    <span class="err-tag-title">{e.title}</span>
+                                                </button>
+                                            {:else}<span class="toc-count">无</span>{/each}
+                                        </div>
+                                    {/if}
+                                </div>
+
+                                <div class="check-sec">
+                                    <div
+                                        class="sec-title"
+                                        role="button"
+                                        tabindex="0"
+                                        on:click={() => (checkCollapseState.title = !checkCollapseState.title)}
+                                        on:keydown={(e) => e.key === "Enter" && (checkCollapseState.title = !checkCollapseState.title)}
+                                    >
+                                        <span>{checkCollapseState.title ? "▶" : "▼"} 标题内容 ({titleErrors.length})</span>
+                                    </div>
+                                    {#if !checkCollapseState.title}
+                                        <div class="tag-list">
+                                            {#each titleErrors as e}
+                                                <button
+                                                    class="err-tag"
+                                                    on:click={() => handleChapterClick(e.id, e.line)}
+                                                >{e.title}</button>
+                                            {:else}<span class="toc-count">无</span>{/each}
+                                        </div>
+                                    {/if}
+                                </div>
+
+                                <div class="check-sec">
+                                    <div
+                                        class="sec-title"
+                                        role="button"
+                                        tabindex="0"
+                                        on:click={() => (checkCollapseState.word = !checkCollapseState.word)}
+                                        on:keydown={(e) => e.key === "Enter" && (checkCollapseState.word = !checkCollapseState.word)}
+                                    >
+                                        <span>{checkCollapseState.word ? "▶" : "▼"} 字数检查 ({wordCountErrors.length})</span>
+                                    </div>
+                                    {#if !checkCollapseState.word}
+                                        <div class="tag-list">
+                                            {#each wordCountErrors as e}
+                                                <button
+                                                    class="err-tag"
+                                                    on:click={() => handleChapterClick(e.id, e.line)}
+                                                >{e.title} {e.msg} ({e.val})</button>
+                                            {:else}<span class="toc-count">无</span>{/each}
+                                        </div>
+                                    {/if}
+                                </div>
+                            </div>
                         </div>
                     {:else}
                         <div class="proof-section">
@@ -2269,12 +2459,12 @@
                                 <input id="showLineBreaks" type="checkbox" bind:checked={appSettings.showLineBreaks} style="width: auto;"/>
                             </div>
                             <!-- 撤销开关 -->
-                            <div class="set-row">
-                                <label for="wth">单章字数检查:</label>
+                            <div class="set-row" style="display: none;">
+                                <label for="wth" style="display: none;">单章字数检查:</label>
                                 <input
                                     id="wth"
-                                    type="number"
-                                    bind:value={appSettings.wordCountThreshold}
+                                    type="hidden"
+                                    bind:value={appSettings.wordCountMaxThreshold}
                                     style="width: 80px;"
                                 />
                             </div>
@@ -2555,7 +2745,7 @@
         </div>
     {/if}
 
-    {#if showCheckPanel}
+    {#if false && showCheckPanel}
         <div
             class="check-panel"
             style="left: {checkPanelPos.x}px; top: {checkPanelPos.y}px;"
@@ -2927,7 +3117,7 @@
 
     .proof-tabs {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 6px;
         padding: 8px 10px;
         border-bottom: 1px solid #e7e7e7;
@@ -2969,6 +3159,12 @@
         max-height: 232px;
     }
 
+    .proof-word-check-controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
     .proof-row {
         display: flex;
         align-items: center;
@@ -2989,7 +3185,7 @@
     }
 
     .proof-row label {
-        width: 64px;
+        width: 72px;
         flex-shrink: 0;
     }
 
@@ -3073,7 +3269,7 @@
     .proof-preview-head {
         position: sticky;
         top: 0;
-        z-index: 1;
+        z-index: 3;
         background: #f4f6f8;
         color: #555;
         font-size: 12px;
@@ -3101,9 +3297,80 @@
         font-size: 12px;
     }
 
-    .proof-preview-row.changed {
+    .proof-preview-row.volume {
+        position: sticky;
+        top: 31px;
+        z-index: 2;
+        background: #f8fafc;
+        color: #2d4d64;
+        font-weight: 800;
+        box-shadow: 0 1px 0 #e6edf3;
+    }
+
+    .proof-preview-row.volume .cell-changed {
+        background: #edf8ff;
+    }
+
+    .proof-preview-row .sequence-broken {
+        background: #fff3f3;
+        color: #b42318;
+    }
+
+    .proof-preview-row .cell-changed {
         background: #f3fbff;
         color: #1f4f6b;
+    }
+
+    .proof-preview-row > div:first-child {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+    }
+
+    .proof-preview-row > div:first-child > span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .proof-volume-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        min-width: 20px;
+        margin: 0 6px 0 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        box-shadow: none;
+        font-size: 11px;
+        vertical-align: middle;
+    }
+
+    .proof-check-panel {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow: hidden;
+    }
+
+    .proof-check-list {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .check-actions {
+        grid-template-columns: 1fr;
     }
 
     .proof-empty {
@@ -3618,19 +3885,6 @@
     }
 
     /* 检查面板样式 */
-    .check-panel {
-        position: fixed;
-        width: 300px;
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(8px);
-        border: 1px solid rgba(0, 0, 0, 0.1);
-        border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-        z-index: 1000;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-    }
     .check-sec {
         padding: 8px 12px;
         border-bottom: 1px solid #eee;
@@ -3897,9 +4151,30 @@
         color: var(--color-text-soft);
     }
 
-    .proof-preview-row.changed {
+    .proof-preview-row.volume {
+        background: var(--color-surface-soft);
+        color: var(--color-text);
+        box-shadow: 0 1px 0 var(--color-border);
+    }
+
+    .proof-preview-row.volume .cell-changed {
+        background: var(--color-accent-quiet);
+    }
+
+    .proof-preview-row .sequence-broken {
+        background: var(--color-danger-soft);
+        color: var(--color-danger);
+    }
+
+    .proof-preview-row .cell-changed {
         background: var(--color-accent-quiet);
         color: var(--color-accent-deep);
+    }
+
+    .proof-check-list {
+        border-color: var(--color-border);
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: var(--radius-sm);
     }
 
     .proof-footer {
@@ -4016,8 +4291,7 @@
     }
 
     .dialog,
-    .modal-content,
-    .check-panel {
+    .modal-content {
         background: var(--color-surface-raised);
         border: 1px solid rgba(255, 255, 255, 0.78);
         border-radius: var(--radius-lg);
@@ -4120,11 +4394,6 @@
         border-color: var(--color-accent);
         background: var(--color-accent-quiet);
         box-shadow: var(--shadow-sm);
-    }
-
-    .check-panel {
-        width: 320px;
-        overflow: hidden;
     }
 
     .check-sec {
