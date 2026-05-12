@@ -181,6 +181,15 @@
     let editorContentDiv: HTMLElement | null = null;
     let epubCodeEditorComponent: EpubCodeEditor | null = null;
 
+    async function closeEpubEditorWindow() {
+        const appWindow = getCurrentWindow();
+        if (appWindow.label === "main") {
+            window.location.href = "/";
+            return;
+        }
+        await appWindow.destroy();
+    }
+
     // 禁用预览iframe的右键菜单
     $: if (previewIframe && previewContent) {
         // 等待iframe加载完成
@@ -1142,6 +1151,9 @@
                             event.preventDefault();
                             closeContext = "app";
                             showCloseDialog = true;
+                        } else if (appWindow.label === "main") {
+                            event.preventDefault();
+                            await closeEpubEditorWindow();
                         }
                     },
                 );
@@ -3184,8 +3196,7 @@
                 modifiedFiles.clear();
                 modifiedFiles = modifiedFiles;
 
-                const appWindow = getCurrentWindow();
-                await appWindow.destroy();
+                await closeEpubEditorWindow();
             } catch (e) {
                 isSaving = false;
                 await confirm(`保存部分文件失败: ${e}`, { kind: "error" });
@@ -3210,8 +3221,7 @@
             }
         } else {
             // App Logic: Discard all
-            const appWindow = getCurrentWindow();
-            await appWindow.destroy();
+            await closeEpubEditorWindow();
         }
         resetDialog();
     }

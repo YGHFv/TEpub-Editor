@@ -32,6 +32,119 @@ Main areas:
 
 ## Change History
 
+### 2026-05-12 22:54 +08:00
+
+Request: bump TEpub-Editor to 0.5.4, build locally, then push updates to GitHub and trigger Actions.
+
+Changes:
+
+- Bumped app version from 0.5.3 to 0.5.4.
+- Included the pending cover-search, cover-layout, TXT/EPUB close behavior, and context-menu fixes in the release candidate.
+
+Touched files:
+
+- `package.json`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` finished successfully.
+- `pnpm tauri build` completed and produced MSI/NSIS release bundles for 0.5.4.
+- GitHub push is pending in this workflow.
+
+### 2026-05-12 22:50 +08:00
+
+Request: prevent the TXT-only title context menu from appearing in the EPUB editor text area, and reduce cases where closing TXT/EPUB editors closes the whole app.
+
+Changes:
+
+- Added an `enableTitleActions` switch to the shared context menu component.
+- Enabled title actions only on the TXT editor page.
+- Left the EPUB editor CodeMirror area with normal edit actions only.
+- Added an EPUB editor close helper that returns to the library when the current window is the main window, and only destroys child editor windows.
+- Used that helper for EPUB close-confirm save/discard flows and for clean main-window close requests.
+
+Touched files:
+
+- `src/lib/ContextMenu.svelte`
+- `src/routes/editor/+page.svelte`
+- `src/routes/epub-editor/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` finished successfully.
+
+### 2026-05-12 22:38 +08:00
+
+Request: restore the TXT editor right-click menu after the input-field context-menu guard made it stop appearing.
+
+Changes:
+
+- Fixed the context-menu input guard so CodeMirror's contenteditable editor surface is still treated as the editor.
+- Plain input, textarea, and non-editor contenteditable fields still keep their native right-click behavior.
+
+Touched files:
+
+- `src/lib/ContextMenu.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+
+### 2026-05-12 22:36 +08:00
+
+Request: fix the first row of cover search results still not showing fully, and fix dev-mode TXT editor close actions not returning to the library or exiting the app correctly.
+
+Changes:
+
+- Increased the cover search results panel height so a full first row can fit after switching thumbnails to `3:4`.
+- Narrowed cover-result cards to keep one row shorter and more stable inside the modal.
+- Removed long image alt text from result thumbnails so broken remote images do not render huge text inside the image frame.
+- Changed TXT editor close handling so the configured `exit` action wins even when the editor was opened from the library.
+- Changed return-to-library for library-opened TXT editor windows to use `destroy()` instead of `close()` to bypass recursive close interception in dev mode.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `cargo check` finished successfully.
+- `pnpm build` passed.
+
+### 2026-05-12 19:42 +08:00
+
+Request: fix EPUB cover preview still hiding part of the cover, make cover search results closer to expected Bing image results, treat `icode.qq.com` as a preferred source, and use the normal web-novel cover ratio.
+
+Changes:
+
+- Changed the EPUB creation cover preview to a `3:4` web-novel cover ratio.
+- Changed cover-search result thumbnails to the same `3:4` ratio and kept `object-fit: contain`.
+- Moved the hover hint into a small pill so it no longer spans and blocks the whole bottom edge of the cover.
+- Switched cover search to `cn.bing.com` and made the first query use the book title directly.
+- Added merged fallback queries for title + author and title + novel cover while keeping title matches weighted highest.
+- Added `icode.qq.com` to preferred cover sources and boosted portrait-like cover dimensions.
+- Updated the cover-results helper text to describe ranking instead of implying an automatic preferred-cover apply.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `src-tauri/src/lib.rs`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `cargo check` finished successfully.
+- `pnpm build` passed.
+
 ### 2026-05-12 19:20 +08:00
 
 Request: fix TXT editor right-click title actions so they do not add or remove numbering, prevent the custom title menu from appearing on EPUB creation form fields, then release version 0.5.3.

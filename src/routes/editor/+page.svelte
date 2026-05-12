@@ -743,18 +743,21 @@
     let lastGeneratedEpubPath = ""; // New state variable
     let openedFromLibrary = false;
     let txtEditorCloseAction: "exit" | "library" = "library";
+    let isClosingEditorWindow = false;
 
     async function closeTxtEditorWindow() {
+        if (isClosingEditorWindow) return;
+        isClosingEditorWindow = true;
         localStorage.removeItem("app-crash-recovery");
+        if (txtEditorCloseAction === "exit") {
+            await invoke("exit_app");
+            return;
+        }
         if (openedFromLibrary) {
-            await getCurrentWindow().close();
+            await getCurrentWindow().destroy();
             return;
         }
-        if (txtEditorCloseAction === "library") {
-            window.location.href = "/";
-            return;
-        }
-        await invoke("exit_app");
+        window.location.href = "/";
     }
 
     function handleDialogSave() {
@@ -980,6 +983,7 @@
                 }
             } catch (_) {}
             unlistenClose = await appWindow.onCloseRequested(async (event) => {
+                if (isClosingEditorWindow) return;
                 if (isModified) {
                     event.preventDefault();
                     showCloseDialog = true;
@@ -3073,7 +3077,7 @@
                             <div class="cover-results-panel">
                                 <div class="cover-results-head">
                                     <span>封面结果</span>
-                                    <small>点击图片使用，优先来源会自动尝试填充</small>
+                                    <small>点击图片使用，结果按书名和封面来源排序</small>
                                 </div>
                                 <div class="cover-result-grid" aria-label="封面搜索结果">
                                     {#each coverSearchResults as result (result.image_url)}
@@ -3084,7 +3088,7 @@
                                             on:click={() => applyRemoteCover(result)}
                                         >
                                             <span class="cover-result-image-wrap">
-                                                <img src={result.image_url} alt={result.title || "封面候选"} loading="lazy" />
+                                                <img src={result.image_url} alt="" loading="lazy" aria-hidden="true" />
                                             </span>
                                             <span class="cover-result-info">
                                                 <span class="cover-result-title">{result.title || "未命名"}</span>
@@ -3316,7 +3320,7 @@
 </main>
 
 <!-- Context Menu -->
-<ContextMenu />
+<ContextMenu enableTitleActions={true} />
 
 {#if showCloseDialog}
     <div class="dialog-overlay">
@@ -4423,7 +4427,7 @@
     }
 
     .epub-cover-column {
-        width: 176px;
+        width: 162px;
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
@@ -4464,7 +4468,8 @@
 
     .epub-cover-preview {
         width: 100%;
-        height: 170px;
+        aspect-ratio: 3 / 4;
+        height: auto;
         border: 2px dashed #eee;
         border-radius: 8px;
         display: flex;
@@ -4487,6 +4492,7 @@
         width: 100%;
         height: 100%;
         object-fit: contain;
+        object-position: center;
     }
 
     .epub-cover-preview .no-cover {
@@ -4503,12 +4509,15 @@
 
     .cover-hint {
         position: absolute;
-        bottom: 0;
-        width: 100%;
-        background: rgba(0,0,0,0.5);
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        width: auto;
+        border-radius: 999px;
+        background: rgba(0,0,0,0.58);
         color: white;
         font-size: 11px;
-        padding: 4px 0;
+        padding: 4px 8px;
         text-align: center;
         opacity: 0;
         transition: opacity 0.2s;
@@ -4575,7 +4584,7 @@
         flex: 0 1 auto;
         flex-direction: column;
         min-height: 0;
-        max-height: clamp(190px, 30vh, 310px);
+        max-height: clamp(300px, 40vh, 420px);
         overflow: hidden;
     }
 
@@ -4604,7 +4613,8 @@
 
     .cover-result-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(96px, 116px));
+        justify-content: start;
         gap: 12px;
         align-content: start;
         grid-auto-rows: max-content;
@@ -4646,9 +4656,10 @@
         position: relative;
         display: block;
         width: 100%;
-        height: 168px;
-        min-height: 168px;
-        flex: 0 0 168px;
+        aspect-ratio: 3 / 4;
+        height: auto;
+        min-height: 0;
+        flex: 0 0 auto;
         background: #f3f7fa;
     }
 

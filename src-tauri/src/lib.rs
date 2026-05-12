@@ -1,4 +1,4 @@
-use chardetng::EncodingDetector;
+﻿use chardetng::EncodingDetector;
 use fancy_regex::Regex;
 use md5;
 use once_cell::sync::Lazy;
@@ -1632,13 +1632,16 @@ fn is_preferred_cover_source(image_url: &str, page_url: &str, source: &str) -> b
     let page = page_url.to_lowercase();
     let source = source.to_lowercase();
     image.contains("bookcover.yuewen.com")
+        || image.contains("icode.qq.com")
         || image.contains("p9-novel-sign.byteimg.com")
         || image.contains("fanqienovel.com")
         || page.contains("m.qidian.com")
+        || page.contains("icode.qq.com")
         || page.contains("bookcover.yuewen.com")
         || page.contains("fanqienovel.com")
         || page.contains("p9-novel-sign.byteimg.com")
         || source.contains("m.qidian.com")
+        || source.contains("icode.qq.com")
         || source.contains("bookcover.yuewen.com")
         || source.contains("fanqienovel.com")
         || source.contains("p9-novel-sign.byteimg.com")
@@ -1660,39 +1663,32 @@ fn host_from_url(url: &str) -> String {
         .unwrap_or_default()
 }
 
+fn json_num(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+    for key in keys {
+        if let Some(number) = value.get(*key).and_then(|v| v.as_f64()) {
+            return Some(number);
+        }
+        if let Some(text) = value.get(*key).and_then(|v| v.as_str()) {
+            if let Ok(number) = text.parse::<f64>() {
+                return Some(number);
+            }
+        }
+    }
+    None
+}
+
 #[tauri::command]
 async fn search_book_covers(title: String, author: String) -> Result<Vec<CoverSearchResult>, String> {
     let clean_title = title.trim();
     let clean_author = author.trim();
-    if clean_title.is_empty() || clean_title == "书名" {
+    if clean_title.is_empty() || clean_title == "书名" || clean_title == "涔﹀悕" {
         return Err("请先填写书名".to_string());
     }
 
-    let query_text = if clean_author.is_empty() || clean_author == "作者" {
-        format!("{} 小说 封面", clean_title)
-    } else {
-        format!("{} {} 小说 封面", clean_title, clean_author)
-    };
-    let query = percent_encode_component(&query_text);
-    let search_url = format!(
-        "https://www.bing.com/images/search?q={}&form=HDRSC2&first=1",
-        query
-    );
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) TEpub-Editor/0.5")
         .build()
         .map_err(|e| format!("初始化封面搜索失败: {}", e))?;
-    let html = client
-        .get(&search_url)
-        .header("Referer", "https://www.bing.com/images")
-        .header("Accept-Language", "zh-CN,zh;q=0.9")
-        .send()
-        .await
-        .map_err(|e| format!("搜索封面失败: {}", e))?
-        .text()
-        .await
-        .map_err(|e| format!("读取封面搜索结果失败: {}", e))?;
-
     let image_meta_re = Regex::new(r#"m="([^"]+)""#)
         .map_err(|e| format!("封面结果解析失败: {}", e))?;
     let mut results: Vec<(i32, CoverSearchResult)> = Vec::new();
@@ -1700,99 +1696,148 @@ async fn search_book_covers(title: String, author: String) -> Result<Vec<CoverSe
     let title_key = compact_match_key(clean_title);
     let author_key = compact_match_key(clean_author);
 
-    for (idx, item) in image_meta_re.captures_iter(&html).enumerate() {
-        let captures = match item {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        let raw_meta = captures.get(1).map(|m| m.as_str()).unwrap_or("");
-        let meta_text = html_unescape_basic(raw_meta);
-        let meta = match serde_json::from_str::<serde_json::Value>(&meta_text) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        let image_url = match meta
-            .get("murl")
-            .and_then(|value| value.as_str())
-            .or_else(|| meta.get("turl").and_then(|value| value.as_str()))
-        {
-            Some(url) => normalize_cover_url(url),
-            None => continue,
-        };
-        if image_url.is_empty()
-            || !(image_url.starts_with("https://") || image_url.starts_with("http://"))
-            || !seen.insert(image_url.clone())
-        {
-            continue;
-        }
+    let mut query_texts = vec![clean_title.to_string()];
+    if !clean_author.is_empty() && clean_author != "作者" && clean_author != "浣滆€?" {
+        query_texts.push(format!("{} {}", clean_title, clean_author));
+    }
+    query_texts.push(format!("{} 小说封面", clean_title));
 
-        let page_url = meta
-            .get("purl")
-            .and_then(|value| value.as_str())
-            .map(normalize_cover_url)
-            .unwrap_or_default();
-        let result_title = meta
-            .get("t")
-            .and_then(|value| value.as_str())
-            .map(html_unescape_basic)
-            .unwrap_or_else(|| clean_title.to_string());
-        let id = meta
-            .get("md5")
-            .and_then(|value| value.as_str())
-            .or_else(|| meta.get("cid").and_then(|value| value.as_str()))
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| idx.to_string());
-        let source = {
-            let page_host = host_from_url(&page_url);
-            if page_host.is_empty() {
-                host_from_url(&image_url)
-            } else {
-                page_host
+    for (query_idx, query_text) in query_texts.iter().enumerate() {
+        let query = percent_encode_component(query_text);
+        let search_url = format!(
+            "https://cn.bing.com/images/search?q={}&form=HDRSC2&first=1",
+            query
+        );
+        let html = client
+            .get(&search_url)
+            .header("Referer", "https://cn.bing.com/images")
+            .header("Accept-Language", "zh-CN,zh;q=0.9")
+            .send()
+            .await
+            .map_err(|e| format!("搜索封面失败: {}", e))?
+            .text()
+            .await
+            .map_err(|e| format!("读取封面搜索结果失败: {}", e))?;
+
+        for (idx, item) in image_meta_re.captures_iter(&html).enumerate() {
+            let captures = match item {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let raw_meta = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+            let meta_text = html_unescape_basic(raw_meta);
+            let meta = match serde_json::from_str::<serde_json::Value>(&meta_text) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            let image_url = match meta
+                .get("murl")
+                .and_then(|value| value.as_str())
+                .or_else(|| meta.get("turl").and_then(|value| value.as_str()))
+            {
+                Some(url) => normalize_cover_url(url),
+                None => continue,
+            };
+            if image_url.is_empty()
+                || !(image_url.starts_with("https://") || image_url.starts_with("http://"))
+                || !seen.insert(image_url.clone())
+            {
+                continue;
             }
-        };
-        let preferred = is_preferred_cover_source(&image_url, &page_url, &source);
 
-        let result_title_key = compact_match_key(&result_title);
-        let page_key = compact_match_key(&page_url);
-        let mut score = if preferred { 100 } else { 0 };
-        if !title_key.is_empty() && result_title_key == title_key {
-            score += 80;
-        } else if !title_key.is_empty()
-            && (result_title_key.contains(&title_key)
-                || title_key.contains(&result_title_key)
-                || page_key.contains(&title_key))
-        {
-            score += 35;
-        }
-        if !author_key.is_empty()
-            && (result_title_key.contains(&author_key) || page_key.contains(&author_key))
-        {
-            score += 30;
-        }
-        score -= idx as i32;
-
-        results.push((
-            score,
-            CoverSearchResult {
-                id,
-                title: if result_title.trim().is_empty() {
-                    clean_title.to_string()
+            let page_url = meta
+                .get("purl")
+                .and_then(|value| value.as_str())
+                .map(normalize_cover_url)
+                .unwrap_or_default();
+            let result_title = meta
+                .get("t")
+                .and_then(|value| value.as_str())
+                .map(html_unescape_basic)
+                .unwrap_or_else(|| clean_title.to_string());
+            let id = meta
+                .get("md5")
+                .and_then(|value| value.as_str())
+                .or_else(|| meta.get("cid").and_then(|value| value.as_str()))
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| format!("{}-{}", query_idx, idx));
+            let source = {
+                let page_host = host_from_url(&page_url);
+                if page_host.is_empty() {
+                    host_from_url(&image_url)
                 } else {
-                    result_title
+                    page_host
+                }
+            };
+            let preferred = is_preferred_cover_source(&image_url, &page_url, &source);
+
+            let result_title_key = compact_match_key(&result_title);
+            let page_key = compact_match_key(&page_url);
+            let source_key = compact_match_key(&source);
+            let image_key = compact_match_key(&image_url);
+            let combined_key = format!("{}{}{}{}", result_title_key, page_key, source_key, image_key);
+            let has_title_match = !title_key.is_empty() && combined_key.contains(&title_key);
+
+            let mut score = if preferred { 180 } else { 0 };
+            score += match query_idx {
+                0 => 70,
+                1 => 30,
+                _ => 10,
+            };
+            if !title_key.is_empty() && result_title_key == title_key {
+                score += 150;
+            } else if has_title_match {
+                score += 100;
+            } else if !title_key.is_empty() && result_title_key.contains(&title_key) {
+                score += 70;
+            } else {
+                score -= 80;
+            }
+            if !author_key.is_empty()
+                && (result_title_key.contains(&author_key) || page_key.contains(&author_key))
+            {
+                score += 20;
+            }
+            if source.contains("icode.qq.com") {
+                score += 90;
+            }
+            if let (Some(width), Some(height)) = (
+                json_num(&meta, &["w", "width", "ow", "imgw"]),
+                json_num(&meta, &["h", "height", "oh", "imgh"]),
+            ) {
+                if width > 0.0 && height > 0.0 {
+                    let ratio = width / height;
+                    if (0.62..=0.82).contains(&ratio) {
+                        score += 35;
+                    } else if ratio >= 1.0 {
+                        score -= 45;
+                    }
+                }
+            }
+            score -= (query_idx as i32 * 20) + idx as i32;
+
+            results.push((
+                score,
+                CoverSearchResult {
+                    id,
+                    title: if result_title.trim().is_empty() {
+                        clean_title.to_string()
+                    } else {
+                        result_title
+                    },
+                    author: source.clone(),
+                    image_url,
+                    page_url,
+                    source,
+                    preferred,
                 },
-                author: source.clone(),
-                image_url,
-                page_url,
-                source,
-                preferred,
-            },
-        ));
+            ));
+        }
     }
 
     results.sort_by(|a, b| b.0.cmp(&a.0));
     Ok(results.into_iter().take(12).map(|(_, result)| result).collect())
 }
-
 #[tauri::command]
 async fn download_cover_to_temp(image_url: String, title: String) -> Result<String, String> {
     let url = normalize_cover_url(&image_url);

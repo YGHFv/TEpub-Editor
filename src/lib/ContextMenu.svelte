@@ -1,9 +1,10 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount, onDestroy } from "svelte";
 
   let showMenu = false;
   let pos = { x: 0, y: 0 };
   let menuElement: HTMLDivElement;
+  export let enableTitleActions = false;
 
   // Define menu items structure
   interface MenuItem {
@@ -87,7 +88,7 @@
       target.tagName === "INPUT" ||
       target.tagName === "TEXTAREA" ||
       target.isContentEditable;
-    if (isInput && !contextNode) return;
+    if (isInput && !isInEditor && !contextNode) return;
     const hasSelection =
       (window.getSelection()?.toString().length ?? 0) > 0;
 
@@ -171,17 +172,22 @@
       if (!isInEditor && !isInput && !hasSelection) return;
       e.preventDefault();
       currentContext = { type: "editor", clientX: e.clientX, clientY: e.clientY };
-      currentItems = [
-        { label: "设为章节标题", action: "make-chapter-title", icon: "H" },
-        { label: "设为卷标题", action: "make-volume-title", icon: "H1" },
-        { label: "取消标题", action: "remove-title", icon: "T" },
+      currentItems = [];
+      if (enableTitleActions) {
+        currentItems.push(
+          { label: "设为章节标题", action: "make-chapter-title", icon: "H" },
+          { label: "设为卷标题", action: "make-volume-title", icon: "H1" },
+          { label: "取消标题", action: "remove-title", icon: "T" },
+          { separator: true, label: "", action: "" },
+        );
+      }
+      currentItems.push(
+        { label: "剪切", action: "cut", icon: "✂" },
+        { label: "复制", action: "copy", icon: "C" },
+        { label: "粘贴", action: "paste", icon: "P" },
         { separator: true, label: "", action: "" },
-        { label: "剪切", action: "cut", icon: "✂️" },
-        { label: "复制", action: "copy", icon: "📋" },
-        { label: "粘贴", action: "paste", icon: "📄" },
-        { separator: true, label: "", action: "" },
-        { label: "全选", action: "select-all", icon: "✨" },
-      ];
+        { label: "全选", action: "select-all", icon: "A" },
+      );
     } else {
       // 空白区域 - 阻止默认菜单，不显示自定义菜单
       e.preventDefault();
