@@ -1571,6 +1571,269 @@ fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
     fs::read(&path).map_err(|e| format!("读取失败: {}", e))
 }
 
+#[derive(Serialize, Clone)]
+struct CoverSearchResult {
+    id: String,
+    title: String,
+    author: String,
+    image_url: String,
+    page_url: String,
+    source: String,
+    preferred: bool,
+}
+
+fn percent_encode_component(input: &str) -> String {
+    let mut out = String::new();
+    for b in input.as_bytes() {
+        match *b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+fn normalize_cover_url(raw: &str) -> String {
+    let mut url = raw
+        .replace("\\/", "/")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .trim()
+        .to_string();
+    if url.starts_with("//") {
+        url = format!("https:{}", url);
+    }
+    url
+}
+
+fn html_unescape_basic(raw: &str) -> String {
+    raw.replace("&quot;", "\"")
+        .replace("&#34;", "\"")
+        .replace("&#x22;", "\"")
+        .replace("&#39;", "'")
+        .replace("&#x27;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+fn compact_match_key(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_whitespace() && *c != '《' && *c != '》')
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn is_preferred_cover_source(image_url: &str, page_url: &str, source: &str) -> bool {
+    let image = image_url.to_lowercase();
+    let page = page_url.to_lowercase();
+    let source = source.to_lowercase();
+    image.contains("bookcover.yuewen.com")
+        || image.contains("p9-novel-sign.byteimg.com")
+        || image.contains("fanqienovel.com")
+        || page.contains("m.qidian.com")
+        || page.contains("bookcover.yuewen.com")
+        || page.contains("fanqienovel.com")
+        || page.contains("p9-novel-sign.byteimg.com")
+        || source.contains("m.qidian.com")
+        || source.contains("bookcover.yuewen.com")
+        || source.contains("fanqienovel.com")
+        || source.contains("p9-novel-sign.byteimg.com")
+}
+
+fn cover_download_referer(url: &str) -> &'static str {
+    let lower = url.to_lowercase();
+    if lower.contains("byteimg.com") || lower.contains("fanqienovel.com") {
+        "https://fanqienovel.com/"
+    } else {
+        "https://m.qidian.com/"
+    }
+}
+
+fn host_from_url(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn search_book_covers(title: String, author: String) -> Result<Vec<CoverSearchResult>, String> {
+    let clean_title = title.trim();
+    let clean_author = author.trim();
+    if clean_title.is_empty() || clean_title == "书名" {
+        return Err("请先填写书名".to_string());
+    }
+
+    let query_text = if clean_author.is_empty() || clean_author == "作者" {
+        format!("{} 小说 封面", clean_title)
+    } else {
+        format!("{} {} 小说 封面", clean_title, clean_author)
+    };
+    let query = percent_encode_component(&query_text);
+    let search_url = format!(
+        "https://www.bing.com/images/search?q={}&form=HDRSC2&first=1",
+        query
+    );
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) TEpub-Editor/0.5")
+        .build()
+        .map_err(|e| format!("初始化封面搜索失败: {}", e))?;
+    let html = client
+        .get(&search_url)
+        .header("Referer", "https://www.bing.com/images")
+        .header("Accept-Language", "zh-CN,zh;q=0.9")
+        .send()
+        .await
+        .map_err(|e| format!("搜索封面失败: {}", e))?
+        .text()
+        .await
+        .map_err(|e| format!("读取封面搜索结果失败: {}", e))?;
+
+    let image_meta_re = Regex::new(r#"m="([^"]+)""#)
+        .map_err(|e| format!("封面结果解析失败: {}", e))?;
+    let mut results: Vec<(i32, CoverSearchResult)> = Vec::new();
+    let mut seen = HashSet::new();
+    let title_key = compact_match_key(clean_title);
+    let author_key = compact_match_key(clean_author);
+
+    for (idx, item) in image_meta_re.captures_iter(&html).enumerate() {
+        let captures = match item {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let raw_meta = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+        let meta_text = html_unescape_basic(raw_meta);
+        let meta = match serde_json::from_str::<serde_json::Value>(&meta_text) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let image_url = match meta
+            .get("murl")
+            .and_then(|value| value.as_str())
+            .or_else(|| meta.get("turl").and_then(|value| value.as_str()))
+        {
+            Some(url) => normalize_cover_url(url),
+            None => continue,
+        };
+        if image_url.is_empty()
+            || !(image_url.starts_with("https://") || image_url.starts_with("http://"))
+            || !seen.insert(image_url.clone())
+        {
+            continue;
+        }
+
+        let page_url = meta
+            .get("purl")
+            .and_then(|value| value.as_str())
+            .map(normalize_cover_url)
+            .unwrap_or_default();
+        let result_title = meta
+            .get("t")
+            .and_then(|value| value.as_str())
+            .map(html_unescape_basic)
+            .unwrap_or_else(|| clean_title.to_string());
+        let id = meta
+            .get("md5")
+            .and_then(|value| value.as_str())
+            .or_else(|| meta.get("cid").and_then(|value| value.as_str()))
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| idx.to_string());
+        let source = {
+            let page_host = host_from_url(&page_url);
+            if page_host.is_empty() {
+                host_from_url(&image_url)
+            } else {
+                page_host
+            }
+        };
+        let preferred = is_preferred_cover_source(&image_url, &page_url, &source);
+
+        let result_title_key = compact_match_key(&result_title);
+        let page_key = compact_match_key(&page_url);
+        let mut score = if preferred { 100 } else { 0 };
+        if !title_key.is_empty() && result_title_key == title_key {
+            score += 80;
+        } else if !title_key.is_empty()
+            && (result_title_key.contains(&title_key)
+                || title_key.contains(&result_title_key)
+                || page_key.contains(&title_key))
+        {
+            score += 35;
+        }
+        if !author_key.is_empty()
+            && (result_title_key.contains(&author_key) || page_key.contains(&author_key))
+        {
+            score += 30;
+        }
+        score -= idx as i32;
+
+        results.push((
+            score,
+            CoverSearchResult {
+                id,
+                title: if result_title.trim().is_empty() {
+                    clean_title.to_string()
+                } else {
+                    result_title
+                },
+                author: source.clone(),
+                image_url,
+                page_url,
+                source,
+                preferred,
+            },
+        ));
+    }
+
+    results.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(results.into_iter().take(12).map(|(_, result)| result).collect())
+}
+
+#[tauri::command]
+async fn download_cover_to_temp(image_url: String, title: String) -> Result<String, String> {
+    let url = normalize_cover_url(&image_url);
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("封面地址无效".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) TEpub-Editor/0.5")
+        .build()
+        .map_err(|e| format!("初始化封面下载失败: {}", e))?;
+    let bytes = client
+        .get(&url)
+        .header("Referer", cover_download_referer(&url))
+        .send()
+        .await
+        .map_err(|e| format!("下载封面失败: {}", e))?
+        .bytes()
+        .await
+        .map_err(|e| format!("读取封面数据失败: {}", e))?;
+    if bytes.is_empty() {
+        return Err("下载到的封面为空".to_string());
+    }
+    if bytes.len() > 12 * 1024 * 1024 {
+        return Err("封面图片过大".to_string());
+    }
+
+    let ext = detect_image_ext(&bytes);
+    let base = sanitize_filename_part(&title);
+    let stem = if base.is_empty() { "cover".to_string() } else { base };
+    let dir = std::env::temp_dir().join("TEpub-Editor").join("covers");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建封面缓存目录失败: {}", e))?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("生成封面缓存文件名失败: {}", e))?
+        .as_millis();
+    let path = dir.join(format!("{}-{}.{}", stem, now, ext));
+    fs::write(&path, &bytes).map_err(|e| format!("保存封面失败: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 fn calculate_md5(content: String) -> String {
     format!("{:x}", md5::compute(content.as_bytes()))
@@ -1727,6 +1990,7 @@ async fn scan_chapters(
                        || line_trim.contains("楔子") 
                        || line_trim.contains("后记") 
                        || line_trim.contains("感言")
+                       || line_trim.contains("本书相关")
                        || line_trim.contains("内容"));
             
             current_chapter = Some(ChapterInfo {
@@ -5589,6 +5853,8 @@ pub fn run() {
             read_text_file,
             save_text_file,
             read_binary_file,
+            search_book_covers,
+            download_cover_to_temp,
             save_history,
             get_history_list,
             calculate_md5,

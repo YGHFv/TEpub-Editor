@@ -60,6 +60,8 @@
   let showSettings = false;
   let showMetaEditor = false;
   let savingMetadata = false;
+  let ingestStatus: "" | "ingesting" | "decrypting" = "";
+  let ingestStatusTimer: ReturnType<typeof setTimeout> | null = null;
 
   // 首次启动书库目录选择
   interface AppModeInfo {
@@ -138,16 +140,44 @@
     collisionPrompt = { ...collisionPrompt, open: false, resolve: null };
     r?.(null);
   }
+
+  function beginBookIngest(filePath: string) {
+    if (ingestStatusTimer) {
+      clearTimeout(ingestStatusTimer);
+      ingestStatusTimer = null;
+    }
+    ingestStatus = "ingesting";
+    if (/\.epub$/i.test(filePath)) {
+      ingestStatusTimer = setTimeout(() => {
+        ingestStatus = "decrypting";
+        ingestStatusTimer = null;
+      }, 1200);
+    }
+  }
+
+  function endBookIngest() {
+    if (ingestStatusTimer) {
+      clearTimeout(ingestStatusTimer);
+      ingestStatusTimer = null;
+    }
+    ingestStatus = "";
+  }
+
   // 包一层：遇 BOOK_FILE_COLLISION 错误自动弹框让用户改名后重试
   async function addBookWithCollisionRetry(filePath: string): Promise<boolean> {
     let overrideFilename: string | undefined = undefined;
     for (let i = 0; i < 5; i++) {
       try {
-        await invoke("add_book_to_library", {
-          filePath,
-          config: libraryConfig,
-          overrideFilename,
-        });
+        beginBookIngest(filePath);
+        try {
+          await invoke("add_book_to_library", {
+            filePath,
+            config: libraryConfig,
+            overrideFilename,
+          });
+        } finally {
+          endBookIngest();
+        }
         return true;
       } catch (e: any) {
         const msg = String(e);
@@ -228,6 +258,7 @@
   type PreviewMode = "auto" | "always" | "never";
   // 双击图书时的默认动作
   type DblClickAction = "read" | "edit" | "metadata";
+  type UiTheme = "modern" | "classic" | "dark";
   interface ShelfSettings {
     gridShowTitle: boolean;
     gridShowAuthor: boolean;
@@ -240,8 +271,9 @@
     gridShowAuthor: true,
     newBookFirst: true,
     previewMode: "auto",
-    dblClickAction: "read",
+    dblClickAction: "edit",
   };
+  let appUiTheme: UiTheme = "modern";
   const VIEW_ICONS: Record<string, string> = { "grid": "▦", "list-cover": "☷", "list-simple": "☰" };
 
   // 预览区可见性：三态
@@ -272,6 +304,40 @@
 
   function saveShelfSettings() {
     localStorage.setItem("shelf-settings", JSON.stringify({ ...shelfSettings, viewMode }));
+  }
+
+  function applyTheme(theme: UiTheme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    const colors: Record<UiTheme, string> = {
+      modern: "#eef4f8",
+      classic: "#f3f3f3",
+      dark: "#151b23",
+    };
+    if (meta) meta.setAttribute("content", colors[theme]);
+  }
+
+  function loadAppUiTheme() {
+    try {
+      const stored = localStorage.getItem("app-settings");
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      if (parsed.uiTheme === "modern" || parsed.uiTheme === "classic" || parsed.uiTheme === "dark") {
+        appUiTheme = parsed.uiTheme;
+      }
+    } catch {}
+    applyTheme(appUiTheme);
+  }
+
+  function saveAppUiTheme() {
+    let settings: Record<string, any> = {};
+    try {
+      const stored = localStorage.getItem("app-settings");
+      if (stored) settings = JSON.parse(stored);
+    } catch {}
+    settings.uiTheme = appUiTheme;
+    localStorage.setItem("app-settings", JSON.stringify(settings));
+    applyTheme(appUiTheme);
   }
 
   function cycleViewMode() {
@@ -1106,6 +1172,7 @@
 
   onMount(async () => {
     loadShelfSettings();
+    loadAppUiTheme();
     await bootLibrary();
 
     // 主窗口固定标题为 TEpub-Editor（避免被 editor/reader 子流程残留的 TXT/EPUB 标题污染）
@@ -1210,6 +1277,11 @@
     </div>
     <div class="toolbar-center"></div>
     <div class="toolbar-right">
+      {#if ingestStatus}
+        <span class="ingest-status">
+          {ingestStatus === "decrypting" ? "解密入库中" : "入库中"}
+        </span>
+      {/if}
       <span class="book-count">{books.length} 本书</span>
       <button class="tb-btn" on:click={cycleViewMode} title="切换视图">{VIEW_ICONS[viewMode]}</button>
       <button class="tb-btn" on:click={() => showSettings = !showSettings} title="书库设置">⚙</button>
@@ -1342,7 +1414,7 @@
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div class="settings-overlay" on:click={(e) => { if (e.target === e.currentTarget) showSettings = false; }}>
-      <div class="settings-panel">
+      <div class="settings-panel library-settings-panel">
         <div class="settings-header">
           <h3>书库设置</h3>
           <button class="settings-close" on:click={() => showSettings = false} title="关闭">×</button>
@@ -1450,6 +1522,18 @@
           <!-- 书架显示 -->
           <section class="settings-section">
             <div class="section-title">书架显示</div>
+            <div class="set-row">
+              <label class="set-label">界面主题</label>
+              <select
+                class="set-control"
+                bind:value={appUiTheme}
+                on:change={saveAppUiTheme}
+              >
+                <option value="modern">现代</option>
+                <option value="classic">经典</option>
+                <option value="dark">深色</option>
+              </select>
+            </div>
             <label class="set-row toggle-row">
               <span class="set-label">九宫格显示书名</span>
               <input type="checkbox" bind:checked={shelfSettings.gridShowTitle} on:change={saveShelfSettings} />
@@ -2009,6 +2093,17 @@
     outline: none;
   }
 
+  @media (max-width: 760px) {
+    .library-settings-panel {
+      min-width: 0;
+      width: min(96vw, 520px);
+    }
+
+    .library-settings-panel .settings-body {
+      grid-template-columns: 1fr;
+    }
+  }
+
   .view-toggles {
     display: flex;
     gap: 2px;
@@ -2023,6 +2118,19 @@
   .book-count {
     color: var(--color-muted);
     font-size: 12px;
+  }
+
+  .ingest-status {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+    color: var(--color-accent);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
   }
 
   /* 已激活筛选条 —— 介于工具栏和主体之间 */
@@ -2233,6 +2341,13 @@
     animation: panelIn 0.2s ease-out;
   }
 
+  .library-settings-panel {
+    border-radius: 14px;
+    min-width: 720px;
+    max-width: 820px;
+    max-height: 84vh;
+  }
+
   @keyframes panelIn {
     from { opacity: 0; transform: translateY(8px) scale(0.98); }
     to { opacity: 1; transform: translateY(0) scale(1); }
@@ -2242,9 +2357,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 20px;
+    padding: 16px 22px;
     border-bottom: 1px solid var(--color-border);
-    background: var(--color-canvas);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.96));
   }
 
   .settings-panel h3 {
@@ -2282,10 +2397,31 @@
     gap: 18px;
   }
 
+  .library-settings-panel .settings-body {
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    background: var(--color-canvas);
+  }
+
   .settings-section {
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .library-settings-panel .settings-section {
+    gap: 10px;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.82);
+  }
+
+  .library-settings-panel .settings-section:first-child {
+    grid-column: 1 / -1;
   }
 
   .section-title {
@@ -2295,7 +2431,7 @@
     text-transform: uppercase;
     letter-spacing: 0.6px;
     padding-bottom: 4px;
-    border-bottom: 1px dashed var(--color-border);
+    border-bottom: 1px solid var(--color-border);
     margin-bottom: 4px;
   }
 
@@ -2387,6 +2523,17 @@
   .set-row textarea {
     resize: vertical;
     font-family: var(--font-ui);
+  }
+
+  @media (max-width: 760px) {
+    .library-settings-panel {
+      min-width: 0;
+      width: min(96vw, 520px);
+    }
+
+    .library-settings-panel .settings-body {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* 元数据编辑面板：复用 settings-panel 头/体/底三段式 */

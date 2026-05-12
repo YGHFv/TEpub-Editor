@@ -12,13 +12,17 @@
     import {
         applyTitleRewrite,
         applyBuiltinRegexPreview,
+        applyChineseConvertPreview,
         buildProofPreviewSummary,
         buildBuiltinRegexPreview,
+        buildChineseConvertPreview,
         buildTitleRewritePreview,
         convertChineseText,
+        getChineseScriptProfile,
         PROOF_BUILTIN_REGEX_RULES,
         type ProofBuiltinRuleId,
         type ProofConvertDirection,
+        type ProofConvertPreviewRow,
         type ProofNumberStyle,
         type ProofRegexPreviewRow,
         type ProofTitlePreviewRow,
@@ -57,6 +61,15 @@
         count: number;
         matches: MatchLocation[];
     }
+    interface CoverSearchResult {
+        id: string;
+        title: string;
+        author: string;
+        image_url: string;
+        page_url: string;
+        source: string;
+        preferred: boolean;
+    }
     interface FlatNode {
         id: string;
         line: number;
@@ -87,17 +100,25 @@
         pattern: string;
     }
 
-    const DEFAULT_META_REGEX =
-        "^\\s*(?:内容)?(?:简介|序(?:章|言)?|前言|楔子|后记|完本感言|尾声)\\s*(?:[:：].*)?$";
-    const DEFAULT_VOLUME_REGEX =
+    const DEFAULT_META_VOLUME_REGEX =
+        "^\\s*(?:内容简介|本书相关|完本感言)\\s*(?:[:：].*)?$";
+    const DEFAULT_META_BODY_REGEX =
+        "^\\s*(?:简介|序(?:章|言)?|前言|楔子|后记|尾声)\\s*(?:[:：].*)?$";
+    const DEFAULT_META_REGEX = DEFAULT_META_VOLUME_REGEX;
+    const LEGACY_VOLUME_REGEX =
         "^\\s*第[零〇一二两三四五六七八九十百千万0-9]+\\s*[卷部].*";
-    const DEFAULT_CHAPTER_REGEX =
+    const LEGACY_CHAPTER_REGEX =
         "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+).*";
+    const DEFAULT_VOLUME_REGEX =
+        "^\\s*(?:第\\s*[零〇一二两三四五六七八九十百千万0-9]+\\s*卷|卷\\s*[零〇一二两三四五六七八九十百千万0-9]+)(?:\\s+|[:：、.．\\-—]+)\\S+.*";
+    const DEFAULT_CHAPTER_REGEX =
+        "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?番外(?:\\s+|[:：、.．\\-—])\\S+|【\\s*番外\\s*】\\s*\\S+).*";
 
     const DEFAULT_SETTINGS = {
         customRegexRules: [
-            { level: 1, pattern: DEFAULT_META_REGEX },
+            { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
             { level: 1, pattern: DEFAULT_VOLUME_REGEX },
+            { level: 3, pattern: DEFAULT_META_BODY_REGEX },
             { level: 3, pattern: DEFAULT_CHAPTER_REGEX }
         ] as CustomRegexRule[],
         wordCountMinThreshold: 2000,
@@ -112,17 +133,20 @@
         // Legacy fallbacks for compatibility
         volRegex: DEFAULT_VOLUME_REGEX,
         chapRegex: DEFAULT_CHAPTER_REGEX,
-        metaRegex: DEFAULT_META_REGEX,
+        metaRegex: DEFAULT_META_VOLUME_REGEX,
     };
 
     const REGEX_PRESETS = [
         { label: "自定义", value: "" },
         { label: "^\\s*第[一二三..]+章.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+章.*$" },
-        { label: "^\\s*第[一二三..]+卷.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+卷.*$" },
+        { label: "第X卷 标题 / 卷X 标题", value: DEFAULT_VOLUME_REGEX },
+        { label: "终章 标题", value: "^\\s*终章(?:\\s+|[:：、.．\\-—])\\S+.*$" },
+        { label: "番外 / 【番外】", value: "^\\s*(?:(?:新增\\s*)?番外(?:\\s+|[:：、.．\\-—])\\S+|【\\s*番外\\s*】\\s*\\S+).*$" },
         { label: "^\\s*第[一二三..]+回.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+回.*$" },
         { label: "^\\s*第[一二三..]+节.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+节.*$" },
         { label: "^\\s*第\\d+章.*$", value: "^\\s*第\\d+章.*$" },
-        { label: "^\\s*(内容)?(简介|序章|序言|前言|楔子|后记|尾声)$", value: DEFAULT_META_REGEX },
+        { label: "内容简介 / 本书相关 / 完本感言", value: DEFAULT_META_VOLUME_REGEX },
+        { label: "简介 / 前言 / 楔子 / 后记 / 尾声", value: DEFAULT_META_BODY_REGEX },
         { label: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$", value: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$" },
         { label: "^\\s*\\d+\\s*$", value: "^\\s*\\d+\\s*$" }
     ];
@@ -139,7 +163,7 @@
         );
     }
 
-    function normalizeTocRegexRule(rule: any): CustomRegexRule {
+    function normalizeTocRegexRules(rule: any): CustomRegexRule[] {
         let level = Number(rule?.level ?? 3);
         let pattern = String(rule?.pattern ?? "");
 
@@ -148,15 +172,27 @@
         }
 
         if (isLegacyLooseMetaRegex(pattern)) {
+            return [
+                { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
+                { level: 3, pattern: DEFAULT_META_BODY_REGEX },
+            ];
+        }
+
+        if (pattern === LEGACY_VOLUME_REGEX) {
             level = 1;
-            pattern = DEFAULT_META_REGEX;
+            pattern = DEFAULT_VOLUME_REGEX;
+        }
+
+        if (pattern === LEGACY_CHAPTER_REGEX) {
+            level = 3;
+            pattern = DEFAULT_CHAPTER_REGEX;
         }
 
         if (pattern.includes("[章回]")) {
             pattern = pattern.replace("[章回]", "(?:[章节]|回(?:[^合]|$))");
         }
 
-        return { level, pattern };
+        return [{ level, pattern }];
     }
 
     function isLikelyTocTitle(title: string, level: number) {
@@ -205,6 +241,20 @@
             }
         }
 
+        const volumeTail = trimmed.match(
+            /^第\s*[0-9零〇一二两三四五六七八九十百千万]+\s*(卷|部)(\S?)/,
+        );
+        if (level === 1 && volumeTail) {
+            const nextChar = volumeTail[2];
+            if (
+                nextChar &&
+                !/^[：:、.．\-—]/.test(nextChar) &&
+                /^[的和与及是在有把被将就都也却但而或想写看说讲]/.test(nextChar)
+            ) {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -233,7 +283,7 @@
 
     // 面板显示状态
     let showSettingsPanel = false;
-    let settingsActiveTab = "display"; // 'display' | 'toc'
+    let settingsActiveTab: "display" | "toc" | "history" = "display";
     let showEpubModal = false;
     let showCheckPanel = false;
     let showProofPanel = false;
@@ -257,6 +307,10 @@
         assets: [] as { name: string, path: string, category: string }[],
     };
     let coverPreviewUrl: string | null = null;
+    let coverSearchResults: CoverSearchResult[] = [];
+    let coverSearchMessage = "";
+    let isCoverSearching = false;
+    let isCoverApplying = false;
     let showAdvancedEpub = false;
     let customMetadata: { key: string; value: string }[] = [];
     let appSettings = { ...DEFAULT_SETTINGS };
@@ -399,7 +453,9 @@
             const summary = buildProofPreviewSummary(proofPreviewRows);
             proofPreviewMessage =
                 proofActiveTab === "toc" && summary.total > 0
-                    ? `目录预览 ${summary.total} 项，预计修改 ${summary.changed} 项`
+                    ? proofTitleScope === "numbers-only"
+                        ? `数字转换预览 ${summary.total} 项，预计修改 ${summary.changed} 项`
+                        : `目录预览 ${summary.total} 项，预计修改 ${summary.changed} 项`
                     : proofTitleScope === "regex" && proofTitleRegex.trim()
                       ? "没有匹配到可重排标题"
                       : proofActiveTab === "builtin"
@@ -429,10 +485,10 @@
                 proofBuiltinRule,
                 getProofTocNodes(),
             );
-            proofRegexSelectedIds = new Set(proofRegexPreviewRows.map((row) => row.id));
+            proofRegexSelectedIds = new Set();
             builtinRegexMessage =
                 proofRegexPreviewRows.length > 0
-                    ? `匹配 ${proofRegexPreviewRows.length} 项，已默认全选`
+                    ? `匹配 ${proofRegexPreviewRows.length} 项，默认全不选`
                     : "没有匹配项";
         } catch (e: any) {
             proofRegexPreviewRows = [];
@@ -535,6 +591,104 @@
         await applyProofResult(result);
     }
 
+    async function openSettingsHistoryTab() {
+        settingsActiveTab = "history";
+        if (!filePath || filePath === "请打开一本小说...") {
+            historyList = [];
+            return;
+        }
+        historyList = await invoke("get_history_list", {
+            originalPath: filePath,
+        });
+    }
+
+    function saveEditorSettings() {
+        try {
+            const vols = appSettings.customRegexRules.filter(r => r.level === 1).map(r => `(${r.pattern})`);
+            const chaps = appSettings.customRegexRules.filter(r => r.level >= 2).map(r => `(${r.pattern})`);
+            appSettings.volRegex = vols.length > 0 ? vols.join("|") : "^$";
+            appSettings.chapRegex = chaps.length > 0 ? chaps.join("|") : "^$";
+        } catch (e) {}
+
+        localStorage.setItem(
+            "app-settings",
+            JSON.stringify(appSettings),
+        );
+        closeAllPanels();
+        scanToc();
+    }
+
+    async function runProofConvertPreview() {
+        proofMessage = "正在查找可转换内容...";
+        const scriptProfile = getChineseScriptProfile(fileContent);
+        proofConvertPreviewRows = await buildChineseConvertPreview(
+            fileContent,
+            proofConvertDirection,
+        );
+        proofConvertSelectedIds = new Set();
+        if (
+            proofConvertPreviewRows.length === 0 &&
+            scriptProfile.dominant === "simplified" &&
+            proofConvertDirection === "simplified-to-traditional"
+        ) {
+            proofMessage = "检测到主体为简体，已跳过简体转繁体查找，避免误扫整本";
+        } else if (
+            proofConvertPreviewRows.length === 0 &&
+            scriptProfile.dominant === "traditional" &&
+            proofConvertDirection === "traditional-to-simplified"
+        ) {
+            proofMessage = "检测到主体为繁体，已跳过繁体转简体查找，避免误扫整本";
+        } else {
+            proofMessage =
+                proofConvertPreviewRows.length > 0
+                    ? `找到 ${proofConvertPreviewRows.length} 处可转换内容，默认全不选`
+                    : "没有找到可转换内容";
+        }
+    }
+
+    function toggleProofConvertRow(rowId: string, checked: boolean) {
+        const next = new Set(proofConvertSelectedIds);
+        if (checked) {
+            next.add(rowId);
+        } else {
+            next.delete(rowId);
+        }
+        proofConvertSelectedIds = next;
+    }
+
+    function setAllProofConvertRows(checked: boolean) {
+        proofConvertSelectedIds = checked
+            ? new Set(proofConvertPreviewRows.map((row) => row.id))
+            : new Set();
+    }
+
+    async function applySelectedConvertRows() {
+        const result = applyChineseConvertPreview(
+            fileContent,
+            proofConvertPreviewRows,
+            proofConvertSelectedIds,
+        );
+        await applyProofResult(result);
+        proofConvertPreviewRows = [];
+        proofConvertSelectedIds = new Set();
+    }
+
+    async function applyAllConvertRows() {
+        const result = applyChineseConvertPreview(
+            fileContent,
+            proofConvertPreviewRows,
+            proofConvertPreviewRows.map((row) => row.id),
+        );
+        await applyProofResult(result);
+        proofConvertPreviewRows = [];
+        proofConvertSelectedIds = new Set();
+    }
+
+    function jumpToProofConvertRow(row: ProofConvertPreviewRow) {
+        editorComponent?.selectMatch(row.lineStart, row.startChar, row.endChar);
+        proofMessage = "已定位到可转换内容";
+    }
+
     // 查找替换状态
     let findPattern = "";
     let replacePattern = "";
@@ -560,6 +714,8 @@
     let proofRegexSelectedIds = new Set<string>();
     let builtinRegexMessage = "";
     let proofConvertDirection: ProofConvertDirection = "traditional-to-simplified";
+    let proofConvertPreviewRows: ProofConvertPreviewRow[] = [];
+    let proofConvertSelectedIds = new Set<string>();
     let proofMessage = "";
 
     // 内容检查状态
@@ -707,20 +863,21 @@
                     appSettings = { ...DEFAULT_SETTINGS, ...parsed };
 
                     if (isLegacyLooseMetaRegex(appSettings.metaRegex)) {
-                        appSettings.metaRegex = DEFAULT_META_REGEX;
+                        appSettings.metaRegex = DEFAULT_META_VOLUME_REGEX;
                     }
                     
                     // 核心初始化：确保 customRegexRules 存在并按照预期结构映射
                     if (!appSettings.customRegexRules || !Array.isArray(appSettings.customRegexRules)) {
                         appSettings.customRegexRules = [
-                            { level: 1, pattern: appSettings.metaRegex || DEFAULT_SETTINGS.metaRegex },
+                            { level: 1, pattern: appSettings.metaRegex || DEFAULT_META_VOLUME_REGEX },
                             { level: 1, pattern: appSettings.volRegex || DEFAULT_SETTINGS.volRegex },
+                            { level: 3, pattern: DEFAULT_META_BODY_REGEX },
                             { level: 3, pattern: appSettings.chapRegex || DEFAULT_SETTINGS.chapRegex }
-                        ].map(normalizeTocRegexRule);
+                        ].flatMap(normalizeTocRegexRules);
                     } else {
                         // 迁移：如果包含 type，无缝转换为 level
                         appSettings.customRegexRules =
-                            appSettings.customRegexRules.map(normalizeTocRegexRule);
+                            appSettings.customRegexRules.flatMap(normalizeTocRegexRules);
                     }
                 } catch (e) {}
             }
@@ -967,6 +1124,70 @@
     function extractPickedPath(selection: string | string[]): string {
         const raw = Array.isArray(selection) ? selection[0] : selection;
         return normalizeLocalPath(raw);
+    }
+
+    async function pickLocalCover() {
+        const selection = await open({
+            filters: [{ name: "Image", extensions: ["jpg", "png", "jpeg", "webp"] }],
+        });
+        if (!selection) return;
+        epubMeta.cover_path = extractPickedPath(selection as string | string[]);
+        coverSearchMessage = "已使用本地封面";
+        await loadCoverPreview();
+    }
+
+    async function applyRemoteCover(result: CoverSearchResult, automatic = false) {
+        if (isCoverApplying) return;
+        isCoverApplying = true;
+        try {
+            const localPath = await invoke<string>("download_cover_to_temp", {
+                imageUrl: result.image_url,
+                title: epubMeta.title || result.title || "cover",
+            });
+            epubMeta.cover_path = localPath;
+            await loadCoverPreview();
+            coverSearchMessage = automatic
+                ? `已自动使用 ${result.source} 封面`
+                : `已使用《${result.title || epubMeta.title}》封面`;
+        } catch (e) {
+            console.error("应用远程封面失败:", e);
+            coverSearchMessage = automatic
+                ? "自动应用失败，可手动选择其他封面"
+                : "应用封面失败，请换一个结果或使用本地图片";
+        } finally {
+            isCoverApplying = false;
+        }
+    }
+
+    async function searchCovers() {
+        const title = epubMeta.title.trim();
+        const author = epubMeta.creator.trim();
+        if (!title || title === "书名") {
+            coverSearchMessage = "请先填写书名";
+            return;
+        }
+
+        isCoverSearching = true;
+        coverSearchMessage = "正在搜索封面...";
+        coverSearchResults = [];
+        try {
+            const results = await invoke<CoverSearchResult[]>("search_book_covers", { title, author });
+            coverSearchResults = results;
+            if (!results.length) {
+                coverSearchMessage = "没有找到可用封面";
+                return;
+            }
+
+            const preferred = results.find((item) => item.preferred);
+            coverSearchMessage = `找到 ${results.length} 个封面`;
+            if (preferred) {
+                await applyRemoteCover(preferred, true);
+            }
+        } catch (e) {
+            coverSearchMessage = `搜索封面失败：${e}`;
+        } finally {
+            isCoverSearching = false;
+        }
     }
 
     async function openAdvancedEpubMetadata() {
@@ -1933,24 +2154,27 @@
                     loadCoverPreview();
                 }}>📚</button
             >
+        </div>
+        <div class="toolbar-tail">
             <button
                 class="btn-secondary"
+                title="查找与替换 (Ctrl+F)"
+                on:click={() => {
+                    closeAllPanels();
+                    if (editorComponent) {
+                        editorComponent.openSearchWindow();
+                    }
+                }}>🔍</button
+            >
+            <button
+                class="btn-secondary"
+                title="偏好设置"
                 on:click={() => {
                     closeAllPanels();
                     showSettingsPanel = true;
                 }}>⚙️</button
             >
         </div>
-        <button
-            class="btn-secondary"
-            title="查找与替换 (Ctrl+F)"
-            on:click={() => {
-                closeAllPanels();
-                if (editorComponent) {
-                    editorComponent.openSearchWindow();
-                }
-            }}>🔍</button
-        >
     </header>
 
     <div class="main-body">
@@ -2119,6 +2343,7 @@
                                     <option value="all">卷和章</option>
                                     <option value="chapters">只排章节</option>
                                     <option value="volumes">只排卷部</option>
+                                    <option value="numbers-only">只转数字</option>
                                     <option value="regex">正则选取</option>
                                 </select>
                             </div>
@@ -2132,7 +2357,7 @@
                                     />
                                 </div>
                             {/if}
-                            {#if proofTitleScope === "all" || proofTitleScope === "volumes" || proofTitleScope === "regex"}
+                            {#if proofTitleScope === "all" || proofTitleScope === "volumes" || proofTitleScope === "regex" || proofTitleScope === "numbers-only"}
                                 <div class="proof-row">
                                     <label for="proof-volume-number-style">卷数字</label>
                                     <select id="proof-volume-number-style" bind:value={proofVolumeNumberStyle}>
@@ -2141,7 +2366,7 @@
                                     </select>
                                 </div>
                             {/if}
-                            {#if proofTitleScope === "all" || proofTitleScope === "chapters" || proofTitleScope === "regex"}
+                            {#if proofTitleScope === "all" || proofTitleScope === "chapters" || proofTitleScope === "regex" || proofTitleScope === "numbers-only"}
                                 <div class="proof-row">
                                     <label for="proof-chapter-number-style">章数字</label>
                                     <select id="proof-chapter-number-style" bind:value={proofChapterNumberStyle}>
@@ -2159,7 +2384,7 @@
                                 disabled={proofPreviewRows.length === 0}
                                 on:click={applyProofTitleRewrite}
                             >
-                                应用目录重排序
+                                {proofTitleScope === "numbers-only" ? "应用数字转换" : "应用目录重排序"}
                             </button>
                         </div>
 
@@ -2358,10 +2583,13 @@
                                     {#if !checkCollapseState.word}
                                         <div class="tag-list">
                                             {#each wordCountErrors as e}
-                                                <button
-                                                    class="err-tag"
-                                                    on:click={() => handleChapterClick(e.id, e.line)}
-                                                >{e.title} {e.msg} ({e.val})</button>
+                                            <button
+                                                class="err-tag"
+                                                on:click={() => handleChapterClick(e.id, e.line)}
+                                            >
+                                                <span class="err-tag-title">{e.title}</span>
+                                                <span class="err-tag-count">{e.val}</span>
+                                            </button>
                                             {:else}<span class="toc-count">无</span>{/each}
                                         </div>
                                     {/if}
@@ -2372,14 +2600,75 @@
                         <div class="proof-section">
                             <div class="proof-row">
                                 <label for="proof-convert-direction">方向</label>
-                                <select id="proof-convert-direction" bind:value={proofConvertDirection}>
+                                <select
+                                    id="proof-convert-direction"
+                                    bind:value={proofConvertDirection}
+                                    on:change={() => {
+                                        proofConvertPreviewRows = [];
+                                        proofConvertSelectedIds = new Set();
+                                    }}
+                                >
                                     <option value="traditional-to-simplified">繁体转简体</option>
                                     <option value="simplified-to-traditional">简体转繁体</option>
                                 </select>
                             </div>
-                            <button class="proof-primary" on:click={runProofFullConvert}>
-                                转换全文
-                            </button>
+                            <div class="proof-actions-row proof-convert-actions">
+                                <button class="proof-primary inline" on:click={runProofConvertPreview}>
+                                    查找
+                                </button>
+                                <button on:click={() => setAllProofConvertRows(true)}>全选</button>
+                                <button on:click={() => setAllProofConvertRows(false)}>全不选</button>
+                                <button
+                                    class="proof-primary inline"
+                                    disabled={proofConvertSelectedIds.size === 0}
+                                    on:click={applySelectedConvertRows}
+                                >替换选中</button>
+                                <button
+                                    class="proof-primary inline"
+                                    disabled={proofConvertPreviewRows.length === 0}
+                                    on:click={applyAllConvertRows}
+                                >全部替换</button>
+                                <button class="proof-primary inline" on:click={runProofFullConvert}>
+                                    转换全文
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="proof-regex-preview">
+                            <div class="proof-regex-head">
+                                <span></span>
+                                <span>原文</span>
+                                <span>转换后</span>
+                            </div>
+                            {#each proofConvertPreviewRows as row}
+                                <label class="proof-regex-row">
+                                    <input
+                                        type="checkbox"
+                                        checked={proofConvertSelectedIds.has(row.id)}
+                                        on:change={(e) =>
+                                            toggleProofConvertRow(
+                                                row.id,
+                                                (e.currentTarget as HTMLInputElement).checked,
+                                            )}
+                                    />
+                                    <span
+                                        role="button"
+                                        tabindex="0"
+                                        title={row.original}
+                                        on:click|preventDefault={() => jumpToProofConvertRow(row)}
+                                        on:keydown|preventDefault={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                jumpToProofConvertRow(row);
+                                            }
+                                        }}
+                                    >
+                                        {row.original}
+                                    </span>
+                                    <span title={row.replacement}>{row.replacement}</span>
+                                </label>
+                            {:else}
+                                <div class="proof-empty">点击查找后显示可转换内容</div>
+                            {/each}
                         </div>
                     {/if}
                 </div>
@@ -2422,6 +2711,8 @@
             <div
                 role="presentation"
                 class="modal-content"
+                class:editor-settings-modal={showSettingsPanel}
+                class:epub-modal-shell={showEpubModal}
                 on:click|stopPropagation
             >
                 {#if showSettingsPanel}
@@ -2435,17 +2726,10 @@
                     <div class="settings-tabs">
                         <button class="tab-btn {settingsActiveTab === 'display' ? 'active' : ''}" on:click={() => settingsActiveTab = 'display'}>显示</button>
                         <button class="tab-btn {settingsActiveTab === 'toc' ? 'active' : ''}" on:click={() => settingsActiveTab = 'toc'}>目录</button>
+                        <button class="tab-btn {settingsActiveTab === 'history' ? 'active' : ''}" on:click={openSettingsHistoryTab}>历史版本</button>
                     </div>
                     <div class="p-body">
                         {#if settingsActiveTab === 'display'}
-                            <div class="set-row">
-                                <label for="uiTheme">界面主题:</label>
-                                <select id="uiTheme" bind:value={appSettings.uiTheme} on:change={(e) => applyTheme(e.currentTarget.value)} style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 15px; background: #fff;">
-                                    <option value="modern">现代</option>
-                                    <option value="classic">经典</option>
-                                    <option value="dark">深色</option>
-                                </select>
-                            </div>
                             <div class="set-row">
                                 <label for="wordWrap">自动换行:</label>
                                 <input id="wordWrap" type="checkbox" bind:checked={appSettings.wordWrap} style="width: auto;"/>
@@ -2473,7 +2757,7 @@
                                 <label for="clh">保存清空撤销:</label>
                                 <input id="clh" type="checkbox" bind:checked={appSettings.clearHistoryOnSave} style="width: auto;"/>
                             </div>
-                        {:else}
+                        {:else if settingsActiveTab === 'toc'}
                             <div class="rules-header">正则表达式</div>
                             <div class="rules-list">
                                 {#each appSettings.customRegexRules as rule, idx}
@@ -2521,8 +2805,9 @@
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
                                 <button class="grid-btn" style="padding: 4px 10px; font-size: 13px;" on:click={() => {
                                     appSettings.customRegexRules = [
-                                        { level: 1, pattern: DEFAULT_SETTINGS.metaRegex },
+                                        { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
                                         { level: 1, pattern: DEFAULT_SETTINGS.volRegex },
+                                        { level: 3, pattern: DEFAULT_META_BODY_REGEX },
                                         { level: 3, pattern: DEFAULT_SETTINGS.chapRegex }
                                     ];
                                 }}>↺ 还原正则</button>
@@ -2532,45 +2817,27 @@
                                 }}>＋ 新增正则</button>
                             </div>
 
+                        {:else}
+                            <div class="history-settings-card">
+                                {#each historyList as h}
+                                    <button
+                                        class="hist-item"
+                                        on:click={() => {
+                                            restoreTargetSnapshot = h;
+                                            showRestoreConfirm = true;
+                                        }}
+                                    >
+                                        <span class="hist-time">{new Date(h.timestamp * 1000).toLocaleString()}</span>
+                                        <span class="hist-size">{(h.size / 1024).toFixed(1)}KB</span>
+                                    </button>
+                                {:else}
+                                    <div class="empty-msg">暂无历史快照</div>
+                                {/each}
+                            </div>
                         {/if}
-
-                        <!-- 底部通用按钮：放在一行，且放在 if/else 外部 -->
-                        <div style="display:flex; gap:10px; margin-top:15px;">
-                            <button
-                                class="grid-btn blue"
-                                style="flex:1;"
-                                on:click={() => {
-                                    // Backward compatibility: keep legacy string arrays synced for older clients, ignoring them in main logic
-                                    try {
-                                        const vols = appSettings.customRegexRules.filter(r => r.level === 1).map(r => `(${r.pattern})`);
-                                        const chaps = appSettings.customRegexRules.filter(r => r.level >= 2).map(r => `(${r.pattern})`);
-                                        appSettings.volRegex = vols.length > 0 ? vols.join("|") : "^$"; 
-                                        appSettings.chapRegex = chaps.length > 0 ? chaps.join("|") : "^$";
-                                    } catch (e) {}
-
-                                    localStorage.setItem(
-                                        "app-settings",
-                                        JSON.stringify(appSettings),
-                                    );
-                                    closeAllPanels();
-                                    scanToc();
-                                }}>保存并应用</button
-                            >
-                            <button
-                                class="grid-btn"
-                                style="flex:1;"
-                                on:click={async () => {
-                                    historyList = await invoke(
-                                        "get_history_list",
-                                        {
-                                            originalPath: filePath,
-                                        },
-                                    );
-                                    showHistoryPanel = true;
-                                    showSettingsPanel = false;
-                                }}>历史版本</button
-                            >
-                        </div>
+                    </div>
+                    <div class="settings-footer editor-settings-footer">
+                        <button class="grid-btn blue" on:click={saveEditorSettings}>保存并应用</button>
                     </div>
                 {:else if showEpubModal}
                     <div class="p-header">
@@ -2609,15 +2876,7 @@
                             <div class="epub-cover-column">
                                 <div
                                     class="epub-cover-preview"
-                                    on:click={async () => {
-                                        const s = await open({
-                                            filters: [{ name: "Image", extensions: ["jpg", "png", "jpeg", "webp"] }],
-                                        });
-                                        if (s) {
-                                            epubMeta.cover_path = extractPickedPath(s as string | string[]);
-                                            await loadCoverPreview();
-                                        }
-                                    }}
+                                    on:click={pickLocalCover}
                                     role="button"
                                     tabindex="0"
                                     on:keydown={(e) => e.key === 'Enter' && (e.target as HTMLElement).click()}
@@ -2637,8 +2896,58 @@
                                         </div>
                                     {/if}
                                 </div>
+                                <div class="cover-source-actions">
+                                    <button
+                                        class="cover-source-btn primary"
+                                        disabled={isCoverSearching || isCoverApplying}
+                                        on:click={searchCovers}
+                                    >
+                                        {isCoverSearching ? "搜索中..." : "搜索封面"}
+                                    </button>
+                                    <button
+                                        class="cover-source-btn"
+                                        disabled={isCoverApplying}
+                                        on:click={pickLocalCover}
+                                    >
+                                        本地图片
+                                    </button>
+                                </div>
+                                {#if coverSearchMessage}
+                                    <div class="cover-search-status">{coverSearchMessage}</div>
+                                {/if}
                             </div>
                         </div>
+
+                        {#if coverSearchResults.length}
+                            <div class="cover-results-panel">
+                                <div class="cover-results-head">
+                                    <span>封面结果</span>
+                                    <small>点击图片使用，优先来源会自动尝试填充</small>
+                                </div>
+                                <div class="cover-result-grid" aria-label="封面搜索结果">
+                                    {#each coverSearchResults as result (result.image_url)}
+                                        <button
+                                            class:preferred={result.preferred}
+                                            class="cover-result-card"
+                                            disabled={isCoverApplying}
+                                            title={`${result.title}${result.source ? ` / ${result.source}` : ""}`}
+                                            on:click={() => applyRemoteCover(result)}
+                                        >
+                                            <span class="cover-result-image-wrap">
+                                                <img src={result.image_url} alt={result.title || "封面候选"} loading="lazy" />
+                                                {#if result.preferred}
+                                                    <span class="cover-result-badge">优先</span>
+                                                {/if}
+                                            </span>
+                                            <span class="cover-result-info">
+                                                <span class="cover-result-title">{result.title || "未命名"}</span>
+                                                <span class="cover-result-source">{result.source || "未知来源"}</span>
+                                            </span>
+                                        </button>
+                                    {/each}
+                                </div>
+                            </div>
+                        {/if}
 
                         <div class="epub-modal-footer">
                             <button class="epub-cancel" on:click={openAdvancedEpubMetadata}>
@@ -2682,11 +2991,12 @@
                                 }}
                             >
                                 <span
+                                    class="hist-time"
                                     >{new Date(
                                         h.timestamp * 1000,
                                     ).toLocaleString()}</span
                                 >
-                                <span>{(h.size / 1024).toFixed(1)}KB</span>
+                                <span class="hist-size">{(h.size / 1024).toFixed(1)}KB</span>
                             </button>
                         {:else}
                             <div class="empty-msg">暂无历史快照</div>
@@ -2993,6 +3303,11 @@
         display: flex;
         gap: 6px;
     }
+    .toolbar-tail {
+        display: flex;
+        gap: 6px;
+        margin-left: auto;
+    }
     button {
         height: 34px;
         min-width: 40px;
@@ -3163,6 +3478,22 @@
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 10px;
+    }
+
+    .proof-word-check-controls .proof-row {
+        min-width: 0;
+    }
+
+    .proof-word-check-controls .proof-row label {
+        width: auto;
+        min-width: 74px;
+        white-space: nowrap;
+    }
+
+    .proof-word-check-controls .proof-row input {
+        min-width: 0;
+        width: 100%;
+        box-sizing: border-box;
     }
 
     .proof-row {
@@ -3398,8 +3729,20 @@
     }
 
     .proof-actions-row button {
+        min-width: 0;
         height: 34px;
         font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .proof-convert-actions {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .proof-convert-actions button {
+        width: 100%;
     }
 
     .proof-regex-preview {
@@ -3573,6 +3916,9 @@
 
     .epub-textarea {
         flex: 1;
+        min-width: 0;
+        width: 100%;
+        box-sizing: border-box;
         padding: 8px;
         background: #fdfdfd;
         border: 1px solid #ddd;
@@ -3644,7 +3990,132 @@
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
     }
 
+    .epub-modal-shell {
+        width: min(900px, calc(100vw - 48px));
+        max-width: min(900px, calc(100vw - 48px));
+        max-height: calc(100vh - 48px);
+    }
+
+    .epub-modal-shell .p-body {
+        min-width: 0;
+        overflow: auto;
+    }
+
     /* 偏好设置面板增强样式 */
+    .editor-settings-modal {
+        max-width: 760px;
+        min-height: 520px;
+        display: grid;
+        grid-template-columns: 170px 1fr;
+        grid-template-rows: 58px 1fr 64px;
+        border-radius: 14px;
+    }
+
+    .editor-settings-modal .p-header {
+        grid-column: 1 / -1;
+        height: 58px;
+        padding: 0 20px;
+        background: #fff;
+    }
+
+    .editor-settings-modal .settings-tabs {
+        grid-column: 1;
+        grid-row: 2 / 4;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 16px;
+        border-right: 1px solid #e8edf3;
+        border-bottom: 0;
+        background: #f8fafc;
+    }
+
+    .editor-settings-modal .settings-tabs .tab-btn {
+        width: 100%;
+        justify-content: flex-start;
+        border-radius: 8px;
+        padding: 9px 12px;
+        text-align: left;
+    }
+
+    .editor-settings-modal .p-body {
+        grid-column: 2;
+        grid-row: 2;
+        min-width: 0;
+        overflow: auto;
+        padding: 18px 20px;
+    }
+
+    .editor-settings-modal .editor-settings-footer {
+        grid-column: 2;
+        grid-row: 3;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 20px;
+        border-top: 1px solid #e8edf3;
+        background: #fff;
+    }
+
+    .editor-settings-modal .editor-settings-footer .grid-btn {
+        min-width: 132px;
+        padding: 9px 18px;
+    }
+
+    .history-settings-card {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .hist-item {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        column-gap: 24px;
+        text-align: left;
+    }
+
+    .hist-time {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .hist-size {
+        min-width: 72px;
+        justify-self: end;
+        text-align: right;
+        color: #64748b;
+        font-family: monospace;
+        font-size: 12px;
+    }
+
+    @media (max-width: 760px) {
+        .editor-settings-modal {
+            display: flex;
+            min-height: 0;
+            max-width: 96vw;
+        }
+
+        .editor-settings-modal .settings-tabs {
+            flex-direction: row;
+            border-right: 0;
+            border-bottom: 1px solid #e8edf3;
+        }
+
+        .editor-settings-modal .editor-settings-footer {
+            justify-content: stretch;
+        }
+
+        .editor-settings-modal .editor-settings-footer .grid-btn {
+            width: 100%;
+        }
+    }
+
     .settings-tabs {
         display: flex;
         gap: 15px;
@@ -3762,7 +4233,9 @@
 
     /* EPUB 制作面板重构样式 */
     .epub-modal-body {
-        max-width: 680px !important;
+        width: 100%;
+        max-width: none !important;
+        box-sizing: border-box;
         font-size: 13px;
         color: #444;
     }
@@ -3771,17 +4244,19 @@
         display: flex;
         gap: 24px;
         margin-bottom: 20px;
+        min-width: 0;
     }
 
     .epub-fields-column {
         flex: 1;
+        min-width: 0;
         display: flex;
         flex-direction: column;
         gap: 12px;
     }
 
     .epub-cover-column {
-        width: 160px;
+        width: 190px;
         flex-shrink: 0;
     }
 
@@ -3789,6 +4264,7 @@
         margin-bottom: 0;
         gap: 12px;
         align-items: center;
+        min-width: 0;
     }
     .set-row.align-start {
         align-items: flex-start !important;
@@ -3872,10 +4348,175 @@
         opacity: 1;
     }
 
+    .cover-source-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 10px;
+    }
+
+    .cover-source-btn {
+        height: 32px;
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--color-text-soft);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: var(--shadow-xs);
+        transition: all 0.18s ease;
+    }
+
+    .cover-source-btn.primary {
+        border-color: transparent;
+        background: linear-gradient(135deg, #2098d1, #14a89d);
+        color: #fff;
+    }
+
+    .cover-source-btn:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(31, 142, 186, 0.18);
+    }
+
+    .cover-source-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+
+    .cover-search-status {
+        margin-top: 8px;
+        color: var(--color-muted);
+        font-size: 12px;
+        line-height: 1.4;
+        max-height: 34px;
+        overflow: hidden;
+        word-break: break-word;
+    }
+
+    .cover-results-panel {
+        margin: -4px 0 18px;
+        padding: 12px;
+        border: 1px solid var(--color-border);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.76);
+        box-shadow: var(--shadow-xs);
+    }
+
+    .cover-results-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+    }
+
+    .cover-results-head span {
+        color: var(--color-text);
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    .cover-results-head small {
+        min-width: 0;
+        color: var(--color-muted);
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .cover-result-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+        gap: 10px;
+        max-height: 310px;
+        padding: 2px 2px 4px;
+        overflow-y: auto;
+    }
+
+    .cover-result-card {
+        position: relative;
+        min-width: 0;
+        padding: 0;
+        border: 1px solid var(--color-border);
+        border-radius: 10px;
+        background: #fff;
+        overflow: hidden;
+        cursor: pointer;
+        box-shadow: var(--shadow-xs);
+        text-align: left;
+        transition: all 0.18s ease;
+    }
+
+    .cover-result-card.preferred {
+        border-color: rgba(20, 168, 157, 0.85);
+    }
+
+    .cover-result-card:hover:not(:disabled) {
+        border-color: var(--color-accent);
+        transform: translateY(-1px);
+        box-shadow: 0 10px 24px rgba(31, 142, 186, 0.16);
+    }
+
+    .cover-result-image-wrap {
+        position: relative;
+        display: block;
+        background: #f3f7fa;
+    }
+
+    .cover-result-card img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 3 / 4;
+        object-fit: cover;
+    }
+
+    .cover-result-badge {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        padding: 3px 6px;
+        border-radius: 999px;
+        background: rgba(20, 168, 157, 0.92);
+        color: #fff;
+        font-size: 11px;
+        line-height: 1.2;
+    }
+
+    .cover-result-info {
+        display: grid;
+        gap: 2px;
+        padding: 7px 8px 8px;
+    }
+
+    .cover-result-title {
+        display: block;
+        min-width: 0;
+        color: var(--color-text-soft);
+        font-size: 12px;
+        font-weight: 650;
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .cover-result-source {
+        min-width: 0;
+        color: var(--color-muted);
+        font-size: 11px;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
     .epub-modal-footer {
         display: flex;
         gap: 12px;
         margin-top: 10px;
+        min-width: 0;
     }
 
     .epub-modal-footer button {
@@ -3909,6 +4550,9 @@
         padding: 8px 0;
     }
     .err-tag {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
         background: #fff5f5;
         border: 1px solid #ffcdd2;
         border-radius: 6px;
@@ -3934,11 +4578,24 @@
     }
     .err-tag-title {
         font-weight: bold;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .err-tag-msg {
+        flex-shrink: 0;
         font-size: 11px;
         color: #f44336;
         font-weight: bold;
+        font-family: monospace;
+    }
+
+    .err-tag-count {
+        flex-shrink: 0;
+        margin-left: auto;
+        color: #6b7280;
+        font-size: 11px;
+        font-weight: 700;
         font-family: monospace;
     }
     

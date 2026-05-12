@@ -32,6 +32,351 @@ Main areas:
 
 ## Change History
 
+### 2026-05-12 13:31 +08:00
+
+Request: fix the EPUB creation modal layout regression, bump the app to version `0.5.2`, build locally, and push the update to GitHub Actions.
+
+Changes:
+
+- Fixed the EPUB creation modal shell width so the wider cover-search layout is applied to the outer modal instead of being clipped by the default 520px shell.
+- Added modal overflow constraints so long metadata/search-result content stays inside the dialog.
+- Tightened EPUB textarea and row sizing to prevent form fields from pushing the cover column out of view.
+- Updated app version from `0.5.1` to `0.5.2` in:
+  - `package.json`
+  - `src-tauri/tauri.conf.json`
+  - `src-tauri/Cargo.toml`
+  - `src-tauri/Cargo.lock`
+
+Touched files:
+
+- `package.json`
+- `src/routes/editor/+page.svelte`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `src-tauri/tauri.conf.json`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `cargo check` passed.
+- `pnpm build` passed.
+- `pnpm tauri build` completed successfully.
+- Local release artifacts were produced:
+  - `src-tauri/target/release/bundle/msi/TEpub-Editor_0.5.2_x64_zh-CN.msi`
+  - `src-tauri/target/release/bundle/nsis/TEpub-Editor_0.5.2_x64-setup.exe`
+
+Caveats:
+
+- Build still emits existing Svelte accessibility warnings outside this feature area.
+- Tauri still warns that bundle identifier `com.tepubeditor.app` ends with `.app`.
+
+### 2026-05-12 13:21 +08:00
+
+Request: optimize the EPUB cover-search result display after the result cards appeared cramped in the cover column.
+
+Changes:
+
+- Moved cover search results out of the narrow cover column into a full-width result panel below the EPUB metadata form.
+- Increased the EPUB creation modal width and cover column width for a more balanced layout.
+- Redesigned result cards as a responsive cover grid with larger thumbnails, short titles, source labels, and an `优先` badge.
+- Shortened remote-cover application failure messages so errors no longer stretch the right-side cover controls.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `cargo check` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still emits existing Svelte accessibility warnings outside this feature area.
+
+### 2026-05-12 13:17 +08:00
+
+Request: change EPUB cover search from direct Qidian/Fanqie site search to general image-search style results, only using source domains for auto-priority.
+
+Changes:
+
+- Reworked the backend cover search to query general image results for `book title + author + 小说 封面`.
+- Parse image result metadata for original image URL, source page URL, title, and host.
+- Removed the old Qidian mobile page result parser from the active search path.
+- Kept auto-priority based on trusted image/source domains such as Yuewen, Qidian, Fanqie, and Byteimg.
+
+Touched files:
+
+- `src-tauri/src/lib.rs`
+
+Verification:
+
+- `cargo check` passed.
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- The current general image-search parser depends on Bing Images result metadata markup.
+- `pnpm build` still emits existing Svelte accessibility warnings outside this feature area.
+
+### 2026-05-12 13:14 +08:00
+
+Request: also auto-prioritize cover search results from `https://fanqienovel.com` and `https://p9-novel-sign.byteimg.com`.
+
+Changes:
+
+- Extracted cover-source priority detection into a shared backend helper.
+- Added `fanqienovel.com` and `p9-novel-sign.byteimg.com` to the preferred cover source rules.
+- Switched remote cover download Referer based on Qidian/Yuewen versus Fanqie/Byteimg image domains.
+
+Touched files:
+
+- `src-tauri/src/lib.rs`
+
+Verification:
+
+- `cargo check` passed.
+- `pnpm exec tsc --noEmit --pretty false` passed.
+
+Caveats:
+
+- Fanqie search endpoint still needs a separate reliable integration; this change prioritizes matching Fanqie/Byteimg results when they are present in cover candidates.
+
+### 2026-05-12 13:09 +08:00
+
+Request: add cover search below the EPUB creation cover area, auto-searching by book title and author, auto-applying Qidian/Yuewen covers, while keeping manual result and local image selection.
+
+Changes:
+
+- Added cover search controls under the EPUB creation cover preview.
+- Search results are shown as selectable cover cards, with preferred Qidian/Yuewen results marked and auto-applied.
+- Kept local image selection as a separate button and as the cover preview click action.
+- Added Tauri backend commands for searching `m.qidian.com` cover candidates and downloading a selected remote cover to a local temp file.
+- Allowed remote HTTPS/data images in the Tauri image CSP so search result thumbnails can render.
+- Added `reqwest` for backend cover search/download.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `src-tauri/src/lib.rs`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `src-tauri/tauri.conf.json`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `cargo check` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- Cover search currently targets Qidian mobile search results and may need adjustment if their page structure changes.
+- `pnpm build` still emits existing Svelte accessibility warnings outside this feature area.
+
+### 2026-05-12 12:52 +08:00
+
+Request: change the library's default double-click action to edit files.
+
+Changes:
+
+- Updated the default shelf setting so double-clicking a book opens the editor by default for new or unset shelf settings.
+
+Touched files:
+
+- `src/routes/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+
+### 2026-05-12 12:51 +08:00
+
+Request: refine default TOC regex levels and title patterns for volumes, extras, final chapters, and metadata sections.
+
+Changes:
+
+- Split the old first metadata regex into two defaults:
+  - `内容简介 / 本书相关 / 完本感言` at volume level.
+  - `简介 / 序章 / 序言 / 前言 / 楔子 / 后记 / 尾声` at body/chapter level.
+- Tightened default volume matching to only `第X卷 标题` or `卷X 标题` with a separator before title text.
+- Added `终章 标题` matching to the default chapter regex.
+- Kept `番外 ...`, `新增番外 ...`, and `【番外】...` in chapter matching.
+- Updated local settings migration so legacy broad metadata, volume, and chapter defaults are rewritten to the new split defaults.
+- Updated backend meta detection so `本书相关` is treated as a volume-level meta section.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+- `src-tauri/src/lib.rs`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `cargo check` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still emits existing Svelte accessibility warnings outside this change area.
+
+### 2026-05-12 12:44 +08:00
+
+Request: reduce false positive TOC title detection for prose mentioning volumes, and add extra-title matching for `番外 ...` and `【番外】...`.
+
+Changes:
+
+- Added `番外 ...`, `新增番外 ...`, and `【番外】...` to the default chapter title regex.
+- Migrated legacy default chapter regex rules to the new default so existing local settings pick up the extra-title support.
+- Added runtime filtering for `第X卷/部` lines immediately followed by prose connector characters such as `的`, `和`, `与`, `想`, `写`, `看`, `说`, and `讲`.
+- Kept the backend regex patterns Rust-compatible by avoiding unsupported lookaround syntax.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still emits existing Svelte accessibility warnings outside this change area.
+
+### 2026-05-12 12:36 +08:00
+
+Request: make history version time and size easier to distinguish.
+
+Changes:
+
+- History version rows now use a two-column grid.
+- Snapshot time stays in the left column with ellipsis when needed.
+- Snapshot size is right-aligned in a fixed-width monospace column.
+
+Touched files:
+
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+
+### 2026-05-12 12:32 +08:00
+
+Request: simplify word-count check results, move editor settings save/apply to the bottom, make history versions a settings card, and move theme settings to library settings.
+
+Changes:
+
+- Word-count check result chips now show the chapter title and final word count only, without `低于/高于` threshold text.
+- TXT editor settings now use `显示 / 目录 / 历史版本` tabs, with history snapshots shown as a dedicated settings page instead of a separate button.
+- TXT editor `保存并应用` is now in a fixed bottom footer of the settings modal.
+- Removed theme selection from TXT editor settings.
+- Added theme selection to the library settings panel and persisted it through `app-settings.uiTheme`.
+
+Touched files:
+
+- `src/routes/+page.svelte`
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still emits existing Svelte accessibility warnings outside this change area.
+
+### 2026-05-12 12:28 +08:00
+
+Request: change simplified/traditional proofreading search to find occasional opposite-script characters instead of whole sentences, and prevent unsafe reverse scans in mostly simplified/traditional books.
+
+Changes:
+
+- Simplified/traditional preview now checks the book's dominant script before scanning.
+- Mostly simplified books skip `简体转繁体` preview searches, and mostly traditional books skip `繁体转简体` preview searches, avoiding accidental full-book scans.
+- Preview results are now per suspicious character/short run, with a small surrounding context instead of the entire line or sentence.
+- Applying selected preview results now replaces only the matched character/run, not the full line.
+- Clicking a conversion preview result now selects the exact matched position in the editor.
+
+Touched files:
+
+- `src/lib/textProofing.ts`
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still emits existing Svelte accessibility warnings outside this change area.
+
+### 2026-05-12 12:25 +08:00
+
+Request: refine library ingest feedback and fix proofreading title-number conversion, built-in replacement safety, and simplified/traditional conversion preview/layout.
+
+Changes:
+
+- Added library toolbar ingest status next to the book count: TXT/non-slow imports show `入库中`, while EPUB imports that keep processing past a short delay show `解密入库中`.
+- Added a directory rewrite scope for converting title numbers without reordering chapter/volume sequence.
+- Built-in proofreading replacement previews now carry source offsets and apply replacements by exact text ranges instead of coarse line splices, preserving adjacent line breaks more reliably.
+- Built-in text-check preview messaging now correctly says matches default to unselected.
+- Simplified/traditional preview now filters by direction-specific characters before offering line replacements, so `繁体转简体` no longer proposes broad simplified-to-traditional replacements in mostly simplified books.
+- Simplified/traditional preview keeps original indentation in replacements and its action buttons use a compact grid to avoid overlap in the proofreading panel.
+- Freed the stale Node dev server that was occupying port `1420`.
+
+Touched files:
+
+- `src/lib/textProofing.ts`
+- `src/routes/+page.svelte`
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+- Confirmed port `1420` no longer has a listening process after stopping the stale Node server.
+
+Caveats:
+
+- `pnpm build` still emits existing Svelte accessibility warnings outside this change area.
+
+### 2026-05-12 08:36 +08:00
+
+Request: fix proofreading word-count layout overflow, make text-check replacements default unselected, add preview replacement for simplified/traditional conversion, move TXT settings next to search, and refresh library/TXT settings UI.
+
+Changes:
+
+- Fixed the proofreading word-count threshold controls so the right-side input no longer overflows the panel.
+- Built-in text check now defaults to no selected matches after preview generation.
+- Simplified/traditional conversion now supports finding convertible lines, previewing original/replacement text, click-to-locate, selected replacement, and replace all.
+- TXT editor toolbar now places Settings to the right of Search, matching the library toolbar order.
+- Library settings panel now uses a cleaner card-grid layout for storage, file associations, and shelf display.
+- TXT editor settings panel now uses a wider, cleaner two-column shell with side tabs.
+- Long check-result labels now truncate within the proofreading panel instead of spilling horizontally.
+
+Touched files:
+
+- `src/lib/textProofing.ts`
+- `src/routes/+page.svelte`
+- `src/routes/editor/+page.svelte`
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+- Started local Vite dev server at `http://127.0.0.1:1420` and verified toolbar order, proofreading tabs, conversion preview controls, text-check default disabled replacement, and library settings rendering via browser DOM snapshots.
+
+Caveats:
+
+- Browser verification of the TXT editor still logs expected non-Tauri API errors when opened outside the Tauri desktop shell.
+- `pnpm build` still emits existing Svelte accessibility warnings outside this feature area.
+
 ### 2026-05-12 08:14 +08:00
 
 Request: bump the app to version 0.5.1, build locally, push updates to GitHub, and trigger GitHub Actions.
