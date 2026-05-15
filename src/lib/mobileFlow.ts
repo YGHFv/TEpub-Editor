@@ -1,0 +1,96 @@
+import { invoke } from "@tauri-apps/api/core";
+import { appDataDir, join } from "@tauri-apps/api/path";
+import { message } from "@tauri-apps/plugin-dialog";
+import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
+
+export interface MobileExportResult {
+    output_path: string;
+    public_output: boolean;
+    message: string;
+}
+
+export function safeFileName(name: string, fallbackExt: string) {
+    const cleaned = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim() || "selected";
+    const hasExt = /\.[^.]+$/.test(cleaned);
+    const ext = fallbackExt.replace(/^\./, "");
+    return hasExt || !ext ? cleaned : `${cleaned}.${ext}`;
+}
+
+export function selectionName(path: string) {
+    const clean = path.split(/[?#]/)[0];
+    const name = clean.split(/[\\/]/).pop() || "selected";
+    try {
+        return decodeURIComponent(name);
+    } catch {
+        return name;
+    }
+}
+
+export function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), timeoutMs);
+    });
+    return Promise.race([task, timeout]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
+
+export async function cacheBrowserFile(file: File, fallbackExt: string) {
+    const root = await appDataDir();
+    const dir = await join(root, "mobile-imports");
+    await mkdir(dir, { recursive: true });
+    const cachedPath = await join(dir, `${Date.now()}_${safeFileName(file.name, fallbackExt)}`);
+    const bytes = new Uint8Array(
+        await withTimeout(file.arrayBuffer(), 45000, "读取文件超时，请确认文件在本机可访问后重试。"),
+    );
+    await withTimeout(writeFile(cachedPath, bytes), 45000, "写入应用缓存超时，请换一个较小的文件或重试。");
+    return cachedPath;
+}
+
+export async function offerSystemExport(path: string, fileName: string) {
+    try {
+        const data = await readFile(path);
+        const outputName = safeFileName(fileName, "epub");
+        const blob = new Blob([data], { type: "application/epub+zip" });
+        const file = new File([blob], outputName, { type: "application/epub+zip" });
+        const nav = navigator as Navigator & {
+            canShare?: (data: ShareData & { files?: File[] }) => boolean;
+            share?: (data: ShareData & { files?: File[] }) => Promise<void>;
+        };
+
+        if (nav.share && (!nav.canShare || nav.canShare({ files: [file] }))) {
+            await nav.share({ files: [file], title: outputName, text: "TEpub-Editor EPUB 导出" });
+            return `已打开系统分享/保存面板：${outputName}`;
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = outputName;
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        return `已触发系统下载：${outputName}`;
+    } catch (err) {
+        await message(`系统另存/分享失败：${err}\n\n后端副本位置：${path}`, {
+            title: "导出 EPUB",
+            kind: "warning",
+        });
+        return `已导出后端副本：${path}`;
+    }
+}
+
+export async function exportEpubPath(path: string, fileName: string) {
+    const result = await invoke<MobileExportResult>("mobile_export_epub", {
+        epubPath: path,
+        fileName,
+    });
+    const handoff = await offerSystemExport(result.output_path, fileName);
+    return {
+        ...result,
+        message: result.public_output ? result.message : `${result.message}；${handoff}`,
+    };
+}

@@ -49,11 +49,25 @@
   let pageMarginV = 0.02;       // 纵向边距占 viewport 的比例（上下）
   let userFontFamily = "";      // 用户选择的字体名（空 = 默认）
   let useEpubFonts = true;      // EPUB 自带字体启用 / 禁用
+  type BodyTextTone = "theme" | "deep" | "black";
+  let bodyTextTone: BodyTextTone = "deep";
+  let bodyFontWeight = 500;
 
   // ===== 主题 =====
   type ThemePreset = "paper" | "eye" | "dark" | "sepia" | "snow";
   let themePreset: ThemePreset = "paper";
   let customBgImage = "";  // 用户自定义背景图（dataURL）。优先级高于 themePreset。
+  $: bodyTextColor = (() => {
+    if (bodyTextTone === "theme") return "var(--rd-text)";
+    if (bodyTextTone === "black") return themePreset === "dark" ? "#ffffff" : "#111111";
+    switch (themePreset) {
+      case "eye": return "#1f3425";
+      case "sepia": return "#3f301f";
+      case "snow": return "#111827";
+      case "dark": return "#e8e8e8";
+      default: return "#2f2a22";
+    }
+  })();
 
   // ===== 翻页交互开关 =====
   let fullScreenNext = false;   // 全屏任意位置点击 = 下一页
@@ -84,6 +98,8 @@
     `--rd-lineheight:${lineHeight};` +
     `--rd-paragraph-spacing:${paragraphSpacing}em;` +
     `--rd-user-font:${userFontFamily ? `"${userFontFamily}"` : "inherit"};` +
+    `--rd-body-color:${bodyTextColor};` +
+    `--rd-body-weight:${bodyFontWeight};` +
     `--rd-bg-image:${customBgImage ? `url("${customBgImage.replace(/"/g, "\\\"")}")` : "none"};`;
 
   // DOM 引用
@@ -171,6 +187,13 @@
   }
 
   // ===== EPUB 解析 =====
+  function markOpeningHeaderImage(body: HTMLElement | null) {
+    // Intentionally no-op: keep EPUB opening artwork in its original flow.
+    // The reader's earlier header-image normalization fought CSS columns and
+    // broke books whose chapter art/title/logo are designed as one EPUB block.
+    void body;
+  }
+
   async function loadEpub() {
     loading = true;
     errorMsg = "";
@@ -765,6 +788,7 @@
           ? Array.from(head.querySelectorAll("style")).map(s => s.outerHTML).join("")
           : "";
         const body = doc.body || doc.querySelector("body");
+        if (body instanceof HTMLElement) markOpeningHeaderImage(body);
         const html = body ? body.innerHTML : doc.documentElement.innerHTML;
         // 把 body 的 class / style / id 转移到 .epub-body div
         const chapterPath = spine[i].path;
@@ -790,13 +814,7 @@
         const epubBodyClass = bodyClass ? `epub-body ${bodyClass}` : "epub-body";
         // .epub-body 也清掉 background-* 部分（避免在白色卡片背后重复绘制）。
         // 其他属性保留（color、margin、padding 等）。
-        const bodyStyleNoBg = bodyStyle
-          ? bodyStyle
-              .split(";")
-              .map(s => s.trim())
-              .filter(s => s && !/^background(-[a-z]+)?\s*:/i.test(s))
-              .join("; ")
-          : "";
+        const bodyStyleNoBg = bodyStyle;
         const styleAttr = bodyStyleNoBg ? ` style="${escapeAttr(bodyStyleNoBg)}"` : "";
         const idAttr = bodyId ? ` id="${escapeAttr(bodyId)}"` : "";
         // 把 body 的 background 样式存到 chapterBgStyle，供全屏背景层使用：
@@ -917,35 +935,11 @@
    * 也借此让位给主题色。inline style 在 EPUB style 之上，能稳赢 cascade。
    */
   function extractChapterBgFromCss(idx: number, sectionEl: HTMLElement) {
-    const epubBody = sectionEl.querySelector<HTMLElement>(".epub-body");
-
-    // 第一步：提取背景图（仅当 chapterBgStyle 还没值时）
-    if (!chapterBgStyle[idx] && epubBody) {
-      const cs = window.getComputedStyle(epubBody);
-      const bgImage = cs.backgroundImage;
-      if (bgImage && bgImage !== "none") {
-        const parts: string[] = [`background-image: ${bgImage}`];
-        if (cs.backgroundSize && cs.backgroundSize !== "auto") {
-          parts.push(`background-size: ${cs.backgroundSize}`);
-        }
-        if (cs.backgroundPosition) {
-          parts.push(`background-position: ${cs.backgroundPosition}`);
-        }
-        if (cs.backgroundRepeat && cs.backgroundRepeat !== "repeat") {
-          parts.push(`background-repeat: ${cs.backgroundRepeat}`);
-        }
-        chapterBgStyle[idx] = parts.join("; ");
-        // 触发派生重算：chapterBgStyle 是普通数组，svelte 不会自动检测 in-place 修改
-        chapterBgStyle = chapterBgStyle;
-      }
-    }
-
-    // 第二步：让 EPUB 自带的 body bg-color / bg-image 在列内不再绘制，
-    // 露出阅读器主题色 / 全屏背景层。inline !important 必胜。
-    if (epubBody) {
-      epubBody.style.setProperty("background-image", "none", "important");
-      epubBody.style.setProperty("background-color", "transparent", "important");
-    }
+    // Keep EPUB body backgrounds in the document flow, like the editor preview.
+    // The old reader copied them to a fullscreen fixed layer and then cleared
+    // .epub-body, which made decorative chapter art bleed over later pages.
+    void idx;
+    void sectionEl;
   }
 
   function hydrateChapter(idx: number): boolean {
@@ -1007,7 +1001,12 @@
   // scrollLeft 已经很轻，后台 hydrate 总在抢主线程。
   // 新实现：先纯 DOM 替换（每章 ~1ms），一个 idle slice 凑够 BATCH_SIZE 章或
   // deadline 用完再 measure，开销摊薄数十倍。
-  const HYDRATE_BATCH_SIZE = 8;
+  const HYDRATE_BATCH_SIZE = 3;
+  const USER_NAV_HYDRATE_PAUSE_MS = 260;
+  let lastPageTurnAt = 0;
+  function markPageTurn() {
+    lastPageTurnAt = Date.now();
+  }
   function scheduleHydrate() {
     if (hydrateScheduled) return;
     hydrateScheduled = true;
@@ -1018,6 +1017,10 @@
     function tick(deadline: any) {
       if (renderedSet.size >= chapterFullHtml.length) {
         hydrateScheduled = false;
+        return;
+      }
+      if (Date.now() - lastPageTurnAt < USER_NAV_HYDRATE_PAUSE_MS) {
+        ric(tick);
         return;
       }
 
@@ -1118,7 +1121,7 @@
         }
         applyTransform();
       }
-    }, 80);
+    }, 140);
   }
 
   // ===== 分页计算 =====
@@ -1153,18 +1156,19 @@
     // 最小垂直 margin 至少要 STATUS_BAR_H，确保 viewport 顶部留出状态栏空间，
     // 状态栏 absolute 在 frame top: 8px 处，落在 viewport 顶部上方的留白区。
     const minVerticalMargin = Math.max(STATUS_BAR_H, Math.round(fullH * Math.max(0.02, pageMarginV)));
-    const columnGap = numCols === 2 ? minSideMargin : 0;
+    const visibleColumnGap = numCols === 2 ? minSideMargin : 0;
+    const columnGap = numCols === 2 ? minSideMargin : minSideMargin * 4;
 
     const usableW = Math.max(1, fullW - 2 * minSideMargin);
     const pageInnerW = numCols === 2
-      ? Math.max(1, Math.floor((usableW - columnGap) / 2))
+      ? Math.max(1, Math.floor((usableW - visibleColumnGap) / 2))
       : usableW;
     // 单列模式下，文本可用区域保持 5:8（宽:高）= 8:5（高:宽）的比例，
     // 与默认窗口比例一致；如果 fullH 不够，则受窗口高度约束（取较小值）。
     const availableH = Math.max(1, fullH - 2 * minVerticalMargin);
     const targetPageH = numCols === 1 ? Math.round(pageInnerW * 8 / 5) : availableH;
     const pageH = Math.max(1, Math.min(availableH, targetPageH));
-    const totalW = numCols * pageInnerW + columnGap;
+    const totalW = numCols * pageInnerW + visibleColumnGap;
 
     const stride = pageInnerW + columnGap;
 
@@ -1248,6 +1252,14 @@
     return { tryCols, pageInnerW, columnGap, stride, numCols, pageH };
   }
 
+  function normalizeOpeningHeaderImages() {
+    if (!pageEl) return;
+    pageEl.querySelectorAll<HTMLElement>(".rd-header-only, .rd-after-header-only").forEach((el) => {
+      el.classList.remove("rd-header-only", "rd-after-header-only");
+    });
+    pageEl.querySelectorAll<HTMLElement>(".rd-opening-header-spacer").forEach((el) => el.remove());
+  }
+
   function measurePageMetrics(initial: { tryCols: number; pageInnerW: number; columnGap: number; stride: number; numCols: number }) {
     if (!pageEl) return;
 
@@ -1315,6 +1327,7 @@
   function recomputeLayout(measureNow = true) {
     const initial = applyBasicLayout();
     if (!initial) return;
+    normalizeOpeningHeaderImages();
     if (measureNow) {
       measurePageMetrics(initial);
     } else {
@@ -1383,6 +1396,7 @@
   // 第二次又改 scrollLeft，浏览器在两个 scrollLeft 之间渲染一帧 = 抖动。
   function nextSpread() {
     if (currentSpread + 1 < totalSpreads) {
+      markPageTurn();
       currentSpread += 1;
       applyTransform();
       requestAnimationFrame(() => {
@@ -1394,6 +1408,7 @@
   }
   function prevSpread() {
     if (currentSpread > 0) {
+      markPageTurn();
       currentSpread -= 1;
       applyTransform();
       requestAnimationFrame(() => {
@@ -1404,6 +1419,7 @@
     }
   }
   function goToSpread(idx: number) {
+    markPageTurn();
     currentSpread = Math.max(0, Math.min(totalSpreads - 1, idx));
     ensureChapterReady(chapterIdxForSpread(currentSpread));
     applyTransform();
@@ -1485,6 +1501,7 @@
   // 滚动模式下的"下一屏 / 上一屏"
   function scrollNext() {
     if (!viewportEl) return;
+    markPageTurn();
     viewportEl.scrollTop = Math.min(
       viewportEl.scrollTop + viewportEl.clientHeight - 40,
       viewportEl.scrollHeight - viewportEl.clientHeight
@@ -1493,6 +1510,7 @@
   }
   function scrollPrev() {
     if (!viewportEl) return;
+    markPageTurn();
     viewportEl.scrollTop = Math.max(0, viewportEl.scrollTop - viewportEl.clientHeight + 40);
     saveProgress();
   }
@@ -1555,6 +1573,17 @@
     if (family === userFontFamily) return;
     applyTypographyChange(() => { userFontFamily = family; });
   }
+  function setBodyTextTone(tone: BodyTextTone) {
+    if (tone === bodyTextTone) return;
+    bodyTextTone = tone;
+    persistSettings();
+  }
+  function setBodyFontWeight(weight: number) {
+    const next = Math.max(350, Math.min(700, weight));
+    if (next === bodyFontWeight) return;
+    bodyFontWeight = next;
+    persistSettings();
+  }
   function toggleEpubFonts() {
     applyTypographyChange(() => { useEpubFonts = !useEpubFonts; });
   }
@@ -1596,6 +1625,7 @@
         fontSize, lineHeight, paragraphSpacing,
         pageMarginH, pageMarginV,
         userFontFamily, useEpubFonts,
+        bodyTextTone, bodyFontWeight,
         themePreset, customBgImage,
         fullScreenNext, wheelTurnPage, arrowTurnPage,
       }));
@@ -1616,6 +1646,8 @@
       if (typeof s.pageMarginV === "number") pageMarginV = s.pageMarginV;
       if (typeof s.userFontFamily === "string") userFontFamily = s.userFontFamily;
       if (typeof s.useEpubFonts === "boolean") useEpubFonts = s.useEpubFonts;
+      if (s.bodyTextTone === "theme" || s.bodyTextTone === "deep" || s.bodyTextTone === "black") bodyTextTone = s.bodyTextTone;
+      if (typeof s.bodyFontWeight === "number") bodyFontWeight = Math.max(350, Math.min(700, s.bodyFontWeight));
       if (typeof s.themePreset === "string") themePreset = s.themePreset;
       if (typeof s.customBgImage === "string") customBgImage = s.customBgImage;
       if (typeof s.fullScreenNext === "boolean") fullScreenNext = s.fullScreenNext;
@@ -1946,7 +1978,6 @@
       章节没自带背景时 style 为空字符串，div 仍然存在但不可见 —— 这样切换
       章节时 div 不会被销毁重建，只是 background-image 切换，无闪烁。
     -->
-    <div class="rd-chapter-bg" style={currentChapterBg}></div>
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="rd-viewport" bind:this={viewportEl} on:scroll={onViewportScroll}>
       <div class="rd-page" bind:this={pageEl}>
@@ -2079,6 +2110,24 @@
               <button on:click={() => changeParagraphSpacing(-0.1)} disabled={paragraphSpacing <= 0}>−</button>
               <span class="rd-font-val">{paragraphSpacing.toFixed(2)}</span>
               <button on:click={() => changeParagraphSpacing(+0.1)} disabled={paragraphSpacing >= 2.5}>+</button>
+            </div>
+          </div>
+
+          <div class="rd-set-row">
+            <span class="rd-set-label">字色</span>
+            <div class="rd-segctrl">
+              <button class:active={bodyTextTone === "theme"} on:click={() => setBodyTextTone("theme")}>主题</button>
+              <button class:active={bodyTextTone === "deep"} on:click={() => setBodyTextTone("deep")}>加深</button>
+              <button class:active={bodyTextTone === "black"} on:click={() => setBodyTextTone("black")}>黑字</button>
+            </div>
+          </div>
+
+          <div class="rd-set-row">
+            <span class="rd-set-label">字重</span>
+            <div class="rd-segctrl">
+              <button class:active={bodyFontWeight === 400} on:click={() => setBodyFontWeight(400)}>常规</button>
+              <button class:active={bodyFontWeight === 500} on:click={() => setBodyFontWeight(500)}>适中</button>
+              <button class:active={bodyFontWeight === 600} on:click={() => setBodyFontWeight(600)}>加粗</button>
             </div>
           </div>
 
@@ -2334,7 +2383,8 @@
     height: var(--page-h, 100%);
     font-size: var(--rd-fontsize, 19px);
     line-height: var(--rd-lineheight, 1.85);
-    color: var(--rd-text);
+    color: var(--rd-body-color, var(--rd-text));
+    font-weight: var(--rd-body-weight, 500);
   }
   .rd-app[data-page-mode="scroll"] .rd-page {
     column-width: auto;
@@ -2371,10 +2421,9 @@
     /*
       让 section 至少占满一页：column-fragmented 时一致显示所需空间。
       box-sizing 保证 padding 不破坏列宽。
-      重要：v3（2026/05）— EPUB 自带的 body background 全部由
-      .rd-chapter-bg 全屏背景层接管。这里强制 section 上 background 整体
-      重置为 transparent —— 包括 EPUB CSS `body { background: white }` 经
-      BODY_REPLACE 落到 .rd-chapter 上的 bg-color，让阅读器主题色透出。
+      重要：EPUB CSS `body { background: white }` 经 BODY_REPLACE 也会落到
+      .rd-chapter 上。这里强制 section background 透明，让阅读器主题色
+      透出，同时避免章节背景在 CSS columns 的每列重复绘制。
       `background` 简写会把 image / color / size / repeat / position /
       attachment 一并重置为 initial（none / transparent / auto / repeat /
       0% 0% / scroll），代替原来零散的 image:none + attachment:scroll。
@@ -2394,14 +2443,30 @@
   /* 用户排版：段间距 */
   .rd-page :global(.epub-body) {
     font-family: var(--rd-user-font, inherit);
+    color: var(--rd-body-color, var(--rd-text));
+    font-weight: var(--rd-body-weight, 500);
+    background-color: transparent !important;
   }
   /*
-    section.rd-chapter 已 min-height: page-h，背景在那一层处理。
-    .epub-body 不再设 min-height，避免双层最小高度造成空白。
+    section.rd-chapter 已 min-height: page-h。
+    .epub-body 不再设 min-height，避免双层最小高度造成空白；它的
+    background-color 透明化后，带 alpha 的章节装饰图会露出阅读器主题色。
   */
   .rd-page :global(.epub-body p) {
     margin-top: 0;
     margin-bottom: var(--rd-paragraph-spacing, 0.6em);
+  }
+  .rd-app[data-page-mode="paginated"] .rd-page :global(.epub-body *) {
+    /*
+      EPUB page-break hints are written for native EPUB engines. Inside our CSS
+      columns they can create empty columns that look like blank pages, so the
+      reader keeps chapter boundaries on section.rd-chapter and neutralizes
+      forced breaks inside chapter content.
+    */
+    break-before: auto !important;
+    page-break-before: auto !important;
+    break-after: auto !important;
+    page-break-after: auto !important;
   }
   /* EPUB 自带字体禁用：强制覆盖章节内所有元素 font-family */
   .rd-app.no-epub-fonts .rd-page :global(*) {
@@ -2438,6 +2503,44 @@
     object-fit: contain;
   }
   /*
+    EPUBs such as 山河稷 mark their chapter artwork with .header_image and
+    `page-break-before: always`. In the reader's CSS-column pagination that can
+    isolate the artwork on its own page. Keep the EPUB's normal visual order,
+    but neutralize the forced break and cap only this header-art block so the
+    chapter title/text can continue below it.
+  */
+  .rd-page :global(.epub-body .header_image) {
+    break-before: auto !important;
+    page-break-before: auto !important;
+    break-after: auto !important;
+    page-break-after: auto !important;
+    background-color: transparent !important;
+    line-height: 0;
+  }
+  .rd-page :global(.epub-body .header_image img),
+  .rd-page :global(.epub-body .header_image svg),
+  .rd-page :global(.epub-body .header_image image) {
+    display: block;
+    width: 100% !important;
+    height: min(42vh, calc(var(--page-h, 100vh) * 0.42)) !important;
+    max-width: 100% !important;
+    max-height: min(42vh, calc(var(--page-h, 100vh) * 0.42)) !important;
+    object-fit: contain;
+    object-position: top center;
+    background-color: transparent !important;
+  }
+  .rd-page :global(.epub-body .header_image + .head),
+  .rd-page :global(.epub-body .header_image + h1),
+  .rd-page :global(.epub-body .header_image + h2),
+  .rd-page :global(.epub-body .header_image + h3) {
+    break-before: auto !important;
+    page-break-before: auto !important;
+    background-color: transparent !important;
+  }
+  .rd-page :global(.epub-body .logo) {
+    background-color: transparent !important;
+  }
+  /*
     "章节头图"特殊版式：当章节 section 第一个可视子元素（含一层 wrapper）
     是图片时，让其上左右贴满整个 frame 窗口宽度 —— 视觉上像 LibraryPreview
     里的封面预览，而不是被 max-height/object-fit 缩成中部居中的小图。
@@ -2454,34 +2557,6 @@
       `--page-margin-h/v` 由 applyBasicLayout 实时计算并 set 到 pageEl。
       user-select 关闭让它像封面那样不可选。
   */
-  .rd-page :global(section.rd-chapter > img:first-child),
-  .rd-page :global(section.rd-chapter > svg:first-child),
-  .rd-page :global(section.rd-chapter > .epub-body > img:first-child),
-  .rd-page :global(section.rd-chapter > .epub-body > svg:first-child),
-  .rd-page :global(section.rd-chapter > .epub-body > p:first-child > img:only-child),
-  .rd-page :global(section.rd-chapter > .epub-body > div:first-child > img:only-child),
-  .rd-page :global(section.rd-chapter > .epub-body > div:first-child > svg:only-child) {
-    display: block;
-    width: calc(var(--page-w, 100%) + 2 * var(--page-margin-h, 0px)) !important;
-    max-width: none !important;
-    max-height: calc(var(--page-h, 100%) + var(--page-margin-v, 0px)) !important;
-    height: auto !important;
-    margin: calc(-1 * var(--page-margin-v, 0px)) calc(-1 * var(--page-margin-h, 0px)) 0 calc(-1 * var(--page-margin-h, 0px)) !important;
-    padding: 0 !important;
-    object-fit: contain;
-  }
-  /*
-    包裹头图的 p / div：仅在它的"唯一子元素是图片"时才清边距，否则保留
-    epub 自带 margin（例如制作说明 .copyright 容器需要 10% 上下边距来呈现
-    悬浮卡片观感，不能一概抹掉）。
-  */
-  .rd-page :global(section.rd-chapter > .epub-body > p:first-child:has(> img:only-child)),
-  .rd-page :global(section.rd-chapter > .epub-body > div:first-child:has(> img:only-child)),
-  .rd-page :global(section.rd-chapter > .epub-body > div:first-child:has(> svg:only-child)) {
-    margin-top: 0 !important;
-    padding-top: 0 !important;
-    text-indent: 0 !important;
-  }
   .rd-page :global(table) {
     max-width: var(--page-w, 100%);
   }

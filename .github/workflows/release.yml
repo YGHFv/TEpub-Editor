@@ -53,3 +53,98 @@ jobs:
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: true
           prerelease: false
+
+  android:
+    needs: release
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          version: 9
+          run_install: false
+
+      - name: setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: install frontend dependencies
+        run: pnpm install
+
+      - name: initialize Android project
+        run: pnpm tauri android init --ci --skip-targets-install
+
+      - name: sync Android launcher icons
+        shell: bash
+        run: |
+          cp -R src-tauri/icons/android/. src-tauri/gen/android/app/src/main/res/
+
+      - name: build Android release APK
+        run: pnpm tauri android build --target aarch64 --apk true --aab false
+
+      - name: sign Android APK for install testing
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/android-debug.keystore"
+          keytool -genkeypair \
+            -keystore "$KEYSTORE" \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          RELEASE_DIR="src-tauri/gen/android/app/build/outputs/apk/universal/release"
+          UNSIGNED="$RELEASE_DIR/app-universal-release-unsigned.apk"
+          ALIGNED="$RELEASE_DIR/app-universal-release-aligned.apk"
+          SIGNED="$RELEASE_DIR/TEpub-Editor-android-arm64-release-signed.apk"
+          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$SIGNED" \
+            "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$SIGNED"
+
+      - name: upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TEpub-Editor-android-arm64-release-signed
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk
+
+      - name: attach Android APK to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk

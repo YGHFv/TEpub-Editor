@@ -268,3 +268,217 @@ select:disabled {
 :root[data-theme="dark"] ::selection {
     background: rgba(96, 165, 250, 0.28);
 }
+
+/* Dark theme compatibility for older component-local light surfaces. */
+:root[data-theme="dark"] .app-container,
+:root[data-theme="dark"] .epub-editor,
+:root[data-theme="dark"] .main-body {
+    background: var(--color-canvas) !important;
+    color: var(--color-text);
+}
+
+:root[data-theme="dark"] .toolbar,
+:root[data-theme="dark"] .sidebar,
+:root[data-theme="dark"] .file-tree,
+:root[data-theme="dark"] .preview-pane,
+:root[data-theme="dark"] .proof-panel {
+    background: color-mix(in srgb, var(--color-surface) 88%, transparent) !important;
+    border-color: var(--color-border) !important;
+    box-shadow: none !important;
+}
+
+:root[data-theme="dark"] .sidebar-header-fixed,
+:root[data-theme="dark"] .tree-header,
+:root[data-theme="dark"] .preview-header,
+:root[data-theme="dark"] .tabs-bar,
+:root[data-theme="dark"] .proof-header,
+:root[data-theme="dark"] .proof-tabs,
+:root[data-theme="dark"] .proof-footer,
+:root[data-theme="dark"] .find-header,
+:root[data-theme="dark"] .p-header,
+:root[data-theme="dark"] .settings-header {
+    background: var(--color-surface-soft) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-text);
+}
+
+:root[data-theme="dark"] .settings-panel,
+:root[data-theme="dark"] .dialog,
+:root[data-theme="dark"] .modal-content,
+:root[data-theme="dark"] .prompt-dialog {
+    background: var(--color-surface) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-text) !important;
+}
+
+:root[data-theme="dark"] .settings-body,
+:root[data-theme="dark"] .library-settings-panel .settings-body,
+:root[data-theme="dark"] .settings-footer,
+:root[data-theme="dark"] .tree-content,
+:root[data-theme="dark"] .toc-list,
+:root[data-theme="dark"] .toc-container,
+:root[data-theme="dark"] .proof-body,
+:root[data-theme="dark"] .preview-container,
+:root[data-theme="dark"] .find-replace-panel,
+:root[data-theme="dark"] .image-preview-container,
+:root[data-theme="dark"] .font-preview-container {
+    background: var(--color-canvas) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-text);
+}
+
+:root[data-theme="dark"] .library-settings-panel .settings-section,
+:root[data-theme="dark"] .meta-section,
+:root[data-theme="dark"] .proof-preview,
+:root[data-theme="dark"] .proof-regex-preview,
+:root[data-theme="dark"] .proof-check-list,
+:root[data-theme="dark"] .cover-results-panel,
+:root[data-theme="dark"] .cover-result-card,
+:root[data-theme="dark"] .font-preview-sample,
+:root[data-theme="dark"] .fr-history-dropdown {
+    background: var(--color-surface-soft) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-text) !important;
+}
+
+:root[data-theme="dark"] .editor-pane,
+:root[data-theme="dark"] .editor-content,
+:root[data-theme="dark"] .mobile-frame {
+    background: var(--color-surface) !important;
+    border-color: var(--color-border) !important;
+    box-shadow: none !important;
+}
+
+:root[data-theme="dark"] .editor-tab,
+:root[data-theme="dark"] .icon-btn,
+:root[data-theme="dark"] .mini-btn,
+:root[data-theme="dark"] .rule-btn,
+:root[data-theme="dark"] .btn,
+:root[data-theme="dark"] .prompt-btn,
+:root[data-theme="dark"] .fr-btn,
+:root[data-theme="dark"] .cover-source-btn,
+:root[data-theme="dark"] .btn-secondary,
+:root[data-theme="dark"] .btn-save-default,
+:root[data-theme="dark"] .epub-cancel,
+:root[data-theme="dark"] .btn-small {
+    background: var(--color-surface-soft) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-text-soft) !important;
+    box-shadow: none !important;
+}
+
+:root[data-theme="dark"] .editor-tab:hover,
+:root[data-theme="dark"] .icon-btn:hover:not(:disabled),
+:root[data-theme="dark"] .mini-btn:hover:not(:disabled),
+:root[data-theme="dark"] .rule-btn:hover:not(:disabled),
+:root[data-theme="dark"] .btn:hover:not(:disabled),
+:root[data-theme="dark"] .prompt-btn:hover:not(:disabled),
+:root[data-theme="dark"] .fr-btn:hover,
+:root[data-theme="dark"] .cover-source-btn:hover:not(:disabled),
+:root[data-theme="dark"] .toc-item:hover,
+:root[data-theme="dark"] .tree-node:hover,
+:root[data-theme="dark"] .toggle-row:hover,
+:root[data-theme="dark"] .fr-history-item:hover {
+    background: var(--color-hover) !important;
+    color: var(--color-text) !important;
+    border-color: var(--color-border-strong) !important;
+}
+
+:root[data-theme="dark"] .editor-tab.active,
+:root[data-theme="dark"] .toc-item.active,
+:root[data-theme="dark"] .tree-node.selected,
+:root[data-theme="dark"] .vol-title,
+:root[data-theme="dark"] .tab.active,
+:root[data-theme="dark"] .settings-tabs .tab-btn.active {
+    background: var(--color-accent-soft) !important;
+    border-color: var(--color-accent) !important;
+    color: var(--color-accent-deep) !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent) !important;
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] .set-control,
+:root[data-theme="dark"] .set-row input,
+:root[data-theme="dark"] .set-row select,
+:root[data-theme="dark"] .set-row textarea,
+:root[data-theme="dark"] .fr-input,
+:root[data-theme="dark"] .fr-select,
+:root[data-theme="dark"] .fr-dropdown-btn,
+:root[data-theme="dark"] .epub-input-small,
+:root[data-theme="dark"] .epub-textarea,
+:root[data-theme="dark"] .rule-type,
+:root[data-theme="dark"] .rule-input,
+:root[data-theme="dark"] .prompt-input,
+:root[data-theme="dark"] .search-box input {
+    background: #151b24 !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-text) !important;
+}
+
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder {
+    color: var(--color-muted) !important;
+}
+
+:root[data-theme="dark"] .tree-header h3,
+:root[data-theme="dark"] .settings-panel h3,
+:root[data-theme="dark"] .section-title,
+:root[data-theme="dark"] .proof-title,
+:root[data-theme="dark"] .dialog-header,
+:root[data-theme="dark"] .prompt-title,
+:root[data-theme="dark"] .find-title,
+:root[data-theme="dark"] .tab-name,
+:root[data-theme="dark"] .font-preview-title {
+    color: var(--color-text) !important;
+}
+
+:root[data-theme="dark"] .set-label,
+:root[data-theme="dark"] .set-row label,
+:root[data-theme="dark"] .toc-item,
+:root[data-theme="dark"] .tree-node,
+:root[data-theme="dark"] .placeholder,
+:root[data-theme="dark"] .loading,
+:root[data-theme="dark"] .empty-state,
+:root[data-theme="dark"] .fr-label,
+:root[data-theme="dark"] .fr-checkbox,
+:root[data-theme="dark"] .dialog-content,
+:root[data-theme="dark"] .prompt-message,
+:root[data-theme="dark"] .font-preview-tip,
+:root[data-theme="dark"] .font-stats-line,
+:root[data-theme="dark"] .proof-subtitle,
+:root[data-theme="dark"] .proof-row label,
+:root[data-theme="dark"] .cover-result-title,
+:root[data-theme="dark"] .cover-result-source {
+    color: var(--color-text-soft) !important;
+}
+
+:root[data-theme="dark"] .btn-primary,
+:root[data-theme="dark"] .btn.primary,
+:root[data-theme="dark"] .epub-confirm,
+:root[data-theme="dark"] .prompt-btn.confirm,
+:root[data-theme="dark"] .cover-source-btn.primary,
+:root[data-theme="dark"] .mini-btn.active,
+:root[data-theme="dark"] .proof-tabs button.active,
+:root[data-theme="dark"] .proof-primary {
+    background: var(--gradient-accent) !important;
+    border-color: transparent !important;
+    color: #ffffff !important;
+}
+
+:root[data-theme="dark"] .btn.danger,
+:root[data-theme="dark"] .btn-save-modified,
+:root[data-theme="dark"] .fr-danger,
+:root[data-theme="dark"] .fr-close-btn {
+    background: var(--color-danger-soft) !important;
+    border-color: color-mix(in srgb, var(--color-danger) 36%, transparent) !important;
+    color: var(--color-danger) !important;
+}
+
+:root[data-theme="dark"] .code-block .line-number,
+:root[data-theme="dark"] .line-number {
+    background: var(--color-surface-soft) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-muted) !important;
+}

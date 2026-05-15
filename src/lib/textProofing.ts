@@ -105,6 +105,56 @@ const CHINESE_DIGITS = [
 ];
 
 const CHINESE_CHAR_RE = /[\u3400-\u9fff]/;
+const PINYIN_TOKEN_SPLIT_RE = /[\s'’\-]+/;
+const PINYIN_TOKEN_CHAR_RE =
+  /^[A-Za-z\u00c0-\u024f\u1e00-\u1eff\u00fc\u00dc\u01d5-\u01dc:]+[1-5]?$/;
+const PINYIN_TONE_MARK_RE =
+  /[\u0101\u00e1\u01ce\u00e0\u0113\u00e9\u011b\u00e8\u012b\u00ed\u01d0\u00ec\u014d\u00f3\u01d2\u00f2\u016b\u00fa\u01d4\u00f9\u01d6\u01d8\u01da\u01dc\u01d5\u01d7\u01d9\u01db\u00fc]/i;
+const PINYIN_TONE_NUMBER_RE =
+  /\b[A-Za-z\u00c0-\u024f\u1e00-\u1eff\u00fc\u00dc\u01d5-\u01dc:]+[1-5]\b/;
+const PINYIN_NOISE_RE = /[=_*\/\\{}<>@#$%&]|[☉≈]/;
+const PINYIN_TRAILING_CANDIDATE_RE =
+  /\s+([A-Za-z\u00c0-\u024f\u1e00-\u1eff\u00fc\u00dc\u01d5-\u01dc:]+(?:[1-5])?(?:[\s'’\-]+[A-Za-z\u00c0-\u024f\u1e00-\u1eff\u00fc\u00dc\u01d5-\u01dc:]+(?:[1-5])?){0,12})\s*$/;
+const PINYIN_BRACKET_RE =
+  /[\uFF08(\u3010\[]\s*([^\uFF08\uFF09()\[\]\u3010\u3011]*)\s*[\uFF09)\u3011\]]/g;
+const PINYIN_FINALS = new Set([
+  "a",
+  "ai",
+  "an",
+  "ang",
+  "ao",
+  "e",
+  "ei",
+  "en",
+  "eng",
+  "er",
+  "i",
+  "ia",
+  "ian",
+  "iang",
+  "iao",
+  "ie",
+  "in",
+  "ing",
+  "iong",
+  "iu",
+  "o",
+  "ong",
+  "ou",
+  "u",
+  "ua",
+  "uai",
+  "uan",
+  "uang",
+  "ue",
+  "ui",
+  "un",
+  "uo",
+  "v",
+  "van",
+  "ve",
+  "vn",
+]);
 const PINYIN_MARK_RE =
   /[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿẁẃẅÿ]/i;
 const PINYIN_WORD_RE = /^[A-Za-züÜvVāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿ'’\-\s0-9]+$/;
@@ -218,21 +268,53 @@ function buildConvertContext(
   };
 }
 
+function normalizePinyinToken(token: string) {
+  return token
+    .toLowerCase()
+    .replace(/u:/g, "v")
+    .replace(/[üǖǘǚǜ]/g, "v")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zv0-9]/g, "");
+}
+
+function isValidPinyinSyllable(raw: string) {
+  if (!PINYIN_TOKEN_CHAR_RE.test(raw)) return false;
+
+  let token = normalizePinyinToken(raw);
+  if (!token) return false;
+  if (/\d/.test(token) && !/[1-5]$/.test(token)) return false;
+
+  token = token.replace(/[1-5]$/, "");
+  if (token.length < 1 || token.length > 7) return false;
+  if (token === "r" || token === "x" || token === "y") return false;
+
+  const initial = token.match(/^(?:zh|ch|sh|[bpmfdtnlgkhjqxzcsrwy])/)?.[0] ?? "";
+  const finalPart = token.slice(initial.length);
+  if (!finalPart) return false;
+
+  return PINYIN_FINALS.has(finalPart);
+}
+
 function isPinyinLike(text: string) {
   const trimmed = normalizeSpaces(text);
   if (!trimmed) return false;
   if (CHINESE_CHAR_RE.test(trimmed)) return false;
-  if (!PINYIN_WORD_RE.test(trimmed)) return false;
-  if (!PINYIN_LATIN_RE.test(trimmed)) return false;
+  if (PINYIN_NOISE_RE.test(trimmed)) return false;
+
+  const tokens = trimmed.split(PINYIN_TOKEN_SPLIT_RE).filter(Boolean);
+  if (!tokens.length || tokens.length > 12) return false;
+  if (!tokens.every(isValidPinyinSyllable)) return false;
+
   return (
-    PINYIN_MARK_RE.test(trimmed) ||
-    PINYIN_TONE_RE.test(trimmed) ||
-    trimmed.split(/\s+/).length >= 2
+    PINYIN_TONE_MARK_RE.test(trimmed) ||
+    PINYIN_TONE_NUMBER_RE.test(trimmed) ||
+    tokens.length >= 2
   );
 }
 
 function stripTrailingPinyin(text: string) {
-  return text.replace(TRAILING_PINYIN_RE, (match, tail: string) =>
+  return text.replace(PINYIN_TRAILING_CANDIDATE_RE, (match, tail: string) =>
     isPinyinLike(tail) ? "" : match,
   );
 }
@@ -277,6 +359,31 @@ function cleanPinyinLine(line: string) {
 
   if (cleaned === trimmed) return line;
   const indent = line.match(/^[\s　]*/)?.[0] ?? "";
+  return cleaned ? `${indent}${cleaned}` : indent.trimEnd();
+}
+
+function cleanPinyinLineStrict(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return line;
+
+  if (!CHINESE_CHAR_RE.test(trimmed)) {
+    return isPinyinLike(trimmed) ? "" : line;
+  }
+
+  const withoutPinyin = stripTrailingPinyin(line).replace(
+    PINYIN_BRACKET_RE,
+    (match, inner: string) => (isPinyinLike(inner) ? "" : match),
+  );
+
+  if (withoutPinyin === line) return line;
+
+  const cleaned = withoutPinyin
+    .replace(/[ \t\u3000]+/g, " ")
+    .replace(/\s*([\uFF1A:\u3001\uFF0C,.\uFF0E\-\u2014])\s*/g, "$1")
+    .trim();
+
+  if (cleaned === trimmed) return line;
+  const indent = line.match(/^[\s\u3000]*/)?.[0] ?? "";
   return cleaned ? `${indent}${cleaned}` : indent.trimEnd();
 }
 
@@ -738,7 +845,7 @@ export function removePinyin(content: string, tocNodes: ProofTocNode[]): ProofTr
       continue;
     }
 
-    const cleaned = cleanPinyinLine(line);
+    const cleaned = cleanPinyinLineStrict(line);
 
     if (cleaned !== line) {
       lines[i] = cleaned;
@@ -752,7 +859,7 @@ export function removePinyin(content: string, tocNodes: ProofTocNode[]): ProofTr
     if (lineIndex < 0 || lineIndex >= lines.length) continue;
     const currentLine = lines[lineIndex];
     if (!CHINESE_CHAR_RE.test(currentLine)) continue;
-    const cleaned = cleanPinyinLine(currentLine);
+    const cleaned = cleanPinyinLineStrict(currentLine);
     if (cleaned !== currentLine) {
       lines[lineIndex] = cleaned;
       changedCount++;
@@ -847,7 +954,7 @@ export function buildBuiltinRegexPreview(
 
   for (let index = 0; index < lines.length; index++) {
     const original = lines[index];
-    const replacement = cleanPinyinLine(original);
+    const replacement = cleanPinyinLineStrict(original);
     if (replacement !== original) {
       pushRow(index + 1, index + 1, original, replacement);
     }
