@@ -4751,6 +4751,11 @@ struct MobileEpubMetadata {
     tags: Vec<String>,
 }
 
+#[derive(Serialize, Clone, Debug, Default)]
+struct MobileEpubCover {
+    bytes: Vec<u8>,
+}
+
 #[derive(Serialize, Clone, Debug)]
 struct MobileExportResult {
     output_path: String,
@@ -5129,6 +5134,127 @@ fn parse_epub_metadata(epub_path: &Path) -> Result<EpubParsedMeta, String> {
         maker,
         tags,
     })
+}
+
+fn read_opf_from_dir(root: &Path) -> Result<(String, String), String> {
+    let container_path = root.join("META-INF").join("container.xml");
+    let container_xml =
+        fs::read_to_string(&container_path).map_err(|e| format!("读取 container.xml 失败: {}", e))?;
+    let opf_re = Regex::new(r#"full-path="([^"]+)""#).map_err(|e| e.to_string())?;
+    let opf_path = match opf_re.captures(&container_xml) {
+        Ok(Some(c)) => c.get(1).map(|m| m.as_str().to_string()),
+        _ => None,
+    }
+    .ok_or_else(|| "container.xml 缺少 full-path".to_string())?;
+    let opf_xml = fs::read_to_string(root.join(&opf_path))
+        .map_err(|e| format!("读取 OPF 文件失败 {}: {}", opf_path, e))?;
+    Ok((opf_path, opf_xml))
+}
+
+fn parse_epub_metadata_from_parts(
+    opf_path: &str,
+    opf_xml: &str,
+    cover_bytes: Option<Vec<u8>>,
+    cover_ext: String,
+) -> Result<EpubParsedMeta, String> {
+    let title = extract_first_tag(opf_xml, "dc:title").unwrap_or_default();
+    let author = extract_first_tag(opf_xml, "dc:creator").unwrap_or_default();
+    let publisher = extract_first_tag(opf_xml, "dc:publisher");
+    let description = extract_first_tag(opf_xml, "dc:description");
+    let epub_uuid = extract_first_tag(opf_xml, "dc:identifier").unwrap_or_default();
+    let subtitle = extract_meta_by_name(opf_xml, "calibre:subtitle");
+    let series = extract_meta_by_name(opf_xml, "calibre:series");
+    let maker = extract_meta_by_name(opf_xml, "maker");
+    let tags = extract_all_tags(opf_xml, "dc:subject");
+    let pub_date = extract_first_tag(opf_xml, "dc:date").and_then(|s| parse_epub_date(&s));
+    let modified_date = match Regex::new(
+        r#"<meta\s+[^>]*property="dcterms:modified"[^>]*>([\s\S]*?)</meta>"#,
+    ) {
+        Ok(re) => match re.captures(opf_xml) {
+            Ok(Some(c)) => c.get(1).and_then(|m| parse_epub_date(m.as_str().trim())),
+            _ => None,
+        },
+        Err(_) => None,
+    };
+
+    let normalized_cover_ext = if cover_ext.is_empty() {
+        find_cover_href(opf_xml)
+            .map(|href| {
+                let opf_dir = Path::new(opf_path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                let cover_full = if opf_dir.is_empty() {
+                    href
+                } else {
+                    format!("{}/{}", opf_dir, href)
+                };
+                ext_from_path(&normalize_zip_path(&cover_full)).to_string()
+            })
+            .unwrap_or_else(|| "jpg".to_string())
+    } else {
+        cover_ext
+    };
+
+    Ok(EpubParsedMeta {
+        title,
+        author,
+        publisher,
+        description,
+        epub_uuid,
+        cover_bytes,
+        cover_ext: normalized_cover_ext,
+        pub_date,
+        modified_date,
+        subtitle,
+        series,
+        maker,
+        tags,
+    })
+}
+
+fn parse_epub_metadata_live(epub_path: &Path) -> Result<EpubParsedMeta, String> {
+    let temp_path = {
+        let cache_guard = EPUB_CACHE.lock().unwrap();
+        if let Some(ref cache) = *cache_guard {
+            if cache.epub_path == epub_path.to_string_lossy() {
+                cache.temp_dir.as_ref().map(|temp| temp.path().to_path_buf())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    if let Some(root) = temp_path {
+        let (opf_path, opf_xml) = read_opf_from_dir(&root)?;
+        let mut cover_bytes: Option<Vec<u8>> = None;
+        let mut cover_ext = String::from("jpg");
+        if let Some(href) = find_cover_href(&opf_xml) {
+            let opf_dir = Path::new(&opf_path)
+                .parent()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            let cover_full = if opf_dir.is_empty() {
+                href
+            } else {
+                format!("{}/{}", opf_dir, href)
+            };
+            let normalized = normalize_zip_path(&cover_full);
+            let disk_path = normalized.split('/').fold(root.clone(), |acc, part| acc.join(part));
+            if let Ok(buf) = fs::read(&disk_path) {
+                cover_ext = match ext_from_path(&normalized) {
+                    "jpg" => detect_image_ext(&buf).to_string(),
+                    other => other.to_string(),
+                };
+                cover_bytes = Some(buf);
+            }
+        }
+        return parse_epub_metadata_from_parts(&opf_path, &opf_xml, cover_bytes, cover_ext);
+    }
+
+    parse_epub_metadata(epub_path)
 }
 
 fn detect_book_file_type(path: &Path) -> &'static str {
@@ -6067,10 +6193,26 @@ async fn mobile_read_epub_metadata(epub_path: String) -> Result<MobileEpubMetada
         if !path.exists() {
             return Err("EPUB 文件不存在".to_string());
         }
-        parse_epub_metadata(&path).map(MobileEpubMetadata::from)
+        parse_epub_metadata_live(&path).map(MobileEpubMetadata::from)
     })
     .await
     .map_err(|e| format!("读取 EPUB 元数据任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn mobile_read_epub_cover(epub_path: String) -> Result<MobileEpubCover, String> {
+    let path = PathBuf::from(epub_path);
+    tauri::async_runtime::spawn_blocking(move || {
+        if !path.exists() {
+            return Err("EPUB 文件不存在".to_string());
+        }
+        let parsed = parse_epub_metadata_live(&path)?;
+        Ok(MobileEpubCover {
+            bytes: parsed.cover_bytes.unwrap_or_default(),
+        })
+    })
+    .await
+    .map_err(|e| format!("读取 EPUB 封面任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -6078,7 +6220,7 @@ async fn mobile_update_epub_metadata(
     epub_path: String,
     metadata: MobileEpubMetadata,
 ) -> Result<MobileEpubMetadata, String> {
-    let path = PathBuf::from(epub_path);
+    let path = PathBuf::from(&epub_path);
     tauri::async_runtime::spawn_blocking(move || {
         if !path.exists() {
             return Err("EPUB 文件不存在".to_string());
@@ -6111,6 +6253,30 @@ async fn mobile_update_epub_metadata(
             &tags,
         );
 
+        let temp_root = {
+            let cache_guard = EPUB_CACHE.lock().unwrap();
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    cache.temp_dir.as_ref().map(|temp| temp.path().to_path_buf())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(root) = temp_root {
+            let (temp_opf_path, _) = read_opf_from_dir(&root)?;
+            let temp_opf_disk_path = temp_opf_path
+                .split('/')
+                .fold(root.clone(), |acc, part| acc.join(part));
+            if let Some(parent) = temp_opf_disk_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("创建 OPF 目录失败: {}", e))?;
+            }
+            fs::write(&temp_opf_disk_path, &new_opf).map_err(|e| format!("写入缓存 OPF 失败: {}", e))?;
+        }
+
         rewrite_epub(
             &path,
             &EpubRewrite {
@@ -6122,6 +6288,65 @@ async fn mobile_update_epub_metadata(
     })
     .await
     .map_err(|e| format!("写回 EPUB 元数据任务失败: {}", e))?
+}
+
+#[tauri::command]
+async fn mobile_update_epub_cover(
+    epub_path: String,
+    cover_data: Vec<u8>,
+) -> Result<MobileEpubCover, String> {
+    if cover_data.is_empty() {
+        return Err("封面数据为空".to_string());
+    }
+
+    let path = PathBuf::from(&epub_path);
+    tauri::async_runtime::spawn_blocking(move || {
+        if !path.exists() {
+            return Err("EPUB 文件不存在".to_string());
+        }
+
+        let temp_root = {
+            let cache_guard = EPUB_CACHE.lock().unwrap();
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    cache.temp_dir.as_ref().map(|temp| temp.path().to_path_buf())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(root) = temp_root {
+            let (opf_path, opf_xml) = read_opf_from_dir(&root)?;
+            if let Some(cover_internal) = locate_cover_in_opf(&opf_path, &opf_xml) {
+                let cover_disk_path = cover_internal
+                    .split('/')
+                    .fold(root.clone(), |acc, part| acc.join(part));
+                if let Some(parent) = cover_disk_path.parent() {
+                    fs::create_dir_all(parent).map_err(|e| format!("创建封面目录失败: {}", e))?;
+                }
+                fs::write(&cover_disk_path, &cover_data)
+                    .map_err(|e| format!("写入缓存封面失败: {}", e))?;
+            }
+        }
+
+        rewrite_epub(
+            &path,
+            &EpubRewrite {
+                opf_replacement: None,
+                cover_replacement: Some(cover_data.clone()),
+            },
+        )?;
+
+        let parsed = parse_epub_metadata_live(&path)?;
+        Ok(MobileEpubCover {
+            bytes: parsed.cover_bytes.unwrap_or(cover_data),
+        })
+    })
+    .await
+    .map_err(|e| format!("写回 EPUB 封面任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -6446,6 +6671,8 @@ pub fn run() {
             mobile_scan_chapters,
             mobile_make_epub,
             mobile_read_epub_metadata,
+            mobile_read_epub_cover,
+            mobile_update_epub_cover,
             mobile_update_epub_metadata,
             mobile_export_epub,
             // ===== Library Phase 4 =====

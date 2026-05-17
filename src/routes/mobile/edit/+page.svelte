@@ -1,7 +1,9 @@
 <script lang="ts">
+    import { onMount, tick } from "svelte";
+    import { goto } from "$app/navigation";
     import { invoke } from "@tauri-apps/api/core";
     import { message } from "@tauri-apps/plugin-dialog";
-    import { cacheBrowserFile, exportEpubPath, safeFileName, selectionName } from "$lib/mobileFlow";
+    import { buildMobileRoute, cacheBrowserFile, readMobileSelection, selectionName } from "$lib/mobileFlow";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
 
     interface EpubFileNode {
@@ -30,27 +32,100 @@
         files: FlatFile[];
     }
 
+    interface SearchMatch {
+        file: FlatFile;
+        from: number;
+        to: number;
+    }
+
+    interface ConfirmSheetState {
+        open: boolean;
+        title: string;
+        message: string;
+        confirmLabel: string;
+        secondaryLabel: string;
+        cancelLabel: string;
+        tone: "primary" | "danger";
+    }
+
+    type ConfirmSheetResult = "confirm" | "secondary" | "cancel";
+
     let fileInputEl: HTMLInputElement | null = null;
     let addFileInputEl: HTMLInputElement | null = null;
     let selectedPath = "";
     let selectedName = "";
     let bookTitle = "编辑 EPUB";
-    let status = "选择 EPUB 后浏览内部文件结构。";
+    let status = "从元数据页进入后浏览内部文件结构。";
     let busy = false;
     let fileTree: EpubFileNode[] = [];
     let flatFiles: FlatFile[] = [];
     let openGroups = new Set<string>();
-    let exportPath = "";
     let editingFile: FlatFile | null = null;
     let editingContent = "";
+    let epubEditorComponent: EpubCodeEditor | null = null;
     let editorDirty = false;
     let previewUrl = "";
     let addTargetGroup: FileGroup | null = null;
+    let findPattern = "";
+    let replacePattern = "";
+    let replaceIsRegex = false;
+    let replaceOnlyText = false;
+    let replaceScope: "current" | "html" | "all" = "html";
+    let replaceStatus = "";
+    let replacePanelOpen = false;
+    let currentMatch: { from: number; to: number; filePath: string } | null = null;
+    let currentMatchIndex = 0;
+    let currentMatchCount = 0;
+    let confirmSheet: ConfirmSheetState = {
+        open: false,
+        title: "",
+        message: "",
+        confirmLabel: "确定",
+        secondaryLabel: "",
+        cancelLabel: "取消",
+        tone: "primary",
+    };
+
+    const FILE_LAYER_STATE_KEY = "mobile-edit-file-open";
+    let confirmResolver: ((result: ConfirmSheetResult) => void) | null = null;
+    let restoringFileLayer = false;
 
     $: groups = buildGroups(flatFiles);
 
     function openPicker() {
         fileInputEl?.click();
+    }
+
+    function metadataRoute(refresh = "") {
+        if (!selectedPath) return "/mobile";
+        return buildMobileRoute("/mobile/metadata", {
+            path: selectedPath,
+            name: selectedName,
+            refresh,
+        });
+    }
+
+    async function loadEpub(epubPath: string, name = "") {
+        try {
+            busy = true;
+            selectedName = name || selectionName(epubPath);
+            selectedPath = epubPath;
+            bookTitle = selectionName(selectedName).replace(/\.epub$/i, "");
+            try {
+                const meta = await invoke<MobileEpubMetadata>("mobile_read_epub_metadata", { epubPath });
+                if (meta.title?.trim()) bookTitle = meta.title.trim();
+            } catch (_) {
+                // metadata is a nice-to-have for the mobile header
+            }
+            fileTree = await invoke<EpubFileNode[]>("extract_epub", { epubPath });
+            refreshFlatFiles(fileTree);
+            status = `已解包 ${flatFiles.length} 个文件。`;
+        } catch (err) {
+            status = "EPUB 解包失败";
+            await message(`EPUB 解包失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+        } finally {
+            busy = false;
+        }
     }
 
     async function onFileChange(event: Event) {
@@ -60,25 +135,11 @@
         if (!file) return;
 
         try {
-            busy = true;
-            exportPath = "";
-            selectedName = file.name;
-            selectedPath = await cacheBrowserFile(file, "epub");
-            bookTitle = selectionName(file.name).replace(/\.epub$/i, "");
-            try {
-                const meta = await invoke<MobileEpubMetadata>("mobile_read_epub_metadata", { epubPath: selectedPath });
-                if (meta.title?.trim()) bookTitle = meta.title.trim();
-            } catch (_) {
-                // metadata is a nice-to-have for the mobile header
-            }
-            fileTree = await invoke<EpubFileNode[]>("extract_epub", { epubPath: selectedPath });
-            refreshFlatFiles(fileTree);
-            status = `已解包 ${flatFiles.length} 个文件。`;
+            const cachedPath = await cacheBrowserFile(file, "epub");
+            await loadEpub(cachedPath, file.name);
         } catch (err) {
-            status = "EPUB 解包失败";
-            await message(`EPUB 解包失败：${err}`, { title: "编辑 EPUB", kind: "error" });
-        } finally {
-            busy = false;
+            status = "导入 EPUB 失败";
+            await message(`导入 EPUB 失败：${err}`, { title: "编辑 EPUB", kind: "error" });
         }
     }
 
@@ -158,6 +219,14 @@
         return !isImageFile(file) && ["html", "css", "xml", "other"].includes(file.file_type);
     }
 
+    function isSearchableTextFile(file: FlatFile) {
+        return (
+            !isImageFile(file) &&
+            file.file_type !== "font" &&
+            (["html", "css", "xml"].includes(file.file_type) || /\.(?:txt|js|json|opf|ncx)$/i.test(file.name))
+        );
+    }
+
     function isImageFile(file: FlatFile) {
         return file.file_type === "image" || /\.(?:jpe?g|png|gif|webp|bmp|svg)$/i.test(file.name) || /\.(?:jpe?g|png|gif|webp|bmp|svg)$/i.test(file.path);
     }
@@ -207,12 +276,78 @@
         previewUrl = "";
     }
 
-    async function openFile(file: FlatFile) {
+    function hasFileLayerState(state?: unknown) {
+        const historyState = state === undefined ? (typeof window !== "undefined" ? window.history.state : null) : state;
+        return Boolean(historyState && typeof historyState === "object" && FILE_LAYER_STATE_KEY in (historyState as Record<string, unknown>));
+    }
+
+    function pushFileLayerState() {
+        if (typeof window === "undefined" || hasFileLayerState()) return;
+        const state = window.history.state && typeof window.history.state === "object" ? window.history.state : {};
+        window.history.pushState({ ...state, [FILE_LAYER_STATE_KEY]: true }, "");
+    }
+
+    function requestCloseFileViaHistory() {
+        if (typeof window === "undefined" || !editingFile) return false;
+        if (!hasFileLayerState()) return false;
+        window.history.back();
+        return true;
+    }
+
+    function restoreFileLayerState() {
+        if (typeof window === "undefined" || hasFileLayerState() || !editingFile) return;
+        restoringFileLayer = true;
+        pushFileLayerState();
+        restoringFileLayer = false;
+    }
+
+    function openConfirmSheet(options: Omit<ConfirmSheetState, "open">) {
+        if (confirmResolver) {
+            confirmResolver("cancel");
+            confirmResolver = null;
+        }
+        confirmSheet = { open: true, ...options };
+        return new Promise<ConfirmSheetResult>((resolve) => {
+            confirmResolver = resolve;
+        });
+    }
+
+    function resolveConfirmSheet(result: ConfirmSheetResult) {
+        const resolver = confirmResolver;
+        confirmResolver = null;
+        confirmSheet = {
+            open: false,
+            title: "",
+            message: "",
+            confirmLabel: "确定",
+            secondaryLabel: "",
+            cancelLabel: "取消",
+            tone: "primary",
+        };
+        resolver?.(result);
+    }
+
+    function blurInteractiveFocus() {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement) active.blur();
+        epubEditorComponent?.getView()?.contentDOM.blur();
+    }
+
+    function toggleReplacePanel() {
+        if (!replacePanelOpen) {
+            blurInteractiveFocus();
+        }
+        replacePanelOpen = !replacePanelOpen;
+    }
+
+    async function openFile(file: FlatFile, keepReplacePanel = false) {
         if (!selectedPath) return;
+        if (!editingFile) pushFileLayerState();
         clearPreviewUrl();
         editingFile = file;
         editingContent = "";
         editorDirty = false;
+        replacePanelOpen = keepReplacePanel ? replacePanelOpen : false;
 
         if (isImageFile(file)) {
             try {
@@ -255,6 +390,21 @@
         }
     }
 
+    async function openTextFileAtMatch(match: SearchMatch) {
+        if (!selectedPath) return;
+        clearPreviewUrl();
+        editingFile = match.file;
+        editingContent = await invoke<string>("read_epub_file_content", {
+            epubPath: selectedPath,
+            filePath: match.file.path,
+        });
+        editorDirty = false;
+        replacePanelOpen = true;
+        status = `正在编辑：${match.file.path}`;
+        await tick();
+        setTimeout(() => applyMatchToEditor({ from: match.from, to: match.to, filePath: match.file.path }), 0);
+    }
+
     async function saveEditingFile() {
         if (!selectedPath || !editingFile) return;
         try {
@@ -274,11 +424,407 @@
         }
     }
 
-    function closeEditor() {
+    async function flushEditingFileIfDirty() {
+        if (editingFile && editorDirty) {
+            await saveEditingFile();
+        }
+    }
+
+    async function promptStashEditingFile() {
+        if (!editingFile || isImageFile(editingFile) || !editorDirty) return true;
+
+        const result = await openConfirmSheet({
+            title: "暂存当前文件修改？",
+            message: `${editingFile.name} 还有未保存的内容。暂存后会保留到本次 EPUB 导出，不暂存会丢失当前文件这次修改。`,
+            confirmLabel: "暂存并返回",
+            secondaryLabel: "不暂存",
+            cancelLabel: "继续编辑",
+            tone: "primary",
+        });
+
+        if (result === "confirm") {
+            await saveEditingFile();
+            return true;
+        }
+        if (result === "secondary") {
+            editorDirty = false;
+            return true;
+        }
+        return false;
+    }
+
+    function activeSearchFiles() {
+        if (replaceOnlyText) {
+            return flatFiles.filter((file) => file.file_type === "html");
+        }
+        if (replaceScope === "current") {
+            return editingFile && isSearchableTextFile(editingFile) ? [editingFile] : [];
+        }
+        const candidates = flatFiles.filter(isSearchableTextFile);
+        if (replaceScope === "html") return candidates.filter((file) => file.file_type === "html");
+        return candidates;
+    }
+
+    function normalizeSearchText(content: string) {
+        return content.replace(/\r\n|\r|\u2028|\u2029/g, "\n");
+    }
+
+    function htmlTextSegments(content: string) {
+        const segments: { from: number; to: number; text: string }[] = [];
+        let inTag = false;
+        let start = -1;
+        for (let index = 0; index < content.length; index += 1) {
+            const char = content[index];
+            if (char === "<") {
+                if (!inTag && start !== -1 && start < index) {
+                    segments.push({ from: start, to: index, text: content.slice(start, index) });
+                }
+                inTag = true;
+                start = -1;
+            } else if (char === ">" && inTag) {
+                inTag = false;
+                start = index + 1;
+            } else if (!inTag && start === -1) {
+                start = index;
+            }
+        }
+        if (!inTag && start !== -1 && start < content.length) {
+            segments.push({ from: start, to: content.length, text: content.slice(start) });
+        }
+        return segments.filter((segment) => segment.text.trim().length > 0);
+    }
+
+    function buildRawMatchList(content: string, offset = 0) {
+        const text = normalizeSearchText(content);
+        const matches: { from: number; to: number }[] = [];
+        if (!findPattern) return matches;
+
+        try {
+            if (replaceIsRegex) {
+                const regex = new RegExp(findPattern, "g");
+                let match: RegExpExecArray | null;
+                while ((match = regex.exec(text)) !== null) {
+                    if (!match[0].length) {
+                        regex.lastIndex += 1;
+                        continue;
+                    }
+                    matches.push({ from: offset + match.index, to: offset + match.index + match[0].length });
+                }
+            } else {
+                let pos = 0;
+                while ((pos = text.indexOf(findPattern, pos)) !== -1) {
+                    matches.push({ from: offset + pos, to: offset + pos + findPattern.length });
+                    pos += findPattern.length || 1;
+                }
+            }
+        } catch {
+            return [];
+        }
+
+        return matches;
+    }
+
+    function buildMatchList(content: string, file?: FlatFile) {
+        if (!replaceOnlyText) return buildRawMatchList(content);
+        if (file?.file_type !== "html") return [];
+        return htmlTextSegments(content).flatMap((segment) => buildRawMatchList(segment.text, segment.from));
+    }
+
+    function applyMatchToEditor(match: { from: number; to: number; filePath: string }, focusEditor = false) {
+        if (!epubEditorComponent) return;
+        const view = epubEditorComponent.getView();
+        if (!view) return;
+        view.dispatch({
+            selection: { anchor: match.from, head: match.to },
+            scrollIntoView: true,
+        });
+        if (focusEditor) {
+            view.focus();
+        }
+    }
+
+    function refreshCurrentMatch(selectFirst = true) {
+        if (!editingFile || !findPattern) {
+            currentMatch = null;
+            currentMatchCount = 0;
+            currentMatchIndex = 0;
+            return;
+        }
+
+        const currentPath = editingFile.path;
+        const currentText = epubEditorComponent?.getView()?.state.doc.toString() || editingContent || "";
+        const currentMatches = buildMatchList(currentText, editingFile);
+        currentMatchCount = currentMatches.length;
+        if (!currentMatches.length) {
+            currentMatch = null;
+            currentMatchIndex = 0;
+            return;
+        }
+
+        if (selectFirst || !currentMatch) {
+            currentMatchIndex = 1;
+            currentMatch = { ...currentMatches[0], filePath: currentPath };
+            applyMatchToEditor(currentMatch);
+        }
+    }
+
+    async function collectSearchMatches() {
+        const files = activeSearchFiles();
+        const matches: SearchMatch[] = [];
+        for (const file of files) {
+            let content = "";
+            if (editingFile?.path === file.path) {
+                content = epubEditorComponent?.getView()?.state.doc.toString() || editingContent || "";
+            } else {
+                content = await invoke<string>("read_epub_file_content", {
+                    epubPath: selectedPath,
+                    filePath: file.path,
+                });
+            }
+            for (const match of buildMatchList(content, file)) {
+                matches.push({ file, ...match });
+            }
+        }
+        return matches;
+    }
+
+    function replaceCurrentMatch() {
+        if (!currentMatch || !editingFile || editingFile.path !== currentMatch.filePath) {
+            replaceStatus = "请先定位到当前匹配项。";
+            return;
+        }
+        const view = epubEditorComponent?.getView();
+        if (!view) return;
+
+        const selectedText = view.state.doc.sliceString(currentMatch.from, currentMatch.to);
+        const replacement = replaceIsRegex ? selectedText.replace(new RegExp(findPattern), replacePattern) : replacePattern;
+        view.dispatch({
+            changes: {
+                from: currentMatch.from,
+                to: currentMatch.to,
+                insert: replacement,
+            },
+        });
+        editingContent = view.state.doc.toString();
+        editorDirty = true;
+        currentMatch = null;
+        replaceStatus = "已替换当前匹配。";
+        refreshCurrentMatch();
+    }
+
+    async function gotoCurrentMatch(direction: "prev" | "next") {
+        if (!selectedPath || !editingFile || !findPattern) {
+            replaceStatus = "请输入查找内容。";
+            return;
+        }
+
+        try {
+            busy = true;
+            await flushEditingFileIfDirty();
+            const matches = await collectSearchMatches();
+            if (!matches.length) {
+                currentMatch = null;
+                currentMatchIndex = 0;
+                currentMatchCount = 0;
+                replaceStatus = "当前范围没有匹配项。";
+                return;
+            }
+
+            const activeIndex = matches.findIndex((match) =>
+                match.file.path === currentMatch?.filePath &&
+                match.from === currentMatch?.from &&
+                match.to === currentMatch?.to
+            );
+            const currentFileIndex = activeIndex === -1
+                ? matches.findIndex((match) => match.file.path === editingFile?.path)
+                : activeIndex;
+            const baseIndex = currentFileIndex === -1 ? 0 : currentFileIndex;
+            const nextIndex = direction === "next"
+                ? (baseIndex + (activeIndex === -1 ? 0 : 1)) % matches.length
+                : (baseIndex > 0 ? baseIndex - 1 : matches.length - 1);
+            const nextMatch = matches[nextIndex];
+
+            currentMatch = { from: nextMatch.from, to: nextMatch.to, filePath: nextMatch.file.path };
+            currentMatchIndex = nextIndex + 1;
+            currentMatchCount = matches.length;
+            if (editingFile?.path !== nextMatch.file.path) {
+                await openTextFileAtMatch(nextMatch);
+            } else {
+                applyMatchToEditor(currentMatch);
+            }
+            replaceStatus = `第 ${currentMatchIndex}/${currentMatchCount} 处：${nextMatch.file.name}`;
+        } catch (err) {
+            replaceStatus = "定位失败";
+            await message(`定位失败：${err}`, { title: "查找替换", kind: "error" });
+        } finally {
+            busy = false;
+        }
+    }
+
+    function countPlainMatches(content: string, pattern: string) {
+        if (!pattern) return 0;
+        let count = 0;
+        let pos = 0;
+        while ((pos = content.indexOf(pattern, pos)) !== -1) {
+            count += 1;
+            pos += pattern.length || 1;
+        }
+        return count;
+    }
+
+    function replaceInTextSegment(content: string) {
+        if (replaceIsRegex) {
+            const regex = new RegExp(findPattern, "g");
+            const matches = content.match(regex);
+            return {
+                text: content.replace(regex, replacePattern),
+                count: matches?.length ?? 0,
+            };
+        }
+        return {
+            text: content.split(findPattern).join(replacePattern),
+            count: countPlainMatches(content, findPattern),
+        };
+    }
+
+    function replaceInText(content: string, file?: FlatFile) {
+        if (!replaceOnlyText || file?.file_type !== "html") return replaceInTextSegment(content);
+
+        let nextContent = content;
+        let count = 0;
+        const segments = htmlTextSegments(content);
+        for (let index = segments.length - 1; index >= 0; index -= 1) {
+            const segment = segments[index];
+            const result = replaceInTextSegment(segment.text);
+            if (result.count > 0) {
+                count += result.count;
+                nextContent = `${nextContent.slice(0, segment.from)}${result.text}${nextContent.slice(segment.to)}`;
+            }
+        }
+        return { text: nextContent, count };
+    }
+
+    async function countBatchMatches() {
+        if (!selectedPath || !findPattern) {
+            replaceStatus = "请输入查找内容。";
+            return;
+        }
+
+        try {
+            busy = true;
+            await flushEditingFileIfDirty();
+            const files = activeSearchFiles();
+            if (!files.length) {
+                replaceStatus = "当前范围没有可查找的文本文件。";
+                return;
+            }
+
+            const count = replaceOnlyText
+                ? (await collectSearchMatches()).length
+                : await invoke<number>("search_in_files", {
+                    epubPath: selectedPath,
+                    files: files.map((file) => file.path),
+                    pattern: findPattern,
+                    isRegex: replaceIsRegex,
+                });
+            replaceStatus = `共 ${count} 处匹配，范围 ${files.length} 个文件。`;
+        } catch (err) {
+            replaceStatus = "查找失败";
+            await message(`查找失败：${err}`, { title: "批量查找替换", kind: "error" });
+        } finally {
+            busy = false;
+        }
+    }
+
+    async function replaceBatchMatches() {
+        if (!selectedPath || !findPattern) {
+            replaceStatus = "请输入查找内容。";
+            return;
+        }
+
+        const files = activeSearchFiles();
+        if (!files.length) {
+            replaceStatus = "当前范围没有可替换的文本文件。";
+            return;
+        }
+
+        const confirmed = await openConfirmSheet({
+            title: "执行批量替换？",
+            message: `这会在 ${files.length} 个文件里写入替换结果，继续后会直接覆盖当前缓存中的对应文件。`,
+            confirmLabel: "开始替换",
+            secondaryLabel: "",
+            cancelLabel: "取消",
+            tone: "danger",
+        });
+        if (confirmed !== "confirm") return;
+
+        try {
+            busy = true;
+            await flushEditingFileIfDirty();
+            replaceStatus = "正在替换...";
+
+            const encoder = new TextEncoder();
+            const changedFiles: Record<string, number[]> = {};
+            let total = 0;
+
+            for (let index = 0; index < files.length; index += 1) {
+                const file = files[index];
+                replaceStatus = `正在处理 ${index + 1}/${files.length}`;
+                let content = await invoke<string>("read_epub_file_content", {
+                    epubPath: selectedPath,
+                    filePath: file.path,
+                });
+
+                const result = replaceInText(content, file);
+                if (result.count > 0 && result.text !== content) {
+                    total += result.count;
+                    changedFiles[file.path] = Array.from(encoder.encode(result.text));
+                    if (editingFile?.path === file.path) {
+                        editingContent = result.text;
+                        epubEditorComponent?.resetDoc(result.text);
+                        editorDirty = false;
+                    }
+                }
+            }
+
+            if (Object.keys(changedFiles).length) {
+                await invoke("save_epub_files_batch", { epubPath: selectedPath, files: changedFiles });
+            }
+
+            replaceStatus = `已替换 ${total} 处，修改 ${Object.keys(changedFiles).length} 个文件。`;
+            status = replaceStatus;
+            refreshCurrentMatch();
+        } catch (err) {
+            replaceStatus = "批量替换失败";
+            await message(`批量替换失败：${err}`, { title: "批量查找替换", kind: "error" });
+        } finally {
+            busy = false;
+        }
+    }
+
+    function resetEditorState() {
         clearPreviewUrl();
         editingFile = null;
+        epubEditorComponent = null;
         editingContent = "";
         editorDirty = false;
+        replacePanelOpen = false;
+        currentMatch = null;
+        currentMatchIndex = 0;
+        currentMatchCount = 0;
+    }
+
+    async function closeEditor() {
+        if (busy) return;
+        if (requestCloseFileViaHistory()) return;
+        try {
+            busy = true;
+            const ok = await promptStashEditingFile();
+            if (!ok) return;
+            resetEditorState();
+        } finally {
+            busy = false;
+        }
     }
 
     function openAddFilePicker(group: FileGroup) {
@@ -315,34 +861,68 @@
         }
     }
 
-    async function exportEditedEpub() {
-        if (!selectedPath) return;
+    async function leaveEditorPage() {
+        if (busy) return;
         try {
+            if (editingFile) {
+                await closeEditor();
+                return;
+            }
             busy = true;
-            status = "正在保存 EPUB 编辑缓存。";
+            await flushEditingFileIfDirty();
             await invoke("save_epub_to_disk", { epubPath: selectedPath });
-            const result = await exportEpubPath(selectedPath, safeFileName(selectedName || `${bookTitle}.epub`, "epub"));
-            exportPath = result.output_path;
-            status = result.message;
+            await goto(metadataRoute(String(Date.now())));
         } catch (err) {
-            status = "保存或导出失败";
-            await message(`保存或导出失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`返回编辑元数据页失败：${err}`, { title: "编辑 EPUB", kind: "error" });
         } finally {
             busy = false;
         }
     }
+
+    onMount(() => {
+        const selection = readMobileSelection(window.location.search);
+        if (selection.path) {
+            void loadEpub(selection.path, selection.name);
+        }
+
+        const handlePopState = () => {
+            if (restoringFileLayer || !editingFile || hasFileLayerState()) return;
+            void (async () => {
+                if (busy) {
+                    restoreFileLayerState();
+                    return;
+                }
+                busy = true;
+                try {
+                    const ok = await promptStashEditingFile();
+                    if (!ok) {
+                        restoreFileLayerState();
+                        return;
+                    }
+                    resetEditorState();
+                } finally {
+                    busy = false;
+                }
+            })();
+        };
+
+        window.addEventListener("popstate", handlePopState);
+        return () => {
+            window.removeEventListener("popstate", handlePopState);
+        };
+    });
 </script>
 
 <svelte:head>
     <title>编辑 EPUB</title>
 </svelte:head>
 
-<main class="editor-page">
+<main class:editing={!!editingFile} class="editor-page">
     <input bind:this={fileInputEl} class="file-input" type="file" accept=".epub" on:change={onFileChange} />
     <input bind:this={addFileInputEl} class="file-input" type="file" on:change={onAddFileChange} />
 
     <header class="topbar">
-        <a href="/mobile" aria-label="返回">‹</a>
+        <button class="back-button" type="button" aria-label="返回" on:click={leaveEditorPage}>‹</button>
         <h1>{bookTitle}</h1>
     </header>
 
@@ -352,12 +932,7 @@
             <p>{status}</p>
         </section>
     {:else}
-        <section class="actions">
-            <button type="button" on:click={openPicker} disabled={busy}>重新选择</button>
-            <button type="button" on:click={exportEditedEpub} disabled={busy}>保存并导出</button>
-        </section>
         <p class="status">{status}</p>
-        {#if exportPath}<code>{exportPath}</code>{/if}
 
         <section class="file-list">
             {#each groups as group}
@@ -388,13 +963,58 @@
         </section>
 
         {#if editingFile}
-            <section class="mobile-editor">
-                <div class="editor-head">
-                    <div>
-                        <strong>{editingFile.name}</strong>
-                        <small>{editingFile.path}</small>
+            <section class={replacePanelOpen ? "mobile-editor replace-open" : "mobile-editor"}>
+                <div class:image-head={isImageFile(editingFile)} class="editor-head">
+                    {#if !isImageFile(editingFile)}
+                        <div>
+                            <strong>{editingFile.name}</strong>
+                            <small>{editingFile.path}</small>
+                        </div>
+                    {:else}
+                        <div class="image-head-spacer"></div>
+                    {/if}
+                    <div class="editor-tools">
+                        <button
+                            class:active={replacePanelOpen}
+                            class="icon-tool"
+                            type="button"
+                            aria-label={replacePanelOpen ? "收起查找替换" : "打开查找替换"}
+                            title={replacePanelOpen ? "收起查找替换" : "打开查找替换"}
+                            on:click={toggleReplacePanel}
+                            disabled={isImageFile(editingFile)}
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <circle cx="11" cy="11" r="6.5"></circle>
+                                <path d="M16 16L21 21"></path>
+                            </svg>
+                        </button>
+                        <button
+                            class="icon-tool save-tool"
+                            type="button"
+                            aria-label={editorDirty ? "保存文件" : "文件已保存"}
+                            title={editorDirty ? "保存文件" : "文件已保存"}
+                            on:click={saveEditingFile}
+                            disabled={busy || !editorDirty || isImageFile(editingFile)}
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 4H16L19 7V20H5Z"></path>
+                                <path d="M8 4V10H15V4"></path>
+                                <path d="M9 20V14H15V20"></path>
+                            </svg>
+                        </button>
+                        <button
+                            class="icon-tool close-tool"
+                            type="button"
+                            aria-label="关闭文件预览"
+                            title="关闭文件预览"
+                            on:click={closeEditor}
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M6 6L18 18"></path>
+                                <path d="M18 6L6 18"></path>
+                            </svg>
+                        </button>
                     </div>
-                    <button type="button" on:click={closeEditor}>关闭</button>
                 </div>
                 {#if isImageFile(editingFile)}
                     <div class="image-preview">
@@ -407,6 +1027,7 @@
                 {:else}
                     <div class="code-editor-wrap">
                         <EpubCodeEditor
+                            bind:this={epubEditorComponent}
                             doc={editingContent}
                             language={languageFor(editingFile)}
                             onChange={(value) => {
@@ -416,12 +1037,84 @@
                             onSave={saveEditingFile}
                         />
                     </div>
-                    <button class="save-file" type="button" on:click={saveEditingFile} disabled={busy || !editorDirty}>
-                        {editorDirty ? "保存文件" : "已保存"}
-                    </button>
+                    {#if replacePanelOpen}
+                        <section class="replace-panel">
+                            <div class="replace-title">
+                                <strong>查找替换</strong>
+                                <small>{replaceOnlyText ? `${activeSearchFiles().length} 个 HTML` : replaceScope === "current" ? "当前文件" : `${activeSearchFiles().length} 个文件`}</small>
+                            </div>
+                            <div class="replace-grid">
+                                <label>
+                                    <span>查找</span>
+                                    <input bind:value={findPattern} autocomplete="off" placeholder="输入查找内容" />
+                                </label>
+                                <label>
+                                    <span>替换为</span>
+                                    <input bind:value={replacePattern} autocomplete="off" placeholder="留空则删除" />
+                                </label>
+                            </div>
+                            <div class="replace-actions">
+                                <button type="button" on:click={() => gotoCurrentMatch("prev")} disabled={busy || !findPattern}>上一个</button>
+                                <button type="button" on:click={countBatchMatches} disabled={busy || !findPattern}>计数</button>
+                                <button type="button" on:click={() => gotoCurrentMatch("next")} disabled={busy || !findPattern}>下一个</button>
+                                <button type="button" on:click={replaceCurrentMatch} disabled={busy || !findPattern}>替换当前</button>
+                                <button type="button" on:click={replaceBatchMatches} disabled={busy || !findPattern}>替换全部</button>
+                            </div>
+                            <div class="replace-options">
+                                <select bind:value={replaceScope} aria-label="查找范围" disabled={replaceOnlyText}>
+                                    <option value="current">当前文件</option>
+                                    <option value="html">HTML章节</option>
+                                    <option value="all">所有文本</option>
+                                </select>
+                                <label class="replace-check">
+                                    <input type="checkbox" bind:checked={replaceIsRegex} />
+                                    <span>正则</span>
+                                </label>
+                                <label class="replace-check">
+                                    <input type="checkbox" bind:checked={replaceOnlyText} />
+                                    <span>仅文本</span>
+                                </label>
+                            </div>
+                            <p>{replaceStatus || (currentMatchCount ? `第 ${currentMatchIndex}/${currentMatchCount} 处` : "在当前文件内定位，或按范围批量替换。")}</p>
+                        </section>
+                    {/if}
                 {/if}
             </section>
         {/if}
+    {/if}
+
+    {#if confirmSheet.open}
+        <div class="confirm-sheet-backdrop" role="presentation" on:click={() => resolveConfirmSheet("cancel")}></div>
+        <div
+            class="confirm-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-confirm-title"
+            aria-describedby="mobile-confirm-message"
+        >
+            <div class="confirm-sheet-copy">
+                <strong id="mobile-confirm-title">{confirmSheet.title}</strong>
+                <p id="mobile-confirm-message">{confirmSheet.message}</p>
+            </div>
+            <div class="confirm-sheet-actions">
+                <button class="sheet-cancel" type="button" on:click={() => resolveConfirmSheet("cancel")}>
+                    {confirmSheet.cancelLabel}
+                </button>
+                {#if confirmSheet.secondaryLabel}
+                    <button class="sheet-secondary" type="button" on:click={() => resolveConfirmSheet("secondary")}>
+                        {confirmSheet.secondaryLabel}
+                    </button>
+                {/if}
+                <button
+                    class:danger={confirmSheet.tone === "danger"}
+                    class="sheet-confirm"
+                    type="button"
+                    on:click={() => resolveConfirmSheet("confirm")}
+                >
+                    {confirmSheet.confirmLabel}
+                </button>
+            </div>
+        </div>
     {/if}
 </main>
 
@@ -432,11 +1125,17 @@
     }
 
     .editor-page {
-        min-height: 100vh;
+        height: 100dvh;
+        min-height: 100dvh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 0 max(22px, env(safe-area-inset-bottom));
+        padding: max(10px, env(safe-area-inset-top)) 0 max(44px, env(safe-area-inset-bottom));
+        overflow-y: auto;
         background: #f2f3f8;
         color: #151923;
+    }
+
+    .editor-page.editing {
+        overflow: hidden;
     }
 
     .file-input {
@@ -457,15 +1156,17 @@
         background: transparent;
     }
 
-    .topbar a {
+    .topbar .back-button {
         width: 34px;
         height: 34px;
         display: grid;
         place-items: center;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
         color: inherit;
         font-size: 28px;
         line-height: 1;
-        text-decoration: none;
     }
 
     h1 {
@@ -495,19 +1196,11 @@
         line-height: 1.5;
     }
 
-    .actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        padding: 10px 14px 5px;
-    }
-
     button {
         font: inherit;
     }
 
-    .empty button,
-    .actions button {
+    .empty button {
         min-height: 36px;
         border: 0;
         border-radius: 8px;
@@ -516,23 +1209,135 @@
         font-weight: 900;
     }
 
-    .actions button:first-child {
-        background: #e6eee9;
-        color: #1f7a5a;
-    }
-
     button:disabled {
         opacity: 0.6;
     }
 
-    .status,
-    code {
+    .status {
         display: block;
         margin: 6px 14px;
         color: #747986;
         font-size: 12px;
         line-height: 1.5;
-        word-break: break-all;
+    }
+
+    .replace-panel {
+        display: grid;
+        gap: 7px;
+        margin: 0;
+        border-top: 1px solid rgba(23, 27, 36, 0.08);
+        background: #fbfbfd;
+        padding: 8px 14px max(36px, calc(env(safe-area-inset-bottom) + 6px));
+    }
+
+    .replace-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .replace-title strong {
+        font-size: 14px;
+        line-height: 1.25;
+    }
+
+    .replace-title small,
+    .replace-panel p {
+        margin: 0;
+        color: #747986;
+        font-size: 11px;
+        line-height: 1.4;
+    }
+
+    .replace-panel label {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr);
+        align-items: center;
+        gap: 7px;
+    }
+
+    .replace-grid {
+        display: grid;
+        gap: 6px;
+    }
+
+    .replace-panel label span {
+        color: #626a78;
+        font-size: 11px;
+        font-weight: 800;
+    }
+
+    .replace-panel input,
+    .replace-panel select {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+        border: 1px solid rgba(23, 27, 36, 0.12);
+        border-radius: 8px;
+        background: #fff;
+        color: inherit;
+        min-height: 34px;
+        padding: 7px 8px;
+        font: inherit;
+        font-size: 12px;
+    }
+
+    .replace-options {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 7px;
+        align-items: center;
+    }
+
+    .replace-actions {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 7px;
+        align-items: center;
+    }
+
+    .replace-panel .replace-check {
+        min-height: 34px;
+        grid-auto-flow: column;
+        grid-template-columns: 16px auto;
+        align-items: center;
+        justify-content: start;
+    }
+
+    .replace-panel .replace-check input {
+        width: 16px;
+        height: 16px;
+        padding: 0;
+    }
+
+    .replace-actions button {
+        min-width: 0;
+        min-height: 34px;
+        border: 0;
+        border-radius: 8px;
+        background: #e6eee9;
+        color: #1f7a5a;
+        font-size: 12px;
+        font-weight: 900;
+        white-space: nowrap;
+    }
+
+    .replace-actions button:nth-child(4),
+    .replace-actions button:last-child {
+        background: #1f7a5a;
+        color: #fff;
+    }
+
+    .replace-actions button:nth-child(1),
+    .replace-actions button:nth-child(2),
+    .replace-actions button:nth-child(3) {
+        grid-column: span 2;
+    }
+
+    .replace-actions button:nth-child(4),
+    .replace-actions button:nth-child(5) {
+        grid-column: span 3;
     }
 
     .file-list {
@@ -589,13 +1394,12 @@
         color: #a1a3ab;
         font-size: 18px;
         font-weight: 400;
-        text-align: center;
         line-height: 1;
+        text-align: center;
     }
 
     .group-toggle {
         font-size: 18px;
-        transform: translateY(-1px);
     }
 
     .file-row {
@@ -682,31 +1486,120 @@
 
     .mobile-editor {
         position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
+        inset: 0;
         z-index: 20;
         display: grid;
-        gap: 8px;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        gap: 0;
         box-sizing: border-box;
-        max-height: 78vh;
-        padding: 12px 14px max(14px, env(safe-area-inset-bottom));
-        border-top: 1px solid #d9dce4;
-        background: #fbfbfd;
-        box-shadow: 0 -12px 28px rgba(18, 24, 36, 0.16);
+        height: 100dvh;
+        min-height: 100dvh;
+        overflow: hidden;
+        padding: 0;
+        background: #f2f3f8;
+    }
+
+    .confirm-sheet-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        background: rgba(20, 25, 35, 0.34);
+        backdrop-filter: blur(10px);
+    }
+
+    .confirm-sheet {
+        position: fixed;
+        left: 14px;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        max-width: 420px;
+        margin: 0 auto;
+        z-index: 31;
+        display: grid;
+        gap: 14px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.97);
+        box-shadow: 0 18px 40px rgba(25, 31, 43, 0.16);
+        padding: 16px;
+    }
+
+    .confirm-sheet-copy {
+        display: grid;
+        gap: 7px;
+    }
+
+    .confirm-sheet-copy strong {
+        font-size: 16px;
+        line-height: 1.25;
+    }
+
+    .confirm-sheet-copy p {
+        margin: 0;
+        color: #666f7d;
+        font-size: 13px;
+        line-height: 1.55;
+    }
+
+    .confirm-sheet-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .confirm-sheet-actions button {
+        min-height: 38px;
+        min-width: 0;
+        border: 0;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 900;
+    }
+
+    .sheet-cancel {
+        background: #eef1f6;
+        color: #4f5867;
+    }
+
+    .sheet-secondary {
+        background: #f4ecee;
+        color: #9b3d4f;
+    }
+
+    .sheet-confirm {
+        background: #1f7a5a;
+        color: #fff;
+    }
+
+    .sheet-confirm.danger {
+        background: #cf5e50;
     }
 
     .editor-head {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 58px;
+        grid-template-columns: minmax(0, 1fr) auto;
         gap: 10px;
         align-items: center;
+        padding: max(10px, env(safe-area-inset-top)) 14px 8px;
+        background: #f2f3f8;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+    }
+
+    .editor-head.image-head {
+        padding-bottom: 0;
+        background: transparent;
     }
 
     .editor-head div {
         min-width: 0;
         display: grid;
         gap: 2px;
+    }
+
+    .image-head-spacer {
+        min-height: 1px;
     }
 
     .editor-head strong,
@@ -725,14 +1618,55 @@
         font-size: 11px;
     }
 
-    .editor-head button,
-    .save-file {
+    .editor-tools {
+        display: grid;
+        grid-auto-flow: column;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .icon-tool {
+        width: 34px;
         min-height: 34px;
+        height: 34px;
+        padding: 0;
         border: 0;
         border-radius: 8px;
         background: #e6eee9;
         color: #1f7a5a;
-        font-weight: 900;
+        display: grid;
+        place-items: center;
+    }
+
+    .icon-tool svg {
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .icon-tool.active,
+    .icon-tool:hover:enabled {
+        background: #d9ebf6;
+        color: #1677b8;
+    }
+
+    .save-tool {
+        background: #1f7a5a;
+        color: #fff;
+    }
+
+    .save-tool:disabled {
+        background: #d6e4dc;
+        color: #6b8d7f;
+    }
+
+    .close-tool {
+        background: #f1e9eb;
+        color: #9b3d4f;
     }
 
     .image-preview {
@@ -756,12 +1690,18 @@
 
     .code-editor-wrap {
         width: 100%;
-        height: min(54vh, 420px);
+        height: 100%;
         box-sizing: border-box;
-        border: 1px solid #d6dbe4;
-        border-radius: 8px;
+        border: 0;
+        border-top: 1px solid #d6dbe4;
+        border-bottom: 1px solid #d6dbe4;
+        border-radius: 0;
         overflow: hidden;
         background: #fff;
+    }
+
+    .mobile-editor.replace-open .code-editor-wrap {
+        height: 100%;
     }
 
     :global(.mobile-editor .cm-editor) {
@@ -772,11 +1712,6 @@
     :global(.mobile-editor .cm-content) {
         font-size: 12px;
         line-height: 1.55;
-    }
-
-    .save-file {
-        background: #1f7a5a;
-        color: #fff;
     }
 
     @media (min-width: 720px) {

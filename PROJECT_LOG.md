@@ -32,6 +32,275 @@ Main areas:
 
 ## Change History
 
+### 2026-05-17 23:31 +08:00
+
+Request: when returning from the mobile EPUB file-structure editor, force the metadata page to rescan the cached EPUB so metadata stays in sync after file edits, and move the in-file editor controls to the top-right with icon-only search/save/close buttons while keeping the find/replace panel at the bottom.
+
+Changes:
+
+- Updated `src/routes/mobile/metadata/+page.svelte` to resync from route query parameters after navigation, not just on initial mount.
+- Added a query-key refresh guard on the metadata page so returning from the editor can explicitly force a fresh metadata read from the cached EPUB.
+- Updated `src/routes/mobile/edit/+page.svelte` so returning to metadata now appends a refresh token and flushes dirty file edits first, ensuring the metadata page rereads the latest cached EPUB state.
+- Reworked the in-file editor header actions:
+  - moved `查找替换`, `保存`, and `关闭` into the top-right corner,
+  - converted them to icon-only buttons with accessible labels,
+  - kept the bottom find/replace panel behavior unchanged.
+- Removed the old bottom editor action bar because search/save now live in the editor header.
+- Kept image preview files using the same header layout, with unsupported actions disabled where appropriate.
+
+Touched files:
+
+- `src/routes/mobile/metadata/+page.svelte`
+- `src/routes/mobile/edit/+page.svelte`
+
+Verification:
+
+- `pnpm build` passed.
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3.
+- Installed successfully on connected device `4e2d9aa2`.
+- Relaunched `com.tepubeditor.app/.MainActivity`; Android window focus confirmed on the app.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`.
+
+Caveats:
+
+- Build still emits the existing Svelte accessibility warnings and chunk-size warning outside this mobile edit/metadata adjustment.
+- Android release packaging still prints the existing Gradle deprecation warning and `Unable to strip ... libtepub_editor_lib.so` notice, but the APK builds and installs successfully.
+
+### 2026-05-17 23:13 +08:00
+
+Request: reshape the Android mobile home flow so metadata editing is merged into EPUB editing, the home page keeps only three direct file-pick entries, EPUB editing enters metadata first and then the file-structure editor, returning from structure editing goes back to metadata, and all save/export behavior stays on cached copies that export into the `Downloads/TEpub-Editor` folder.
+
+Changes:
+
+- Reduced the Android mobile home page to three entries: `制作 EPUB`, `解密 EPUB`, and `编辑 EPUB`.
+- Changed each home entry to open the relevant file picker immediately and then navigate with the cached working-copy path instead of first landing on a placeholder page.
+- Added shared mobile route helpers in `src/lib/mobileFlow.ts` so cached file paths and display names can move between mobile pages safely through query parameters.
+- Updated `src/routes/mobile/make/+page.svelte` and `src/routes/mobile/decrypt/+page.svelte` to preload the cached file selected on the home page and start their existing workflows directly.
+- Reworked `src/routes/mobile/metadata/+page.svelte` into the main EPUB editing entry page:
+  - it now loads the cached EPUB passed from the home page,
+  - the top primary button is now `编辑 EPUB 文件`,
+  - entering the structure editor auto-saves dirty metadata to the cached EPUB before navigation,
+  - save/export remains on this metadata page.
+- Reworked `src/routes/mobile/edit/+page.svelte` into a child page of the metadata flow:
+  - it now loads the cached EPUB from query parameters,
+  - the top-level `重新选择` and `保存并导出` actions were removed,
+  - the page back button now returns to the metadata page and flushes dirty file edits into the cached EPUB before leaving.
+- Kept the Android mobile EPUB workflow on cached copies only; no new path in this change writes back to the original picked file.
+
+Touched files:
+
+- `src/lib/mobileFlow.ts`
+- `src/routes/mobile/+page.svelte`
+- `src/routes/mobile/make/+page.svelte`
+- `src/routes/mobile/decrypt/+page.svelte`
+- `src/routes/mobile/metadata/+page.svelte`
+- `src/routes/mobile/edit/+page.svelte`
+
+Verification:
+
+- `pnpm build` passed.
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3.
+- Installed successfully on connected device `4e2d9aa2`.
+- Relaunched `com.tepubeditor.app/.MainActivity` after install.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`.
+
+Caveats:
+
+- Build still emits the existing Svelte accessibility warnings and chunk-size warning outside this mobile flow change.
+- Android release packaging still prints the existing Gradle deprecation warning and `Unable to strip ... libtepub_editor_lib.so` notice, but the APK builds and installs successfully.
+
+### 2026-05-17 22:46 +08:00
+
+Request: reduce the mobile EPUB editor bottom whitespace again because the collapsed bottom bar sits too high and the expanded find/replace panel leaves a large blank gap under the action buttons.
+
+Changes:
+
+- Reduced the bottom safe-area padding on the collapsed editor action row so the controls sit closer to the gesture bar without overlapping it.
+- Reduced the expanded find/replace panel bottom padding to a smaller safe-area offset.
+- Added a replace-open override so the action row drops its extra bottom padding when the find/replace panel is visible, removing the empty gap between buttons and panel.
+
+Verification:
+
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3 and installed successfully on device `25098PN5AC`.
+- Relaunched and foregrounded `com.tepubeditor.app/.MainActivity`; Android window focus confirmed on `com.tepubeditor.app/com.tepubeditor.app.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk` (22.01 MB).
+
+### 2026-05-17 22:39 +08:00
+
+Request: raise the bottom action area a bit more above the gesture bar on the mobile EPUB editor page, and stop the search panel from automatically popping the soft keyboard when it opens.
+
+Changes:
+
+- Increased the mobile EPUB editor bottom safe-area padding again for both the collapsed action row and the expanded find/replace panel.
+- Added a mobile editor focus-reset helper so opening the find/replace panel blurs the active element instead of leaving the editor focused.
+- Stopped match navigation from force-focusing CodeMirror, so selection updates no longer trigger the keyboard by default.
+
+Verification:
+
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3 and installed successfully on device `25098PN5AC`.
+- Launched `com.tepubeditor.app/.MainActivity`; Android window focus confirmed on `com.tepubeditor.app/com.tepubeditor.app.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk` (22.01 MB).
+
+### 2026-05-17 21:30 +08:00
+
+Request: make the Android editor status bar match the page top color, shrink the mobile EPUB find/replace panel, place current/all replace on one row, and globally avoid overlap with the gesture navigation bar.
+
+Changes:
+
+- Updated the mobile EPUB editor find/replace form to use inline labels beside inputs, keeping the panel shorter.
+- Kept `上一个 / 计数 / 下一个` on one row and placed `替换当前 / 替换全部` together on the next row.
+- Increased bottom safe-area padding across Android mobile pages so controls do not overlap the gesture navigation bar.
+- Set Android status bar and navigation bar colors in generated Android theme files and `MainActivity` so the native bars match the mobile UI.
+
+Verification:
+
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3 and installed successfully on device `25098PN5AC`.
+- Launched `com.tepubeditor.app/.MainActivity`; Android window focus confirmed on `com.tepubeditor.app/com.tepubeditor.app.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk` (22.01 MB).
+
+### 2026-05-17 21:16 +08:00
+
+Request: refine the mobile EPUB editor find/replace screen so the page no longer scrolls, the code area aligns visually with the status bar, the count button sits between previous and next, and a text-only option limits HTML matching to title/body text instead of tags/attributes.
+
+Changes:
+
+- Converted the mobile EPUB editor overlay from a bottom sheet into a full-screen editing layer with a fixed header, full-height code editor, and bottom action/find panels.
+- Reordered the find/replace actions to `上一个 / 计数 / 下一个`, followed by `替换当前` and `替换全部`.
+- Added a `仅文本` option that restricts search and replacement to text segments outside HTML tags, and narrows the active search scope to HTML files while enabled.
+
+Verification:
+
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3 and installed successfully on device `25098PN5AC`.
+- Launched `com.tepubeditor.app/.MainActivity`; Android window focus confirmed on `com.tepubeditor.app/com.tepubeditor.app.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk` (22.01 MB).
+
+### 2026-05-17 21:02 +08:00
+
+Request: make the mobile EPUB editor find/replace previous/next buttons jump to the matching file and automatically position the editor on the match.
+
+Changes:
+
+- Added cross-file match collection for the mobile EPUB editor find/replace panel using the active search scope.
+- Changed previous/next navigation to open the target text file when the next match is in a different EPUB file.
+- Kept the find/replace panel open during navigation and selected/scrolled the CodeMirror editor to the target match after file switching.
+
+Verification:
+
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3 and installed successfully on device `25098PN5AC`.
+- Launched `com.tepubeditor.app/.MainActivity`; Android window focus confirmed on `com.tepubeditor.app/com.tepubeditor.app.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk` (22.01 MB).
+
+### 2026-05-17 20:53 +08:00
+
+Request: fix the mobile EPUB editor find/replace panel because only the two input fields are visible and the previous/next/current-replace/replace-all controls are not usable.
+
+Changes:
+
+- Changed the mobile EPUB editor find/replace panel so action buttons render immediately below the find/replace inputs.
+- Made the editor bottom sheet scrollable and reduced the code editor height while the find/replace panel is open, leaving visible space for `上一个`, `下一个`, `替换当前`, `计数`, and `替换全部`.
+- Adjusted the mobile button grid to a stable two-column layout with the current-replace action spanning the row, improving narrow-screen visibility.
+
+Verification:
+
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3 and installed successfully on device `25098PN5AC`.
+- Launched `com.tepubeditor.app/.MainActivity`; Android window focus confirmed on `com.tepubeditor.app/com.tepubeditor.app.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk` (22.01 MB).
+
+### 2026-05-17 20:49 +08:00
+
+Request: compile and run the Android version only after the mobile EPUB editor find/replace UI adjustment; desktop build/run is not needed for this step.
+
+Changes:
+
+- No additional source changes in this step.
+- Built the Android aarch64 release APK, aligned it, signed it with the local Android debug keystore, installed it on the connected Android device, and launched the app.
+
+Verification:
+
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` completed and produced `src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`.
+- Signed APK verified with APK Signature Scheme v2/v3 and installed successfully on device `25098PN5AC`.
+- Launched `com.tepubeditor.app/.MainActivity`; Android window focus confirmed on `com.tepubeditor.app/com.tepubeditor.app.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk` (22.01 MB).
+
+### 2026-05-17 20:42 +08:00
+
+Request: move the mobile EPUB find/replace panel below the editor, keep it collapsed by default, and show it only after tapping a find/replace entry point.
+
+Changes:
+
+- Added a mobile editor `replacePanelOpen` state so opening an editable file does not immediately show the find/replace panel.
+- Moved the expanded find/replace panel below the code editor and added a compact `查找替换` / `收起查找` toggle next to the save button.
+- Kept previous, next, replace-current, count, and replace-all actions in the expanded panel.
+
+Verification:
+
+- `tools\pnpm.cmd build` passed.
+- Started the local Vite dev server at `http://127.0.0.1:4173/` with `tools\pnpm.cmd dev --host 127.0.0.1 --port 4173 --strictPort`.
+
+### 2026-05-17 20:18 +08:00
+
+Request: move the mobile EPUB editor's find/replace panel into the empty space above the editor when a text file is opened, and add previous/next/current-replace controls.
+
+Changes:
+
+- Moved the mobile EPUB find/replace panel from the file-list area into the editor area so it appears above the code editor only after opening an editable text file.
+- Added previous, next, and replace-current actions for the current file while keeping count and replace-all actions for the selected search scope.
+- Added current-match tracking and editor selection scrolling for mobile EPUB text files.
+
+Verification:
+
+- `tools\pnpm.cmd build` passed.
+
+### 2026-05-17 20:13 +08:00
+
+Request: add the desktop EPUB editor's batch find/replace workflow to the mobile EPUB editor, then build and test an Android install package.
+
+Changes:
+
+- Added a compact mobile batch find/replace panel to the EPUB editor page with scope selection, regex toggle, count, and replace-all actions.
+- Reused the existing EPUB batch search and batch save backend commands so mobile replacements write back into the EPUB cache before export.
+- Kept the current-file editor in sync after batch replacement when the edited file is part of the affected set.
+
+Verification:
+
+- `tools\pnpm.cmd build` passed.
+- `cargo check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` produced an unsigned release APK.
+
+### 2026-05-17 19:49 +08:00
+
+Request: align and center all mobile fold/expand buttons so collapsible areas look consistent.
+
+Changes:
+
+- Standardized mobile make-EPUB fold icons in section headers, TOC rows, and reorder preview rows with fixed icon slots and grid centering.
+- Removed manual vertical offset from the mobile EPUB editor folder toggle and aligned folder add/toggle buttons through consistent line-height and grid placement.
+
+Verification:
+
+- `tools\pnpm.cmd build` passed.
+
+### 2026-05-17 19:29 +08:00
+
+Request: make the mobile make-EPUB cover box align better and look cleaner.
+
+Changes:
+
+- Reworked the mobile make-EPUB metadata panel so title/author fields and the cover picker share a stable top grid.
+- Added a dedicated cover label and adjusted cover picker dimensions, spacing, and empty-state text to avoid the previous floating, misaligned look.
+
+Verification:
+
+- `tools\pnpm.cmd build` passed.
+
 ### 2026-05-15 19:49 +08:00
 
 Request: fix Android launcher icon cropping, make the mobile make-EPUB TOC preview fold volumes reliably, bump the app to v0.5.6, and push a release update that also builds an Android APK in GitHub Actions.
@@ -1621,3 +1890,231 @@ Caveats:
 
 - Existing `pnpm check` failures remain outside this feature area.
 - Existing unrelated working-tree items were present and not modified: `README.md`, `.claude/`, `AGENTS.md`.
+
+### 2026-05-17 23:47 +08:00
+
+Request: refine the Android EPUB metadata/editor flow so returning from file editing refreshes metadata, simplify the image preview header, and improve the metadata page layout.
+
+Changes:
+
+- Added mobile-only EPUB cover loading command `mobile_read_epub_cover` in `src-tauri/src/lib.rs`, reusing parsed cover bytes from the existing EPUB metadata pipeline.
+- Updated the Android EPUB file editor return flow in `src/routes/mobile/edit/+page.svelte` so leaving the editor now flushes dirty file content, writes the extracted cache back into the cached EPUB with `save_epub_to_disk`, and then returns to the metadata page with a forced reload key.
+- Updated `src/routes/mobile/metadata/+page.svelte` to reload metadata after navigation back from file editing, preventing stale author/title/UUID values after internal OPF edits.
+- Reworked the metadata hero area so `书名` and `作者` stack vertically on the left, while the right side shows the current cover preview.
+- Moved the `编辑 EPUB 文件` action above the bottom `保存元数据` / `导出 EPUB` buttons.
+- Simplified the image-file editor header so image preview no longer shows the previous card-like filename/path block at the top.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed release APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with APK Signature Scheme v2/v3.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched the Android app, and activity history shows `com.tepubeditor.app/.MainActivity`.
+
+Caveats:
+
+- Android build still reports existing Gradle deprecation warnings and the existing native strip warning for `libtepub_editor_lib.so`, but packaging completed successfully.
+
+### 2026-05-18 00:05 +08:00
+
+Request: keep the Android metadata page in sync after editing OPF files, remove the top filename/reselect card, and reduce the bottom action area to `编辑 EPUB 文件` + `保存并导出`.
+
+Changes:
+
+- Added a live metadata reader path in `src-tauri/src/lib.rs`:
+  - `mobile_read_epub_metadata` and `mobile_read_epub_cover` now prefer the currently extracted EPUB temp directory when it exists, instead of only rereading the zipped EPUB file.
+  - Added `read_opf_from_dir`, `parse_epub_metadata_from_parts`, and `parse_epub_metadata_live` to parse current OPF state directly from the mobile editor cache.
+- Updated `src/routes/mobile/metadata/+page.svelte` so metadata route navigation always forces a reload after returning from `/mobile/edit`.
+- Removed the loaded-state filename + `重新选择 EPUB` card from the metadata page; when a file is already selected the page now starts directly from metadata fields.
+- Reworked the bottom action row on the metadata page to two buttons only:
+  - `编辑 EPUB 文件`
+  - `保存并导出`
+- Kept export path/status as a lightweight status block instead of a separate top card.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully, and activity history shows `com.tepubeditor.app/.MainActivity`.
+
+Caveats:
+
+- Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
+
+### 2026-05-18 01:01 +08:00
+
+Request: move the new mobile stash-confirm dialog from the bottom to the center of the screen, bump the app to `0.5.7`, and push a GitHub update that triggers the release workflow including the Android install package build.
+
+Changes:
+
+- Refined the Android file-editor confirmation dialog in `src/routes/mobile/edit/+page.svelte`:
+  - the custom stash-confirm dialog now opens centered on screen instead of docking to the bottom,
+  - the same visual style and button layout are preserved, just with a calmer modal placement.
+- Bumped app version metadata to `0.5.7` in:
+  - `package.json`
+  - `src-tauri/Cargo.toml`
+  - `src-tauri/tauri.conf.json`
+  - `src-tauri/Cargo.lock`
+- Confirmed `.github/workflows/release.yml` already contains the Android release build/sign/upload job, so pushing the `v0.5.7` tag is enough to trigger a fresh desktop + Android packaging run in GitHub Actions.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- GitHub release workflow trigger prepared via `v0.5.7` tag push.
+
+Caveats:
+
+- Frontend build still reports the existing repository-wide Svelte a11y/chunk-size warnings, but the new modal placement and version bump themselves build cleanly.
+
+### 2026-05-18 00:53 +08:00
+
+Request: fix Android file-editor system back behavior so it returns from an opened file to the internal file list before going back to metadata, and replace the temporary-save prompt with a prettier in-app dialog that matches the mobile UI.
+
+Changes:
+
+- Updated Android file-editor history handling in `src/routes/mobile/edit/+page.svelte`:
+  - opening an EPUB internal file now pushes a dedicated in-page history layer,
+  - Android system back first consumes that layer and closes the current file back to the file list,
+  - only after the file list is visible again does the next back step return to the metadata page.
+- Replaced the old system `ask()` prompt in `src/routes/mobile/edit/+page.svelte`:
+  - unsaved file close/back now shows a custom bottom-sheet dialog,
+  - the dialog offers `暂存并返回` / `不暂存` / `继续编辑`,
+  - batch replace confirmation now reuses the same in-app dialog style for consistency.
+- Tightened the editor shell behavior in `src/routes/mobile/edit/+page.svelte`:
+  - the page now uses an explicit `.editing` state instead of relying on `:has(...)` for scroll locking while the editor overlay is open.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `pnpm tauri android build --target aarch64` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\bundle\universalRelease\app-universal-release.aab`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android packaging still emits the existing identifier warning (`com.tepubeditor.app` ends with `.app`), Gradle deprecation warning, and `libtepub_editor_lib.so` strip warning, but the release APK builds, signs, installs, and launches successfully.
+
+### 2026-05-18 00:42 +08:00
+
+Request: fix the mobile metadata page footer log layout, make file-editor back navigation return to the EPUB file list first, keep the editor header stable while the Android IME is open, and prompt to stash/save the current file when closing or backing out with unsaved edits.
+
+Changes:
+
+- Refined Android metadata status output in `src/routes/mobile/metadata/+page.svelte`:
+  - the export path line now uses a full-width block instead of collapsing into the lower-left corner,
+  - long paths wrap across the available width so the footer log reads as a proper row.
+- Updated Android file-editor close/back behavior in `src/routes/mobile/edit/+page.svelte`:
+  - added `promptStashEditingFile()` to ask whether the current dirty file should be temporarily saved before leaving,
+  - closing an opened file now returns to the EPUB file list inside the editor route first,
+  - leaving the editor route only jumps back to metadata after the file list is already closed.
+- Stabilized the Android editor viewport in `src/routes/mobile/edit/+page.svelte`:
+  - editor shells now use `100dvh`,
+  - the top header is sticky and includes safe-area top padding,
+  - this keeps the toolbar from being pushed out of view when the input method opens.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `pnpm tauri android build --release --target aarch64` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds, signs, installs, and launches successfully.
+
+### 2026-05-18 00:15 +08:00
+
+Request: remove the remaining `已读取元数据` card, make the bottom two action buttons evenly split one row, and allow tapping the cover to replace it with a local image.
+
+Changes:
+
+- Removed the loaded-state status card from the Android metadata page so the form now starts directly from the metadata fields.
+- Fixed the bottom action row layout in `src/routes/mobile/metadata/+page.svelte`:
+  - added a reusable `.full` grid span for non-label blocks,
+  - kept the action row at full width,
+  - ensured the two buttons split the row evenly.
+- Added tap-to-replace cover on the metadata page:
+  - cover preview is now a button,
+  - uses a hidden image file input,
+  - selected image bytes are written back through new Tauri command `mobile_update_epub_cover`.
+- Added `mobile_update_epub_cover` in `src-tauri/src/lib.rs`:
+  - updates the cached extracted cover when present,
+  - rewrites the EPUB zip cover,
+  - returns fresh cover bytes so the mobile preview updates immediately.
+- Kept exported path feedback inline below the action buttons instead of using a separate top card.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
+
+### 2026-05-18 00:30 +08:00
+
+Request: keep the cover frame ratio stable regardless of the chosen image ratio, and fix the severe Android export bug where file edits made inside `编辑 EPUB 文件` were missing from `保存并导出`.
+
+Changes:
+
+- Fixed Android metadata cover layout in `src/routes/mobile/metadata/+page.svelte`:
+  - the cover picker now uses a fixed `aspect-ratio: 3 / 4`,
+  - the frame size stays stable even when the selected image is extra wide or extra tall.
+- Fixed Android export sequencing in `src/routes/mobile/metadata/+page.svelte`:
+  - `保存并导出` now first tries `save_epub_to_disk` so extracted editor changes are flushed back into the cached EPUB before export,
+  - cache-miss errors are tolerated when no extracted editor session exists.
+- Fixed metadata/temp-cache consistency in `src-tauri/src/lib.rs`:
+  - `mobile_update_epub_metadata` now updates the extracted temp `OPF` file when the mobile editor cache exists,
+  - this prevents later flush/export operations from overwriting freshly saved metadata with stale temp copies.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `npm.cmd run tauri -- android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.

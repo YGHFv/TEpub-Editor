@@ -1,7 +1,14 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { message } from "@tauri-apps/plugin-dialog";
-    import { cacheBrowserFile, exportEpubPath, safeFileName, selectionName } from "$lib/mobileFlow";
+    import {
+        cacheBrowserFile,
+        exportEpubPath,
+        readMobileSelection,
+        safeFileName,
+        selectionName,
+    } from "$lib/mobileFlow";
 
     interface RegexRule {
         level: number;
@@ -121,6 +128,25 @@
         coverInputEl?.click();
     }
 
+    async function loadSource(sourcePath: string, name = "") {
+        try {
+            busy = true;
+            resetResult();
+            selectedName = name || selectionName(sourcePath);
+            selectedPath = sourcePath;
+            content = await invoke<string>("read_text_file", { path: selectedPath });
+            title = selectionName(selectedName).replace(/\.[^.]+$/, "");
+            if (uuidAuto) uuid = crypto.randomUUID?.() ?? uuid;
+            status = `已导入 ${selectedName}，正在扫描目录。`;
+            await previewToc();
+        } catch (err) {
+            status = "导入文本失败";
+            await message(`导入文本失败：${err}`, { title: "制作 EPUB", kind: "error" });
+        } finally {
+            busy = false;
+        }
+    }
+
     async function onFileChange(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
         const file = input.files?.[0];
@@ -128,20 +154,11 @@
         if (!file) return;
 
         try {
-            busy = true;
-            resetResult();
-            selectedName = file.name;
-            selectedPath = await cacheBrowserFile(file, "txt");
-            content = await invoke<string>("read_text_file", { path: selectedPath });
-            title = selectionName(file.name).replace(/\.[^.]+$/, "");
-            if (uuidAuto) uuid = crypto.randomUUID?.() ?? uuid;
-            status = `已导入 ${file.name}，正在扫描目录。`;
-            await previewToc();
+            const cachedPath = await cacheBrowserFile(file, "txt");
+            await loadSource(cachedPath, file.name);
         } catch (err) {
             status = "导入文本失败";
             await message(`导入文本失败：${err}`, { title: "制作 EPUB", kind: "error" });
-        } finally {
-            busy = false;
         }
     }
 
@@ -485,6 +502,13 @@
         uuidAuto = false;
         if (!uuid) uuid = crypto.randomUUID?.() ?? "";
     }
+
+    onMount(() => {
+        const selection = readMobileSelection(window.location.search);
+        if (selection.path) {
+            void loadSource(selection.path, selection.name);
+        }
+    });
 </script>
 
 <svelte:head>
@@ -507,23 +531,28 @@
 
     {#if selectedPath}
         <section class="meta">
-            <div class="meta-main">
-                <label>
-                    <span>书名</span>
-                    <input bind:value={title} autocomplete="off" />
-                </label>
-                <label>
-                    <span>作者</span>
-                    <input bind:value={author} autocomplete="off" />
+            <div class="meta-top">
+                <div class="meta-main">
+                    <label>
+                        <span>书名</span>
+                        <input bind:value={title} autocomplete="off" />
+                    </label>
+                    <label>
+                        <span>作者</span>
+                        <input bind:value={author} autocomplete="off" />
+                    </label>
+                </div>
+                <label class="cover-field">
+                    <span>封面</span>
+                    <button class="cover-box" type="button" on:click={openCoverPicker} aria-label="选择封面">
+                        {#if coverPreviewUrl}
+                            <img src={coverPreviewUrl} alt={coverName || "封面"} />
+                        {:else}
+                            <b>选择封面</b>
+                        {/if}
+                    </button>
                 </label>
             </div>
-            <button class="cover-box" type="button" on:click={openCoverPicker} aria-label="选择封面">
-                {#if coverPreviewUrl}
-                    <img src={coverPreviewUrl} alt={coverName || "封面"} />
-                {:else}
-                    <span>封面</span>
-                {/if}
-            </button>
             <label class="uuid-row">
                 <span>UUID</span>
                 <input bind:value={uuid} readonly={uuidAuto} on:focus={enableManualUuid} autocomplete="off" />
@@ -694,7 +723,7 @@
     .page {
         min-height: 100vh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 14px max(22px, env(safe-area-inset-bottom));
+        padding: max(10px, env(safe-area-inset-top)) 14px max(44px, env(safe-area-inset-bottom));
         background: #f4f5f8;
         color: #171b24;
     }
@@ -783,9 +812,14 @@
 
     .meta {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 82px;
         gap: 10px;
-        align-items: start;
+    }
+
+    .meta-top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 94px;
+        gap: 12px;
+        align-items: stretch;
     }
 
     .meta-main {
@@ -793,9 +827,13 @@
         gap: 10px;
     }
 
+    .cover-field {
+        align-content: start;
+    }
+
     .cover-box {
-        width: 82px;
-        height: 112px;
+        width: 100%;
+        height: 118px;
         min-height: 0;
         display: grid;
         place-items: center;
@@ -804,18 +842,24 @@
         border-radius: 8px;
         background: #f1f5f8;
         color: #747986;
-        font-size: 12px;
+        padding: 0;
+        font-size: 11px;
         font-weight: 900;
+    }
+
+    .cover-box b {
+        display: block;
+        max-width: 4em;
+        color: #7b8491;
+        font-size: 11px;
+        line-height: 1.35;
+        text-align: center;
     }
 
     .cover-box img {
         width: 100%;
         height: 100%;
         object-fit: cover;
-    }
-
-    .uuid-row {
-        grid-column: 1 / -1;
     }
 
     label {
@@ -891,9 +935,14 @@
 
     .fold-head b,
     .check-head b {
+        width: 20px;
+        height: 20px;
+        display: grid;
+        place-items: center;
         color: #8d94a0;
         font-size: 18px;
         font-weight: 400;
+        line-height: 1;
         text-align: center;
     }
 
@@ -952,10 +1001,15 @@
     }
 
     .fold {
+        width: 20px;
+        height: 20px;
         grid-area: fold;
+        display: grid;
+        place-items: center;
         align-self: center;
         color: #8d94a0;
         font-size: 18px;
+        line-height: 1;
     }
 
     .toc-row strong {
@@ -1078,10 +1132,13 @@
     }
 
     .reorder-row b {
-        display: inline-block;
-        width: 14px;
+        display: inline-grid;
+        width: 18px;
+        height: 18px;
+        place-items: center;
         color: #8d94a0;
         font-weight: 400;
+        line-height: 1;
     }
 
     .reorder-row .changed {

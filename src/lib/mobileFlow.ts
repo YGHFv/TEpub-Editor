@@ -9,6 +9,11 @@ export interface MobileExportResult {
     message: string;
 }
 
+export interface MobileSelection {
+    path: string;
+    name: string;
+}
+
 export function safeFileName(name: string, fallbackExt: string) {
     const cleaned = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim() || "selected";
     const hasExt = /\.[^.]+$/.test(cleaned);
@@ -24,6 +29,25 @@ export function selectionName(path: string) {
     } catch {
         return name;
     }
+}
+
+export function buildMobileRoute(route: string, params: Record<string, string | null | undefined>) {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value && value.trim()) search.set(key, value);
+    }
+    const query = search.toString();
+    return query ? `${route}?${query}` : route;
+}
+
+export function readMobileSelection(search: string): MobileSelection {
+    const params = new URLSearchParams(search);
+    const path = params.get("path")?.trim() ?? "";
+    const name = params.get("name")?.trim() ?? "";
+    return {
+        path,
+        name: name || selectionName(path),
+    };
 }
 
 export function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string) {
