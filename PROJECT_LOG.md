@@ -32,6 +32,163 @@ Main areas:
 
 ## Change History
 
+### 2026-05-18 10:39 +08:00
+
+Request: make `编辑本章文本` start from the chapter title line so the title can be edited directly; if the title is deleted, the remaining chapter text should merge into the previous chapter after rescanning. Also add `移除本章标题` to the right-side three-dot TOC menu, with the same merge-into-previous behavior.
+
+Changes:
+
+- Updated `src/routes/mobile/make/+page.svelte`:
+  - changed the chapter text editor range to include the title line itself,
+  - kept save behavior writing the updated TXT content through `save_text_file`,
+  - after saving, the TOC preview is rescanned so edited or deleted title lines immediately reshape the directory list,
+  - added `移除本章标题` to each TOC row action sheet,
+  - implemented title-line removal by deleting only the heading line and preserving the remaining body text, so the body naturally becomes part of the previous scanned chapter,
+  - added destructive-action styling for the remove-title button.
+
+Touched files:
+
+- `src/routes/mobile/make/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` completed and produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed the release APK with the local Android debug keystore and verified APK Signature Scheme v2/v3:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `adb install -r` succeeded on connected device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android build still emits the existing Gradle deprecation notice and `Unable to strip ... libtepub_editor_lib.so`; the APK still builds, signs, installs, and launches successfully.
+
+### 2026-05-18 10:29 +08:00
+
+Request: for the mobile EPUB creation page, remove the top TXT/file-name selection card, make the directory-regex card collapsible and collapsed by default, add a three-dot menu to each detected TOC title, and support renaming titles or editing chapter text with automatic TOC rescan after edits. Also enforce the project rule that every change is logged here and every Android page change is built, installed, and launched on Android.
+
+Changes:
+
+- Updated `src/routes/mobile/make/+page.svelte`:
+  - removed the visible top `选择 TXT` / selected file-name card from the make EPUB page,
+  - changed the `目录正则` panel into a foldable section with `regexOpen = false` by default,
+  - added a right-side three-dot action button to every TOC row,
+  - added action sheets for `重命名标题` and `编辑本章文本`,
+  - implemented title-line replacement and chapter-body replacement against the cached TXT content,
+  - saved edited content with `save_text_file` and called the existing TOC scan flow after each edit so the directory list refreshes automatically.
+
+Touched files:
+
+- `src/routes/mobile/make/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- `pnpm check` still fails only on existing repository-wide Svelte/TypeScript issues outside `src/routes/mobile/make/+page.svelte`; no new `mobile/make` TypeScript errors were reported.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` completed and produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed the release APK with the local Android debug keystore and verified APK Signature Scheme v2/v3:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `adb install -r` succeeded on connected device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android build still emits the existing Java source/target 8 deprecation warning, Gradle deprecation notice, and `Unable to strip ... libtepub_editor_lib.so`; the APK still builds, signs, installs, and launches successfully.
+- The visible TXT picker card is removed as requested, so this page assumes entry from the mobile home flow where the source file has already been selected and cached.
+
+### 2026-05-18 10:05 +08:00
+
+Request: reduce the heavy divider usage on the mobile EPUB file-structure page to feel closer to 阅微, then build a desktop release, bump the app version to `0.5.8`, and push to GitHub to trigger Actions.
+
+Changes:
+
+- Updated `src/routes/mobile/edit/+page.svelte` to soften the mobile EPUB structure view:
+  - changed the file group list from continuous hard rules into rounded card-like sections with spacing between groups,
+  - removed the heavy top borders on every file row and replaced them with lighter inner separators,
+  - softened the image preview, font preview, code editor container, and replace panel so the page no longer looks like stacked bordered boxes.
+- Synced the desktop release version to `0.5.8` in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, and `src-tauri/tauri.conf.json`.
+- Built the desktop release bundles and pushed commit `000b2c0` to `origin/main`, which triggered the GitHub Actions workflow for the new release.
+
+Touched files:
+
+- `src/routes/mobile/edit/+page.svelte`
+- `package.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `src-tauri/tauri.conf.json`
+
+Verification:
+
+- `pnpm tauri build` passed.
+- Desktop bundles produced successfully:
+  - `src-tauri\target\release\bundle\msi\TEpub-Editor_0.5.8_x64_zh-CN.msi`
+  - `src-tauri\target\release\bundle\nsis\TEpub-Editor_0.5.8_x64-setup.exe`
+- `git push origin main` succeeded and updated `main` from `d5085b2` to `000b2c0`.
+
+Caveats:
+
+- `pnpm check` still reports the existing repository-wide Svelte/TypeScript issues outside this release pass; only the new nullability issue introduced during this change was corrected.
+
+### 2026-05-18 09:33 +08:00
+
+Request: make the Android EPUB file-structure hierarchy more obvious, shrink the folder-name row text and height a bit more, and remove the white button backgrounds from the folder/file action controls.
+
+Changes:
+
+- Updated `src/routes/mobile/edit/+page.svelte` so folder header rows are shorter and lighter, with smaller folder label text and tighter spacing.
+- Increased the inner left indent on file rows so files sit more clearly under their parent folder headers.
+- Removed the white background and inset border treatment from the folder action buttons and file three-dot button so the controls blend into the row styling.
+
+Touched files:
+
+- `src/routes/mobile/edit/+page.svelte`
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `pnpm tauri android build --target aarch64` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3.
+- Uninstalled the previous package from connected device `4e2d9aa2`, installed the new signed APK, and relaunched `com.tepubeditor.app/.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`.
+
+Caveats:
+
+- This pass only adjusts the Android mobile EPUB file-structure presentation; no backend behavior changed.
+
+### 2026-05-18 09:24 +08:00
+
+Request: refine the Android EPUB file-structure page so folder rows keep hierarchy without looking indented like files, remove duplicate filename/path text from the font preview, and pull the preview area upward.
+
+Changes:
+
+- Updated `src/routes/mobile/edit/+page.svelte` so group header labels no longer carry the same left indent as file rows, while file entries still keep their inner indent for clearer hierarchy.
+- Adjusted the mobile editor header logic so font preview files use the same spacer treatment as image preview files, preventing duplicate filename/path display.
+- Simplified the font preview body by removing the repeated filename/path block and tightening the preview container spacing so the preview card sits higher on screen.
+
+Touched files:
+
+- `src/routes/mobile/edit/+page.svelte`
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `pnpm tauri android build --target aarch64` completed and produced the Android release APK.
+- Signed APK verified with APK Signature Scheme v2/v3.
+- Uninstalled the previous package from connected device `4e2d9aa2`, installed the new signed APK, and relaunched `com.tepubeditor.app/.MainActivity`.
+- Final signed APK: `src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`.
+
+Caveats:
+
+- This change is intentionally limited to the Android mobile EPUB editor layout; existing warnings outside this page are unchanged.
+
 ### 2026-05-17 23:31 +08:00
 
 Request: when returning from the mobile EPUB file-structure editor, force the metadata page to rescan the cached EPUB so metadata stays in sync after file edits, and move the in-file editor controls to the top-right with icon-only search/save/close buttons while keeping the find/replace panel at the bottom.
@@ -1951,6 +2108,88 @@ Verification:
 Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
+
+### 2026-05-18 09:19 +08:00
+
+Request: restore the left indentation in the Android EPUB file list, make the new action buttons less boxy and closer to the rest of the mobile UI, add font preview support in the file-structure editor, and fix the top-left back arrow centering across mobile secondary pages.
+
+Changes:
+
+- Refined Android EPUB file-list layout in `src/routes/mobile/edit/+page.svelte`:
+  - restored the left-side visual indentation for grouped files,
+  - group labels now keep a left inset so the list hierarchy reads more clearly again.
+- Polished the mobile file actions in `src/routes/mobile/edit/+page.svelte`:
+  - the add/fold buttons and the three-dot file action button now use softer rounded corners and filled surfaces,
+  - the centered action/rename dialogs now visually match the rest of the mobile button styling better.
+- Added Android font preview support in `src/routes/mobile/edit/+page.svelte`:
+  - `.ttf/.otf/.woff/.woff2` files now open into a live preview card instead of only showing “暂不支持直接编辑”,
+  - the preview loads the real embedded font and renders sample Latin + Chinese text.
+- Unified top-left back arrow alignment across:
+  - `src/routes/mobile/edit/+page.svelte`
+  - `src/routes/mobile/make/+page.svelte`
+  - `src/routes/mobile/metadata/+page.svelte`
+  - `src/routes/mobile/decrypt/+page.svelte`
+  - all four pages now use the same centered SVG back icon instead of glyph text arrows.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `pnpm tauri android build --target aarch64` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\bundle\universalRelease\app-universal-release.aab`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb uninstall com.tepubeditor.app` succeeded.
+- `adb install` of the new signed APK succeeded.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device.
+
+Caveats:
+
+- Android packaging still emits the existing identifier warning (`com.tepubeditor.app`), Gradle deprecation warnings, and `libtepub_editor_lib.so` strip warning, but the updated mobile editor UI and previews build, install, and launch successfully.
+
+### 2026-05-18 09:05 +08:00
+
+Request: improve the Android EPUB file-structure page by showing image thumbnails directly in the list, add a three-dot file action menu for rename/delete, and finally fix the long-standing misalignment of expand/collapse buttons across the mobile file/toc views.
+
+Changes:
+
+- Upgraded the Android EPUB file list in `src/routes/mobile/edit/+page.svelte`:
+  - image files now load inline thumbnail previews directly in the structure list,
+  - text/css/xml/font items keep their existing type badges,
+  - the file row is split into a primary tap zone plus a separate three-dot action button on the right.
+- Added mobile file actions in `src/routes/mobile/edit/+page.svelte`:
+  - the three-dot menu now opens a centered action sheet,
+  - supports `重命名` via an in-app rename dialog,
+  - supports `删除文件` via a destructive confirmation dialog,
+  - both actions reload the extracted EPUB tree and preserve folder expansion state where possible.
+- Unified mobile expand/collapse visuals in:
+  - `src/routes/mobile/edit/+page.svelte`
+  - `src/routes/mobile/make/+page.svelte`
+  - replaced character-based arrows with fixed-size SVG chevrons,
+  - normalized button boxes, alignment, and rotation behavior so folder toggles, TOC folds, and reorder folds stay centered and visually consistent.
+
+Verification:
+
+- `pnpm build` passed.
+- `cargo check` passed.
+- `pnpm tauri android build --target aarch64` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\bundle\universalRelease\app-universal-release.aab`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- Device install needed one extra step because the existing device build had a different signature:
+  - `adb uninstall com.tepubeditor.app` succeeded,
+  - `adb install` of the new signed APK succeeded.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device.
+
+Caveats:
+
+- Android packaging still emits the existing identifier warning (`com.tepubeditor.app`), Gradle deprecation warnings, and `libtepub_editor_lib.so` strip warning, but the new mobile file-structure UI builds, installs, and launches successfully.
 
 ### 2026-05-18 01:01 +08:00
 

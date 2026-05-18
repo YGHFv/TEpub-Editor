@@ -58,8 +58,26 @@
         sequenceBroken: boolean;
     }
 
+    interface RenameTitleSheetState {
+        open: boolean;
+        item: TocItem | null;
+        value: string;
+    }
+
+    interface ChapterEditSheetState {
+        open: boolean;
+        item: TocItem | null;
+        value: string;
+        startLine: number;
+        endLine: number;
+    }
+
     type ReorderScope = "all" | "volumes" | "chapters" | "regex";
     type NumberStyle = "arabic" | "chinese";
+
+    function chevronLabel(open: boolean) {
+        return open ? "收起" : "展开";
+    }
 
     const DEFAULT_META_VOLUME_REGEX = "^\\s*(?:内容简介|本书相关|完本感言)\\s*(?:[:：].*)?$";
     const DEFAULT_META_BODY_REGEX = "^\\s*(?:简介|序(?:章|言)?|前言|楔子|后记|尾声)\\s*(?:[:：].*)?$";
@@ -103,8 +121,22 @@
     let volumeNumberStyle: NumberStyle = "chinese";
     let chapterNumberStyle: NumberStyle = "arabic";
     let reorderCollapsedVolumeKeys = new Set<string>();
+    let regexOpen = false;
     let tocOpen = true;
     let checkOpen = true;
+    let tocActionTarget: TocItem | null = null;
+    let renameTitleSheet: RenameTitleSheetState = {
+        open: false,
+        item: null,
+        value: "",
+    };
+    let chapterEditSheet: ChapterEditSheetState = {
+        open: false,
+        item: null,
+        value: "",
+        startLine: 0,
+        endLine: 0,
+    };
 
     $: tocItems = buildToc(chapters);
     $: visibleToc = tocItems.filter((item) => item.kind !== "chapter" || !item.volumeKey || expandedIds.has(item.volumeKey));
@@ -293,6 +325,116 @@
         if (expandedIds.has(item.id)) expandedIds.delete(item.id);
         else expandedIds.add(item.id);
         expandedIds = new Set(expandedIds);
+    }
+
+    function normalizedLines() {
+        return content.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
+    }
+
+    function openTocActions(item: TocItem, event: Event) {
+        event.stopPropagation();
+        tocActionTarget = item;
+    }
+
+    function closeTocActions() {
+        tocActionTarget = null;
+    }
+
+    function openRenameTitle(item: TocItem) {
+        tocActionTarget = null;
+        renameTitleSheet = {
+            open: true,
+            item,
+            value: item.title,
+        };
+    }
+
+    function closeRenameTitle() {
+        renameTitleSheet = {
+            open: false,
+            item: null,
+            value: "",
+        };
+    }
+
+    async function submitRenameTitle() {
+        const item = renameTitleSheet.item;
+        const nextTitle = renameTitleSheet.value.trim();
+        if (!selectedPath || !item || !nextTitle) return;
+
+        const lines = normalizedLines();
+        const lineIndex = item.line_number - 1;
+        if (lineIndex < 0 || lineIndex >= lines.length) return;
+
+        const indent = lines[lineIndex].match(/^[\s　]*/)?.[0] ?? "";
+        lines[lineIndex] = `${indent}${nextTitle}`;
+        content = lines.join("\n");
+        await invoke("save_text_file", { path: selectedPath, content });
+        closeRenameTitle();
+        await previewToc();
+        status = `已重命名目录标题：${nextTitle}`;
+    }
+
+    function chapterBodyRange(item: TocItem) {
+        const lines = normalizedLines();
+        const nextChapter = chapters
+            .filter((chapter) => chapter.line_number > item.line_number)
+            .sort((a, b) => a.line_number - b.line_number)[0];
+        const startLine = Math.max(0, Math.min(item.line_number - 1, lines.length));
+        const endLine = nextChapter ? Math.max(startLine, nextChapter.line_number - 1) : lines.length;
+        return { lines, startLine, endLine };
+    }
+
+    function openChapterEditor(item: TocItem) {
+        tocActionTarget = null;
+        const { lines, startLine, endLine } = chapterBodyRange(item);
+        chapterEditSheet = {
+            open: true,
+            item,
+            value: lines.slice(startLine, endLine).join("\n"),
+            startLine,
+            endLine,
+        };
+    }
+
+    function closeChapterEditor() {
+        chapterEditSheet = {
+            open: false,
+            item: null,
+            value: "",
+            startLine: 0,
+            endLine: 0,
+        };
+    }
+
+    async function submitChapterEdit() {
+        if (!selectedPath || !chapterEditSheet.item) return;
+        const lines = normalizedLines();
+        const nextLines = [
+            ...lines.slice(0, chapterEditSheet.startLine),
+            ...chapterEditSheet.value.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n"),
+            ...lines.slice(chapterEditSheet.endLine),
+        ];
+        content = nextLines.join("\n");
+        await invoke("save_text_file", { path: selectedPath, content });
+        const titleText = chapterEditSheet.item.title;
+        closeChapterEditor();
+        await previewToc();
+        status = `已更新章节正文：${titleText}`;
+    }
+
+    async function removeChapterTitle(item: TocItem) {
+        if (!selectedPath) return;
+        const lines = normalizedLines();
+        const lineIndex = item.line_number - 1;
+        if (lineIndex < 0 || lineIndex >= lines.length) return;
+
+        lines.splice(lineIndex, 1);
+        content = lines.join("\n");
+        tocActionTarget = null;
+        await invoke("save_text_file", { path: selectedPath, content });
+        await previewToc();
+        status = `已移除目录标题：${item.title}`;
     }
 
     function revealTocItem(id: string) {
@@ -520,14 +662,13 @@
     <input bind:this={coverInputEl} class="file-input" type="file" accept="image/*" on:change={onCoverChange} />
 
     <header class="topbar">
-        <a href="/mobile" aria-label="返回">‹</a>
+        <a href="/mobile" aria-label="返回">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15 6L9 12L15 18"></path>
+            </svg>
+        </a>
         <h1>制作 EPUB</h1>
     </header>
-
-    <section class="controls">
-        <button type="button" on:click={openPicker} disabled={busy}>{busy ? "处理中" : "选择 TXT"}</button>
-        {#if selectedName}<p>{selectedName}</p>{/if}
-    </section>
 
     {#if selectedPath}
         <section class="meta">
@@ -561,23 +702,35 @@
 
         <section class="regex-panel">
             <div class="section-head">
-                <h2>目录正则</h2>
-                <button type="button" on:click={previewToc} disabled={busy}>重新扫描</button>
+                <button class="fold-head" type="button" on:click={() => (regexOpen = !regexOpen)}>
+                    <span>目录正则</span>
+                    <small>{rules.length} 条</small>
+                    <span class="chevron-shell" aria-hidden="true">
+                        <svg class:open={regexOpen} viewBox="0 0 24 24">
+                            <path d="M9 6L15 12L9 18"></path>
+                        </svg>
+                    </span>
+                </button>
             </div>
-            {#each rules as rule, index}
-                <div class="rule-row">
-                    <select bind:value={rule.level}>
-                        <option value={1}>卷/元信息</option>
-                        <option value={3}>章节</option>
-                    </select>
-                    <input bind:value={rule.pattern} autocomplete="off" />
-                    <button type="button" on:click={() => removeRule(index)} aria-label="删除正则">×</button>
+            {#if regexOpen}
+                <div class="regex-actions">
+                    <button type="button" on:click={previewToc} disabled={busy}>重新扫描</button>
                 </div>
-            {/each}
-            <div class="rule-actions">
-                <button type="button" on:click={() => addRule(1)}>添加卷规则</button>
-                <button type="button" on:click={() => addRule(3)}>添加章节规则</button>
-            </div>
+                {#each rules as rule, index}
+                    <div class="rule-row">
+                        <select bind:value={rule.level}>
+                            <option value={1}>卷/元信息</option>
+                            <option value={3}>章节</option>
+                        </select>
+                        <input bind:value={rule.pattern} autocomplete="off" />
+                        <button type="button" on:click={() => removeRule(index)} aria-label="删除正则">×</button>
+                    </div>
+                {/each}
+                <div class="rule-actions">
+                    <button type="button" on:click={() => addRule(1)}>添加卷规则</button>
+                    <button type="button" on:click={() => addRule(3)}>添加章节规则</button>
+                </div>
+            {/if}
         </section>
 
         <section class="toc-panel">
@@ -585,7 +738,11 @@
                 <button class="fold-head" type="button" on:click={() => (tocOpen = !tocOpen)}>
                     <span>目录预览</span>
                     <small>{chapters.length} 项</small>
-                    <b>{tocOpen ? "⌄" : "›"}</b>
+                    <span class="chevron-shell" aria-hidden="true">
+                        <svg class:open={tocOpen} viewBox="0 0 24 24">
+                            <path d="M9 6L15 12L9 18"></path>
+                        </svg>
+                    </span>
                 </button>
             </div>
             {#if tocOpen}
@@ -593,18 +750,31 @@
                 {#if visibleToc.length}
                     <div class="toc-list">
                         {#each visibleToc as item}
-                            <button
+                            <div
                                 class="toc-row"
                                 class:volume={item.kind === "volume"}
                                 class:sequence-error={invalidSequenceIds.has(item.id)}
                                 style={`--depth:${item.depth}`}
-                                type="button"
-                                on:click={() => toggleItem(item)}
                             >
-                                <span class="fold">{item.kind === "volume" && item.hasChildren ? (expandedIds.has(item.id) ? "⌄" : "›") : ""}</span>
-                                <strong>{item.title}</strong>
-                                <small>第 {item.line_number} 行 · {item.word_count} 字</small>
-                            </button>
+                                <button class="toc-main" type="button" on:click={() => toggleItem(item)}>
+                                    <span class="fold" aria-label={item.kind === "volume" && item.hasChildren ? chevronLabel(expandedIds.has(item.id)) : undefined}>
+                                        {#if item.kind === "volume" && item.hasChildren}
+                                            <svg class:open={expandedIds.has(item.id)} viewBox="0 0 24 24" aria-hidden="true">
+                                                <path d="M9 6L15 12L9 18"></path>
+                                            </svg>
+                                        {/if}
+                                    </span>
+                                    <strong>{item.title}</strong>
+                                    <small>第 {item.line_number} 行 · {item.word_count} 字</small>
+                                </button>
+                                <button class="toc-more" type="button" aria-label={`${item.title} 更多操作`} on:click={(event) => openTocActions(item, event)}>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <circle cx="12" cy="5" r="1.75"></circle>
+                                        <circle cx="12" cy="12" r="1.75"></circle>
+                                        <circle cx="12" cy="19" r="1.75"></circle>
+                                    </svg>
+                                </button>
+                            </div>
                         {/each}
                     </div>
                 {/if}
@@ -615,7 +785,11 @@
             <button class="check-head" type="button" on:click={() => (checkOpen = !checkOpen)}>
                 <span>目录检查</span>
                 <small>{sequenceErrors.length + titleErrors.length} 个问题</small>
-                <b>{checkOpen ? "⌄" : "›"}</b>
+                <span class="chevron-shell" aria-hidden="true">
+                    <svg class:open={checkOpen} viewBox="0 0 24 24">
+                        <path d="M9 6L15 12L9 18"></path>
+                    </svg>
+                </span>
             </button>
             {#if checkOpen}
                 <div class="reorder-options">
@@ -673,7 +847,11 @@
                         >
                             <span>
                                 {#if row.kind === "volume"}
-                                    <b>{reorderCollapsedVolumeKeys.has(row.id) ? "›" : "⌄"}</b>
+                                    <span class="row-chevron" aria-hidden="true">
+                                        <svg class:open={!reorderCollapsedVolumeKeys.has(row.id)} viewBox="0 0 24 24">
+                                            <path d="M9 6L15 12L9 18"></path>
+                                        </svg>
+                                    </span>
                                 {/if}
                                 {row.original}
                             </span>
@@ -711,6 +889,55 @@
             {/if}
             {#if exportPath}<code>{exportPath}</code>{/if}
         </section>
+    {/if}
+
+    {#if tocActionTarget}
+        <div class="sheet-backdrop" role="presentation" on:click={closeTocActions}></div>
+        <div class="action-sheet" role="dialog" aria-modal="true" aria-labelledby="toc-actions-title">
+            <div class="sheet-copy">
+                <strong id="toc-actions-title">{tocActionTarget.title}</strong>
+                <p>第 {tocActionTarget.line_number} 行</p>
+            </div>
+            <div class="action-sheet-actions">
+                <button type="button" on:click={() => openRenameTitle(tocActionTarget!)}>重命名标题</button>
+                <button type="button" on:click={() => openChapterEditor(tocActionTarget!)}>编辑本章文本</button>
+                <button class="sheet-danger" type="button" on:click={() => removeChapterTitle(tocActionTarget!)}>移除本章标题</button>
+                <button class="sheet-cancel" type="button" on:click={closeTocActions}>取消</button>
+            </div>
+        </div>
+    {/if}
+
+    {#if renameTitleSheet.open}
+        <div class="sheet-backdrop" role="presentation" on:click={closeRenameTitle}></div>
+        <div class="action-sheet" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+            <div class="sheet-copy">
+                <strong id="rename-title">重命名标题</strong>
+                <p>第 {renameTitleSheet.item?.line_number} 行</p>
+            </div>
+            <label class="sheet-field">
+                <span>标题</span>
+                <input bind:value={renameTitleSheet.value} autocomplete="off" />
+            </label>
+            <div class="action-sheet-actions two">
+                <button class="sheet-cancel" type="button" on:click={closeRenameTitle}>取消</button>
+                <button type="button" on:click={submitRenameTitle} disabled={busy || !renameTitleSheet.value.trim()}>保存</button>
+            </div>
+        </div>
+    {/if}
+
+    {#if chapterEditSheet.open}
+        <div class="sheet-backdrop" role="presentation" on:click={closeChapterEditor}></div>
+        <div class="chapter-sheet" role="dialog" aria-modal="true" aria-labelledby="edit-chapter-text">
+            <div class="sheet-copy">
+                <strong id="edit-chapter-text">编辑本章文本</strong>
+                <p>{chapterEditSheet.item?.title}</p>
+            </div>
+            <textarea bind:value={chapterEditSheet.value}></textarea>
+            <div class="action-sheet-actions two">
+                <button class="sheet-cancel" type="button" on:click={closeChapterEditor}>取消</button>
+                <button type="button" on:click={submitChapterEdit} disabled={busy}>保存并重扫</button>
+            </div>
+        </div>
     {/if}
 </main>
 
@@ -750,13 +977,21 @@
         display: grid;
         place-items: center;
         color: inherit;
-        font-size: 28px;
-        line-height: 1;
         text-decoration: none;
+        padding: 0;
+    }
+
+    .topbar a svg {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
     }
 
     h1,
-    h2,
     p {
         margin: 0;
         letter-spacing: 0;
@@ -766,11 +1001,6 @@
         font-size: 22px;
     }
 
-    h2 {
-        font-size: 15px;
-    }
-
-    .controls,
     .meta,
     .regex-panel,
     .toc-panel,
@@ -783,12 +1013,6 @@
         padding: 12px;
     }
 
-    .controls {
-        display: grid;
-        gap: 10px;
-    }
-
-    .controls p,
     .status,
     code {
         color: #747986;
@@ -933,17 +1157,41 @@
         font-size: 12px;
     }
 
-    .fold-head b,
-    .check-head b {
+    .chevron-shell {
         width: 20px;
         height: 20px;
         display: grid;
         place-items: center;
         color: #8d94a0;
-        font-size: 18px;
-        font-weight: 400;
-        line-height: 1;
-        text-align: center;
+    }
+
+    .chevron-shell svg,
+    .fold svg,
+    .row-chevron svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.9;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: transform 0.16s ease;
+    }
+
+    .chevron-shell svg.open,
+    .fold svg.open,
+    .row-chevron svg.open {
+        transform: rotate(90deg);
+    }
+
+    .regex-actions {
+        display: grid;
+        margin-bottom: 8px;
+    }
+
+    .regex-actions button {
+        background: #e8f2f8;
+        color: #1677b8;
     }
 
     .rule-row {
@@ -975,17 +1223,48 @@
     .toc-row {
         min-height: 46px;
         display: grid;
-        grid-template-columns: 20px minmax(0, 1fr);
-        grid-template-areas:
-            "fold title"
-            "fold meta";
-        gap: 2px 8px;
-        padding: 6px 2px 6px calc(2px + var(--depth) * 18px);
+        grid-template-columns: minmax(0, 1fr) 34px;
+        gap: 6px;
+        padding: 0 2px 0 calc(2px + var(--depth) * 18px);
         border-radius: 0;
         border-bottom: 1px solid #eceef2;
         background: transparent;
         color: inherit;
         text-align: left;
+    }
+
+    .toc-main {
+        min-height: 46px;
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr);
+        grid-template-areas:
+            "fold title"
+            "fold meta";
+        gap: 2px 8px;
+        padding: 6px 0;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+    }
+
+    .toc-more {
+        width: 30px;
+        height: 30px;
+        min-height: 30px;
+        display: grid;
+        place-items: center;
+        align-self: center;
+        border-radius: 8px;
+        background: transparent;
+        color: #858b96;
+        padding: 0;
+    }
+
+    .toc-more svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
     }
 
     .toc-row.volume strong {
@@ -1008,8 +1287,6 @@
         place-items: center;
         align-self: center;
         color: #8d94a0;
-        font-size: 18px;
-        line-height: 1;
     }
 
     .toc-row strong {
@@ -1024,6 +1301,104 @@
         grid-area: meta;
         color: #858b96;
         font-size: 11px;
+    }
+
+    .sheet-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        background: rgba(20, 25, 35, 0.34);
+        backdrop-filter: blur(10px);
+    }
+
+    .action-sheet,
+    .chapter-sheet {
+        position: fixed;
+        left: 14px;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 31;
+        display: grid;
+        gap: 14px;
+        max-width: 420px;
+        margin: 0 auto;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 18px 40px rgba(25, 31, 43, 0.16);
+        padding: 16px;
+    }
+
+    .chapter-sheet {
+        top: max(18px, env(safe-area-inset-top));
+        bottom: max(18px, env(safe-area-inset-bottom));
+        transform: none;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        max-width: 640px;
+    }
+
+    .sheet-copy {
+        display: grid;
+        gap: 6px;
+    }
+
+    .sheet-copy strong {
+        font-size: 16px;
+        line-height: 1.25;
+    }
+
+    .sheet-copy p {
+        margin: 0;
+        color: #666f7d;
+        font-size: 13px;
+        line-height: 1.45;
+        word-break: break-all;
+    }
+
+    .sheet-field {
+        display: grid;
+        gap: 6px;
+    }
+
+    .chapter-sheet textarea {
+        width: 100%;
+        min-height: 0;
+        resize: none;
+        box-sizing: border-box;
+        border: 1px solid rgba(23, 27, 36, 0.12);
+        border-radius: 10px;
+        background: #fbfcfe;
+        color: inherit;
+        padding: 10px;
+        font: inherit;
+        font-size: 14px;
+        line-height: 1.65;
+    }
+
+    .action-sheet-actions {
+        display: grid;
+        gap: 8px;
+    }
+
+    .action-sheet-actions.two {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .action-sheet-actions button {
+        min-height: 38px;
+        background: #1677b8;
+        color: #fff;
+        box-shadow: none;
+    }
+
+    .action-sheet-actions .sheet-cancel {
+        background: #eef1f6;
+        color: #4f5867;
+    }
+
+    .action-sheet-actions .sheet-danger {
+        background: #f4ecee;
+        color: #9b3d4f;
     }
 
     .check-panel {
@@ -1131,14 +1506,14 @@
         white-space: nowrap;
     }
 
-    .reorder-row b {
-        display: inline-grid;
+    .row-chevron {
         width: 18px;
         height: 18px;
+        display: inline-grid;
         place-items: center;
+        margin-right: 2px;
         color: #8d94a0;
-        font-weight: 400;
-        line-height: 1;
+        vertical-align: middle;
     }
 
     .reorder-row .changed {

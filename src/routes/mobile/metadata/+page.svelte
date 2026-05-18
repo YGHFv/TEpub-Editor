@@ -270,7 +270,11 @@
     <input bind:this={fileInputEl} class="file-input" type="file" accept=".epub" on:change={onFileChange} />
     <input bind:this={coverInputEl} class="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" on:change={onCoverChange} />
     <header class="topbar">
-        <a href="/mobile" aria-label="返回">‹</a>
+        <a href="/mobile" aria-label="返回">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15 6L9 12L15 18"></path>
+            </svg>
+        </a>
         <h1>编辑 EPUB</h1>
     </header>
 
@@ -358,9 +362,18 @@
         display: grid;
         place-items: center;
         color: inherit;
-        font-size: 28px;
-        line-height: 1;
         text-decoration: none;
+        padding: 0;
+    }
+
+    .topbar a svg {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
     }
 
     h1 {
