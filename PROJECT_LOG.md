@@ -32,6 +32,36 @@ Main areas:
 
 ## Change History
 
+### 2026-05-18 10:53 +08:00
+
+Request: bump the app version to `0.5.9`, push the update to GitHub, and trigger the release Action.
+
+Changes:
+
+- Updated release version metadata from `0.5.8` to `0.5.9` in:
+  - `package.json`
+  - `src-tauri/tauri.conf.json`
+  - `src-tauri/Cargo.toml`
+  - `src-tauri/Cargo.lock`
+
+Touched files:
+
+- `package.json`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- Version fields were rechecked after editing and all app/package version entries report `0.5.9`.
+- No Android page code was changed in this pass, so the Android build/install rule does not apply.
+- Release workflow trigger is prepared by pushing the `v0.5.9` tag after the version commit.
+
+Caveats:
+
+- This is a version/tag release trigger only; no functional code changes were made.
+
 ### 2026-05-18 10:39 +08:00
 
 Request: make `编辑本章文本` start from the chapter title line so the title can be edited directly; if the title is deleted, the remaining chapter text should merge into the previous chapter after rescanning. Also add `移除本章标题` to the right-side three-dot TOC menu, with the same merge-into-previous behavior.
