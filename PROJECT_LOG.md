@@ -32,6 +32,47 @@ Main areas:
 
 ## Change History
 
+### 2026-05-18 12:25 +08:00
+
+Request: remove the original mobile theme entirely, keep only the new UI, make the top-left/title area show only `TEpub Editor` on Home, only `配置` on Config, and no header text on About. Adjust the About page closer to the new reference image and ensure the main visual is the software icon.
+
+Changes:
+
+- Simplified `src/routes/mobile/+page.svelte` to a single new mobile UI:
+  - removed `原主题` / `澎湃新主题` switching state and all classic-theme rendering,
+  - removed the old original-theme config card path,
+  - kept the bottom navigation with `主页` / `配置` / `关于`.
+- Adjusted page titles:
+  - Home now shows `TEpub Editor`,
+  - Config now shows `配置`,
+  - About renders no top header text.
+- Refined About layout:
+  - the app/software icon is the main centered visual,
+  - brand/version block is pushed lower to better resemble the supplied task-card reference,
+  - about cards remain below the icon section.
+- Config page now only describes the active new UI style instead of exposing theme switching.
+
+Touched files:
+
+- `src/routes/mobile/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` completed and produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed the release APK with the local Android debug keystore and verified APK Signature Scheme v2/v3:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `adb install -r` succeeded on connected device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android packaging still emits the existing Java source/target 8 deprecation warning, Gradle deprecation notice, bundle identifier warning, and `Unable to strip ... libtepub_editor_lib.so`; the APK still builds, signs, installs, and launches successfully.
+
 ### 2026-05-18 12:09 +08:00
 
 Request: build a new Android/mobile UI inspired by `compose-miuix-ui/miuix` and Xiaomi HyperOS 3 style, add a bottom bar with Home, Config, and About pages, make the About page roughly match the provided reference image, and let Config switch between the new theme and the original theme. In the original theme, add a large `配置 TEPUB-Editor` card on the home page that syncs with the new theme config page.
