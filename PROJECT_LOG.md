@@ -32,6 +32,53 @@ Main areas:
 
 ## Change History
 
+### 2026-05-18 12:09 +08:00
+
+Request: build a new Android/mobile UI inspired by `compose-miuix-ui/miuix` and Xiaomi HyperOS 3 style, add a bottom bar with Home, Config, and About pages, make the About page roughly match the provided reference image, and let Config switch between the new theme and the original theme. In the original theme, add a large `配置 TEPUB-Editor` card on the home page that syncs with the new theme config page.
+
+Changes:
+
+- Rebuilt `src/routes/mobile/+page.svelte` as a mobile shell with three bottom tabs:
+  - `主页`: keeps the existing three feature entry points for making EPUB, decrypting EPUB, and editing EPUB,
+  - `配置`: exposes theme switching between `澎湃新主题` and `原主题`,
+  - `关于`: adds a centered app icon/title/version block and large rounded action cards similar to the supplied REAREye reference.
+- Added a miuix/HyperOS-inspired visual theme:
+  - soft pastel gradient background,
+  - translucent rounded cards,
+  - floating rounded bottom navigation,
+  - icon-led feature cards and about cards,
+  - persisted theme selection through `localStorage`.
+- Preserved the original/classic visual mode:
+  - original feature cards remain available,
+  - home page gains a large `配置 TEPUB-Editor` card,
+  - the card uses the same theme switching state as the new config page.
+- Kept all three existing mobile feature routes unchanged:
+  - `/mobile/make`
+  - `/mobile/decrypt`
+  - `/mobile/metadata`
+
+Touched files:
+
+- `src/routes/mobile/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` completed and produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed the release APK with the local Android debug keystore and verified APK Signature Scheme v2/v3:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `adb install -r` succeeded on connected device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android packaging still emits the existing Java source/target 8 deprecation warning, Gradle deprecation notice, bundle identifier warning, and `Unable to strip ... libtepub_editor_lib.so`; the APK still builds, signs, installs, and launches successfully.
+- The new UI is a Svelte/WebView implementation inspired by miuix/HyperOS aesthetics, not a direct Kotlin Compose integration of the `miuix` library.
+
 ### 2026-05-18 11:52 +08:00
 
 Request: fix the Android/mobile flow where repeatedly selecting files across EPUB editing, returning home, then selecting TXT to make EPUB can get stuck on the mobile home import state after the second selection.
