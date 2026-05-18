@@ -1,6 +1,7 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
     import { message } from "@tauri-apps/plugin-dialog";
+    import { openUrl } from "@tauri-apps/plugin-opener";
     import { buildMobileRoute, cacheBrowserFileStable } from "$lib/mobileFlow";
 
     interface MobileModule {
@@ -16,7 +17,9 @@
 
     type MobileTab = "home" | "config" | "about";
 
-    const appVersion = "0.5.9";
+    const appVersion = "0.6.0";
+    const appIconUrl = new URL("../../../src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png", import.meta.url).href;
+    const developerUrl = "https://github.com/YGHFv";
 
     const modules: MobileModule[] = [
         {
@@ -55,24 +58,17 @@
         {
             title: "鸣谢人员",
             description: "查看参与项目开发、测试与支持的人员名单",
-            icon: "flower",
+            href: "https://github.com/YGHFv/TEpub-Editor/graphs/contributors",
         },
         {
             title: "GitHub 仓库",
             description: "查看源码、问题反馈与发布版本",
-            icon: "link",
-            href: "https://github.com/YGHFv/TEpub-Editor",
-        },
-        {
-            title: "文档",
-            description: "使用教程和疑难解惑",
-            icon: "link",
             href: "https://github.com/YGHFv/TEpub-Editor",
         },
         {
             title: "爱发电赞助",
             description: "支持后续开发和维护",
-            icon: "link",
+            href: "https://afdian.com/",
         },
     ];
 
@@ -86,7 +82,7 @@
 
     $: pageTitle = activeTab === "home" ? "TEpub Editor" : activeTab === "config" ? "配置" : "";
     $: showHeader = activeTab !== "about";
-    $: pageSubtitle = activeTab === "home" ? status : "";
+    $: pageSubtitle = "";
 
     function inputFor(route: string) {
         if (route === "/mobile/make") return makeInputEl;
@@ -103,9 +99,13 @@
         activeTab = tab;
     }
 
-    function openExternal(href?: string) {
+    async function openExternal(href?: string) {
         if (!href) return;
-        window.open(href, "_blank", "noopener,noreferrer");
+        try {
+            await openUrl(href);
+        } catch {
+            window.open(href, "_blank", "noopener,noreferrer");
+        }
     }
 
     async function handlePick(item: MobileModule, event: Event) {
@@ -141,7 +141,7 @@
     <title>TEpub Mobile</title>
 </svelte:head>
 
-<main class="mobile-shell">
+<main class:about-mode={activeTab === "about"} class="mobile-shell">
     <input bind:this={makeInputEl} class="file-input" type="file" accept={modules[0].accept} on:change={(event) => handlePick(modules[0], event)} />
     <input bind:this={decryptInputEl} class="file-input" type="file" accept={modules[1].accept} on:change={(event) => handlePick(modules[1], event)} />
     <input bind:this={editInputEl} class="file-input" type="file" accept={modules[2].accept} on:change={(event) => handlePick(modules[2], event)} />
@@ -185,7 +185,7 @@
                     <div>
                         <span>界面风格</span>
                         <strong>澎湃新 UI</strong>
-                        <small>入口页使用大圆角、半透明卡片和悬浮底栏；功能流程保持原有稳定逻辑。</small>
+                        <small>入口页使用大圆角卡片和贴底导航；功能流程保持原有稳定逻辑。</small>
                     </div>
                     <span class="setting-orb" aria-hidden="true"></span>
                 </div>
@@ -194,29 +194,32 @@
             <section class="about-page">
                 <div class="brand-block">
                     <div class="app-icon" aria-hidden="true">
-                        <svg viewBox="0 0 64 64">
-                            <path d="M15 41c7-20 21-26 35-23-1 16-10 29-31 31"></path>
-                            <path d="M17 46c9-7 17-14 31-32"></path>
-                            <circle cx="32" cy="32" r="20"></circle>
-                        </svg>
+                        <img src={appIconUrl} alt="" />
                     </div>
-                    <h2>TEpub-Editor</h2>
+                    <h2>TEpub Editor</h2>
                     <p>{appVersion}-mobile-release</p>
                 </div>
 
-                <div class="about-list">
+                <button class="developer-card" type="button" on:click={() => openExternal(developerUrl)}>
+                    <img src="https://github.com/YGHFv.png" alt="" />
+                    <span>
+                        <strong>源谷绘</strong>
+                        <small>@YGHFv</small>
+                    </span>
+                    <i aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"></path></svg>
+                    </i>
+                </button>
+
+                <div class="about-list" aria-label="关于链接">
                     {#each aboutLinks as item}
-                        <button class="about-card" type="button" on:click={() => openExternal(item.href)}>
+                        <button class="about-row" type="button" on:click={() => openExternal(item.href)}>
                             <span>
                                 <strong>{item.title}</strong>
                                 <small>{item.description}</small>
                             </span>
                             <i aria-hidden="true">
-                                {#if item.icon === "flower"}
-                                    <svg viewBox="0 0 24 24"><path d="M12 21v-7"></path><path d="M8 13c-3 0-5-2-5-5 3 0 5 1 6 3"></path><path d="M16 13c3 0 5-2 5-5-3 0-5 1-6 3"></path><path d="M12 14c-3-2-4-5-2-8 2 1 3 2 4 4 1-2 2-3 4-4 2 3 1 6-2 8"></path></svg>
-                                {:else}
-                                    <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"></path><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"></path></svg>
-                                {/if}
+                                <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"></path></svg>
                             </i>
                         </button>
                     {/each}
@@ -244,7 +247,7 @@
 <style>
     :global(html),
     :global(body) {
-        background: #eef2ff;
+        background: #f4f5f7;
     }
 
     .file-input {
@@ -260,21 +263,71 @@
         --muted: #626a78;
         --card: rgba(255, 255, 255, 0.74);
         --line: rgba(255, 255, 255, 0.58);
+        position: relative;
+        overflow-x: hidden;
         min-height: 100vh;
         box-sizing: border-box;
         color: var(--text);
+        background: #f4f5f7;
+    }
+
+    .mobile-shell.about-mode {
         background:
-            radial-gradient(circle at 12% 10%, rgba(214, 225, 255, 0.96), transparent 32%),
-            radial-gradient(circle at 18% 78%, rgba(255, 210, 224, 0.9), transparent 28%),
-            linear-gradient(135deg, #eef2ff 0%, #fff5fb 48%, #e7efff 100%);
+            radial-gradient(circle at 52% 20%, rgba(255, 255, 255, 0.88), transparent 30%),
+            linear-gradient(155deg, #f4ecff 0%, #fdf3f6 45%, #edf5ff 100%);
+    }
+
+    .mobile-shell.about-mode::before,
+    .mobile-shell.about-mode::after {
+        content: "";
+        position: fixed;
+        inset: auto;
+        z-index: 0;
+        width: 82vw;
+        height: 82vw;
+        border-radius: 999px;
+        pointer-events: none;
+        filter: blur(34px);
+        opacity: 0.72;
+        transform: translateZ(0);
+        animation: halo-drift 11s ease-in-out infinite alternate;
+    }
+
+    .mobile-shell.about-mode::before {
+        top: 8vh;
+        left: -26vw;
+        background:
+            radial-gradient(circle at 44% 46%, rgba(255, 198, 219, 0.92), transparent 58%),
+            radial-gradient(circle at 72% 42%, rgba(157, 201, 255, 0.72), transparent 54%);
+    }
+
+    .mobile-shell.about-mode::after {
+        right: -24vw;
+        bottom: 10vh;
+        background:
+            radial-gradient(circle at 44% 46%, rgba(236, 223, 255, 0.92), transparent 56%),
+            radial-gradient(circle at 22% 74%, rgba(255, 222, 176, 0.72), transparent 50%);
+        animation-delay: -4s;
+    }
+
+    @keyframes halo-drift {
+        from {
+            transform: translate3d(-4%, -3%, 0) scale(0.92) rotate(0deg);
+        }
+
+        to {
+            transform: translate3d(7%, 5%, 0) scale(1.08) rotate(16deg);
+        }
     }
 
     .screen {
+        position: relative;
+        z-index: 1;
         min-height: 100vh;
         box-sizing: border-box;
         max-width: 780px;
         margin: 0 auto;
-        padding: max(46px, calc(env(safe-area-inset-top) + 28px)) 18px calc(118px + env(safe-area-inset-bottom));
+        padding: max(46px, calc(env(safe-area-inset-top) + 28px)) 18px calc(96px + env(safe-area-inset-bottom));
     }
 
     .screen.about-screen {
@@ -324,7 +377,7 @@
         box-sizing: border-box;
         padding: 18px;
         border: 1px solid var(--line);
-        border-radius: 28px;
+        border-radius: 22px;
         background: var(--card);
         color: inherit;
         text-align: left;
@@ -350,8 +403,8 @@
 
     .entry-icon svg,
     .bottom-tabs svg,
-    .about-card svg,
-    .app-icon svg {
+    .developer-card svg,
+    .about-row svg {
         width: 24px;
         height: 24px;
         fill: none;
@@ -381,8 +434,7 @@
         line-height: 1.45;
     }
 
-    .settings-card,
-    .about-card {
+    .settings-card {
         border: 1px solid var(--line);
         background: var(--card);
         color: inherit;
@@ -396,7 +448,7 @@
         gap: 16px;
         align-items: center;
         padding: 18px;
-        border-radius: 24px;
+        border-radius: 22px;
     }
 
     .settings-card div {
@@ -430,7 +482,7 @@
 
     .about-page {
         display: grid;
-        gap: 78px;
+        gap: 24px;
     }
 
     .brand-block {
@@ -442,20 +494,20 @@
     }
 
     .app-icon {
-        width: 112px;
-        height: 112px;
+        width: 96px;
+        height: 96px;
         display: grid;
         place-items: center;
-        border-radius: 32px;
-        background: linear-gradient(145deg, #7355bd, #8d71c7);
-        color: rgba(255, 255, 255, 0.86);
-        box-shadow: 0 22px 56px rgba(110, 82, 181, 0.24);
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.64);
+        box-shadow: 0 22px 56px rgba(110, 82, 181, 0.16);
+        overflow: hidden;
     }
 
-    .app-icon svg {
-        width: 68px;
-        height: 68px;
-        stroke-width: 3.2;
+    .app-icon img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
     }
 
     .brand-block h2 {
@@ -473,63 +525,133 @@
         font-weight: 700;
     }
 
-    .about-card {
-        min-height: 82px;
+    .developer-card {
+        min-height: 88px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        margin-top: 38px;
+        border: 0;
+        border-radius: 28px;
+        padding: 16px 20px;
+        background: rgba(255, 255, 255, 0.86);
+        color: inherit;
+        text-align: left;
+        box-shadow: 0 18px 36px rgba(103, 84, 128, 0.07);
+        backdrop-filter: blur(24px);
+    }
+
+    .developer-card img {
+        width: 58px;
+        height: 58px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: #eef0f5;
+    }
+
+    .developer-card span {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+    }
+
+    .about-row span {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .developer-card strong {
+        color: #0f1014;
+        font-size: 20px;
+        font-weight: 900;
+        line-height: 1.2;
+    }
+
+    .developer-card small {
+        color: #66616f;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.35;
+    }
+
+    .about-row strong {
+        color: #101116;
+        font-size: 18px;
+        font-weight: 850;
+        line-height: 1.15;
+    }
+
+    .about-row small {
+        overflow: hidden;
+        color: #66616f;
+        font-size: 13px;
+        font-weight: 650;
+        line-height: 1.25;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .developer-card i,
+    .about-row i {
+        width: 28px;
+        height: 28px;
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        margin-left: auto;
+        color: #9ca0a8;
+    }
+
+    .developer-card i svg,
+    .about-row i svg {
+        width: 26px;
+        height: 26px;
+        stroke-width: 2.5;
+    }
+
+    .about-list {
+        display: grid;
+        gap: 0;
+        overflow: hidden;
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.86);
+        box-shadow: 0 18px 36px rgba(103, 84, 128, 0.06);
+        backdrop-filter: blur(24px);
+    }
+
+    .about-row {
+        min-height: 70px;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        border-radius: 24px;
-        padding: 18px 20px;
+        border: 0;
+        padding: 12px 20px;
+        background: transparent;
+        color: inherit;
         text-align: left;
     }
 
-    .about-card span {
-        display: grid;
-        gap: 6px;
-    }
-
-    .about-card strong {
-        font-size: 20px;
-        line-height: 1.2;
-    }
-
-    .about-card small {
-        color: #5f5966;
-        font-size: 14px;
-        line-height: 1.35;
-    }
-
-    .about-card i {
-        width: 34px;
-        height: 34px;
-        display: grid;
-        place-items: center;
-        color: #111;
-    }
-
-    .about-card i svg {
-        width: 30px;
-        height: 30px;
-        stroke-width: 2.3;
+    .about-row + .about-row {
+        margin-top: 1px;
     }
 
     .bottom-tabs {
         position: fixed;
-        left: 12px;
-        right: 12px;
-        bottom: max(8px, env(safe-area-inset-bottom));
+        left: 0;
+        right: 0;
+        bottom: 0;
         z-index: 10;
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 4px;
+        gap: 6px;
         box-sizing: border-box;
-        padding: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.72);
-        border-radius: 30px;
-        background: rgba(255, 255, 255, 0.72);
-        box-shadow: 0 18px 46px rgba(85, 76, 110, 0.18);
-        backdrop-filter: blur(20px);
+        padding: 6px 16px max(4px, env(safe-area-inset-bottom));
+        border-top: 0;
+        background: rgba(255, 255, 255, 0.78);
+        box-shadow: none;
+        backdrop-filter: blur(28px) saturate(1.18);
     }
 
     .bottom-tabs button {
@@ -546,7 +668,7 @@
 
     .bottom-tabs button.active {
         color: #050506;
-        background: rgba(23, 27, 36, 0.08);
+        background: transparent;
     }
 
     .bottom-tabs svg {
@@ -576,11 +698,10 @@
         }
 
         .bottom-tabs {
-            max-width: 520px;
-            left: 50%;
-            right: auto;
-            width: calc(100% - 32px);
-            transform: translateX(-50%);
+            left: 0;
+            right: 0;
+            width: 100%;
+            transform: none;
         }
     }
 </style>

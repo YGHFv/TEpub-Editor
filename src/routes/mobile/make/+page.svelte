@@ -423,18 +423,20 @@
         status = `已更新章节正文：${titleText}`;
     }
 
-    async function removeChapterTitle(item: TocItem) {
+    async function cancelChapterTitle(item: TocItem) {
         if (!selectedPath) return;
         const lines = normalizedLines();
         const lineIndex = item.line_number - 1;
         if (lineIndex < 0 || lineIndex >= lines.length) return;
 
-        lines.splice(lineIndex, 1);
+        const currentLine = lines[lineIndex];
+        const indent = currentLine.match(/^[\s　]*/)?.[0] ?? "";
+        lines[lineIndex] = `${indent}原章节标题：${item.title}`;
         content = lines.join("\n");
         tocActionTarget = null;
         await invoke("save_text_file", { path: selectedPath, content });
         await previewToc();
-        status = `已移除目录标题：${item.title}`;
+        status = `已取消本章标题：${item.title}`;
     }
 
     function revealTocItem(id: string) {
@@ -901,7 +903,7 @@
             <div class="action-sheet-actions">
                 <button type="button" on:click={() => openRenameTitle(tocActionTarget!)}>重命名标题</button>
                 <button type="button" on:click={() => openChapterEditor(tocActionTarget!)}>编辑本章文本</button>
-                <button class="sheet-danger" type="button" on:click={() => removeChapterTitle(tocActionTarget!)}>移除本章标题</button>
+                <button class="sheet-danger" type="button" on:click={() => cancelChapterTitle(tocActionTarget!)}>取消本章标题</button>
                 <button class="sheet-cancel" type="button" on:click={closeTocActions}>取消</button>
             </div>
         </div>

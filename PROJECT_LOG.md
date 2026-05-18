@@ -32,6 +32,229 @@ Main areas:
 
 ## Change History
 
+### 2026-05-18 14:13 +08:00
+
+Request: bump TEpub-Editor to version `0.6.0`, push the update to GitHub, and trigger the release Action.
+
+Changes:
+
+- Updated version metadata from `0.5.9` to `0.6.0` in:
+  - `package.json`,
+  - `src-tauri/Cargo.toml`,
+  - `src-tauri/Cargo.lock`,
+  - `src-tauri/tauri.conf.json`,
+  - `src/routes/mobile/+page.svelte`.
+- Prepared the release trigger by creating and pushing tag `v0.6.0`.
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- Version fields were rechecked after editing and all app/package version entries report `0.6.0`.
+- Git commit and push to `origin/main` completed.
+- Git tag `v0.6.0` was pushed to `origin`, triggering `.github/workflows/release.yml`.
+
+Caveats:
+
+- Build output still includes existing Svelte accessibility/chunk-size warnings; no new blocking build errors were introduced.
+
+### 2026-05-18 14:09 +08:00
+
+Request: fix the Android About page again because the version-to-developer spacing was still too small, the link list rows from `鸣谢人员` down were still too large, their line spacing was too tall, and the `鸣谢人员` description should be compressed to one line.
+
+Changes:
+
+- Updated `src/routes/mobile/+page.svelte` to separate developer-card typography from About link-list typography so list rows no longer inherit the larger developer text sizing.
+- Added an explicit `38px` top margin to the developer card, making the space after the version block visible.
+- Reduced About link-list row height, padding, title font size, description font size, and line-height.
+- Forced About link descriptions to render as a single line with ellipsis overflow.
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed and focused.
+
+Caveats:
+
+- Build output still includes existing Svelte accessibility/chunk-size warnings, the existing `.app` bundle identifier warning, Gradle deprecation warning, and the existing `libtepub_editor_lib.so` strip warning; no new blocking build or install errors were introduced.
+
+### 2026-05-18 14:00 +08:00
+
+Request: continue the Android About page refinement after correcting that the previous text and row sizes were too large; keep the second reference image as the style target, add spacing between version and developer row, change the developer label to the GitHub nickname `源谷绘`, and remove dividers from multi-line rows.
+
+Changes:
+
+- Updated `src/routes/mobile/+page.svelte` About developer row text from `项目开发者` to `源谷绘`, keeping `@YGHFv` as the secondary line.
+- Added extra spacing below the app version block before the developer row.
+- Kept the About row typography and row height at the smaller corrected size instead of the oversized intermediate attempt.
+- Removed visible dividers between multi-line About list rows.
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed.
+
+Caveats:
+
+- Build output still includes existing Svelte accessibility/chunk-size warnings, the existing `.app` bundle identifier warning, Gradle deprecation warning, and the existing `libtepub_editor_lib.so` strip warning; no new blocking build or install errors were introduced.
+
+### 2026-05-18 13:38 +08:00
+
+Request: refine the Android mobile UI so the Home feature cards use the Config page card radius with a slightly smaller corner, change the About page bottom link cards into the grouped list style from the reference image, remove the `文档` row, open remaining links in the system browser, and set the project developer to `https://github.com/YGHFv`.
+
+Changes:
+
+- Updated `src/routes/mobile/+page.svelte` Home and Config card radius from large rounded cards to a smaller shared `22px` radius.
+- Reworked the About page lower section:
+  - removed the `文档` row,
+  - added a project developer profile row linking to `https://github.com/YGHFv`,
+  - changed the remaining About links into a continuous rounded grouped list with dividers instead of separate floating cards,
+  - gave `鸣谢人员`, `GitHub 仓库`, and `爱发电赞助` browser targets.
+- Switched About link opening from `window.open` to Tauri `openUrl`, with `window.open` kept as a fallback.
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed and focused.
+
+Caveats:
+
+- Build output still includes existing Svelte accessibility/chunk-size warnings, the existing `.app` bundle identifier warning, Gradle deprecation warning, and the existing `libtepub_editor_lib.so` strip warning; no new blocking build or install errors were introduced.
+
+### 2026-05-18 13:16 +08:00
+
+Request: make the Android bottom navigation background card look like the referenced blurred bar and remove the ugly dark halo above the current bar.
+
+Changes:
+
+- Updated `src/routes/mobile/+page.svelte` bottom navigation styling:
+  - removed the upward dark `box-shadow`,
+  - kept a translucent white background,
+  - increased the frosted blur/saturation effect via `backdrop-filter`.
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed and focused.
+
+Caveats:
+
+- Build output still includes existing Svelte accessibility/chunk-size warnings, the existing `.app` bundle identifier warning, Gradle deprecation warning, and the existing `libtepub_editor_lib.so` strip warning; no new blocking build or install errors were introduced.
+
+### 2026-05-18 13:08 +08:00
+
+Request: adjust the Android bottom navigation selected state so it no longer uses a background pill, matching the referenced apps where selection is shown only by the tab icon/text state.
+
+Changes:
+
+- Updated `src/routes/mobile/+page.svelte` so `.bottom-tabs button.active` keeps a transparent background and relies on icon/text color for selected state.
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed.
+
+Caveats:
+
+- Build output still includes existing Svelte accessibility/chunk-size warnings, the existing `.app` bundle identifier warning, Gradle deprecation warning, and the existing `libtepub_editor_lib.so` strip warning; no new blocking build or install errors were introduced.
+
+### 2026-05-18 12:54 +08:00
+
+Request: reduce the Android bottom navigation bottom blank space, remove the odd divider line above it, and change the Make EPUB TOC action from `移除本章标题` to `取消本章标题` while keeping chapter text merge behavior correct.
+
+Changes:
+
+- Tightened the mobile bottom navigation padding in `src/routes/mobile/+page.svelte` and removed its top border line.
+- Renamed the Make EPUB TOC menu action to `取消本章标题` in `src/routes/mobile/make/+page.svelte`.
+- Changed that menu action so the heading line is converted into normal body text (`原章节标题：...`) and then the TOC is rescanned, causing the former title plus its content to merge into the previous chapter.
+- Left the `编辑本章文本` flow unchanged: deleting the title line inside the editor still removes only that title line and merges the remaining text into the previous chapter.
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed.
+
+Caveats:
+
+- Build output still includes existing Svelte accessibility/chunk-size warnings, the existing `.app` bundle identifier warning, Gradle deprecation warning, and the existing `libtepub_editor_lib.so` strip warning; no new blocking build or install errors were introduced.
+
+### 2026-05-18 12:42 +08:00
+
+Request: refine the Android new UI so only the About page uses a dynamic HyperOS-like glow background, keep other pages on a solid background, dock the bottom navigation, use the real app icon on About, remove the Home subtitle, and rename visible software branding to `TEpub Editor`.
+
+Changes:
+
+- Updated `src/routes/mobile/+page.svelte` so Home and Config use a clean solid background, while About gets animated blurred radial glow layers.
+- Changed the bottom navigation from a floating pill to a docked bottom bar with safe-area padding.
+- Removed the Home subtitle/status text under `TEpub Editor`.
+- Replaced the temporary About SVG mark with the packaged Android launcher icon and reduced its visual size.
+- Changed About branding from `TEpub-Editor` to `TEpub Editor`.
+- Updated app/product naming in `src-tauri/tauri.conf.json` and Android `strings.xml` to `TEpub Editor`.
+
+Verification:
+
+- `pnpm build` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed APK:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `apksigner verify --verbose` passed with v2/v3 signature verification.
+- `adb install -r` succeeded on device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed and focused.
+
+Caveats:
+
+- Build output still includes existing Svelte accessibility/chunk-size warnings, the existing `.app` bundle identifier warning, Gradle deprecation warning, and the existing `libtepub_editor_lib.so` strip warning; no new blocking build or install errors were introduced.
+
 ### 2026-05-18 12:25 +08:00
 
 Request: remove the original mobile theme entirely, keep only the new UI, make the top-left/title area show only `TEpub Editor` on Home, only `配置` on Config, and no header text on About. Adjust the About page closer to the new reference image and ensure the main visual is the software icon.
