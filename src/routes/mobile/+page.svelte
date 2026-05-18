@@ -17,7 +17,7 @@
 
     type MobileTab = "home" | "config" | "about";
 
-    const appVersion = "0.6.0";
+    const appVersion = "0.6.1";
     const appIconUrl = new URL("../../../src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png", import.meta.url).href;
     const developerUrl = "https://github.com/YGHFv";
 

@@ -52,65 +52,65 @@ const CSS_FONT: &str = r#"@charset "utf-8";
 
 const CSS_MAIN: &str = r#"@charset "utf-8";
 
-@import url("fonts.css");
+@import url("font.css");
 
-/* Global Setting */
+/* 全书基础页：正文页 / 章节页 / 卷页的默认排版 */
 
-body {
+body.te-book-body,
+body.te-chapter-page,
+body.te-volume-page {
     padding: 0%;
     margin-top: 0%;
     margin-bottom: 0%;
-    margin-left: 0.5%;
-    margin-right: 0.5%;
+    margin-left: 1%;
+    margin-right: 1%;
     line-height: 130%;
     text-align: justify;
     font-family: "Maintext", "DK-SONGTI", "st", "宋体", "zw", sans-serif;
 }
 
-p {
+/* 正文段落 */
+p.te-paragraph {
     text-align: justify;
     text-indent: 2em;
     duokan-text-indent: 2em;
-    line-height: 150%;
-    margin-right: 0.5%;
-    margin-left: 0.5%;
-    font-family: "Maintext";
+    line-height: 130%;
+    margin-right: 1%;
+    margin-left: 1%;
+    font-family: "DK-SONGTI", "st", "宋体", "zw", sans-serif;
 }
 
+/* 通用块元素：给封面、简介、头图、分割图等容器打基础样式 */
 div {
     margin: 0;
     padding: 0;
     line-height: 130%;
-    text-align: justify;
+    text-align: center;
     font-family: "zw";
 }
 
 /*————————————————————制作说明————————————————————*/
-.copyright {
+.te-production-card {
     margin: 10% 7.25% 2.75% 7.25%;
     padding: 5.25% 5.25%;
     border: 1.5px solid #6C322D;
+    background: url(../Images/production-card-bg.jpg) no-repeat top left;
     background-size: 35% auto;
+    background-color: rgba(255, 255, 255, 0.7);
     border-radius: 5px;
 }
 
-.line {
-    border: dotted #333;
-    border-width: 1px 0 0 0;
-    margin: 5% 0 5% 0;
-}
-
-h1.copyright-title {
-    font-family: "Title";
-    font-size: 121%;
+.te-production-title {
+    font-family: "哥特式字体";
+    font-size: 110%;
     font-weight: normal;
-    color: #00008B;
-    margin: 1em 0 0.77em 0;
+    color: black;
+    margin: 1em 0 0.5em 0;
     text-align: center;
 }
 
-body.full {
-    background: no-repeat center;
+body.te-production-page {
+    background: #fff no-repeat center;
     background-size: cover;
     background-attachment: fixed;
     background-repeat: no-repeat;
@@ -119,8 +119,8 @@ body.full {
     transform: scale(1.0) translate(0px, 0px);
 }
 
-.copyright-text1 {
-    font-family: "Title";
+.te-production-text {
+    font-family: "哥特式字体";
     font-size: 80%;
     color: #220;
     text-align: justify;
@@ -129,7 +129,7 @@ body.full {
     margin: 0 0 2.5% 0;
 }
 
-.copyright-text2 {
+.te-production-note {
     font-family: "cc", "kt", sans-serif;
     font-size: 65%;
     color: #000;
@@ -139,96 +139,94 @@ body.full {
     margin: 2.5% 0 0 0;
 }
 
-div.logo {
-    margin: 0 24% 0 24%;
+.te-production-logo {
+    margin: 0 20% 0 20%;
     text-align: center;
     text-indent: 0em;
     duokan-text-indent: 0em;
 }
 
-img.logo {
-    width: 66%;
+.te-production-logo-img {
+    width: 70%;
 }
 
 /*————————————————————内容简介————————————————————*/
 
-body.introduction {
+body.te-intro-page {
+    background-color: transparent;
     border-color: rgba(83, 83, 83, 0.5);
     border-width: 0.4em;
 }
 
-div.cover {
-    margin: 2em 0 1em 0;
+.te-cover-wrap {
+    margin: 3em 0 1em 0;
     text-align: center;
     text-indent: 0;
     duokan-text-indent: 0;
     width: 100%;
 }
 
-img.cover {
+.te-cover-image {
     width: 40%;
     box-shadow: 3px 3px 3px #535353;
     margin: 0 0 0.5em 0;
 }
 
-h1.nrjj-title {
-    font-family: "Title";
-    font-size: 160%;
-    font-weight: normal;
+.te-intro-title {
+    font-family: "哥特宋";
+    font-size: 125%;
     color: #00008B;
-    margin: 2em 0 1.6em 0;
-    text-align: center;
+    margin: 0.3em 0 0.5em 0;
+    text-align: left;
+    text-indent: 0;
 }
 
 span.book-name {
     font-family: "楷体", sans-serif;
-    color: #DC143C
+    color: #DC143C;
 }
 
 span.author {
     font-family: "小标宋", sans-serif;
 }
 
-h1.introduction-title {
+.te-intro-title span,
+.te-intro-heading span {
+    background-color: transparent;
+    padding: 0.4em 2em 0.2em 0.4em;
+}
+
+.te-intro-heading {
     margin: 0.3em 0 0.5em 0;
     text-align: left;
     text-indent: 0;
     duokan-text-indent: 0;
     font-size: 110%;
     color: #00008B;
-    font-family: "Title";
-}
-
-h1.introduction-title span {
-    padding: 0.4em 2em 0.2em 0.4em;
+    font-family: "哥特式字体";
 }
 
 div.book-introduction p {
     font-family: "DK-XIHEITI", "黑体", sans-serif;
 }
 
-h1.PrefacehA1 {
-    font-family: "Title", "黑体", sans-serif;
-    text-align: center;
-    font-weight: 600;
+/* 卷标题 / 卷副标题 */
+.te-volume-title {
+    font-family: "哥特宋", serif;
     font-size: 1.2em;
-    margin: 7em 0em 1em 0em;
-    color: #f972bd;
+    color: #59bde6;
+    font-weight: 600;
+    margin: 2em 0 1em 0;
+    text-align: center;
+    text-indent: 0em;
     line-height: 130%;
 }
 
-h1.PrefacehA1 b {
-    font-family: "Title", "黑体", sans-serif;
-    font-size: 1.1em;
-    font-weight: 900;
-    color: #dd3e3f;
-}
-
-p.PrefacepA1 {
-    font-family: "Title";
-    color: #5577c1;
-    font-size: 1.7em;
-    margin: 0em 0em 0.2em 0em;
+.te-volume-subtitle {
+    font-family: "哥特宋", serif;
+    font-size: 1.2em;
+    color: #59bde6;
+    margin: 0em 0em 1em 0em;
     text-indent: 0em;
     text-align: center;
     line-height: 110%;
@@ -236,7 +234,7 @@ p.PrefacepA1 {
 
 /* Header Image */
 
-div.logo {
+.te-volume-head-image {
     margin: 0.5em;
     text-align: center;
     text-indent: 0em;
@@ -244,102 +242,87 @@ div.logo {
     duokan-bleed: lefttopright;
 }
 
-img.logo {
+.te-volume-head-img {
     width: 70%;
+    max-width: 100%;
 }
 
-/* Chapter Title */
+body.te-volume-page {
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    background-position: bottom center;
+    padding: 1% 1% 5%;
+}
 
-h3.head {
+body.te-volume-page.te-volume-page--no-image .te-volume-title {
+    margin-top: 12.2em;
+}
+
+body.te-volume-page.te-volume-page--no-image .te-volume-subtitle {
+    margin-bottom: 1.8em;
+}
+
+/* 章节标题 / 章节头图 */
+.te-chapter-title {
+    font-family: "黑体", sans-serif;
+    text-align: center;
+    margin: 2em 0em 3em 0em;
     font-size: 1.2em;
-    color: #5577c1;
-    text-align: center;
-    line-height: 130%;
-    padding: 35px 4px 0 4px;
-    margin: 0em auto 2em auto;
-    font-family: "Title";
+    font-weight: 900;
+    color: #c2181e;
 }
 
-h3.neirong {
-    font-size: 1.1em;
-    color: #5577c1;
-    text-align: right;
-    line-height: 130%;
-    padding: 0 4px 0 4px;
-    margin: -1em 0em 0em 2em;
-    font-family: "Maintext";
+body.te-chapter-page.te-chapter-page--no-image .te-chapter-title {
+    margin-top: 6.5em;
 }
 
-span.num {
-    font-family: "Maintext";
-    padding: 2px 4px 1px 4px;
-    text-align: center;
-    font-size: 0.81em;
-    background-color: #f972bd;
-    border-radius: 10px;
-    color: #fff;
-}
-
-span.num2 {
-    font-size: 0.95em;
-    color: white;
-    background-color: #20626d;
-    padding: 0.2em 0.4em 0.1em;
-    border-radius: 0.2em;
-    font-family: "Maintext";
-}
-
-span.num3 {
-    color: #b50a02;
-    font-family: "Maintext";
-}
-
-h2.head5 {
-    padding: 0 4px 0 4px;
-    margin: 1em auto 2em auto;
-    font-size: 1.6em;
-    color: #a36141;
-    text-align: center;
-    line-height: 130%;
-    font-family: "Title";
+.te-chapter-head-image {
+    margin: 0em 0em 0em 0em;
+    text-align: left;
     text-indent: 0em;
     duokan-text-indent: 0em;
+    duokan-bleed: lefttopright;
 }
 
-h2.head {
-    font-size: 2.1em;
-    color: #59bde6;
-    text-align: center;
+.te-chapter-head-img {
+    width: 100%;
+}
+
+.te-chapter-number {
+    font-family: "黑体", sans-serif;
+    font-weight: 900;
+    font-size: 0.8em;
+    color: #413245;
     line-height: 130%;
-    padding: 64px 4px 0 4px;
-    margin: 0em auto 2em auto;
-    font-family: "Title";
-}
-
-span.num {
-    font-family: "Maintext";
-    padding: 2px 4px 2px 4px;
+    padding: 0;
     text-align: center;
-    font-size: x-small;
-    background-color: #f972bd;
-    border-radius: 16px;
-    color: #fff;
-}
-
-span.num2 {
-    font-size: 0.95em;
-    color: white;
-    background-color: #20626d;
-    padding: 0.2em 0.4em 0.1em;
-    border-radius: 0.2em;
-    font-family: "Maintext";
+    background-color: transparent;
 }
 
 /* 分割线 */
-p.fg1 {
+p.te-divider-line {
     text-align: center;
     text-indent: 0;
     duokan-text-indent: 0em;
+    margin: 1em 0;
+}
+
+/* 分割图：当模板提供 dividerImage 时，用图片替换孤立省略号 */
+.te-divider-image {
+    text-align: center;
+    text-indent: 0;
+    duokan-text-indent: 0em;
+    margin: 1em 0;
+    padding: 0;
+    line-height: 130%;
+}
+
+.te-divider-img {
+    width: 200px;
+    max-width: 100%;
+    border: none;
+    vertical-align: middle;
 }
 
 /*全面屏*/
@@ -460,7 +443,7 @@ div.roundsolid2 {
 }
 
 /*图片*/
-.duokan-image-single {
+.te-image-single {
     text-align: center;
     text-indent: 0em;
     duokan-text-indent: 0em;
@@ -534,6 +517,8 @@ struct AssetInfo {
     name: String,
     path: String,
     category: String, // "fonts", "images", "others"
+    #[serde(default)]
+    role: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -553,9 +538,87 @@ struct EpubMetadata {
     #[serde(default)]
     font_css: String,
     #[serde(default)]
+    subset_fonts: bool,
+    #[serde(default)]
     assets: Vec<AssetInfo>,
     #[serde(flatten)]
     extra: HashMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct EpubTemplateRepository {
+    id: String,
+    name: String,
+    url: String,
+    #[serde(default = "default_template_branch")]
+    branch: String,
+    #[serde(default)]
+    last_synced: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct EpubRemoteTemplate {
+    id: String,
+    name: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    description: String,
+    path: String,
+    #[serde(default)]
+    preview: String,
+    #[serde(default)]
+    category: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct EpubTemplateRepositoryIndex {
+    #[serde(default = "default_template_schema")]
+    schema: u32,
+    #[serde(default)]
+    templates: Vec<EpubRemoteTemplate>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct EpubTemplateInstallResult {
+    template_id: String,
+    local_path: String,
+    file_count: usize,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct LibraryFontInfo {
+    family: String,
+    css_value: String,
+    file_name: String,
+    path: String,
+}
+
+type LibraryFontAliasMap = HashMap<String, String>;
+
+#[derive(Serialize, Debug, Clone)]
+struct StyleTemplateInfo {
+    id: String,
+    name: String,
+    file_name: String,
+    path: String,
+    is_builtin: bool,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct StyleTemplateContent {
+    id: String,
+    name: String,
+    main_css: String,
+    is_builtin: bool,
+}
+
+fn default_template_branch() -> String {
+    "main".to_string()
+}
+
+fn default_template_schema() -> u32 {
+    1
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -694,6 +757,358 @@ fn normalize_local_file_path(path: &str) -> String {
         decoded
     } else {
         path.to_string()
+    }
+}
+
+fn image_mime_from_ext(ext: &str) -> &'static str {
+    match ext.to_lowercase().as_str() {
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => "image/jpeg",
+    }
+}
+
+fn asset_manifest_mime(name: &str) -> &'static str {
+    match Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase()
+        .as_str()
+    {
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "css" => "text/css",
+        "js" => "text/javascript",
+        _ => "application/octet-stream",
+    }
+}
+
+fn build_font_subset_text(content: &str, metadata: &EpubMetadata) -> String {
+    let mut seen = HashSet::new();
+    let mut out = String::new();
+
+    for chunk in [
+        metadata.title.as_str(),
+        metadata.creator.as_str(),
+        metadata.publisher.as_str(),
+        metadata.description.as_str(),
+        content,
+    ] {
+        for ch in chunk.chars() {
+            if seen.insert(ch) {
+                out.push(ch);
+            }
+        }
+    }
+
+    for tag in &metadata.tags {
+        for ch in tag.chars() {
+            if seen.insert(ch) {
+                out.push(ch);
+            }
+        }
+    }
+
+    out
+}
+
+fn ensure_fonttools_available() -> Result<(), String> {
+    let check = process::Command::new("python")
+        .args(["-m", "fontTools.subset", "--help"])
+        .output();
+    if let Ok(output) = check {
+        if output.status.success() {
+            return Ok(());
+        }
+    }
+
+    let install = process::Command::new("python")
+        .args([
+            "-m",
+            "pip",
+            "install",
+            "--user",
+            "fonttools",
+            "brotli",
+            "zopfli",
+        ])
+        .output()
+        .map_err(|e| format!("无法启动 Python 安装 fontTools: {}", e))?;
+
+    if install.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "自动安装 fontTools 失败: {}",
+            String::from_utf8_lossy(&install.stderr)
+        ))
+    }
+}
+
+fn try_subset_font_bytes(bytes: &[u8], ext: &str, subset_text: &str) -> Result<Vec<u8>, String> {
+    let ext = ext.to_lowercase();
+    if subset_text.trim().is_empty() || !matches!(ext.as_str(), "ttf" | "otf" | "woff" | "woff2") {
+        return Ok(bytes.to_vec());
+    }
+
+    ensure_fonttools_available()?;
+
+    let temp_dir = tempfile::tempdir().map_err(|e| format!("创建字体子集临时目录失败: {}", e))?;
+    let input_path = temp_dir.path().join(format!("input.{}", ext));
+    let text_path = temp_dir.path().join("subset.txt");
+    let output_path = temp_dir.path().join(format!("output.{}", ext));
+
+    fs::write(&input_path, bytes).map_err(|e| format!("写入原始字体临时文件失败: {}", e))?;
+    fs::write(&text_path, subset_text).map_err(|e| format!("写入子集字符集失败: {}", e))?;
+
+    let mut args = vec![
+        "-m".to_string(),
+        "fontTools.subset".to_string(),
+        input_path.to_string_lossy().to_string(),
+        format!("--text-file={}", text_path.to_string_lossy()),
+        format!("--output-file={}", output_path.to_string_lossy()),
+        "--layout-features=*".to_string(),
+        "--glyph-names".to_string(),
+        "--symbol-cmap".to_string(),
+        "--legacy-cmap".to_string(),
+        "--notdef-glyph".to_string(),
+        "--notdef-outline".to_string(),
+        "--recommended-glyphs".to_string(),
+        "--name-IDs=*".to_string(),
+        "--name-legacy".to_string(),
+        "--name-languages=*".to_string(),
+    ];
+
+    if ext == "woff" || ext == "woff2" {
+        args.push(format!("--flavor={}", ext));
+    }
+
+    let output = process::Command::new("python")
+        .args(&args)
+        .output()
+        .map_err(|e| format!("无法启动字体子集化命令: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "fontTools 子集化失败: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    fs::read(&output_path).map_err(|e| format!("读取子集化字体失败: {}", e))
+}
+
+fn asset_slot_file_stem(role: &str) -> String {
+    let mut out = String::new();
+    for (idx, ch) in role.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if idx > 0 {
+                out.push('-');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if ch == '-' || ch == '_' {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "image-slot".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn asset_slot_class_stem(role: &str) -> String {
+    asset_slot_file_stem(role)
+}
+
+fn image_slot_html(role: &str, href: &str) -> String {
+    let stem = asset_slot_class_stem(role);
+    format!(
+        "  <div class=\"te-{}-image\"><img class=\"te-{}-img\" src=\"../{}\" alt=\"\" /></div>\n",
+        stem,
+        stem,
+        escape_xml(href)
+    )
+}
+
+fn divider_image_html(role: &str, href: &str) -> String {
+    let stem = asset_slot_class_stem(role);
+    format!(
+        "  <div class=\"te-divider-image\"><img class=\"te-{}-img te-divider-img\" src=\"../{}\" alt=\"分隔符\" /></div>\n",
+        stem,
+        escape_xml(href)
+    )
+}
+
+fn parse_asset_slot_placements(css: &str) -> HashMap<String, String> {
+    let mut placements = HashMap::new();
+    let Ok(slot_re) = Regex::new(r#"@tepub-asset-slot\s+([A-Za-z][\w-]*)([^*]*)"#) else {
+        return placements;
+    };
+    let Ok(placement_re) = Regex::new(r#"placement\s*=\s*["']([^"']+)["']"#) else {
+        return placements;
+    };
+    for caps_result in slot_re.captures_iter(css) {
+        let Ok(caps) = caps_result else {
+            continue;
+        };
+        let Some(role) = caps.get(1).map(|m| m.as_str().to_string()) else {
+            continue;
+        };
+        let attrs = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        if let Ok(Some(place_caps)) = placement_re.captures(attrs) {
+            if let Some(place) = place_caps.get(1).map(|m| m.as_str().to_string()) {
+                placements.insert(role, place);
+            }
+        }
+    }
+    placements
+}
+
+fn first_image_slot_for_placement<'a>(
+    hrefs: &'a HashMap<String, String>,
+    placements: &'a HashMap<String, String>,
+    placement: &str,
+    fallback_role: &'a str,
+) -> Option<(&'a str, &'a str)> {
+    for (role, place) in placements {
+        if place == placement {
+            if let Some(href) = hrefs.get(role) {
+                return Some((role.as_str(), href.as_str()));
+            }
+        }
+    }
+    hrefs
+        .get(fallback_role)
+        .map(|href| (fallback_role, href.as_str()))
+}
+
+fn is_ellipsis_paragraph(line: &str) -> bool {
+    let compact: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+    if compact.is_empty() {
+        return false;
+    }
+    compact.chars().all(|c| c == '…' || c == '.')
+        && (compact.matches('…').count() >= 1 || compact.matches('.').count() >= 3)
+}
+
+fn append_text_body_lines(
+    html_body: &mut String,
+    body_lines: &[&str],
+    enable_dividers: bool,
+    divider_image: Option<(&str, &str)>,
+) {
+    let non_empty: Vec<(usize, &str)> = body_lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let trim = line.trim();
+            if trim.is_empty() {
+                None
+            } else {
+                Some((index, trim))
+            }
+        })
+        .collect();
+
+    let last_non_empty_index = non_empty.last().map(|(index, _)| *index);
+
+    for (position, (line_index, trim)) in non_empty.iter().enumerate() {
+        let is_ellipsis = is_ellipsis_paragraph(trim);
+        let prev_is_ellipsis = position > 0 && is_ellipsis_paragraph(non_empty[position - 1].1);
+        let next_is_ellipsis =
+            position + 1 < non_empty.len() && is_ellipsis_paragraph(non_empty[position + 1].1);
+        let is_last_non_empty = Some(*line_index) == last_non_empty_index;
+
+        if enable_dividers && is_ellipsis && !prev_is_ellipsis && !next_is_ellipsis && !is_last_non_empty {
+            if let Some((role, href)) = divider_image {
+                html_body.push_str(&divider_image_html(role, href));
+            } else {
+                html_body.push_str("  <p class=\"te-divider-line\">※※※</p>\n");
+            }
+        } else {
+            html_body.push_str(&format!(
+                "  <p class=\"te-paragraph\">{}</p>\n",
+                escape_xml(trim)
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::append_text_body_lines;
+
+    #[test]
+    fn isolated_ellipsis_becomes_divider() {
+        let mut html = String::new();
+        let lines = ["第一段", "……", "第二段"];
+        append_text_body_lines(&mut html, &lines, true, None);
+
+        assert!(html.contains(r#"<p class="te-divider-line">※※※</p>"#));
+        assert!(html.contains(r#"<p class="te-paragraph">第一段</p>"#));
+        assert!(html.contains(r#"<p class="te-paragraph">第二段</p>"#));
+    }
+
+    #[test]
+    fn consecutive_ellipsis_stay_as_normal_paragraphs() {
+        let mut html = String::new();
+        let lines = ["第一段", "……", "……", "第二段"];
+        append_text_body_lines(&mut html, &lines, true, None);
+
+        assert!(!html.contains(r#"<p class="te-divider-line">※※※</p>"#));
+        assert_eq!(html.matches(r#"<p class="te-paragraph">……</p>"#).count(), 2);
+    }
+
+    #[test]
+    fn last_ellipsis_stays_as_normal_paragraph() {
+        let mut html = String::new();
+        let lines = ["第一段", "……"];
+        append_text_body_lines(&mut html, &lines, true, None);
+
+        assert!(!html.contains(r#"<p class="te-divider-line">※※※</p>"#));
+        assert!(html.contains(r#"<p class="te-paragraph">……</p>"#));
+    }
+
+    #[test]
+    fn blank_lines_do_not_break_isolated_ellipsis_detection() {
+        let mut html = String::new();
+        let lines = ["第一段", "", "   ", "……", "", "第二段"];
+        append_text_body_lines(&mut html, &lines, true, None);
+
+        assert!(html.contains(r#"<p class="te-divider-line">※※※</p>"#));
+        assert!(!html.contains(r#"<p class="te-paragraph"></p>"#));
+    }
+
+    #[test]
+    fn divider_image_replaces_isolated_ellipsis_when_available() {
+        let mut html = String::new();
+        let lines = ["第一段", "……", "第二段"];
+        append_text_body_lines(
+            &mut html,
+            &lines,
+            true,
+            Some(("dividerImage", "Images/divider-image.png")),
+        );
+
+        assert!(html.contains(r#"<div class="te-divider-image"><img class="te-divider-image-img te-divider-img" src="../Images/divider-image.png" alt="分隔符" /></div>"#));
+        assert!(!html.contains("※※※"));
     }
 }
 
@@ -1325,6 +1740,150 @@ fn app_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("无法获取 app_data_dir: {}", e))
 }
 
+fn epub_templates_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_root(app)?.join("epub-templates"))
+}
+
+fn epub_template_repositories_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(epub_templates_root(app)?.join("repositories.json"))
+}
+
+fn style_templates_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_root(app)?.join("style-templates"))
+}
+
+fn builtin_style_template_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(style_templates_root(app)?.join("builtin.css"))
+}
+
+fn style_template_path(app: &tauri::AppHandle, id: &str) -> Result<PathBuf, String> {
+    let safe_id = sanitize_filename_part(id);
+    if safe_id.is_empty() {
+        return Err("模板 ID 无效".to_string());
+    }
+    Ok(style_templates_root(app)?.join(format!("{}.css", safe_id)))
+}
+
+fn library_font_aliases_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_data_dir(app)?.join("font-aliases.json"))
+}
+
+fn read_library_font_aliases(app: &tauri::AppHandle) -> Result<LibraryFontAliasMap, String> {
+    let path = library_font_aliases_path(app)?;
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("读取字体别名失败: {}", e))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("解析字体别名失败: {}", e))
+}
+
+fn write_library_font_aliases(
+    app: &tauri::AppHandle,
+    aliases: &LibraryFontAliasMap,
+) -> Result<(), String> {
+    let dir = library_data_dir(app)?;
+    ensure_dir(&dir)?;
+    let path = library_font_aliases_path(app)?;
+    let bytes = serde_json::to_vec_pretty(aliases).map_err(|e| format!("序列化字体别名失败: {}", e))?;
+    fs::write(&path, bytes).map_err(|e| format!("保存字体别名失败: {}", e))
+}
+
+fn style_template_name_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.replace('_', " ").replace('-', " "))
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "样式模板".to_string())
+}
+
+fn build_style_template_info(path: &Path, is_builtin: bool) -> Result<StyleTemplateInfo, String> {
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "模板文件名无效".to_string())?
+        .to_string();
+    let id = if is_builtin {
+        "builtin".to_string()
+    } else {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| "模板 ID 无效".to_string())?
+    };
+    Ok(StyleTemplateInfo {
+        id,
+        name: if is_builtin {
+            "内置模板".to_string()
+        } else {
+            style_template_name_from_path(path)
+        },
+        file_name,
+        path: path.to_string_lossy().to_string(),
+        is_builtin,
+    })
+}
+
+fn github_owner_repo(url: &str) -> Result<(String, String), String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let parsed = reqwest::Url::parse(trimmed)
+        .map_err(|e| format!("模板仓库 URL 无效: {}", e))?;
+    let host = parsed.host_str().unwrap_or_default().to_lowercase();
+    if host != "github.com" {
+        return Err("当前模板仓库仅支持 github.com".to_string());
+    }
+    let parts: Vec<&str> = parsed
+        .path_segments()
+        .map(|segments| segments.collect())
+        .unwrap_or_else(Vec::new);
+    if parts.len() < 2 {
+        return Err("GitHub 仓库 URL 需要包含 owner/repo".to_string());
+    }
+    let owner = parts[0].to_string();
+    let repo = parts[1].trim_end_matches(".git").to_string();
+    if owner.is_empty() || repo.is_empty() {
+        return Err("GitHub 仓库 URL 需要包含 owner/repo".to_string());
+    }
+    Ok((owner, repo))
+}
+
+fn raw_github_url(repo: &EpubTemplateRepository, path: &str) -> Result<String, String> {
+    let (owner, name) = github_owner_repo(&repo.url)?;
+    let clean_path = path.trim_start_matches('/');
+    Ok(format!(
+        "https://raw.githubusercontent.com/{}/{}/{}/{}",
+        owner, name, repo.branch, clean_path
+    ))
+}
+
+fn github_tree_url(repo: &EpubTemplateRepository, dir: &str) -> Result<String, String> {
+    let (owner, name) = github_owner_repo(&repo.url)?;
+    let clean_dir = dir.trim_matches('/');
+    Ok(format!(
+        "https://api.github.com/repos/{}/{}/git/trees/{}:{}?recursive=1",
+        owner, name, repo.branch, clean_dir
+    ))
+}
+
+fn read_template_repositories(app: &tauri::AppHandle) -> Result<Vec<EpubTemplateRepository>, String> {
+    let path = epub_template_repositories_path(app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("读取模板仓库配置失败: {}", e))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("解析模板仓库配置失败: {}", e))
+}
+
+fn write_template_repositories(
+    app: &tauri::AppHandle,
+    repos: &[EpubTemplateRepository],
+) -> Result<(), String> {
+    let root = epub_templates_root(app)?;
+    ensure_dir(&root)?;
+    let path = epub_template_repositories_path(app)?;
+    let bytes = serde_json::to_vec_pretty(repos).map_err(|e| format!("序列化模板仓库配置失败: {}", e))?;
+    fs::write(path, bytes).map_err(|e| format!("保存模板仓库配置失败: {}", e))
+}
+
 fn get_history_base_dir(app: Option<&tauri::AppHandle>) -> PathBuf {
     // 优先使用书库工作目录下的 _data/history（书库已配置时）
     if let Some(app) = app {
@@ -1352,6 +1911,261 @@ fn history_key_for_path(original_path: &str) -> String {
     // Keep names deterministic and avoid collisions for files that share the same stem.
     let digest = format!("{:x}", md5::compute(original_path.as_bytes()));
     digest[..8].to_string()
+}
+
+fn pick_font_family_name(font_data: &[u8], source_path: &Path) -> String {
+    if let Some(name) = pick_preferred_font_name(parse_font_internal_names(font_data)) {
+        return name;
+    }
+
+    source_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "CustomFont".to_string())
+}
+
+fn contains_cjk(text: &str) -> bool {
+    text.chars().any(|ch| {
+        matches!(
+            ch as u32,
+            0x3400..=0x4DBF
+                | 0x4E00..=0x9FFF
+                | 0xF900..=0xFAFF
+                | 0x20000..=0x2A6DF
+                | 0x2A700..=0x2B73F
+                | 0x2B740..=0x2B81F
+                | 0x2B820..=0x2CEAF
+                | 0x2CEB0..=0x2EBEF
+        )
+    })
+}
+
+fn font_name_preference_score(name: &str) -> i32 {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return i32::MIN;
+    }
+
+    let mut score = 0i32;
+    if contains_cjk(trimmed) {
+        score += 1000;
+    }
+    if trimmed.contains(' ') {
+        score += 40;
+    }
+    if trimmed.len() >= 2 {
+        score += 10;
+    }
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '+' | '.'))
+    {
+        score -= 120;
+    }
+    if trimmed.eq_ignore_ascii_case("regular")
+        || trimmed.eq_ignore_ascii_case("bold")
+        || trimmed.eq_ignore_ascii_case("italic")
+    {
+        score -= 400;
+    }
+    score - trimmed.len() as i32 / 4
+}
+
+fn pick_preferred_font_name(names: Vec<String>) -> Option<String> {
+    names
+        .into_iter()
+        .filter(|name| !name.trim().is_empty())
+        .max_by_key(|name| font_name_preference_score(name))
+}
+
+fn build_library_font_info(app: &tauri::AppHandle, font_path: &Path) -> Result<LibraryFontInfo, String> {
+    let font_data = fs::read(font_path).map_err(|e| format!("读取字体失败: {}", e))?;
+    let file_name = font_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "字体文件名无效".to_string())?
+        .to_string();
+    let aliases = read_library_font_aliases(app).unwrap_or_default();
+    let family = aliases
+        .get(&file_name)
+        .cloned()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| pick_font_family_name(&font_data, font_path));
+    Ok(LibraryFontInfo {
+        css_value: format!(r#""{}", serif"#, family),
+        family,
+        file_name,
+        path: font_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn list_epub_template_repositories(
+    app: tauri::AppHandle,
+) -> Result<Vec<EpubTemplateRepository>, String> {
+    read_template_repositories(&app)
+}
+
+#[tauri::command]
+fn add_epub_template_repository(
+    app: tauri::AppHandle,
+    name: String,
+    url: String,
+    branch: Option<String>,
+) -> Result<Vec<EpubTemplateRepository>, String> {
+    let (owner, repo_name) = github_owner_repo(&url)?;
+    let fallback_name = format!("{}-{}", owner, repo_name);
+    let display_name = if name.trim().is_empty() {
+        fallback_name.clone()
+    } else {
+        name.trim().to_string()
+    };
+    let mut repo_id = sanitize_filename_part(&display_name);
+    if repo_id.trim().is_empty() {
+        repo_id = sanitize_filename_part(&fallback_name);
+    }
+    let mut branch_name = branch.unwrap_or_else(default_template_branch);
+    if branch_name.trim().is_empty() {
+        branch_name = default_template_branch();
+    }
+
+    let mut repos = read_template_repositories(&app)?;
+    let repo = EpubTemplateRepository {
+        id: repo_id,
+        name: display_name,
+        url: url.trim().to_string(),
+        branch: branch_name.trim().to_string(),
+        last_synced: String::new(),
+    };
+    repos.retain(|item| item.id != repo.id && item.url != repo.url);
+    repos.push(repo);
+    write_template_repositories(&app, &repos)?;
+    Ok(repos)
+}
+
+#[tauri::command]
+async fn sync_epub_template_repository(
+    app: tauri::AppHandle,
+    repository_id: String,
+) -> Result<EpubTemplateRepositoryIndex, String> {
+    let mut repos = read_template_repositories(&app)?;
+    let repo = repos
+        .iter()
+        .find(|item| item.id == repository_id)
+        .cloned()
+        .ok_or_else(|| "模板仓库不存在".to_string())?;
+    let index_url = raw_github_url(&repo, "index.json")?;
+    let client = reqwest::Client::builder()
+        .user_agent("TEpub-Editor")
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let text = client
+        .get(index_url)
+        .send()
+        .await
+        .map_err(|e| format!("拉取模板索引失败: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("模板索引响应异常: {}", e))?
+        .text()
+        .await
+        .map_err(|e| format!("读取模板索引失败: {}", e))?;
+    let index: EpubTemplateRepositoryIndex =
+        serde_json::from_str(&text).map_err(|e| format!("解析模板索引失败: {}", e))?;
+    for item in &mut repos {
+        if item.id == repository_id {
+            item.last_synced = chrono::Local::now().to_rfc3339();
+        }
+    }
+    write_template_repositories(&app, &repos)?;
+    Ok(index)
+}
+
+#[tauri::command]
+async fn install_remote_epub_template(
+    app: tauri::AppHandle,
+    repository_id: String,
+    template: EpubRemoteTemplate,
+) -> Result<EpubTemplateInstallResult, String> {
+    let repos = read_template_repositories(&app)?;
+    let repo = repos
+        .iter()
+        .find(|item| item.id == repository_id)
+        .cloned()
+        .ok_or_else(|| "模板仓库不存在".to_string())?;
+    let template_dir = Path::new(&template.path)
+        .parent()
+        .and_then(|p| p.to_str())
+        .ok_or_else(|| "模板 path 需要指向 template.json".to_string())?
+        .replace('\\', "/");
+    let tree_url = github_tree_url(&repo, &template_dir)?;
+    let client = reqwest::Client::builder()
+        .user_agent("TEpub-Editor")
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let tree_text = client
+        .get(tree_url)
+        .send()
+        .await
+        .map_err(|e| format!("拉取模板文件树失败: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("模板文件树响应异常: {}", e))?
+        .text()
+        .await
+        .map_err(|e| format!("读取模板文件树失败: {}", e))?;
+    let tree_json: serde_json::Value =
+        serde_json::from_str(&tree_text).map_err(|e| format!("解析模板文件树失败: {}", e))?;
+
+    let install_root = epub_templates_root(&app)?
+        .join("github")
+        .join(sanitize_filename_part(&repository_id))
+        .join(sanitize_filename_part(&template.id));
+    ensure_dir(&install_root)?;
+    let entries = tree_json
+        .get("tree")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "GitHub tree 响应缺少 tree 字段".to_string())?;
+
+    let mut file_count = 0usize;
+    for entry in entries {
+        if entry.get("type").and_then(|v| v.as_str()) != Some("blob") {
+            continue;
+        }
+        let Some(path) = entry.get("path").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let relative = path
+            .trim_start_matches(&template_dir)
+            .trim_start_matches('/')
+            .replace('\\', "/");
+        if relative.is_empty() || relative.contains("..") {
+            continue;
+        }
+        let raw_url = raw_github_url(&repo, path)?;
+        let bytes = client
+            .get(raw_url)
+            .send()
+            .await
+            .map_err(|e| format!("下载模板文件失败 {}: {}", relative, e))?
+            .error_for_status()
+            .map_err(|e| format!("模板文件响应异常 {}: {}", relative, e))?
+            .bytes()
+            .await
+            .map_err(|e| format!("读取模板文件失败 {}: {}", relative, e))?;
+        let target = install_root.join(relative);
+        if let Some(parent) = target.parent() {
+            ensure_dir(parent)?;
+        }
+        fs::write(&target, &bytes).map_err(|e| format!("写入模板文件失败: {}", e))?;
+        file_count += 1;
+    }
+
+    Ok(EpubTemplateInstallResult {
+        template_id: template.id,
+        local_path: install_root.to_string_lossy().to_string(),
+        file_count,
+    })
 }
 
 // --- 指令区域 ---
@@ -2008,6 +2822,273 @@ async fn get_history_list(
     list
 }
 
+#[tauri::command]
+fn list_library_fonts(app: tauri::AppHandle) -> Result<Vec<LibraryFontInfo>, String> {
+    let dir = library_fonts_dir(&app)?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut fonts = Vec::new();
+    let entries = fs::read_dir(&dir).map_err(|e| format!("读取字体目录失败: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取字体目录项失败: {}", e))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if !matches!(ext.as_str(), "ttf" | "otf" | "woff" | "woff2") {
+            continue;
+        }
+        if let Ok(info) = build_library_font_info(&app, &path) {
+            fonts.push(info);
+        }
+    }
+
+    fonts.sort_by(|a, b| a.family.to_lowercase().cmp(&b.family.to_lowercase()));
+    Ok(fonts)
+}
+
+#[tauri::command]
+fn import_library_font(app: tauri::AppHandle, path: String) -> Result<LibraryFontInfo, String> {
+    let normalized = normalize_local_file_path(&path);
+    let source = PathBuf::from(&normalized);
+    if !source.exists() || !source.is_file() {
+        return Err("字体文件不存在".to_string());
+    }
+
+    let ext = source
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !matches!(ext.as_str(), "ttf" | "otf" | "woff" | "woff2") {
+        return Err("仅支持导入 ttf / otf / woff / woff2 字体".to_string());
+    }
+
+    let font_data = fs::read(&source).map_err(|e| format!("读取字体失败: {}", e))?;
+    let family = pick_font_family_name(&font_data, &source);
+    let file_stem = sanitize_filename_part(&family);
+    let safe_stem = if file_stem.is_empty() {
+        "font".to_string()
+    } else {
+        file_stem
+    };
+
+    let target_dir = library_fonts_dir(&app)?;
+    ensure_dir(&target_dir)?;
+
+    let mut target = target_dir.join(format!("{}.{}", safe_stem, ext));
+    let mut seq = 2usize;
+    while target.exists() {
+        let existing = fs::read(&target).unwrap_or_default();
+        if existing == font_data {
+            return build_library_font_info(&app, &target);
+        }
+        target = target_dir.join(format!("{}-{}.{}", safe_stem, seq, ext));
+        seq += 1;
+    }
+
+    fs::write(&target, &font_data).map_err(|e| format!("写入字体失败: {}", e))?;
+    build_library_font_info(&app, &target)
+}
+
+#[tauri::command]
+fn rename_library_font(
+    app: tauri::AppHandle,
+    file_name: String,
+    family: String,
+) -> Result<LibraryFontInfo, String> {
+    let trimmed_family = family.trim();
+    if trimmed_family.is_empty() {
+        return Err("字体名称不能为空".to_string());
+    }
+
+    let font_path = library_fonts_dir(&app)?.join(&file_name);
+    if !font_path.exists() || !font_path.is_file() {
+        return Err("字体文件不存在".to_string());
+    }
+
+    let mut aliases = read_library_font_aliases(&app)?;
+    aliases.insert(file_name.clone(), trimmed_family.to_string());
+    write_library_font_aliases(&app, &aliases)?;
+    build_library_font_info(&app, &font_path)
+}
+
+#[tauri::command]
+fn delete_library_font(app: tauri::AppHandle, file_name: String) -> Result<(), String> {
+    let font_path = library_fonts_dir(&app)?.join(&file_name);
+    if !font_path.exists() || !font_path.is_file() {
+        return Err("字体文件不存在".to_string());
+    }
+
+    fs::remove_file(&font_path).map_err(|e| format!("删除字体失败: {}", e))?;
+    let mut aliases = read_library_font_aliases(&app)?;
+    if aliases.remove(&file_name).is_some() {
+        write_library_font_aliases(&app, &aliases)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn list_style_templates(app: tauri::AppHandle) -> Result<Vec<StyleTemplateInfo>, String> {
+    let root = style_templates_root(&app)?;
+    ensure_dir(&root)?;
+
+    let builtin_path = builtin_style_template_path(&app)?;
+    let mut templates = vec![build_style_template_info(&builtin_path, true)?];
+
+    let entries = fs::read_dir(&root).map_err(|e| format!("读取样式模板目录失败: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取样式模板目录项失败: {}", e))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if ext != "css" {
+            continue;
+        }
+        if path.file_name().and_then(|s| s.to_str()) == Some("builtin.css") {
+            continue;
+        }
+        templates.push(build_style_template_info(&path, false)?);
+    }
+
+    let mut imported = templates.split_off(1);
+    imported.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    templates.extend(imported);
+    Ok(templates)
+}
+
+#[tauri::command]
+fn read_style_template(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<StyleTemplateContent, String> {
+    let is_builtin = id == "builtin";
+    let path = if is_builtin {
+        builtin_style_template_path(&app)?
+    } else {
+        style_template_path(&app, &id)?
+    };
+    let main_css = if path.exists() {
+        let css = fs::read_to_string(&path).map_err(|e| format!("读取样式模板失败: {}", e))?;
+        if is_builtin && is_stale_builtin_style_template_css(&css) {
+            fs::remove_file(&path).map_err(|e| format!("升级内置样式模板失败: {}", e))?;
+            String::new()
+        } else {
+            css
+        }
+    } else {
+        String::new()
+    };
+    Ok(StyleTemplateContent {
+        id: if is_builtin { "builtin".to_string() } else { id },
+        name: if is_builtin {
+            "内置模板".to_string()
+        } else {
+            style_template_name_from_path(&path)
+        },
+        main_css,
+        is_builtin,
+    })
+}
+
+#[tauri::command]
+fn import_style_template(app: tauri::AppHandle, path: String) -> Result<StyleTemplateInfo, String> {
+    let normalized = normalize_local_file_path(&path);
+    let source = PathBuf::from(&normalized);
+    if !source.exists() || !source.is_file() {
+        return Err("样式模板文件不存在".to_string());
+    }
+
+    let ext = source
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if ext != "css" {
+        return Err("仅支持导入 CSS 样式模板".to_string());
+    }
+
+    let css = fs::read_to_string(&source).map_err(|e| format!("读取样式模板失败: {}", e))?;
+    let root = style_templates_root(&app)?;
+    ensure_dir(&root)?;
+
+    let source_stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("style-template");
+    let safe_stem = {
+        let candidate = sanitize_filename_part(source_stem);
+        if candidate.is_empty() {
+            "style-template".to_string()
+        } else {
+            candidate
+        }
+    };
+
+    let mut target = root.join(format!("{}.css", safe_stem));
+    let mut seq = 2usize;
+    while target.exists() {
+        let existing = fs::read_to_string(&target).unwrap_or_default();
+        if existing == css {
+            return build_style_template_info(&target, false);
+        }
+        target = root.join(format!("{}-{}.css", safe_stem, seq));
+        seq += 1;
+    }
+
+    fs::write(&target, css).map_err(|e| format!("保存样式模板失败: {}", e))?;
+    build_style_template_info(&target, false)
+}
+
+#[tauri::command]
+fn save_style_template(
+    app: tauri::AppHandle,
+    id: String,
+    main_css: String,
+) -> Result<StyleTemplateInfo, String> {
+    let path = if id == "builtin" {
+        builtin_style_template_path(&app)?
+    } else {
+        style_template_path(&app, &id)?
+    };
+    let root = style_templates_root(&app)?;
+    ensure_dir(&root)?;
+    fs::write(&path, main_css).map_err(|e| format!("保存样式模板失败: {}", e))?;
+    build_style_template_info(&path, id == "builtin")
+}
+
+#[tauri::command]
+fn restore_builtin_style_template(app: tauri::AppHandle) -> Result<(), String> {
+    let path = builtin_style_template_path(&app)?;
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| format!("恢复内置样式失败: {}", e))?;
+    }
+    Ok(())
+}
+
+fn is_stale_builtin_style_template_css(css: &str) -> bool {
+    let normalized = css.trim();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    normalized.contains("TEpub template schema: 1")
+        && !normalized.contains(".te-volume-subtitle")
+}
+
 #[derive(serde::Deserialize, Clone)]
 pub struct RegexRule {
     pub level: u8,
@@ -2069,15 +3150,10 @@ async fn scan_chapters(
             // But ensure Volumes (Level 1 containing 卷/部) are NOT treated as meta
             // And only auto-detect meta for Level 1 items (Chapters at Level 3 should not be meta)
             let is_vol_keyword = line_trim.contains("卷") || line_trim.contains("部");
-            let is_meta = (lvl == 1) && !is_vol_keyword && (
-                          line_trim.contains("简介") 
-                       || line_trim.contains("前言") 
-                       || line_trim.contains("序") 
-                       || line_trim.contains("楔子") 
-                       || line_trim.contains("后记") 
-                       || line_trim.contains("感言")
-                       || line_trim.contains("本书相关")
-                       || line_trim.contains("内容"));
+            let is_first_heading = chapters.is_empty();
+            let is_meta = !is_vol_keyword
+                && mobile_is_meta_title(line_trim)
+                && (lvl == 1 || is_first_heading);
             
             current_chapter = Some(ChapterInfo {
                 title: line_trim.to_string(),
@@ -2209,6 +3285,7 @@ async fn export_epub(
     } else {
         &metadata.main_css
     };
+    let asset_slot_placements = parse_asset_slot_placements(main_css);
     zip.write_all(main_css.as_bytes())
         .map_err(|e| e.to_string())?;
 
@@ -2237,44 +3314,65 @@ async fn export_epub(
     let mut play_order = 1;
 
     if has_cover {
-        let mime = match cover_ext.as_str() {
-            "png" => "image/png",
-            "webp" => "image/webp",
-            "gif" => "image/gif",
-            "bmp" => "image/bmp",
-            "jpg" | "jpeg" => "image/jpeg",
-            _ => "image/jpeg",
-        };
+        let mime = image_mime_from_ext(&cover_ext);
         manifest_items.push_str(&format!(r#"<item id="cover-image" href="Images/cover.{}" media-type="{}" properties="cover-image"/>"#, cover_ext, mime));
     }
 
     // 写入资产文件
+    let mut image_slot_hrefs: HashMap<String, String> = HashMap::new();
+    let font_subset_text = if metadata.subset_fonts {
+        Some(build_font_subset_text(&content, &metadata))
+    } else {
+        None
+    };
     for (i, asset) in metadata.assets.iter().enumerate() {
-        if let Ok(asset_bytes) = fs::read(&asset.path) {
+        let normalized_asset_path = normalize_local_file_path(&asset.path);
+        if let Ok(mut asset_bytes) = fs::read(&normalized_asset_path) {
             let sub_dir = match asset.category.as_str() {
                 "fonts" => "Fonts",
                 "images" => "Images",
                 _ => "Other",
             };
-            let asset_filename = format!("OEBPS/{}/{}", sub_dir, asset.name);
+            let ext = Path::new(&asset.name)
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let safe_name = if !asset.role.trim().is_empty() && asset.category == "images" {
+                let stem = asset_slot_file_stem(&asset.role);
+                if ext.is_empty() {
+                    format!("{}.jpg", stem)
+                } else {
+                    format!("{}.{}", stem, ext)
+                }
+            } else {
+                let sanitized = sanitize_filename_part(&asset.name);
+                if sanitized.is_empty() {
+                    format!("asset_{}", i)
+                } else {
+                    sanitized
+                }
+            };
+
+            if asset.category == "fonts" {
+                if let Some(subset_text) = font_subset_text.as_deref() {
+                    match try_subset_font_bytes(&asset_bytes, &ext, subset_text) {
+                        Ok(subsetted) => asset_bytes = subsetted,
+                        Err(err) => eprintln!("字体子集化已回退原文件: {} ({})", asset.name, err),
+                    }
+                }
+            }
+
+            let asset_filename = format!("OEBPS/{}/{}", sub_dir, safe_name);
             zip.start_file(&asset_filename, options)
                 .map_err(|e| e.to_string())?;
             zip.write_all(&asset_bytes).map_err(|e| e.to_string())?;
 
-            let href = format!("{}/{}", sub_dir, asset.name);
-            let mime = match Path::new(&asset.name).extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase().as_str() {
-                "ttf" => "font/ttf",
-                "otf" => "font/otf",
-                "woff" => "font/woff",
-                "woff2" => "font/woff2",
-                "png" => "image/png",
-                "jpg" | "jpeg" => "image/jpeg",
-                "gif" => "image/gif",
-                "svg" => "image/svg+xml",
-                "css" => "text/css",
-                "js" => "text/javascript",
-                _ => "application/octet-stream",
-            };
+            let href = format!("{}/{}", sub_dir, safe_name);
+            let mime = asset_manifest_mime(&safe_name);
+            if !asset.role.trim().is_empty() && asset.category == "images" {
+                image_slot_hrefs.insert(asset.role.clone(), href.clone());
+            }
             manifest_items.push_str(&format!(
                 r#"<item id="asset_{}" href="{}" media-type="{}"/>"#,
                 i, href, mime
@@ -2308,7 +3406,7 @@ async fn export_epub(
         };
 
         let mut html_body = String::new();
-        let mut class_attr = "";
+        let mut class_attr = "te-book-body te-chapter-page";
 
         let (chap_num_raw, chap_name_raw) = split_title(&chapter.title);
         let safe_display_title = if !chap_num_raw.is_empty() && !chap_name_raw.is_empty() {
@@ -2322,20 +3420,34 @@ async fn export_epub(
         };
 
         if chapter.is_meta {
+            class_attr = "te-book-body te-intro-page";
+            if i == 0 && has_cover {
+                html_body.push_str(&format!(
+                    "  <div class=\"te-cover-wrap\"><img class=\"te-cover-image\" src=\"../Images/cover.{}\" alt=\"封面\" /><br/>\n    <span class=\"book-name\">{}</span>\n  </div>\n\n",
+                    cover_ext,
+                    escape_xml(&metadata.title)
+                ));
+            }
             html_body.push_str(&format!(
-                "  <h1 class=\"nrjj-title\">{}</h1>\n",
+                "  <h1 class=\"te-intro-title\" title=\"{}\"><span><b>{}</b></span></h1>\n",
+                safe_display_title,
                 safe_display_title
             ));
-            for line in body_lines {
-                let trim = line.trim();
-                if !trim.is_empty() {
-                    html_body.push_str(&format!("  <p>{}</p>\n", escape_xml(trim)));
-                }
-            }
+            append_text_body_lines(
+                &mut html_body,
+                body_lines,
+                true,
+                first_image_slot_for_placement(
+                    &image_slot_hrefs,
+                    &asset_slot_placements,
+                    "replace-ellipsis",
+                    "dividerImage",
+                ),
+            );
         } else {
             match chapter.level {
                 1 => {
-                    class_attr = "Preface1";
+                    class_attr = "te-book-body te-volume-page";
                     let safe_vol_num = escape_xml(&chap_num_raw);
                     let safe_vol_name = escape_xml(&chap_name_raw);
                     
@@ -2348,63 +3460,104 @@ async fn export_epub(
                     
                     let formatted_name = if !safe_vol_name.is_empty() {
                         safe_vol_name
-                            .chars()
-                            .map(|c| format!("{} ", c))
-                            .collect::<String>()
                     } else {
                         safe_display_title.clone()
-                            .chars()
-                            .map(|c| format!("{} ", c))
-                            .collect::<String>()
                     };
 
+                    let inserted_volume_head = if let Some((role, href)) = first_image_slot_for_placement(
+                        &image_slot_hrefs,
+                        &asset_slot_placements,
+                        "volume-before-title",
+                        "volumeHead",
+                    ) {
+                        html_body.push_str(&image_slot_html(role, href));
+                        true
+                    } else {
+                        false
+                    };
+
+                    if !inserted_volume_head {
+                        class_attr = "te-book-body te-volume-page te-volume-page--no-image";
+                    }
+
                     html_body.push_str(&format!(
-                        "  <h1 class=\"PrefacehA1\" title=\"{}\"><br /><br />\n  {}</h1>\n  <p class=\"PrefacepA1\">{}</p>\n", 
+                        "  <h1 class=\"te-volume-title\" title=\"{}\"><br /><br />\n  {}</h1>\n  <p class=\"te-volume-subtitle\">{}</p>\n",
                         safe_display_title, vertical_num, formatted_name.trim()
                     ));
-                    
+
                     // Add body content for Volume if they exist, to prevent loss of potential inner-body text
-                    for line in body_lines {
-                        let trim = line.trim();
-                        if !trim.is_empty() {
-                            html_body.push_str(&format!("  <p>{}</p>\n", escape_xml(trim)));
-                        }
-                    }
+                    append_text_body_lines(
+                        &mut html_body,
+                        body_lines,
+                        true,
+                        first_image_slot_for_placement(
+                            &image_slot_hrefs,
+                            &asset_slot_placements,
+                            "replace-ellipsis",
+                            "dividerImage",
+                        ),
+                    );
                 }
                 3 => {
                     let safe_chap_num = escape_xml(&chap_num_raw);
                     let safe_chap_name = escape_xml(&chap_name_raw);
                     
+                    let inserted_chapter_head = if let Some((role, href)) = first_image_slot_for_placement(
+                        &image_slot_hrefs,
+                        &asset_slot_placements,
+                        "chapter-before-title",
+                        "chapterHead",
+                    ) {
+                        html_body.push_str(&image_slot_html(role, href));
+                        true
+                    } else {
+                        false
+                    };
+
+                    if !inserted_chapter_head {
+                        class_attr = "te-book-body te-chapter-page te-chapter-page--no-image";
+                    }
+
                     if !safe_chap_num.is_empty() {
                         html_body.push_str(&format!(
-                            "  <h3 class=\"head\"><span class=\"num\">{}</span><br/><b>{}</b></h3>\n",
+                            "  <h3 class=\"te-chapter-title\"><span class=\"te-chapter-number\">{}</span><br/><b class=\"te-chapter-name\">{}</b></h3>\n",
                             safe_chap_num, safe_chap_name
                         ));
                     } else {
                         html_body.push_str(&format!(
-                            "  <h3 class=\"head\">{}</h3>\n",
+                            "  <h3 class=\"te-chapter-title\">{}</h3>\n",
                             safe_display_title
                         ));
                     }
                     
-                    for line in body_lines {
-                        let trim = line.trim();
-                        if !trim.is_empty() {
-                            html_body.push_str(&format!("  <p>{}</p>\n", escape_xml(trim)));
-                        }
-                    }
+                    append_text_body_lines(
+                        &mut html_body,
+                        body_lines,
+                        true,
+                        first_image_slot_for_placement(
+                            &image_slot_hrefs,
+                            &asset_slot_placements,
+                            "replace-ellipsis",
+                            "dividerImage",
+                        ),
+                    );
                 }
                 _ => {
                     html_body.push_str(&format!(
-                        "  <h{} class=\"head\">{}</h{}>\n",
+                        "  <h{} class=\"te-chapter-title\">{}</h{}>\n",
                         chapter.level, safe_display_title, chapter.level
                     ));
-                    for line in body_lines {
-                        let trim = line.trim();
-                        if !trim.is_empty() {
-                            html_body.push_str(&format!("  <p>{}</p>\n", escape_xml(trim)));
-                        }
-                    }
+                    append_text_body_lines(
+                        &mut html_body,
+                        body_lines,
+                        true,
+                        first_image_slot_for_placement(
+                            &image_slot_hrefs,
+                            &asset_slot_placements,
+                            "replace-ellipsis",
+                            "dividerImage",
+                        ),
+                    );
                 }
             }
         }
@@ -2423,11 +3576,7 @@ async fn export_epub(
 </body>
 </html>"#,
             safe_display_title,
-            if class_attr.is_empty() {
-                String::new()
-            } else {
-                format!(" class=\"{}\"", class_attr)
-            },
+            format!(" class=\"{}\"", class_attr),
             html_body
         );
 
@@ -3171,71 +4320,97 @@ async fn save_epub_files_batch(
 
 #[tauri::command]
 async fn save_epub_to_disk(epub_path: String) -> Result<(), String> {
-    use zip::write::FileOptions;
+    tauri::async_runtime::spawn_blocking(move || {
+        use zip::write::FileOptions;
 
-    // 1. 获取临时目录
-    let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
+        let temp_path: PathBuf = {
+            let cache_guard = EPUB_CACHE.lock().unwrap();
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
-    }
-    .ok_or("EPUB 未加载或缓存失效".to_string())?;
+        .ok_or("EPUB 未加载或缓存失效".to_string())?;
 
-    // 2. 创建临时 ZIP 文件
-    let zip_file_path = format!("{}.zip.tmp", epub_path);
-    let zip_file = fs::File::create(&zip_file_path).map_err(|e| format!("创建ZIP失败: {}", e))?;
-    let mut zip_writer = zip::ZipWriter::new(zip_file);
+        let zip_file_path = format!("{}.zip.tmp", epub_path);
+        let backup_file_path = format!("{}.bak.tmp", epub_path);
 
-    let options_deflated =
-        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    let options_stored = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-
-    // 3. 遍历临时目录并写入 ZIP
-    for entry in WalkDir::new(&temp_path).into_iter().filter_map(|e| e.ok()) {
-        if !entry.file_type().is_file() {
-            continue;
+        if Path::new(&zip_file_path).exists() {
+            let _ = fs::remove_file(&zip_file_path);
+        }
+        if Path::new(&backup_file_path).exists() {
+            let _ = fs::remove_file(&backup_file_path);
         }
 
-        let full_path = entry.path();
-        let relative_path = full_path.strip_prefix(&temp_path).unwrap();
-        let path_str = relative_path.to_string_lossy().replace("\\", "/");
+        let zip_file =
+            fs::File::create(&zip_file_path).map_err(|e| format!("创建 ZIP 失败: {}", e))?;
+        let mut zip_writer = zip::ZipWriter::new(zip_file);
 
-        let options = if path_str == "mimetype" {
-            options_stored
-        } else {
-            options_deflated
-        };
+        let options_deflated =
+            FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options_stored =
+            FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+        for entry in WalkDir::new(&temp_path).into_iter().filter_map(|e| e.ok()) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let full_path = entry.path();
+            let relative_path = full_path
+                .strip_prefix(&temp_path)
+                .map_err(|e| format!("计算相对路径失败: {}", e))?;
+            let path_str = relative_path.to_string_lossy().replace("\\", "/");
+
+            let options = if path_str == "mimetype" {
+                options_stored
+            } else {
+                options_deflated
+            };
+
+            zip_writer
+                .start_file(&path_str, options)
+                .map_err(|e| format!("写入文件失败: {}", e))?;
+
+            let content = fs::read(full_path).map_err(|e| format!("读取文件失败: {}", e))?;
+            zip_writer
+                .write_all(&content)
+                .map_err(|e| format!("写入内容失败: {}", e))?;
+        }
 
         zip_writer
-            .start_file(&path_str, options)
-            .map_err(|e| format!("写入文件失败: {}", e))?;
+            .finish()
+            .map_err(|e| format!("完成 ZIP 失败: {}", e))?;
 
-        // Read file content
-        let content = fs::read(full_path).map_err(|e| format!("读取文件失败: {}", e))?;
-        zip_writer
-            .write_all(&content)
-            .map_err(|e| format!("写入内容失败: {}", e))?;
-    }
+        if Path::new(&epub_path).exists() {
+            fs::rename(&epub_path, &backup_file_path)
+                .map_err(|e| format!("备份原 EPUB 失败: {}", e))?;
+        }
 
-    zip_writer
-        .finish()
-        .map_err(|e| format!("完成 ZIP 失败: {}", e))?;
+        if let Err(e) = fs::rename(&zip_file_path, &epub_path) {
+            if Path::new(&backup_file_path).exists() {
+                let _ = fs::rename(&backup_file_path, &epub_path);
+            }
+            return Err(format!("替换 EPUB 失败: {}", e));
+        }
 
-    // 4. replace original file
-    fs::rename(&zip_file_path, &epub_path).map_err(|e| format!("替换文件失败: {}", e))?;
+        if Path::new(&backup_file_path).exists() {
+            let _ = fs::remove_file(&backup_file_path);
+        }
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("保存 EPUB 任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -4322,6 +5497,10 @@ fn library_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 // 图书 子目录：所有书文件按「书名-作者.ext」命名后存这里
 fn library_books_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(library_root_dir(app)?.join("图书"))
+}
+
+fn library_fonts_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_root_dir(app)?.join("字体"))
 }
 
 fn library_covers_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -6172,6 +7351,7 @@ async fn mobile_make_epub(
             tags: Vec::new(),
             main_css: String::new(),
             font_css: String::new(),
+            subset_fonts: false,
             assets: Vec::new(),
             extra: HashMap::new(),
         },
@@ -6629,6 +7809,19 @@ pub fn run() {
             save_history,
             get_history_list,
             calculate_md5,
+            list_library_fonts,
+            import_library_font,
+            rename_library_font,
+            delete_library_font,
+            list_style_templates,
+            read_style_template,
+            import_style_template,
+            save_style_template,
+            restore_builtin_style_template,
+            list_epub_template_repositories,
+            add_epub_template_repository,
+            sync_epub_template_repository,
+            install_remote_epub_template,
             scan_chapters,
             advanced_search,
             advanced_replace,

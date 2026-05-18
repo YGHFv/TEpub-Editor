@@ -1,12 +1,42 @@
-<script lang="ts">
+﻿<script lang="ts">
     import { onMount } from "svelte";
+    import { invoke } from "@tauri-apps/api/core";
     import { listen, emit } from "@tauri-apps/api/event";
     import { getCurrentWindow } from "@tauri-apps/api/window";
 
-    let activeTab = "meta"; // "meta" or "style"
-    let activeCssFile = "main.css"; // "main.css" or "font.css"
-    let persistCss = false;
-    
+    let activeTab = "meta";
+
+    type TemplateRepository = {
+        id: string;
+        name: string;
+        url: string;
+        branch: string;
+        last_synced?: string;
+    };
+    type RemoteTemplate = {
+        id: string;
+        name: string;
+        version?: string;
+        description?: string;
+        path: string;
+        preview?: string;
+        category?: string;
+    };
+    type EpubAsset = {
+        name: string;
+        path: string;
+        category: string;
+        role?: string;
+        slot_label?: string;
+    };
+    type AssetSlot = {
+        role: string;
+        label: string;
+        type: string;
+        placement: string;
+        selector?: string;
+    };
+
     let metadata = {
         publisher: "",
         uuid: "",
@@ -15,488 +45,140 @@
             "main.css": "",
             "font.css": "",
         },
-        assets: [] as { name: string, path: string, category: string }[],
+        assets: [] as EpubAsset[],
     };
-
-    const BUILTIN_STYLES = {
-        "main.css": `@charset "utf-8";
-
-@import url("fonts.css");
-
-/* Global Setting */
-
-body {
-    padding: 0%;
-    margin-top: 0%;
-    margin-bottom: 0%;
-    margin-left: 0.5%;
-    margin-right: 0.5%;
-    line-height: 130%;
-    text-align: justify;
-    font-family: "Maintext", "DK-SONGTI", "st", "宋体", "zw", sans-serif;
-}
-
-p {
-    text-align: justify;
-    text-indent: 2em;
-    duokan-text-indent: 2em;
-    line-height: 150%;
-    margin-right: 0.5%;
-    margin-left: 0.5%;
-    font-family: "Maintext";
-}
-
-div {
-    margin: 0;
-    padding: 0;
-    line-height: 130%;
-    text-align: justify;
-    font-family: "zw";
-}
-
-/*————————————————————制作说明————————————————————*/
-.copyright {
-    margin: 10% 7.25% 2.75% 7.25%;
-    padding: 5.25% 5.25%;
-    border: 1.5px solid #6C322D;
-    background-size: 35% auto;
-    border-radius: 5px;
-}
-
-.line {
-    border: dotted #333;
-    border-width: 1px 0 0 0;
-    margin: 5% 0 5% 0;
-}
-
-h1.copyright-title {
-    font-family: "Title";
-    font-size: 121%;
-    font-weight: normal;
-    color: #00008B;
-    margin: 1em 0 0.77em 0;
-    text-align: center;
-}
-
-body.full {
-    background: no-repeat center;
-    background-size: cover;
-    background-attachment: fixed;
-    background-repeat: no-repeat;
-    background-position: bottom center;
-    background-image: url(../Images/back.jpg);
-    transform: scale(1.0) translate(0px, 0px);
-}
-
-.copyright-text1 {
-    font-family: "Title";
-    font-size: 80%;
-    color: #220;
-    text-align: justify;
-    text-indent: 2em;
-    duokan-text-indent: 2em;
-    margin: 0 0 2.5% 0;
-}
-
-.copyright-text2 {
-    font-family: "cc", "kt", sans-serif;
-    font-size: 65%;
-    color: #000;
-    text-align: justify;
-    text-indent: 2em;
-    duokan-text-indent: 2em;
-    margin: 2.5% 0 0 0;
-}
-
-div.logo {
-    margin: 0 24% 0 24%;
-    text-align: center;
-    text-indent: 0em;
-    duokan-text-indent: 0em;
-}
-
-img.logo {
-    width: 66%;
-}
-
-/*————————————————————内容简介————————————————————*/
-
-body.introduction {
-    border-color: rgba(83, 83, 83, 0.5);
-    border-width: 0.4em;
-}
-
-div.cover {
-    margin: 2em 0 1em 0;
-    text-align: center;
-    text-indent: 0;
-    duokan-text-indent: 0;
-    width: 100%;
-}
-
-img.cover {
-    width: 40%;
-    box-shadow: 3px 3px 3px #535353;
-    margin: 0 0 0.5em 0;
-}
-
-h1.nrjj-title {
-    font-family: "Title";
-    font-size: 160%;
-    font-weight: normal;
-    color: #00008B;
-    margin: 2em 0 1.6em 0;
-    text-align: center;
-}
-
-span.book-name {
-    font-family: "楷体", sans-serif;
-    color: #DC143C
-}
-
-span.author {
-    font-family: "小标宋", sans-serif;
-}
-
-h1.introduction-title {
-    margin: 0.3em 0 0.5em 0;
-    text-align: left;
-    text-indent: 0;
-    duokan-text-indent: 0;
-    font-size: 110%;
-    color: #00008B;
-    font-family: "Title";
-}
-
-h1.introduction-title span {
-    padding: 0.4em 2em 0.2em 0.4em;
-}
-
-div.book-introduction p {
-    font-family: "DK-XIHEITI", "黑体", sans-serif;
-}
-
-h1.PrefacehA1 {
-    font-family: "Title", "黑体", sans-serif;
-    text-align: center;
-    font-weight: 600;
-    font-size: 1.2em;
-    margin: 7em 0em 1em 0em;
-    color: #f972bd;
-    line-height: 130%;
-}
-
-h1.PrefacehA1 b {
-    font-family: "Title", "黑体", sans-serif;
-    font-size: 1.1em;
-    font-weight: 900;
-    color: #dd3e3f;
-}
-
-p.PrefacepA1 {
-    font-family: "Title";
-    color: #5577c1;
-    font-size: 1.7em;
-    margin: 0em 0em 0.2em 0em;
-    text-indent: 0em;
-    text-align: center;
-    line-height: 110%;
-}
-
-/* Header Image */
-
-div.logo {
-    margin: 0.5em;
-    text-align: center;
-    text-indent: 0em;
-    duokan-text-indent: 0em;
-    duokan-bleed: lefttopright;
-}
-
-img.logo {
-    width: 70%;
-}
-
-/* Chapter Title */
-
-h3.head {
-    font-size: 1.2em;
-    color: #5577c1;
-    text-align: center;
-    line-height: 130%;
-    padding: 35px 4px 0 4px;
-    margin: 0em auto 2em auto;
-    font-family: "Title";
-}
-
-h3.neirong {
-    font-size: 1.1em;
-    color: #5577c1;
-    text-align: right;
-    line-height: 130%;
-    padding: 0 4px 0 4px;
-    margin: -1em 0em 0em 2em;
-    font-family: "Maintext";
-}
-
-span.num {
-    font-family: "Maintext";
-    padding: 2px 4px 1px 4px;
-    text-align: center;
-    font-size: 0.81em;
-    background-color: #f972bd;
-    border-radius: 10px;
-    color: #fff;
-}
-
-span.num2 {
-    font-size: 0.95em;
-    color: white;
-    background-color: #20626d;
-    padding: 0.2em 0.4em 0.1em;
-    border-radius: 0.2em;
-    font-family: "Maintext";
-}
-
-span.num3 {
-    color: #b50a02;
-    font-family: "Maintext";
-}
-
-h2.head5 {
-    padding: 0 4px 0 4px;
-    margin: 1em auto 2em auto;
-    font-size: 1.6em;
-    color: #a36141;
-    text-align: center;
-    line-height: 130%;
-    font-family: "Title";
-    text-indent: 0em;
-    duokan-text-indent: 0em;
-}
-
-h2.head {
-    font-size: 2.1em;
-    color: #59bde6;
-    text-align: center;
-    line-height: 130%;
-    padding: 64px 4px 0 4px;
-    margin: 0em auto 2em auto;
-    font-family: "Title";
-}
-
-/* 分割线 */
-p.fg1 {
-    text-align: center;
-    text-indent: 0;
-    duokan-text-indent: 0em;
-}
-
-/*全面屏*/
-body.fy {
-    background-size: cover;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
-    background-position: center;
-    background-image: url('../Images/fy.jpg');
-}
-
-body.intro {
-    background-size: cover;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
-    background-position: center;
-    background-image: url('../Images/intro.jpg');
-}
-
-body.e1 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e1.jpg'); }
-body.e2 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e2.jpg'); }
-body.e3 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e3.jpg'); }
-body.e4 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e4.jpg'); }
-body.e5 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e5.jpg'); }
-body.e6 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e6.jpg'); }
-body.e7 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e7.jpg'); }
-body.e8 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e8.jpg'); }
-body.e9 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e9.jpg'); }
-body.e10 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e10.jpg'); }
-body.e11 { background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-position: center; background-image: url('../Images/e11.jpg'); }
-body.ex {
-    background-size: cover;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
-    background-position: center;
-    background-image: url('../Images/ex.jpg');
-}
-
-p.fs3 {
-    font-family: "zdy3";
-    color: #000;
-    margin: 1em 0em 1em 0em;
-    font-size: 1.0em;
-    font-weight: bold;
-}
-
-div.zwone {
-    margin: 0em 0em 0em 0em;
-    text-align: left;
-    text-indent: 0em;
-    duokan-text-indent: 0em;
-}
-
-img.zwone {
-    width: 70%;
-}
-
-div.neirong {
-    text-align: left;
-    text-indent: 0em;
-    margin: 0em 0em 0em 0em;
-    duokan-text-indent: 0em;
-}
-
-img.neirong {
-    width: 55%;
-}
-
-.fs2 {
-    font-family: "zdy2";
-    font-weight: bold;
-}
-
-.txtu {
-    text-indent: 2em;
-    duokan-text-indent: 2em;
-    line-height: 130%;
-    margin-right: 1%;
-    margin-left: 1%;
-    font-family: "zdy5";
-    color: #1E90FF;
-}
-
-.txtu2 {
-    text-indent: 2em;
-    duokan-text-indent: 2em;
-    line-height: 130%;
-    margin-right: 1%;
-    margin-left: 1%;
-    font-family: "zdy5";
-    color: #B22222;
-    font-size: 0.95em;
-}
-
-p.fs7 {
-    font-family: "Maintext";
-    color: #000;
-    font-size: 0.9em;
-    text-align: right;
-    margin: 1em 1em 2em 0em;
-}
-
-div.roundsolid2 {
-    margin: 1em 0em;
-    text-indent: 2em;
-    duokan-text-indent: 2em;
-    line-height: 130%;
-    margin-right: 1%;
-    margin-left: 1%;
-    font-family: "zdy4";
-    color: #02439B;
-    font-size: 0.9em;
-}
-
-.bu {
-    display: block;
-    font-size: .9em;
-}
-
-/*图片*/
-.duokan-image-single {
-    text-align: center;
-    text-indent: 0em;
-    duokan-text-indent: 0em;
-    margin: 1.5em 0;
-    text-align: center;
-}
-
-.DKimg-left {
-    float: left;
-    clear: both;
-    width: 50%;
-    margin: 0 0.5em 0.2em 0;
-}
-
-.DKimg-right {
-    float: right;
-    clear: both;
-    width: 50%;
-    margin: 0 0 0em 0.5em;
-}
-
-.txtu2 {
-    text-indent: 2em;
-    duokan-text-indent: 2em;
-    line-height: 130%;
-    margin-right: 1%;
-    margin-left: 1%;
-    font-family: "zdy6";
-    color: #B22222;
-    font-size: 0.95em;
-}
-
-.txtu {
-    text-indent: 2em;
-    duokan-text-indent: 2em;
-    line-height: 130%;
-    margin-right: 1%;
-    margin-left: 1%;
-    font-family: "zdy6";
-    color: #1E90FF;
-    font-size: 0.95em;
-}`,
-        "font.css": `@charset "utf-8";
-/*正文字体*/
-@font-face {
-    font-family: "Maintext";
-    src: url("../Fonts/Maintext.ttf");
-}
-
-/*标题字体*/
-@font-face {
-    font-family: "Title";
-    src: url("../Fonts/Title.ttf"); 
-}`
-    };
-
     let customMetadata: { key: string; value: string }[] = [];
+
+    let templateRepositories: TemplateRepository[] = [];
+    let selectedRepositoryId = "";
+    let remoteTemplates: RemoteTemplate[] = [];
+    let repoName = "";
+    let repoUrl = "";
+    let repoBranch = "main";
+    let templateRepoBusy = false;
+    let templateRepoMessage = "";
+
+    function parseAssetSlots(css: string): AssetSlot[] {
+        const slots: AssetSlot[] = [];
+        const seen = new Set<string>();
+        const re = /@tepub-asset-slot\s+([A-Za-z][\w-]*)([^*]*)/g;
+        let match: RegExpExecArray | null;
+        while ((match = re.exec(css || ""))) {
+            const role = match[1];
+            const attrs = match[2] || "";
+            const getAttr = (name: string) => attrs.match(new RegExp(`${name}=["']([^"']+)["']`, "i"))?.[1] || "";
+            const type = getAttr("type") || "image";
+            if (type !== "image" || seen.has(role)) continue;
+            seen.add(role);
+            slots.push({
+                role,
+                type,
+                label: getAttr("label") || role,
+                placement: getAttr("placement") || "manual",
+                selector: getAttr("selector") || "",
+            });
+        }
+        return slots;
+    }
+
+    $: imageAssetSlots = parseAssetSlots(metadata.styles["main.css"] || "");
+
+    async function loadTemplateRepositories() {
+        try {
+            templateRepositories = await invoke<TemplateRepository[]>("list_epub_template_repositories");
+            if (!selectedRepositoryId && templateRepositories.length) {
+                selectedRepositoryId = templateRepositories[0].id;
+            }
+        } catch (err) {
+            templateRepoMessage = `读取模板仓库失败：${err}`;
+        }
+    }
+
+    async function addTemplateRepository() {
+        if (!repoUrl.trim()) {
+            templateRepoMessage = "请输入 GitHub 仓库地址";
+            return;
+        }
+        templateRepoBusy = true;
+        templateRepoMessage = "正在添加仓库...";
+        try {
+            templateRepositories = await invoke<TemplateRepository[]>("add_epub_template_repository", {
+                name: repoName.trim(),
+                url: repoUrl.trim(),
+                branch: repoBranch.trim() || "main",
+            });
+            selectedRepositoryId = templateRepositories[templateRepositories.length - 1]?.id || "";
+            repoName = "";
+            repoUrl = "";
+            repoBranch = "main";
+            templateRepoMessage = "仓库已添加";
+        } catch (err) {
+            templateRepoMessage = `添加模板仓库失败：${err}`;
+        } finally {
+            templateRepoBusy = false;
+        }
+    }
+
+    async function syncTemplateRepository() {
+        if (!selectedRepositoryId) {
+            templateRepoMessage = "请先选择模板仓库";
+            return;
+        }
+        templateRepoBusy = true;
+        templateRepoMessage = "正在同步模板索引...";
+        try {
+            const index = await invoke<{ templates: RemoteTemplate[] }>("sync_epub_template_repository", {
+                repositoryId: selectedRepositoryId,
+            });
+            remoteTemplates = index.templates || [];
+            await loadTemplateRepositories();
+            templateRepoMessage = `已同步 ${remoteTemplates.length} 个模板`;
+        } catch (err) {
+            templateRepoMessage = `同步模板仓库失败：${err}`;
+        } finally {
+            templateRepoBusy = false;
+        }
+    }
+
+    async function installRemoteTemplate(template: RemoteTemplate) {
+        if (!selectedRepositoryId) return;
+        templateRepoBusy = true;
+        templateRepoMessage = `正在安装 ${template.name}...`;
+        try {
+            const result = await invoke<{ local_path: string; file_count: number }>("install_remote_epub_template", {
+                repositoryId: selectedRepositoryId,
+                template,
+            });
+            templateRepoMessage = `已安装到 ${result.local_path}，共 ${result.file_count} 个文件`;
+        } catch (err) {
+            templateRepoMessage = `安装模板失败：${err}`;
+        } finally {
+            templateRepoBusy = false;
+        }
+    }
 
     onMount(() => {
         let unlistenFn: (() => void) | undefined;
 
         const init = async () => {
-             // 监听来自主窗口的数据初始化
             const unlisten = await listen("init-metadata", (event: any) => {
-                console.log("Received init metadata:", event.payload);
                 const { meta, custom } = event.payload;
                 metadata.publisher = meta.publisher || "";
                 metadata.uuid = meta.uuid || "";
                 metadata.md5 = meta.md5 || "";
-                
-                // 自动预填充内置样式内容
                 metadata.styles = {
-                    "main.css": meta.styles?.["main.css"] || BUILTIN_STYLES["main.css"],
-                    "font.css": meta.styles?.["font.css"] || BUILTIN_STYLES["font.css"],
+                    "main.css": meta.styles?.["main.css"] || "",
+                    "font.css": meta.styles?.["font.css"] || "",
                 };
                 metadata.assets = meta.assets || [];
                 customMetadata = [...(custom || [])];
             });
             unlistenFn = unlisten;
-
-            // 告诉主窗口我们准备好了，可以发送数据了
             await emit("metadata-window-ready");
+            await loadTemplateRepositories();
         };
 
         init();
-
         return () => {
             if (unlistenFn) unlistenFn();
         };
@@ -510,26 +192,47 @@ div.roundsolid2 {
         customMetadata = customMetadata.filter((_, i) => i !== index);
     }
 
-    async function addAsset(category: string) {
+    function assetSlotFileStem(role: string) {
+        return role
+            .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+            .replace(/[_\s]+/g, "-")
+            .toLowerCase();
+    }
+
+    function updateSlotCssReference(slot: AssetSlot, fileName: string) {
+        if (!slot?.role || !metadata.styles["main.css"]) return;
+        const ext = fileName.split(".").pop()?.toLowerCase();
+        if (!ext) return;
+        const stem = assetSlotFileStem(slot.role);
+        const escapedStem = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp(`\\.\\./Images/${escapedStem}\\.[A-Za-z0-9]+`, "g");
+        metadata.styles["main.css"] = metadata.styles["main.css"].replace(re, `../Images/${stem}.${ext}`);
+    }
+
+    async function addAsset(category: string, slot?: AssetSlot) {
         try {
             const { open } = await import("@tauri-apps/plugin-dialog");
             const selected = await open({
-                multiple: true,
-                filters: category === 'fonts' ? 
-                    [{ name: 'Fonts', extensions: ['ttf', 'otf', 'woff', 'woff2'] }] :
-                    category === 'images' ?
-                    [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'svg'] }] :
-                    []
+                multiple: !slot,
+                filters: category === "fonts"
+                    ? [{ name: "Fonts", extensions: ["ttf", "otf", "woff", "woff2"] }]
+                    : category === "images"
+                        ? [{ name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "svg"] }]
+                        : [],
             });
 
             if (selected) {
                 const paths = Array.isArray(selected) ? selected : [selected];
-                const newAssets = paths.map(p => ({
+                const newAssets = paths.map((p) => ({
                     name: (p as string).split(/[/\\]/).pop() || "",
                     path: p as string,
-                    category
+                    category,
+                    ...(slot ? { role: slot.role, slot_label: slot.label } : {}),
                 }));
                 metadata.assets = [...metadata.assets, ...newAssets];
+                if (slot && newAssets[0]?.name) {
+                    updateSlotCssReference(slot, newAssets[0].name);
+                }
             }
         } catch (err) {
             console.error("Failed to add assets:", err);
@@ -544,7 +247,6 @@ div.roundsolid2 {
         await emit("update-metadata", {
             meta: metadata,
             custom: customMetadata,
-            persistCss: persistCss,
         });
         const win = getCurrentWindow();
         await win.close();
@@ -559,7 +261,6 @@ div.roundsolid2 {
 <div class="metadata-container">
     <div class="tabs">
         <button class="tab-btn" class:active={activeTab === 'meta'} on:click={() => activeTab = 'meta'}>元数据</button>
-        <button class="tab-btn" class:active={activeTab === 'style'} on:click={() => activeTab = 'style'}>样式</button>
         <button class="tab-btn" class:active={activeTab === 'files'} on:click={() => activeTab = 'files'}>文件</button>
     </div>
 
@@ -567,7 +268,7 @@ div.roundsolid2 {
         <div class="tab-content scroll-p compact-top">
             <div class="form-section">
                 <div class="input-group">
-                    <label for="publisher">出版社:</label>
+                    <label for="publisher">出版社</label>
                     <input
                         id="publisher"
                         type="text"
@@ -623,12 +324,22 @@ div.roundsolid2 {
                     <div class="asset-group">
                         <div class="section-header">
                             <h3>{cat === 'fonts' ? '字体' : cat === 'images' ? '图片' : '其他'}</h3>
-                            <button class="add-btn small" on:click={() => addAsset(cat)}>+</button>
+                            <div class="asset-add-actions">
+                                {#if cat === 'images'}
+                                    {#each imageAssetSlots as slot}
+                                        <button class="mini-btn" on:click={() => addAsset(cat, slot)}>添加{slot.label}</button>
+                                    {/each}
+                                {/if}
+                                <button class="add-btn small" on:click={() => addAsset(cat)}>+</button>
+                            </div>
                         </div>
                         <div class="asset-list">
                             {#each metadata.assets.filter(a => a.category === cat) as asset, idx}
                                 <div class="asset-item">
-                                    <span class="file-name" title={asset.path}>{asset.name}</span>
+                                    <span class="file-name" title={asset.path}>
+                                        {asset.name}
+                                        {#if asset.role}<em>{asset.slot_label || asset.role}</em>{/if}
+                                    </span>
                                     <button class="remove-btn" on:click={() => removeAsset(metadata.assets.indexOf(asset))}>×</button>
                                 </div>
                             {/each}
@@ -638,42 +349,41 @@ div.roundsolid2 {
                         </div>
                     </div>
                 {/each}
-            </div>
-        </div>
-    {:else}
-        <div class="tab-content style-manager">
-            <div class="style-sub-tabs">
-                <button 
-                    class="sub-tab" 
-                    class:active={activeCssFile === 'main.css'} 
-                    on:click={() => activeCssFile = 'main.css'}>
-                    main.css
-                    {#if (metadata.styles as any)['main.css'] && (metadata.styles as any)['main.css'] !== BUILTIN_STYLES['main.css']}<span class="modified-dot">●</span>{/if}
-                </button>
-                <button 
-                    class="sub-tab" 
-                    class:active={activeCssFile === 'font.css'} 
-                    on:click={() => activeCssFile = 'font.css'}>
-                    font.css
-                    {#if (metadata.styles as any)['font.css'] && (metadata.styles as any)['font.css'] !== BUILTIN_STYLES['font.css']}<span class="modified-dot">●</span>{/if}
-                </button>
-            </div>
-
-            <div class="style-editor-area">
-                <div class="section-header">
-                    <div class="editor-controls">
-                        <label class="persist-cb">
-                            <input type="checkbox" bind:checked={persistCss} /> 保存为默认样式
-                        </label>
-                        <button class="mini-btn" on:click={() => (metadata.styles as any)[activeCssFile] = BUILTIN_STYLES[activeCssFile as keyof typeof BUILTIN_STYLES]}>重置为内置</button>
+                <div class="template-repo-panel">
+                    <div class="section-header">
+                        <h3>GitHub 模板仓库</h3>
+                        <button class="mini-btn" on:click={loadTemplateRepositories} disabled={templateRepoBusy}>刷新</button>
                     </div>
-                </div>
-                <div class="editor-main">
-                    <textarea 
-                        class="css-editor full-height" 
-                        bind:value={(metadata.styles as any)[activeCssFile]} 
-                        placeholder={`正在编辑 ${activeCssFile}...\n（清空内容将恢复内置默认配置）`}
-                    ></textarea>
+                    <div class="repo-form">
+                        <input bind:value={repoName} placeholder="仓库名称" disabled={templateRepoBusy} />
+                        <input bind:value={repoUrl} placeholder="https://github.com/owner/repo" disabled={templateRepoBusy} />
+                        <input bind:value={repoBranch} placeholder="分支 main" disabled={templateRepoBusy} />
+                        <button class="mini-btn" on:click={addTemplateRepository} disabled={templateRepoBusy}>添加</button>
+                    </div>
+                    <div class="repo-actions">
+                        <select bind:value={selectedRepositoryId} disabled={templateRepoBusy || !templateRepositories.length}>
+                            <option value="">选择模板仓库</option>
+                            {#each templateRepositories as repo}
+                                <option value={repo.id}>{repo.name} / {repo.branch}</option>
+                            {/each}
+                        </select>
+                        <button class="mini-btn" on:click={syncTemplateRepository} disabled={templateRepoBusy || !selectedRepositoryId}>同步索引</button>
+                    </div>
+                    {#if templateRepoMessage}
+                        <p class="repo-message">{templateRepoMessage}</p>
+                    {/if}
+                    <div class="remote-template-list">
+                        {#each remoteTemplates as tpl}
+                            <div class="remote-template-item">
+                                <div>
+                                    <strong>{tpl.name}</strong>
+                                    <span>{tpl.version || tpl.id}</span>
+                                    {#if tpl.description}<p>{tpl.description}</p>{/if}
+                                </div>
+                                <button class="mini-btn" on:click={() => installRemoteTemplate(tpl)} disabled={templateRepoBusy}>安装</button>
+                            </div>
+                        {/each}
+                    </div>
                 </div>
             </div>
         </div>
@@ -810,6 +520,13 @@ div.roundsolid2 {
         color: #2c3e50;
     }
 
+    .asset-add-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
     .add-btn {
         width: 28px;
         height: 28px;
@@ -876,7 +593,7 @@ div.roundsolid2 {
         line-height: 1;
     }
 
-    /* 资源管理器样式 */
+    /* 璧勬簮绠＄悊鍣ㄦ牱寮?*/
     .asset-manager {
         display: flex;
         flex-direction: column;
@@ -912,6 +629,75 @@ div.roundsolid2 {
         font-size: 0.85rem;
     }
 
+    .template-repo-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 6px;
+        padding-top: 14px;
+        border-top: 1px solid var(--color-border, #e2e8f0);
+    }
+
+    .repo-form,
+    .repo-actions {
+        display: grid;
+        grid-template-columns: minmax(90px, 0.8fr) minmax(170px, 1.5fr) minmax(80px, 0.6fr) auto;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .repo-actions {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .repo-form input,
+    .repo-actions select {
+        min-width: 0;
+        padding: 8px 10px;
+        border: 1px solid var(--color-border, #d8e0e8);
+        border-radius: var(--radius-sm, 6px);
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--color-text, #172434);
+        font: inherit;
+        font-size: 0.84rem;
+    }
+
+    .repo-message {
+        margin: 0;
+        color: var(--color-text-soft, #708090);
+        font-size: 0.8rem;
+    }
+
+    .remote-template-list {
+        display: grid;
+        gap: 8px;
+    }
+
+    .remote-template-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 10px;
+        border: 1px solid var(--color-border, #e2e8f0);
+        border-radius: var(--radius-sm, 6px);
+        background: rgba(255, 255, 255, 0.78);
+    }
+
+    .remote-template-item strong {
+        display: block;
+        color: var(--color-text, #172434);
+        font-size: 0.9rem;
+    }
+
+    .remote-template-item span,
+    .remote-template-item p {
+        display: block;
+        margin: 2px 0 0;
+        color: var(--color-text-soft, #708090);
+        font-size: 0.78rem;
+    }
+
     .file-name {
         flex: 1;
         overflow: hidden;
@@ -919,6 +705,18 @@ div.roundsolid2 {
         white-space: nowrap;
         color: #2c3e50;
         margin-right: 10px;
+    }
+
+    .file-name em {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(52, 152, 219, 0.12);
+        color: #2474a6;
+        font-style: normal;
+        font-size: 0.72rem;
+        vertical-align: 1px;
     }
 
     .footer {
@@ -966,99 +764,6 @@ div.roundsolid2 {
         color: #999;
         font-size: 0.85rem;
         margin-top: 20px;
-    }
-
-    .style-manager {
-        flex-direction: column;
-        gap: 0;
-        border: 1px solid #eee;
-        border-radius: 8px;
-        background: white;
-        overflow: hidden;
-    }
-
-    .style-sub-tabs {
-        display: flex;
-        background: #f1f3f5;
-        border-bottom: 1px solid #dee2e6;
-    }
-
-    .sub-tab {
-        padding: 10px 20px;
-        border: none;
-        background: none;
-        font-size: 0.85rem;
-        color: #666;
-        cursor: pointer;
-        transition: all 0.2s;
-        border-right: 1px solid #dee2e6;
-        position: relative;
-    }
-
-    .sub-tab:hover {
-        background: #e9ecef;
-    }
-
-    .sub-tab.active {
-        background: white;
-        color: #3498db;
-        font-weight: 600;
-    }
-
-    .modified-dot {
-        color: #3498db;
-        margin-left: 4px;
-    }
-
-    .style-editor-area {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
-        padding: 15px;
-    }
-
-    .editor-main {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 15px;
-        min-height: 0;
-    }
-
-    .css-editor {
-        flex: 1;
-        width: 100%;
-        padding: 12px;
-        border: 1px solid #ddd;
-        border-radius: 6px;
-        background: #fafafa;
-        font-family: 'Consolas', 'Monaco', monospace;
-        font-size: 0.8rem;
-        line-height: 1.5;
-        border-radius: 6px;
-        overflow-y: auto;
-        padding: 15px;
-        box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
-    }
-
-    .editor-controls {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-
-    .persist-cb {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        font-size: 0.8rem;
-        color: #666;
-        cursor: pointer;
-    }
-
-    .persist-cb input {
-        cursor: pointer;
     }
 
     .mini-btn {
@@ -1133,13 +838,8 @@ div.roundsolid2 {
         box-sizing: border-box;
     }
 
-    .tab-content.style-manager {
-        padding: 0;
-    }
-
     .input-group label,
     .asset-group h3,
-    .persist-cb,
     .empty-hint {
         color: var(--color-text-soft);
     }
@@ -1151,8 +851,7 @@ div.roundsolid2 {
     }
 
     .input-group input,
-    .custom-row,
-    .css-editor {
+    .custom-row {
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
         background: rgba(255, 255, 255, 0.92);
@@ -1164,8 +863,7 @@ div.roundsolid2 {
     }
 
     .input-group input:focus,
-    .custom-row input:focus,
-    .css-editor:focus {
+    .custom-row input:focus {
         outline: none;
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
@@ -1230,8 +928,7 @@ div.roundsolid2 {
 
     .btn-cancel,
     .btn-save,
-    .mini-btn,
-    .sub-tab {
+    .mini-btn {
         border-radius: var(--radius-sm);
         transition:
             background var(--transition-fast),
@@ -1254,48 +951,6 @@ div.roundsolid2 {
         border-color: var(--color-border-strong);
         color: var(--color-text);
         box-shadow: var(--shadow-sm);
-    }
-
-    .style-manager {
-        border-color: var(--color-border);
-        border-radius: var(--radius-lg);
-        background: rgba(255, 255, 255, 0.78);
-        box-shadow: var(--shadow-sm);
-    }
-
-    .style-sub-tabs {
-        gap: 6px;
-        padding: 8px 8px 0;
-        background: rgba(246, 249, 252, 0.9);
-        border-bottom-color: var(--color-border);
-    }
-
-    .sub-tab {
-        border: 1px solid transparent;
-        border-bottom: 0;
-        background: transparent;
-        color: var(--color-text-soft);
-    }
-
-    .sub-tab:hover {
-        background: var(--color-hover);
-    }
-
-    .sub-tab.active {
-        background: #fff;
-        border-color: var(--color-border);
-        color: var(--color-accent-deep);
-        box-shadow: 0 -6px 16px rgba(23, 36, 52, 0.05);
-    }
-
-    .modified-dot {
-        color: var(--color-warning);
-    }
-
-    .css-editor {
-        font-family: var(--font-code);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
-        box-shadow: inset 0 1px 3px rgba(23, 36, 52, 0.06);
     }
 
     ::-webkit-scrollbar-thumb {

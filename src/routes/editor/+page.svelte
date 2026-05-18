@@ -79,6 +79,31 @@
         word_count: number;
         level?: number;
     }
+    type EpubAsset = {
+        name: string;
+        path: string;
+        category: string;
+        role?: string;
+    };
+    type ImportedFontInfo = {
+        family: string;
+        css_value: string;
+        file_name: string;
+        path: string;
+    };
+    type StyleTemplateInfo = {
+        id: string;
+        name: string;
+        file_name: string;
+        path: string;
+        is_builtin: boolean;
+    };
+    type StyleTemplateContent = {
+        id: string;
+        name: string;
+        main_css: string;
+        is_builtin: boolean;
+    };
     interface CheckItem {
         id: string;
         title: string;
@@ -127,6 +152,8 @@
         wordCountThreshold: 6000,
         clearHistoryOnSave: false,
         defaultEpubStyles: { "main.css": "", "font.css": "" },
+        selectedStyleTemplateId: "builtin",
+        subsetFonts: false,
         uiTheme: "modern" as "modern" | "classic" | "dark",
         wordWrap: true,
         showWhitespace: false,
@@ -285,12 +312,14 @@
 
     // 面板显示状态
     let showSettingsPanel = false;
-    let settingsActiveTab: "display" | "toc" | "history" = "display";
+    let settingsActiveTab: "display" | "fonts" | "styles" | "toc" | "history" = "display";
     let showEpubModal = false;
+    let showStylePanel = false;
     let showCheckPanel = false;
     let showProofPanel = false;
     let showHistoryPanel = false;
     let showRestoreConfirm = false;
+    let showStyleSourceEditor = false;
     let restoreTargetSnapshot: any = null;
     let epubGenerationStatus: "idle" | "generating" | "success" = "idle";
 
@@ -306,7 +335,7 @@
         description: "",
         tags: [] as string[],
         styles: { "main.css": "", "font.css": "" },
-        assets: [] as { name: string, path: string, category: string }[],
+        assets: [] as EpubAsset[],
     };
     let coverPreviewUrl: string | null = null;
     let coverSearchResults: CoverSearchResult[] = [];
@@ -317,6 +346,586 @@
     let customMetadata: { key: string; value: string }[] = [];
     let appSettings = { ...DEFAULT_SETTINGS };
     let historyList: HistoryMeta[] = [];
+    let importedFonts: ImportedFontInfo[] = [];
+    let isImportingFont = false;
+    let renamingFontFileName = "";
+    let deletingFontFileName = "";
+    let fontSettingsMessage = "";
+    let styleTemplates: StyleTemplateInfo[] = [];
+    let isImportingStyleTemplate = false;
+    let isSavingStyleTemplate = false;
+    let styleSettingsMessage = "";
+    let currentStyleTemplateId = "builtin";
+    let currentStyleTemplateName = "内置模板";
+    let selectedStyleTemplateCss = "";
+    let styleSourceDraft = "";
+    let styleTemplateExtraCss = "";
+    let stylePanelBaselineCss = "";
+
+    type CssPropertyOption = { label: string; value: string };
+    type CssPropertyItem = {
+        label: string;
+        name: string;
+        value: string;
+        options?: CssPropertyOption[];
+        color?: boolean;
+        hiddenInBlockEditor?: boolean;
+    };
+    type StyleBlock = {
+        id: string;
+        title: string;
+        selector: string;
+        note: string;
+        accent: string;
+        properties: CssPropertyItem[];
+        hiddenInBlockEditor?: boolean;
+    };
+
+    const BUILTIN_FONT_FAMILY_OPTIONS: CssPropertyOption[] = [
+        { label: "Maintext / 宋体", value: `"Maintext", "DK-SONGTI", "st", "宋体", "zw", sans-serif` },
+        { label: "Title / 黑体", value: `"Title", "黑体", sans-serif` },
+        { label: "系统宋体", value: `"宋体", SimSun, serif` },
+        { label: "系统黑体", value: `"黑体", SimHei, sans-serif` },
+        { label: "系统楷体", value: `"楷体", KaiTi, serif` },
+    ];
+    $: fontFamilyOptions = [
+        ...BUILTIN_FONT_FAMILY_OPTIONS,
+        ...importedFonts.map((font) => ({
+            label: `${font.family} / 已导入`,
+            value: font.css_value,
+        })),
+    ];
+    const LINE_HEIGHT_OPTIONS: CssPropertyOption[] = [
+        { label: "紧凑 130%", value: "130%" },
+        { label: "标准 150%", value: "150%" },
+        { label: "舒展 170%", value: "170%" },
+        { label: "宽松 1.8", value: "1.8" },
+    ];
+    const TEXT_ALIGN_OPTIONS: CssPropertyOption[] = [
+        { label: "两端对齐", value: "justify" },
+        { label: "左对齐", value: "left" },
+        { label: "居中", value: "center" },
+        { label: "右对齐", value: "right" },
+    ];
+    const STYLE_BLOCK_DEFAULTS: StyleBlock[] = [
+        {
+            id: "book-body",
+            title: "正文页面",
+            selector: "body.te-book-body, body.te-chapter-page",
+            note: "全书页面基础样式",
+            accent: "#a6781d",
+            properties: [
+                { label: "字体", name: "font-family", value: `"Maintext", "DK-SONGTI", "st", "宋体", "zw", sans-serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                { label: "行间距", name: "line-height", value: "130%", options: LINE_HEIGHT_OPTIONS },
+                { label: "左侧外边距", name: "margin-left", value: "1%" },
+                { label: "右侧外边距", name: "margin-right", value: "1%" },
+                { label: "水平对齐方式", name: "text-align", value: "justify", options: TEXT_ALIGN_OPTIONS },
+                { label: "颜色", name: "background-color", value: "transparent", color: true },
+            ],
+        },
+        {
+            id: "paragraph",
+            title: "正文段落",
+            selector: "p.te-paragraph",
+            note: "正文段落",
+            accent: "#a6781d",
+            properties: [
+                { label: "字体", name: "font-family", value: `"DK-SONGTI", "st", "宋体", "zw", sans-serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                { label: "行间距", name: "line-height", value: "130%", options: LINE_HEIGHT_OPTIONS },
+                { label: "左侧外边距", name: "margin-left", value: "1%" },
+                { label: "右侧外边距", name: "margin-right", value: "1%" },
+                { label: "水平对齐方式", name: "text-align", value: "justify", options: TEXT_ALIGN_OPTIONS },
+                { label: "首行缩进", name: "text-indent", value: "2em" },
+            ],
+        },
+        {
+            id: "cover",
+            title: "封面",
+            selector: "body.te-cover-page, .te-cover-wrap",
+            note: "封面页容器与封面图区域",
+            accent: "#3d8c8a",
+            properties: [
+                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                { label: "上边距", name: "margin-top", value: "3em" },
+                { label: "下边距", name: "margin-bottom", value: "1em" },
+            ],
+        },
+        {
+            id: "cover-image",
+            title: "封面图",
+            selector: ".te-cover-image",
+            note: "封面图片",
+            accent: "#3d8c8a",
+            hiddenInBlockEditor: true,
+            properties: [
+                { label: "宽度", name: "width", value: "40%" },
+                { label: "阴影", name: "box-shadow", value: "3px 3px 3px #535353" },
+                { label: "下边距", name: "margin-bottom", value: "0.5em" },
+            ],
+        },
+        {
+            id: "production-note",
+            title: "制作说明",
+            selector: ".te-production-card",
+            note: "制作说明页主卡片",
+            accent: "#8d6c42",
+            properties: [
+                { label: "外边距", name: "margin", value: "10% 7.25% 2.75% 7.25%" },
+                { label: "内边距", name: "padding", value: "5.25%" },
+                { label: "边框", name: "border", value: "1.5px solid #6C322D" },
+                { label: "圆角", name: "border-radius", value: "5px" },
+                { label: "颜色", name: "background-color", value: "rgba(255, 255, 255, 0.7)", color: true },
+                { label: "背景图", name: "background", value: "url(../Images/production-card-bg.jpg) no-repeat top left", hiddenInBlockEditor: true },
+                { label: "背景尺寸", name: "background-size", value: "35% auto", hiddenInBlockEditor: true },
+            ],
+        },
+        {
+            id: "intro",
+            title: "内容简介",
+            selector: "body.te-intro-page",
+            note: "内容简介/简介页面",
+            accent: "#3e7dbb",
+            properties: [
+                { label: "颜色", name: "background-color", value: "transparent", color: true },
+                { label: "颜色", name: "border-color", value: "rgba(83, 83, 83, 0.5)", color: true },
+                { label: "边框宽度", name: "border-width", value: "0.4em" },
+            ],
+        },
+        {
+            id: "intro-title",
+            title: "简介标题",
+            selector: ".te-intro-title",
+            note: "内容简介标题",
+            accent: "#3e7dbb",
+            properties: [
+                { label: "字体", name: "font-family", value: `"哥特宋"`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                { label: "字号", name: "font-size", value: "125%" },
+                { label: "颜色", name: "color", value: "#00008B", color: true },
+                { label: "水平对齐方式", name: "text-align", value: "left", options: TEXT_ALIGN_OPTIONS },
+                { label: "外边距", name: "margin", value: "0.3em 0 0.5em 0" },
+                { label: "缩进", name: "text-indent", value: "0" },
+            ],
+        },
+        {
+            id: "volume-title",
+            title: "卷序",
+            selector: ".te-volume-title",
+            note: "卷序",
+            accent: "#cc5f8c",
+            properties: [
+                { label: "字体", name: "font-family", value: `"哥特宋", serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                { label: "字号", name: "font-size", value: "1.2em" },
+                { label: "颜色", name: "color", value: "#59bde6", color: true },
+                { label: "字重", name: "font-weight", value: "600" },
+                { label: "外边距", name: "margin", value: "2em 0 1em 0" },
+                { label: "缩进", name: "text-indent", value: "0em" },
+                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                { label: "行间距", name: "line-height", value: "130%", options: LINE_HEIGHT_OPTIONS },
+            ],
+        },
+        {
+            id: "volume-subtitle",
+            title: "卷名",
+            selector: ".te-volume-subtitle",
+            note: "卷名",
+            accent: "#cc5f8c",
+            properties: [
+                { label: "字体", name: "font-family", value: `"哥特宋", serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                { label: "字号", name: "font-size", value: "1.2em" },
+                { label: "颜色", name: "color", value: "#59bde6", color: true },
+                { label: "外边距", name: "margin", value: "0em 0em 1em 0em" },
+                { label: "缩进", name: "text-indent", value: "0em" },
+                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                { label: "行间距", name: "line-height", value: "110%", options: LINE_HEIGHT_OPTIONS },
+            ],
+        },
+        {
+            id: "volume-head-image",
+            title: "卷头图",
+            selector: ".te-volume-head-image",
+            note: "定义后高级选项会出现卷头图图片槽",
+            accent: "#cc5f8c",
+            hiddenInBlockEditor: true,
+            properties: [
+                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                { label: "外边距", name: "margin", value: "0.5em" },
+                { label: "缩进", name: "text-indent", value: "0" },
+            ],
+        },
+        {
+            id: "volume-head-img",
+            title: "卷头图片",
+            selector: ".te-volume-head-img",
+            note: "卷页顶部图片本体",
+            accent: "#cc5f8c",
+            hiddenInBlockEditor: true,
+            properties: [
+                { label: "宽度", name: "width", value: "70%" },
+                { label: "最大宽度", name: "max-width", value: "100%" },
+                { label: "显示", name: "display", value: "inline-block" },
+            ],
+        },
+        {
+            id: "chapter-title",
+            title: "章节标题",
+            selector: ".te-chapter-title",
+            note: "章节序号与标题容器",
+            accent: "#5c7fbf",
+            properties: [
+                { label: "字体", name: "font-family", value: `"黑体", sans-serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                { label: "字号", name: "font-size", value: "1.2em" },
+                { label: "颜色", name: "color", value: "#c2181e", color: true },
+                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                { label: "字重", name: "font-weight", value: "900" },
+                { label: "外边距", name: "margin", value: "2em 0 3em 0" },
+            ],
+        },
+        {
+            id: "chapter-number",
+            title: "章节序号",
+            selector: ".te-chapter-number",
+            note: "章节序号徽标",
+            accent: "#d48035",
+            properties: [
+                { label: "字体", name: "font-family", value: `"黑体", sans-serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                { label: "字号", name: "font-size", value: "0.8em" },
+                { label: "颜色", name: "color", value: "#413245", color: true },
+                { label: "行间距", name: "line-height", value: "130%", options: LINE_HEIGHT_OPTIONS },
+                { label: "字重", name: "font-weight", value: "900" },
+                { label: "内边距", name: "padding", value: "0" },
+            ],
+        },
+        {
+            id: "chapter-head-image",
+            title: "章节头图",
+            selector: ".te-chapter-head-image",
+            note: "章节页顶部图片容器",
+            accent: "#5c7fbf",
+            hiddenInBlockEditor: true,
+            properties: [
+                { label: "水平对齐方式", name: "text-align", value: "left", options: TEXT_ALIGN_OPTIONS },
+                { label: "外边距", name: "margin", value: "0" },
+                { label: "缩进", name: "text-indent", value: "0em" },
+                { label: "出血", name: "duokan-bleed", value: "lefttopright" },
+            ],
+        },
+        {
+            id: "chapter-head-img",
+            title: "章节头图片",
+            selector: ".te-chapter-head-img",
+            note: "章节页顶部图片本体",
+            accent: "#5c7fbf",
+            hiddenInBlockEditor: true,
+            properties: [
+                { label: "宽度", name: "width", value: "100%" },
+            ],
+        },
+        {
+            id: "divider",
+            title: "分割线/分割图",
+            selector: "p.te-divider-line, .te-divider-image",
+            note: "章节内分割线与分割图容器",
+            accent: "#6a7c5b",
+            properties: [
+                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                { label: "缩进", name: "text-indent", value: "0" },
+                { label: "外边距", name: "margin", value: "1em 0" },
+                { label: "内边距", name: "padding", value: "0" },
+                { label: "行高", name: "line-height", value: "130%" },
+            ],
+        },
+        {
+            id: "divider-image",
+            title: "分割图片",
+            selector: ".te-divider-img",
+            note: "孤立省略号替换成分割图时使用",
+            accent: "#6a7c5b",
+            hiddenInBlockEditor: true,
+            properties: [
+                { label: "宽度", name: "width", value: "200px" },
+                { label: "最大宽度", name: "max-width", value: "100%" },
+                { label: "边框", name: "border", value: "none" },
+                { label: "垂直对齐", name: "vertical-align", value: "middle" },
+            ],
+        },
+    ];
+    let styleBlocks: StyleBlock[] = cloneStyleBlocks(STYLE_BLOCK_DEFAULTS);
+
+    const STYLE_TEMPLATE_BUILTIN_ID = "builtin";
+    const STYLE_TEMPLATE_HEADER = `@charset "utf-8";
+
+@import url("font.css");
+
+/* TEpub template schema: 1 */
+/* @tepub-asset-slot productionCardBg type="image" label="制作说明背景图" placement="manual" selector=".te-production-card" */
+/* @tepub-asset-slot volumeHead type="image" label="卷头图" placement="volume-before-title" selector=".te-volume-head-image .te-volume-head-img" */
+/* @tepub-asset-slot chapterHead type="image" label="章节头图" placement="chapter-before-title" selector=".te-chapter-head-image .te-chapter-head-img" */
+/* @tepub-asset-slot dividerImage type="image" label="分割图" placement="replace-ellipsis" selector=".te-divider-image .te-divider-img" */
+/* Standard classes: te-cover-wrap te-cover-image te-production-card te-production-title te-production-text te-production-note te-production-logo te-production-logo-img te-intro-page te-intro-title te-intro-heading te-volume-page te-volume-title te-volume-subtitle te-volume-head-image te-volume-head-img te-chapter-page te-chapter-title te-chapter-number te-chapter-name te-chapter-head-image te-chapter-head-img te-paragraph te-divider-line te-divider-image te-divider-img */`;
+
+    function cloneStyleBlocks(blocks: StyleBlock[]) {
+        return blocks.map((block) => ({
+            ...block,
+            properties: block.properties.map((prop) => ({
+                ...prop,
+                options: prop.options ? [...prop.options] : undefined,
+            })),
+        }));
+    }
+
+    function escapeRegExp(value: string) {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function channelToHex(value: number) {
+        return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+    }
+
+    function rgbToHex(r: number, g: number, b: number) {
+        return `#${channelToHex(r)}${channelToHex(g)}${channelToHex(b)}`;
+    }
+
+    function hexToRgb(hex: string) {
+        const normalized = hex.trim().replace("#", "");
+        if (/^[0-9a-f]{3}$/i.test(normalized)) {
+            return {
+                r: parseInt(normalized[0] + normalized[0], 16),
+                g: parseInt(normalized[1] + normalized[1], 16),
+                b: parseInt(normalized[2] + normalized[2], 16),
+            };
+        }
+        if (/^[0-9a-f]{6}$/i.test(normalized)) {
+            return {
+                r: parseInt(normalized.slice(0, 2), 16),
+                g: parseInt(normalized.slice(2, 4), 16),
+                b: parseInt(normalized.slice(4, 6), 16),
+            };
+        }
+        return { r: 0, g: 0, b: 0 };
+    }
+
+    function parseCssColorValue(value: string) {
+        const raw = value.trim();
+        if (!raw || raw.toLowerCase() === "transparent") {
+            return { hex: "#00000000", swatch: "#000000" };
+        }
+        const hexMatch = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+        if (hexMatch) {
+            const normalized = raw.length === 4
+                ? `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`
+                : raw.toUpperCase();
+            const rgb = hexToRgb(normalized);
+            return { hex: normalized, swatch: rgbToHex(rgb.r, rgb.g, rgb.b) };
+        }
+        const hexAlphaMatch = raw.match(/^#([0-9a-f]{8})$/i);
+        if (hexAlphaMatch) {
+            const normalized = raw.toUpperCase();
+            return { hex: normalized, swatch: normalized.slice(0, 7) };
+        }
+        const rgbaMatch = raw.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([0-9.]+))?\s*\)$/i);
+        if (rgbaMatch) {
+            const alpha = rgbaMatch[4] === undefined ? 255 : Math.max(0, Math.min(255, Math.round(Number(rgbaMatch[4]) * 255)));
+            const baseHex = rgbToHex(Number(rgbaMatch[1]), Number(rgbaMatch[2]), Number(rgbaMatch[3]));
+            return {
+                hex: alpha >= 255 ? baseHex : `${baseHex}${channelToHex(alpha).toUpperCase()}`,
+                swatch: baseHex,
+            };
+        }
+        return { hex: "#000000", swatch: "#000000" };
+    }
+
+    function normalizeHexColorInput(value: string) {
+        const raw = value.trim().toUpperCase();
+        if (/^#([0-9A-F]{6}|[0-9A-F]{8})$/.test(raw)) {
+            return raw;
+        }
+        if (/^#([0-9A-F]{3}|[0-9A-F]{4})$/.test(raw)) {
+            const chars = raw.slice(1).split("");
+            return `#${chars.map((item) => item + item).join("")}`;
+        }
+        return null;
+    }
+
+    function buildCssColorValue(hex: string) {
+        const normalized = normalizeHexColorInput(hex);
+        if (!normalized) return hex;
+        if (normalized.length === 9) {
+            const alphaHex = normalized.slice(7, 9);
+            if (alphaHex === "00") return "transparent";
+            if (alphaHex === "FF") return normalized.slice(0, 7);
+            const { r, g, b } = hexToRgb(normalized.slice(0, 7));
+            const alpha = parseInt(alphaHex, 16) / 255;
+            return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")})`;
+        }
+        return normalized;
+    }
+
+    function updateToolbarColorValue(blockId: string, propName: string, value: string) {
+        const blockIndex = styleBlocks.findIndex((item) => item.id === blockId);
+        const propIndex = styleBlocks.find((item) => item.id === blockId)?.properties.findIndex((item) => item.name === propName) ?? -1;
+        if (blockIndex < 0 || propIndex < 0) return;
+        const normalized = normalizeHexColorInput(value);
+        if (!normalized) {
+            updateToolbarStyleBlock(blockIndex, propIndex, value);
+            return;
+        }
+        updateToolbarStyleBlock(blockIndex, propIndex, buildCssColorValue(normalized));
+    }
+
+    $: visibleStyleBlocks = styleBlocks
+        .filter((block) => !block.hiddenInBlockEditor)
+        .map((block) => ({
+            ...block,
+            properties: block.properties.filter((prop) => !prop.hiddenInBlockEditor),
+        }));
+
+    function buildStyleBlocksCss(blocks = styleBlocks) {
+        return blocks
+            .map((block) => {
+                const declarations = block.properties
+                    .filter((prop) => prop.value.trim())
+                    .map((prop) => `    ${prop.name}: ${prop.value.trim()};`)
+                    .join("\n");
+                return declarations ? `/* [tepub-block:${block.id}] ${block.title} */\n${block.selector} {\n${declarations}\n}` : "";
+            })
+            .filter(Boolean)
+            .join("\n\n");
+    }
+
+    function buildStyleTemplateCss(blocks = styleBlocks, extraCss = styleTemplateExtraCss) {
+        const blockCss = buildStyleBlocksCss(blocks);
+        const tail = extraCss.trim();
+        return `${STYLE_TEMPLATE_HEADER}\n\n${blockCss}${tail ? `\n\n${tail}\n` : "\n"}`;
+    }
+
+    function getBuiltinStyleTemplateCss() {
+        return buildStyleTemplateCss(cloneStyleBlocks(STYLE_BLOCK_DEFAULTS), "");
+    }
+
+    function extractRuleDeclarations(css: string, selector: string) {
+        const match = css.match(new RegExp(`${escapeRegExp(selector)}\\s*\\{([\\s\\S]*?)\\}`, "m"));
+        if (!match) return null;
+        const declarations = new Map<string, string>();
+        for (const declaration of match[1].matchAll(/([-\w]+)\s*:\s*([^;]+);/g)) {
+            declarations.set(declaration[1].trim(), declaration[2].trim());
+        }
+        return declarations;
+    }
+
+    function parseStyleTemplateCss(css: string) {
+        const blocks = cloneStyleBlocks(STYLE_BLOCK_DEFAULTS).map((block) => {
+            const declarations = extractRuleDeclarations(css, block.selector);
+            if (!declarations) return block;
+            return {
+                ...block,
+                properties: block.properties.map((prop) => ({
+                    ...prop,
+                    value: declarations.get(prop.name) ?? prop.value,
+                })),
+            };
+        });
+
+        let extraCss = css;
+        extraCss = extraCss.replace(/@charset\s+"utf-8";\s*/i, "");
+        extraCss = extraCss.replace(/@import\s+url\("font\.css"\);\s*/i, "");
+        extraCss = extraCss.replace(/\/\*\s*TEpub template schema:\s*1\s*\*\/\s*/gi, "");
+        extraCss = extraCss.replace(/\/\*\s*@tepub-asset-slot[\s\S]*?\*\/\s*/gi, "");
+        extraCss = extraCss.replace(/\/\*\s*Standard classes:[\s\S]*?\*\/\s*/gi, "");
+        extraCss = extraCss.replace(/\/\*\s*\[tepub-block:[\s\S]*?\*\/\s*/gi, "");
+        for (const block of STYLE_BLOCK_DEFAULTS) {
+            extraCss = extraCss.replace(
+                new RegExp(`${escapeRegExp(block.selector)}\\s*\\{[\\s\\S]*?\\}\\s*`, "g"),
+                "",
+            );
+        }
+
+        return {
+            blocks,
+            extraCss: extraCss.trim(),
+        };
+    }
+
+    function applyResolvedStyleTemplateCss(mainCss: string) {
+        const effectiveCss = mainCss.trim() || getBuiltinStyleTemplateCss();
+        const { blocks, extraCss } = parseStyleTemplateCss(effectiveCss);
+        styleBlocks = blocks;
+        styleTemplateExtraCss = extraCss;
+        epubMeta.styles["main.css"] = effectiveCss;
+        syncManagedFontAssets(blocks);
+        epubMeta.styles = { ...epubMeta.styles };
+    }
+
+    function captureStylePanelBaseline() {
+        stylePanelBaselineCss = epubMeta.styles["main.css"] || getBuiltinStyleTemplateCss();
+    }
+
+    function collectUsedImportedFonts(blocks = styleBlocks) {
+        const used = new Map<string, ImportedFontInfo>();
+        for (const block of blocks) {
+            for (const prop of block.properties) {
+                if (prop.name !== "font-family") continue;
+                const matched = importedFonts.find((font) => font.css_value === prop.value.trim());
+                if (matched) {
+                    used.set(matched.family, matched);
+                }
+            }
+        }
+        return [...used.values()];
+    }
+
+    function buildManagedFontCss(usedFonts: ImportedFontInfo[]) {
+        if (!usedFonts.length) return "";
+        return usedFonts
+            .map((font) => {
+                const ext = font.file_name.split(".").pop()?.toLowerCase() || "ttf";
+                const formatMap: Record<string, string> = {
+                    ttf: "truetype",
+                    otf: "opentype",
+                    woff: "woff",
+                    woff2: "woff2",
+                };
+                return `/* 外部导入字体：${font.family} */\n@font-face {\n    font-family: "${font.family}";\n    src: url("../Fonts/${font.file_name}") format("${formatMap[ext] || ext}");\n}`;
+            })
+            .join("\n\n");
+    }
+
+    function syncManagedFontAssets(blocks = styleBlocks) {
+        const usedFonts = collectUsedImportedFonts(blocks);
+        const managedAssets = usedFonts.map((font) => ({
+            name: font.file_name,
+            path: font.path,
+            category: "fonts",
+            role: `managed-font:${font.family}`,
+        }));
+        epubMeta.assets = [
+            ...epubMeta.assets.filter((asset) => !(asset.category === "fonts" && asset.role?.startsWith("managed-font:"))),
+            ...managedAssets,
+        ];
+        epubMeta.styles["font.css"] = buildManagedFontCss(usedFonts);
+    }
+
+    function syncToolbarStyleToEpubMeta() {
+        epubMeta.styles["main.css"] = buildStyleTemplateCss();
+        syncManagedFontAssets();
+        epubMeta.styles = { ...epubMeta.styles };
+    }
+
+    function updateToolbarStyleBlock(blockIndex: number, propIndex: number, value: string) {
+        if (blockIndex < 0 || propIndex < 0) return;
+        styleBlocks = styleBlocks.map((block, i) => {
+            if (i !== blockIndex) return block;
+            return {
+                ...block,
+                properties: block.properties.map((prop, j) => j === propIndex ? { ...prop, value } : prop),
+            };
+        });
+        syncToolbarStyleToEpubMeta();
+    }
+
+    function resetToolbarStyleBlocks() {
+        applyResolvedStyleTemplateCss(stylePanelBaselineCss);
+        styleSourceDraft = stylePanelBaselineCss;
+    }
 
     function getVolumeCollapseKey(node: Pick<TocNode, "line_number" | "title">) {
         return `${node.line_number}:${node.title}`;
@@ -604,7 +1213,197 @@
         });
     }
 
-    function saveEditorSettings() {
+    async function loadImportedFonts() {
+        try {
+            importedFonts = await invoke<ImportedFontInfo[]>("list_library_fonts");
+            syncManagedFontAssets();
+            epubMeta = { ...epubMeta };
+        } catch (error) {
+            console.error("加载外部字体失败:", error);
+            importedFonts = [];
+            fontSettingsMessage = "读取字体目录失败";
+        }
+    }
+
+    async function openSettingsFontsTab() {
+        settingsActiveTab = "fonts";
+        fontSettingsMessage = "";
+        await loadImportedFonts();
+    }
+
+    async function loadStyleTemplates() {
+        try {
+            styleTemplates = await invoke<StyleTemplateInfo[]>("list_style_templates");
+        } catch (error) {
+            console.error("加载样式模板失败:", error);
+            styleTemplates = [{ id: STYLE_TEMPLATE_BUILTIN_ID, name: "内置模板", file_name: "builtin.css", path: "", is_builtin: true }];
+            styleSettingsMessage = "读取样式模板失败";
+        }
+    }
+
+    async function readStyleTemplateCss(templateId: string) {
+        const template = await invoke<StyleTemplateContent>("read_style_template", { id: templateId });
+        return template.main_css.trim() || (templateId === STYLE_TEMPLATE_BUILTIN_ID ? getBuiltinStyleTemplateCss() : "");
+    }
+
+    async function applySelectedStyleTemplate(templateId = appSettings.selectedStyleTemplateId || STYLE_TEMPLATE_BUILTIN_ID) {
+        currentStyleTemplateId = templateId;
+        const selectedTemplate = styleTemplates.find((item) => item.id === templateId);
+        currentStyleTemplateName = selectedTemplate?.name || "当前模板";
+        selectedStyleTemplateCss = await readStyleTemplateCss(templateId);
+        applyResolvedStyleTemplateCss(selectedStyleTemplateCss);
+        styleSourceDraft = epubMeta.styles["main.css"];
+    }
+
+    async function openSettingsStylesTab() {
+        settingsActiveTab = "styles";
+        styleSettingsMessage = "";
+        await loadStyleTemplates();
+    }
+
+    async function importExternalFont() {
+        if (isImportingFont) return;
+        const selection = await open({
+            multiple: false,
+            filters: [{ name: "Font", extensions: ["ttf", "otf", "woff", "woff2"] }],
+        });
+        if (!selection) return;
+
+        isImportingFont = true;
+        fontSettingsMessage = "正在导入字体...";
+        try {
+            const imported = await invoke<ImportedFontInfo>("import_library_font", {
+                path: extractPickedPath(selection as string | string[]),
+            });
+            await loadImportedFonts();
+            syncManagedFontAssets();
+            epubMeta = { ...epubMeta };
+            fontSettingsMessage = `已导入字体：${imported.family}`;
+        } catch (error) {
+            console.error("导入字体失败:", error);
+            fontSettingsMessage = `导入失败：${error}`;
+        } finally {
+            isImportingFont = false;
+        }
+    }
+
+    async function renameImportedFont(font: ImportedFontInfo) {
+        const nextFamily = window.prompt("输入新的字体显示名", font.family)?.trim();
+        if (!nextFamily || nextFamily === font.family) return;
+
+        renamingFontFileName = font.file_name;
+        fontSettingsMessage = "正在重命名字体...";
+        try {
+            await invoke<ImportedFontInfo>("rename_library_font", {
+                fileName: font.file_name,
+                family: nextFamily,
+            });
+            await loadImportedFonts();
+            syncManagedFontAssets();
+            epubMeta = { ...epubMeta };
+            fontSettingsMessage = `已重命名为：${nextFamily}`;
+        } catch (error) {
+            console.error("重命名字体失败:", error);
+            fontSettingsMessage = `重命名失败：${error}`;
+        } finally {
+            renamingFontFileName = "";
+        }
+    }
+
+    async function deleteImportedFont(font: ImportedFontInfo) {
+        const confirmed = await ask(`确定删除字体“${font.family}”吗？`, {
+            title: "删除字体",
+            kind: "warning",
+        });
+        if (!confirmed) return;
+
+        deletingFontFileName = font.file_name;
+        fontSettingsMessage = "正在删除字体...";
+        try {
+            await invoke("delete_library_font", {
+                fileName: font.file_name,
+            });
+            await loadImportedFonts();
+            syncManagedFontAssets();
+            epubMeta = { ...epubMeta };
+            fontSettingsMessage = `已删除字体：${font.family}`;
+        } catch (error) {
+            console.error("删除字体失败:", error);
+            fontSettingsMessage = `删除失败：${error}`;
+        } finally {
+            deletingFontFileName = "";
+        }
+    }
+
+    async function importStyleTemplateFile() {
+        if (isImportingStyleTemplate) return;
+        const selection = await open({
+            multiple: false,
+            filters: [{ name: "CSS", extensions: ["css"] }],
+        });
+        if (!selection) return;
+
+        isImportingStyleTemplate = true;
+        styleSettingsMessage = "正在导入样式模板...";
+        try {
+            const imported = await invoke<StyleTemplateInfo>("import_style_template", {
+                path: extractPickedPath(selection as string | string[]),
+            });
+            await loadStyleTemplates();
+            appSettings.selectedStyleTemplateId = imported.id;
+            styleSettingsMessage = `已导入模板：${imported.name}`;
+        } catch (error) {
+            console.error("导入样式模板失败:", error);
+            styleSettingsMessage = `导入失败：${error}`;
+        } finally {
+            isImportingStyleTemplate = false;
+        }
+    }
+
+    async function saveCurrentStyleTemplate() {
+        if (isSavingStyleTemplate) return;
+        isSavingStyleTemplate = true;
+        styleSettingsMessage = "正在保存当前模板...";
+        try {
+            if (showStyleSourceEditor) {
+                applyResolvedStyleTemplateCss(styleSourceDraft);
+            } else {
+                syncToolbarStyleToEpubMeta();
+            }
+            const targetId = appSettings.selectedStyleTemplateId || STYLE_TEMPLATE_BUILTIN_ID;
+            await invoke<StyleTemplateInfo>("save_style_template", {
+                id: targetId,
+                mainCss: epubMeta.styles["main.css"],
+            });
+            await loadStyleTemplates();
+            await applySelectedStyleTemplate(targetId);
+            captureStylePanelBaseline();
+            styleSettingsMessage = `已保存到模板：${currentStyleTemplateName}`;
+        } catch (error) {
+            console.error("保存样式模板失败:", error);
+            styleSettingsMessage = `保存失败：${error}`;
+        } finally {
+            isSavingStyleTemplate = false;
+        }
+    }
+
+    async function restoreBuiltinStyleTemplateToDefault() {
+        styleSettingsMessage = "正在恢复内置模板...";
+        try {
+            await invoke("restore_builtin_style_template");
+            await loadStyleTemplates();
+            if ((appSettings.selectedStyleTemplateId || STYLE_TEMPLATE_BUILTIN_ID) === STYLE_TEMPLATE_BUILTIN_ID) {
+                await applySelectedStyleTemplate(STYLE_TEMPLATE_BUILTIN_ID);
+                captureStylePanelBaseline();
+            }
+            styleSettingsMessage = "内置模板已恢复默认样式";
+        } catch (error) {
+            console.error("恢复内置模板失败:", error);
+            styleSettingsMessage = `恢复失败：${error}`;
+        }
+    }
+
+    async function saveEditorSettings() {
         try {
             const vols = appSettings.customRegexRules.filter(r => r.level === 1).map(r => `(${r.pattern})`);
             const chaps = appSettings.customRegexRules.filter(r => r.level >= 2).map(r => `(${r.pattern})`);
@@ -612,10 +1411,14 @@
             appSettings.chapRegex = chaps.length > 0 ? chaps.join("|") : "^$";
         } catch (e) {}
 
+        if (!appSettings.selectedStyleTemplateId) {
+            appSettings.selectedStyleTemplateId = STYLE_TEMPLATE_BUILTIN_ID;
+        }
         localStorage.setItem(
             "app-settings",
             JSON.stringify(appSettings),
         );
+        await applySelectedStyleTemplate(appSettings.selectedStyleTemplateId);
         closeAllPanels();
         scanToc();
     }
@@ -895,8 +1698,30 @@
                         appSettings.customRegexRules =
                             appSettings.customRegexRules.flatMap(normalizeTocRegexRules);
                     }
+                    if (!appSettings.selectedStyleTemplateId) {
+                        appSettings.selectedStyleTemplateId = STYLE_TEMPLATE_BUILTIN_ID;
+                    }
                 } catch (e) {}
             }
+            await loadImportedFonts();
+            await loadStyleTemplates();
+            if (appSettings.defaultEpubStyles?.["main.css"]?.trim()) {
+                try {
+                    const legacyMainCss = appSettings.defaultEpubStyles["main.css"].trim();
+                    const builtinTemplate = await invoke<StyleTemplateContent>("read_style_template", {
+                        id: STYLE_TEMPLATE_BUILTIN_ID,
+                    });
+                    if (builtinTemplate.main_css.trim() === legacyMainCss) {
+                        await invoke("restore_builtin_style_template");
+                        await loadStyleTemplates();
+                    }
+                    appSettings.defaultEpubStyles = { "main.css": "", "font.css": "" };
+                    localStorage.setItem("app-settings", JSON.stringify(appSettings));
+                } catch (e) {
+                    console.warn("清理旧默认样式缓存失败:", e);
+                }
+            }
+            await applySelectedStyleTemplate(appSettings.selectedStyleTemplateId);
 
             // 应用主题设置
             if (!Number.isFinite(Number(appSettings.wordCountMinThreshold))) {
@@ -939,6 +1764,7 @@
                             editorComponent?.resetDoc(fileContent);
                             await scanToc(fileContent);
                             epubMeta = extractMetadata(fileContent, filePath);
+                            refreshEpubMetadata();
                             updateMd5(fileContent);
                             if (state.scrollLine) {
                                 setTimeout(() => editorComponent?.scrollToLine(state.scrollLine), 200);
@@ -1037,7 +1863,7 @@
             description: "",
             tags: [...epubMeta.tags],
             styles: { ...epubMeta.styles },
-            assets: [...epubMeta.assets] as { name: string, path: string, category: string }[],
+            assets: [...epubMeta.assets] as EpubAsset[],
         };
 
         // 默认书名
@@ -1103,10 +1929,8 @@
         if (isModified || isCreatorDefault) epubMeta.creator = fresh.creator;
         if (isModified || !epubMeta.description) epubMeta.description = fresh.description;
         
-        // 加载自定义内置样式 (如果存在)
-        if (appSettings.defaultEpubStyles) {
-            if (!epubMeta.styles["main.css"]) epubMeta.styles["main.css"] = appSettings.defaultEpubStyles["main.css"];
-            if (!epubMeta.styles["font.css"]) epubMeta.styles["font.css"] = appSettings.defaultEpubStyles["font.css"];
+        if (!epubMeta.styles["main.css"]) {
+            epubMeta.styles["main.css"] = selectedStyleTemplateCss || getBuiltinStyleTemplateCss();
         }
 
         // UUID 保持不变除非为空
@@ -1226,7 +2050,6 @@
 
     async function openAdvancedEpubMetadata() {
         try {
-            // 检查窗口是否已存在
             const existing = await WebviewWindow.getByLabel("epub-metadata");
             if (existing) {
                 await existing.setFocus();
@@ -1236,14 +2059,13 @@
             const win = new WebviewWindow("epub-metadata", {
                 url: "/epub-metadata",
                 title: "高级选项",
-                width: 450,
-                height: 480,
+                width: 540,
+                height: 620,
                 resizable: true,
                 decorations: true,
                 center: true,
             });
 
-            // 监听初始化请求
             win.once("metadata-window-ready", async () => {
                 await emit("init-metadata", {
                     meta: {
@@ -1251,37 +2073,27 @@
                         uuid: epubMeta.uuid,
                         md5: epubMeta.md5,
                         styles: { ...epubMeta.styles },
-                        assets: [...epubMeta.assets]
+                        assets: [...epubMeta.assets],
                     },
-                    custom: customMetadata
+                    custom: customMetadata,
                 });
             });
 
-            // 监听更新
             const unlisten = await listen("update-metadata", (event: any) => {
-                const { meta, custom, persistCss } = event.payload;
+                const { meta, custom } = event.payload;
                 epubMeta.publisher = meta.publisher;
                 epubMeta.uuid = meta.uuid;
                 epubMeta.md5 = meta.md5;
-                epubMeta.styles = { ...meta.styles };
+                epubMeta.styles = { ...epubMeta.styles, ...(meta.styles || {}) };
                 epubMeta.assets = [...(meta.assets || [])];
-                customMetadata = [...custom];
-
-                if (persistCss) {
-                    appSettings.defaultEpubStyles = { ...meta.styles };
-                    localStorage.setItem("app-settings", JSON.stringify(appSettings));
-                    console.log("Persisted custom styles to settings");
-                }
-
-                console.log("Updated metadata from window:", event.payload);
+                customMetadata = [...(custom || [])];
             });
 
             win.once("tauri://destroyed", () => {
                 unlisten();
             });
-
         } catch (e) {
-            message("打开高级设置失败: " + e, { kind: "error" });
+            message("打开高级选项失败: " + e, { kind: "error" });
         }
     }
 
@@ -1416,6 +2228,7 @@
                 // 提取元数据
                 epubMeta = extractMetadata(content, path);
                 customMetadata = []; // 重置自定义元数据
+                refreshEpubMetadata();
 
                 editorComponent?.resetDoc(content);
                 isModified = false;
@@ -2160,6 +2973,7 @@
                     tags: epubMeta.tags,
                     main_css: epubMeta.styles["main.css"],
                     font_css: epubMeta.styles["font.css"],
+                    subset_fonts: !!appSettings.subsetFonts,
                     assets: epubMeta.assets,
                     ...Object.fromEntries(customMetadata.map(m => [m.key, m.value]))
                 },
@@ -2239,9 +3053,31 @@
     function closeAllPanels() {
         showSettingsPanel = false;
         showEpubModal = false;
+        showStylePanel = false;
         showCheckPanel = false;
         showProofPanel = false;
         showHistoryPanel = false;
+    }
+
+    function toggleProofPanel() {
+        if (showProofPanel) {
+            showProofPanel = false;
+            return;
+        }
+        closeAllPanels();
+        showProofPanel = true;
+    }
+
+    function toggleStylePanel() {
+        if (showStylePanel) {
+            showStylePanel = false;
+            return;
+        }
+        closeAllPanels();
+        applyResolvedStyleTemplateCss(epubMeta.styles["main.css"] || selectedStyleTemplateCss || getBuiltinStyleTemplateCss());
+        styleSourceDraft = epubMeta.styles["main.css"];
+        captureStylePanelBaseline();
+        showStylePanel = true;
     }
 </script>
 
@@ -2277,10 +3113,7 @@
                 class="btn-secondary proof-tool-btn"
                 title="校对"
                 aria-label="校对"
-                on:click={() => {
-                    closeAllPanels();
-                    showProofPanel = true;
-                }}
+                on:click={toggleProofPanel}
             >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M5 4.5h10.2a2.3 2.3 0 0 1 2.3 2.3v3.45" />
@@ -2292,6 +3125,14 @@
                 </svg>
             </button
             >
+            <button
+                class="btn-secondary style-tool-btn"
+                title="EPUB 样式"
+                aria-label="EPUB 样式"
+                on:click={toggleStylePanel}
+            >
+                Aa
+            </button>
             <button
                 class="btn-secondary"
                 on:click={() => (showSidebar = !showSidebar)}>📖</button
@@ -2333,6 +3174,102 @@
     </header>
 
     <div class="main-body">
+        {#if showStylePanel}
+            <aside class="style-panel">
+                <div class="style-panel-header">
+                    <div>
+                        <div class="style-panel-title">EPUB 样式</div>
+                        <div class="style-panel-subtitle">当前模板：{currentStyleTemplateName}</div>
+                    </div>
+                    <div class="style-panel-actions">
+                        <button class="mini-action" on:click={() => {
+                            if (showStyleSourceEditor) {
+                                applyResolvedStyleTemplateCss(styleSourceDraft);
+                                showStyleSourceEditor = false;
+                            } else {
+                                syncToolbarStyleToEpubMeta();
+                                styleSourceDraft = epubMeta.styles["main.css"];
+                                showStyleSourceEditor = true;
+                            }
+                        }}>{showStyleSourceEditor ? "块编辑" : "编辑"}</button>
+                        <button class="mini-action" on:click={resetToolbarStyleBlocks}>重置</button>
+                        <button class="mini-action primary" disabled={isSavingStyleTemplate} on:click={saveCurrentStyleTemplate}>{isSavingStyleTemplate ? "保存中..." : "保存"}</button>
+                        <button class="mini-action" on:click={() => showStylePanel = false}>关闭</button>
+                    </div>
+                </div>
+                {#if showStyleSourceEditor}
+                    <div class="style-source-editor">
+                        <textarea
+                            spellcheck="false"
+                            bind:value={styleSourceDraft}
+                            on:input={() => {
+                                epubMeta.styles["main.css"] = styleSourceDraft;
+                                epubMeta.styles = { ...epubMeta.styles };
+                            }}
+                        ></textarea>
+                    </div>
+                {:else}
+                    <div class="style-block-list">
+                        {#each visibleStyleBlocks as block}
+                            <section class="style-block-card" style={`--block-accent:${block.accent}`}>
+                                <header class="style-block-head">
+                                    <div>
+                                        <strong>{block.title}</strong>
+                                        <span>{block.note}</span>
+                                    </div>
+                                    <code>
+                                        {#each block.selector.split(",").map((item) => item.trim()).filter(Boolean) as selector}
+                                            <span>{selector}</span>
+                                        {/each}
+                                    </code>
+                                </header>
+                                <div class="style-prop-list">
+                                    {#each block.properties as prop}
+                                        <label class="style-prop-row">
+                                            <span class="prop-title">
+                                                <span class="prop-label">{prop.label}</span>
+                                                <span class="prop-name">{prop.name}</span>
+                                            </span>
+                                            {#if prop.options}
+                                                <select
+                                                    value={prop.value}
+                                                    on:change={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === block.id), styleBlocks.find((item) => item.id === block.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}>
+                                                    {#each (prop.name === "font-family" ? fontFamilyOptions : prop.options) as option}
+                                                        <option value={option.value}>{option.label}</option>
+                                                    {/each}
+                                                </select>
+                                            {:else if prop.color}
+                                                {@const parsedColor = parseCssColorValue(prop.value)}
+                                                <span class="color-value-control">
+                                                    <input
+                                                        class="color-swatch"
+                                                        type="color"
+                                                        value={parsedColor.swatch}
+                                                        title={prop.value}
+                                                        on:input={(event) => updateToolbarColorValue(block.id, prop.name, event.currentTarget.value)}
+                                                    />
+                                                    <input
+                                                        class="color-hex-input"
+                                                        value={parsedColor.hex}
+                                                        placeholder="#RRGGBB / #RRGGBBAA"
+                                                        on:input={(event) => updateToolbarColorValue(block.id, prop.name, event.currentTarget.value)}
+                                                    />
+                                                </span>
+                                            {:else}
+                                                <input
+                                                    value={prop.value}
+                                                    on:input={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === block.id), styleBlocks.find((item) => item.id === block.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}
+                                                />
+                                            {/if}
+                                        </label>
+                                    {/each}
+                                </div>
+                            </section>
+                        {/each}
+                    </div>
+                {/if}
+            </aside>
+        {/if}
         {#if showSidebar && isMobile}
             <div
                 role="presentation"
@@ -2880,6 +3817,8 @@
                     
                     <div class="settings-tabs">
                         <button class="tab-btn {settingsActiveTab === 'display' ? 'active' : ''}" on:click={() => settingsActiveTab = 'display'}>显示</button>
+                        <button class="tab-btn {settingsActiveTab === 'fonts' ? 'active' : ''}" on:click={openSettingsFontsTab}>字体</button>
+                        <button class="tab-btn {settingsActiveTab === 'styles' ? 'active' : ''}" on:click={openSettingsStylesTab}>样式</button>
                         <button class="tab-btn {settingsActiveTab === 'toc' ? 'active' : ''}" on:click={() => settingsActiveTab = 'toc'}>目录</button>
                         <button class="tab-btn {settingsActiveTab === 'history' ? 'active' : ''}" on:click={openSettingsHistoryTab}>历史版本</button>
                     </div>
@@ -2911,6 +3850,93 @@
                             <div class="set-row">
                                 <label for="clh">保存清空撤销:</label>
                                 <input id="clh" type="checkbox" bind:checked={appSettings.clearHistoryOnSave} style="width: auto;"/>
+                            </div>
+                            <div class="set-row">
+                                <label for="subsetFonts">字体子集化:</label>
+                                <input id="subsetFonts" type="checkbox" bind:checked={appSettings.subsetFonts} style="width: auto;"/>
+                            </div>
+                        {:else if settingsActiveTab === 'fonts'}
+                            <div class="font-settings-panel">
+                                <div class="font-settings-head">
+                                    <div>
+                                        <div class="font-settings-title">外部字体</div>
+                                        <div class="font-settings-note">导入后自动复制到当前书库目录下的“字体”文件夹，并可直接在块编辑里选择使用。</div>
+                                    </div>
+                                    <button class="grid-btn blue" disabled={isImportingFont} on:click={importExternalFont}>
+                                        {isImportingFont ? "导入中..." : "导入字体"}
+                                    </button>
+                                </div>
+                                {#if fontSettingsMessage}
+                                    <div class="font-settings-status">{fontSettingsMessage}</div>
+                                {/if}
+                                <div class="font-settings-list">
+                                    {#each importedFonts as font}
+                                        <div class="font-settings-item">
+                                            <div class="font-settings-item-top">
+                                                <div class="font-settings-meta">
+                                                    <strong>{font.family}</strong>
+                                                    <span>{font.file_name}</span>
+                                                </div>
+                                                <div class="font-settings-actions">
+                                                    <button
+                                                        class="mini-action"
+                                                        type="button"
+                                                        disabled={renamingFontFileName === font.file_name || deletingFontFileName === font.file_name}
+                                                        on:click={() => renameImportedFont(font)}
+                                                    >{renamingFontFileName === font.file_name ? "重命名中..." : "重命名"}</button>
+                                                    <button
+                                                        class="mini-action"
+                                                        type="button"
+                                                        disabled={deletingFontFileName === font.file_name || renamingFontFileName === font.file_name}
+                                                        on:click={() => deleteImportedFont(font)}
+                                                    >{deletingFontFileName === font.file_name ? "删除中..." : "删除"}</button>
+                                                </div>
+                                            </div>
+                                            <code>{font.css_value}</code>
+                                        </div>
+                                    {:else}
+                                        <div class="empty-msg">还没有导入外部字体</div>
+                                    {/each}
+                                </div>
+                            </div>
+                        {:else if settingsActiveTab === 'styles'}
+                            <div class="font-settings-panel">
+                                <div class="font-settings-head">
+                                    <div>
+                                        <div class="font-settings-title">样式模板</div>
+                                        <div class="font-settings-note">模板只保存 CSS 文件。这里选择默认模板，样式侧栏保存时会写回当前选中的模板。</div>
+                                    </div>
+                                    <button class="grid-btn blue" disabled={isImportingStyleTemplate} on:click={importStyleTemplateFile}>
+                                        {isImportingStyleTemplate ? "导入中..." : "导入 CSS"}
+                                    </button>
+                                </div>
+                                {#if styleSettingsMessage}
+                                    <div class="font-settings-status">{styleSettingsMessage}</div>
+                                {/if}
+                                <div class="style-template-list">
+                                    {#each styleTemplates as template}
+                                        <label class="style-template-item {appSettings.selectedStyleTemplateId === template.id ? 'active' : ''}">
+                                            <div class="style-template-main">
+                                                <input
+                                                    type="radio"
+                                                    name="editor-style-template"
+                                                    checked={appSettings.selectedStyleTemplateId === template.id}
+                                                    on:change={() => {
+                                                        appSettings.selectedStyleTemplateId = template.id;
+                                                        currentStyleTemplateName = template.name;
+                                                    }}
+                                                />
+                                                <div class="style-template-meta">
+                                                    <strong>{template.name}</strong>
+                                                    <span>{template.is_builtin ? "内置模板（始终置顶）" : template.file_name}</span>
+                                                </div>
+                                            </div>
+                                            {#if template.is_builtin}
+                                                <button class="mini-action" type="button" on:click|stopPropagation={restoreBuiltinStyleTemplateToDefault}>恢复默认样式</button>
+                                            {/if}
+                                        </label>
+                                    {/each}
+                                </div>
                             </div>
                         {:else if settingsActiveTab === 'toc'}
                             <div class="rules-header">正则表达式</div>
@@ -3107,9 +4133,11 @@
                         {/if}
 
                         <div class="epub-modal-footer">
-                            <button class="epub-cancel" on:click={openAdvancedEpubMetadata}>
-                                高级选项
-                            </button>
+                            {#if epubGenerationStatus !== "success"}
+                                <button class="epub-cancel" on:click={openAdvancedEpubMetadata}>
+                                    高级选项
+                                </button>
+                            {/if}
                             {#if epubGenerationStatus === "success"}
                                 <button class="epub-cancel" on:click={openGeneratedEpubInEditor}>
                                     用 EPUB 编辑器打开
@@ -3529,9 +4557,10 @@
     }
 
     .proof-panel {
-        width: 390px;
-        min-width: 340px;
-        max-width: min(440px, 46vw);
+        order: -1;
+        width: 400px;
+        min-width: 360px;
+        max-width: min(440px, 44vw);
         background: #fff;
         border-right: 1px solid #ddd;
         display: flex;
@@ -3555,6 +4584,411 @@
         stroke-width: 1.9;
         stroke-linecap: round;
         stroke-linejoin: round;
+    }
+
+    .style-tool-btn {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 17px;
+        font-weight: 800;
+        color: #8b6718;
+    }
+
+    .style-panel {
+        order: -2;
+        width: 400px;
+        min-width: 360px;
+        max-width: min(440px, 44vw);
+        height: 100%;
+        max-height: 100%;
+        min-height: 0;
+        background: #f6f7fb;
+        border-right: 1px solid #dfe5ec;
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        overflow: hidden;
+        box-shadow: 10px 0 24px rgba(23, 36, 52, 0.06);
+    }
+
+    .style-panel-header {
+        min-height: 58px;
+        padding: 8px 10px;
+        border-bottom: 1px solid #dfe5ec;
+        background: rgba(255, 255, 255, 0.86);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        box-sizing: border-box;
+    }
+
+    .style-panel-title {
+        color: #172434;
+        font-size: 16px;
+        font-weight: 900;
+        line-height: 1.3;
+    }
+
+    .style-panel-subtitle {
+        color: #758294;
+        font-size: 11px;
+        line-height: 1.4;
+        margin-top: 2px;
+    }
+
+    .style-panel-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .mini-action {
+        height: 28px;
+        min-width: 0;
+        padding: 0 9px;
+        border: 1px solid #cfd8e3;
+        border-radius: 6px;
+        background: #fff;
+        color: #526071;
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    .mini-action.primary {
+        border-color: #1677b8;
+        background: #e6f2fb;
+        color: #11679f;
+    }
+
+    .style-block-list {
+        flex: 1;
+        min-height: 0;
+        height: 100%;
+        overflow-y: auto;
+        display: grid;
+        align-content: start;
+        grid-auto-rows: max-content;
+        gap: 16px;
+        padding: 14px 14px 18px;
+    }
+
+    .style-block-card {
+        overflow: hidden;
+        border: 1px solid #e1e6ee;
+        border-radius: 8px;
+        background: rgba(250, 251, 255, 0.9);
+        box-shadow: 0 6px 16px rgba(23, 36, 52, 0.05);
+        min-height: max-content;
+    }
+
+    .style-block-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #e1e6ee;
+        background: rgba(255, 255, 255, 0.76);
+    }
+
+    .style-block-head strong {
+        display: block;
+        color: var(--block-accent);
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 1.05rem;
+        letter-spacing: 0;
+    }
+
+    .style-block-head span {
+        display: block;
+        margin-top: 2px;
+        color: #7b8794;
+        font-size: 11px;
+    }
+
+    .style-block-head code {
+        padding: 5px 8px;
+        border-radius: 10px;
+        background: rgba(166, 120, 29, 0.1);
+        color: var(--block-accent);
+        font-family: Consolas, monospace;
+        font-size: 10px;
+        display: grid;
+        gap: 4px;
+        line-height: 1.45;
+        text-align: right;
+        max-width: 180px;
+    }
+
+    .style-block-head code span {
+        display: block;
+        margin-top: 0;
+        white-space: normal;
+        word-break: break-all;
+    }
+
+    .style-prop-list {
+        display: grid;
+        padding: 10px 16px 16px;
+    }
+
+    .style-prop-row {
+        display: grid;
+        grid-template-columns: minmax(142px, 0.9fr) minmax(130px, 1fr);
+        align-items: center;
+        gap: 14px;
+        min-height: 58px;
+        border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+    }
+
+    .style-prop-row:last-child {
+        border-bottom: 0;
+    }
+
+    .prop-title {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .prop-label {
+        color: #8a94a3;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+
+    .prop-name {
+        color: #151923;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 1.04rem;
+        font-weight: 800;
+        letter-spacing: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1.15;
+    }
+
+    .style-prop-row input,
+    .style-prop-row select {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.78);
+        color: #172434;
+        font: inherit;
+        font-size: 0.82rem;
+        padding: 8px 10px;
+    }
+
+    .style-prop-row input:focus,
+    .style-prop-row select:focus {
+        outline: none;
+        border-color: #1677b8;
+        box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.16);
+        background: #fff;
+    }
+
+    .color-value-control {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        grid-template-areas: "swatch text";
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    .style-prop-row input.color-swatch {
+        grid-area: swatch;
+        width: 28px;
+        height: 28px;
+        padding: 2px;
+        border-color: #d8e1ea;
+        background: #fff;
+        cursor: pointer;
+    }
+
+    .style-prop-row input.color-hex-input {
+        grid-area: text;
+        font-family: Consolas, "SFMono-Regular", monospace;
+        text-transform: uppercase;
+    }
+
+    .style-source-editor {
+        flex: 1;
+        min-height: 0;
+        padding: 14px;
+        display: flex;
+    }
+
+    .font-settings-panel {
+        display: grid;
+        gap: 12px;
+        min-height: 0;
+    }
+
+    .style-template-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .style-template-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 12px;
+        border: 1px solid #e0e6ed;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .style-template-item.active {
+        border-color: #1677b8;
+        box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.1);
+    }
+
+    .style-template-main {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        flex: 1;
+    }
+
+    .style-template-main input[type="radio"] {
+        width: auto;
+        flex-shrink: 0;
+    }
+
+    .style-template-meta {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .style-template-meta strong {
+        font-size: 13px;
+        color: #1b2d3f;
+    }
+
+    .style-template-meta span {
+        font-size: 11px;
+        color: #6d7887;
+        word-break: break-all;
+    }
+
+    .font-settings-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .font-settings-title {
+        font-size: 14px;
+        font-weight: 800;
+        color: #253547;
+    }
+
+    .font-settings-note {
+        margin-top: 4px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #708093;
+    }
+
+    .font-settings-status {
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: #f5f9fc;
+        color: #486277;
+        font-size: 12px;
+        line-height: 1.5;
+    }
+
+    .font-settings-list {
+        display: grid;
+        gap: 8px;
+        max-height: 320px;
+        overflow: auto;
+        padding-right: 2px;
+    }
+
+    .font-settings-item {
+        display: grid;
+        gap: 6px;
+        padding: 10px 12px;
+        border: 1px solid #e0e6ed;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .font-settings-item-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .font-settings-meta {
+        display: grid;
+        gap: 2px;
+    }
+
+    .font-settings-meta strong {
+        font-size: 13px;
+        color: #1b2d3f;
+    }
+
+    .font-settings-meta span {
+        font-size: 11px;
+        color: #7b8794;
+    }
+
+    .font-settings-item code {
+        font-size: 11px;
+        color: #466176;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .font-settings-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .style-source-editor textarea {
+        flex: 1;
+        width: 100%;
+        min-height: 0;
+        resize: none;
+        box-sizing: border-box;
+        border: 1px solid #d6e0eb;
+        border-radius: 8px;
+        background: #fff;
+        color: #172434;
+        font-family: Consolas, "SFMono-Regular", monospace;
+        font-size: 12px;
+        line-height: 1.55;
+        padding: 12px;
+        outline: none;
+        box-shadow: inset 0 1px 3px rgba(23, 36, 52, 0.05);
+    }
+
+    .style-source-editor textarea:focus {
+        border-color: #1677b8;
+        box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.16);
     }
 
     .proof-header {
@@ -4725,7 +6159,7 @@
         padding-top: 10px;
         min-width: 0;
         flex: 0 0 auto;
-        background: #fff;
+        background: transparent;
     }
 
     .epub-modal-footer button {
@@ -5345,10 +6779,11 @@
     }
 
     @media (max-width: 768px) {
-        .proof-panel {
+        .proof-panel,
+        .style-panel {
             position: absolute;
             inset: 0 auto 0 0;
-            width: min(92vw, 390px);
+            width: min(92vw, 400px);
             max-width: 92vw;
             z-index: 80;
         }

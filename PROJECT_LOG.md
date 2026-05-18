@@ -32,6 +32,47 @@ Main areas:
 
 ## Change History
 
+### 2026-05-19 11:05 +08:00
+
+Request: write the current desktop EPUB style/template work into `PROJECT_LOG.md`, bump TEpub-Editor to version `0.6.1`, and push to GitHub to trigger the release Action.
+
+Changes:
+
+- Continued the desktop EPUB styling pipeline in `src-tauri/src/lib.rs` and `src/routes/epub-metadata/+page.svelte`:
+  - normalized the built-in EPUB CSS around the `te-*` standard class interface,
+  - added template/style-library support, GitHub template repository sync/install plumbing, and local style template metadata,
+  - expanded asset-slot handling for volume head images, chapter head images, production-note background images, and divider images,
+  - added divider replacement rules for isolated ellipsis paragraphs and extended the divider flow to introduction content,
+  - added font-library metadata and optional font subsetting support for EPUB export.
+- Refined the desktop TXT-to-EPUB workflow UI in `src/routes/editor/+page.svelte`:
+  - polished the EPUB generation modal footer,
+  - removed the extra white footer background,
+  - hid the `高级选项` action once generation succeeds.
+- Repaired the desktop EPUB editor page in `src/routes/epub-editor/+page.svelte`:
+  - restored visible Chinese labels and loading/search dialog text,
+  - repaired the file-tab close button icon and related UI text rendering,
+  - fixed the broken search/replace section so the page compiles again.
+- Updated release metadata from `0.6.0` to `0.6.1` in:
+  - `package.json`,
+  - `src-tauri/Cargo.toml`,
+  - `src-tauri/Cargo.lock` (project crate entry),
+  - `src-tauri/tauri.conf.json`,
+  - `src/routes/mobile/+page.svelte`.
+- Prepared the release trigger by creating and pushing tag `v0.6.1`.
+
+Verification:
+
+- `cargo check` passed.
+- `pnpm build` passed.
+- `git diff --check` passed.
+- Version fields were rechecked after editing and all app/package version entries report `0.6.1`.
+- Git commit and push to `origin/main` completed.
+- Git tag `v0.6.1` was pushed to `origin`, triggering `.github/workflows/release.yml`.
+
+Caveats:
+
+- `pnpm check` still has pre-existing project-wide errors and warnings outside this release batch, including the known `ReaderTocNode.svelte` interface placement issue and nullable typing issues on the library page.
+
 ### 2026-05-18 14:13 +08:00
 
 Request: bump TEpub-Editor to version `0.6.0`, push the update to GitHub, and trigger the release Action.
