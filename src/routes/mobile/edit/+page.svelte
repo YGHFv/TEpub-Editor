@@ -50,6 +50,12 @@
 
     type ConfirmSheetResult = "confirm" | "secondary" | "cancel";
 
+    interface RenameSheetState {
+        open: boolean;
+        file: FlatFile | null;
+        value: string;
+    }
+
     let fileInputEl: HTMLInputElement | null = null;
     let addFileInputEl: HTMLInputElement | null = null;
     let selectedPath = "";
@@ -65,6 +71,8 @@
     let epubEditorComponent: EpubCodeEditor | null = null;
     let editorDirty = false;
     let previewUrl = "";
+    let fontPreviewFace: FontFace | null = null;
+    let fontPreviewFamily = "";
     let addTargetGroup: FileGroup | null = null;
     let findPattern = "";
     let replacePattern = "";
@@ -76,6 +84,14 @@
     let currentMatch: { from: number; to: number; filePath: string } | null = null;
     let currentMatchIndex = 0;
     let currentMatchCount = 0;
+    let thumbnailUrls = new Map<string, string>();
+    let thumbnailLoading = new Set<string>();
+    let fileActionTarget: FlatFile | null = null;
+    let renameSheet: RenameSheetState = {
+        open: false,
+        file: null,
+        value: "",
+    };
     let confirmSheet: ConfirmSheetState = {
         open: false,
         title: "",
@@ -89,6 +105,7 @@
     const FILE_LAYER_STATE_KEY = "mobile-edit-file-open";
     let confirmResolver: ((result: ConfirmSheetResult) => void) | null = null;
     let restoringFileLayer = false;
+    let thumbnailEpoch = 0;
 
     $: groups = buildGroups(flatFiles);
 
@@ -157,9 +174,59 @@
         return out.sort((a, b) => a.group.localeCompare(b.group) || naturalName(a.name).localeCompare(naturalName(b.name)));
     }
 
-    function refreshFlatFiles(tree: EpubFileNode[]) {
-        flatFiles = flattenFiles(tree);
-        openGroups = new Set(buildGroups(flatFiles).map((group) => group.name));
+    function clearThumbnailUrls() {
+        thumbnailEpoch += 1;
+        for (const url of thumbnailUrls.values()) URL.revokeObjectURL(url);
+        thumbnailUrls = new Map();
+        thumbnailLoading = new Set();
+    }
+
+    async function loadThumbnail(file: FlatFile, epoch = thumbnailEpoch) {
+        if (!selectedPath || !isImageFile(file) || thumbnailUrls.has(file.path) || thumbnailLoading.has(file.path)) return;
+        const loading = new Set(thumbnailLoading);
+        loading.add(file.path);
+        thumbnailLoading = loading;
+        try {
+            const data = await invoke<unknown>("read_epub_file_binary", {
+                epubPath: selectedPath,
+                filePath: file.path,
+            });
+            const bytes = bytesFromInvoke(data);
+            if (!bytes.length) return;
+            const url = URL.createObjectURL(new Blob([bytes], { type: imageMimeFor(file, bytes) }));
+            if (epoch !== thumbnailEpoch) {
+                URL.revokeObjectURL(url);
+                return;
+            }
+            const next = new Map(thumbnailUrls);
+            next.set(file.path, url);
+            thumbnailUrls = next;
+        } catch {
+            // thumbnail preview is best-effort
+        } finally {
+            const loadingNext = new Set(thumbnailLoading);
+            loadingNext.delete(file.path);
+            thumbnailLoading = loadingNext;
+        }
+    }
+
+    function preloadThumbnails(files: FlatFile[], epoch = thumbnailEpoch) {
+        for (const file of files) {
+            if (isImageFile(file)) {
+                void loadThumbnail(file, epoch);
+            }
+        }
+    }
+
+    function refreshFlatFiles(tree: EpubFileNode[], preservedOpenGroups?: Set<string>) {
+        const nextFlatFiles = flattenFiles(tree);
+        const nextGroups = buildGroups(nextFlatFiles);
+        flatFiles = nextFlatFiles;
+        openGroups = preservedOpenGroups
+            ? new Set(nextGroups.map((group) => group.name).filter((name) => preservedOpenGroups.has(name)))
+            : new Set(nextGroups.map((group) => group.name));
+        clearThumbnailUrls();
+        preloadThumbnails(nextFlatFiles, thumbnailEpoch);
     }
 
     function naturalName(name: string) {
@@ -219,6 +286,10 @@
         return !isImageFile(file) && ["html", "css", "xml", "other"].includes(file.file_type);
     }
 
+    function isFontFile(file: FlatFile) {
+        return file.file_type === "font" || /\.(?:ttf|otf|woff2?)$/i.test(file.name) || /\.(?:ttf|otf|woff2?)$/i.test(file.path);
+    }
+
     function isSearchableTextFile(file: FlatFile) {
         return (
             !isImageFile(file) &&
@@ -276,6 +347,21 @@
         previewUrl = "";
     }
 
+    function clearFontPreviewFace() {
+        if (fontPreviewFace) {
+            document.fonts.delete(fontPreviewFace);
+            fontPreviewFace = null;
+        }
+        fontPreviewFamily = "";
+    }
+
+    async function reloadTree(preserve = new Set(openGroups), focusGroup?: string) {
+        if (!selectedPath) return;
+        if (focusGroup) preserve.add(focusGroup);
+        fileTree = await invoke<EpubFileNode[]>("extract_epub", { epubPath: selectedPath });
+        refreshFlatFiles(fileTree, preserve);
+    }
+
     function hasFileLayerState(state?: unknown) {
         const historyState = state === undefined ? (typeof window !== "undefined" ? window.history.state : null) : state;
         return Boolean(historyState && typeof historyState === "object" && FILE_LAYER_STATE_KEY in (historyState as Record<string, unknown>));
@@ -327,6 +413,32 @@
         resolver?.(result);
     }
 
+    function closeFileActions() {
+        fileActionTarget = null;
+    }
+
+    function openFileActions(file: FlatFile, event: Event) {
+        event.stopPropagation();
+        fileActionTarget = file;
+    }
+
+    function openRenameSheet(file: FlatFile) {
+        fileActionTarget = null;
+        renameSheet = {
+            open: true,
+            file,
+            value: file.name,
+        };
+    }
+
+    function closeRenameSheet() {
+        renameSheet = {
+            open: false,
+            file: null,
+            value: "",
+        };
+    }
+
     function blurInteractiveFocus() {
         const active = document.activeElement;
         if (active instanceof HTMLElement) active.blur();
@@ -344,6 +456,7 @@
         if (!selectedPath) return;
         if (!editingFile) pushFileLayerState();
         clearPreviewUrl();
+        clearFontPreviewFace();
         editingFile = file;
         editingContent = "";
         editorDirty = false;
@@ -364,6 +477,38 @@
             } catch (err) {
                 status = "读取图片失败";
                 await message(`读取图片失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            } finally {
+                busy = false;
+            }
+            return;
+        }
+
+        if (isFontFile(file)) {
+            try {
+                busy = true;
+                const data = await invoke<unknown>("read_epub_file_binary", {
+                    epubPath: selectedPath,
+                    filePath: file.path,
+                });
+                const bytes = bytesFromInvoke(data);
+                if (!bytes.length) throw new Error("字体数据为空");
+                const ext = file.name.split(".").pop()?.toLowerCase();
+                const mime = ext === "otf"
+                    ? "font/otf"
+                    : ext === "woff"
+                      ? "font/woff"
+                      : ext === "woff2"
+                        ? "font/woff2"
+                        : "font/ttf";
+                previewUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+                fontPreviewFamily = `mobile-font-preview-${Date.now()}`;
+                const face = new FontFace(fontPreviewFamily, `url(${previewUrl})`);
+                fontPreviewFace = await face.load();
+                document.fonts.add(fontPreviewFace);
+                status = `正在预览：${file.path}`;
+            } catch (err) {
+                status = "读取字体失败";
+                await message(`读取字体失败：${err}`, { title: "编辑 EPUB", kind: "error" });
             } finally {
                 busy = false;
             }
@@ -451,6 +596,88 @@
             return true;
         }
         return false;
+    }
+
+    async function submitRenameFile() {
+        const file = renameSheet.file;
+        const nextName = renameSheet.value.trim();
+        if (!selectedPath || !file) return;
+        if (!nextName) {
+            await message("文件名不能为空。", { title: "重命名文件", kind: "warning" });
+            return;
+        }
+        if (/[\\/]/.test(nextName)) {
+            await message("文件名不能包含斜杠。", { title: "重命名文件", kind: "warning" });
+            return;
+        }
+        if (nextName === file.name) {
+            closeRenameSheet();
+            return;
+        }
+
+        const newPath = file.groupPath ? `${file.groupPath}/${nextName}` : nextName;
+        try {
+            busy = true;
+            if (editingFile?.path === file.path && editorDirty && !isImageFile(editingFile)) {
+                await saveEditingFile();
+            }
+            await invoke("rename_epub_file", {
+                epubPath: selectedPath,
+                oldPath: file.path,
+                newPath,
+            });
+
+            if (editingFile?.path === file.path) {
+                editingFile = { ...editingFile, name: nextName, path: newPath };
+            }
+            if (currentMatch?.filePath === file.path) {
+                currentMatch = { ...currentMatch, filePath: newPath };
+            }
+            status = `已重命名：${file.name} → ${nextName}`;
+            closeRenameSheet();
+            await reloadTree(new Set(openGroups), file.group);
+        } catch (err) {
+            await message(`重命名失败：${err}`, { title: "重命名文件", kind: "error" });
+        } finally {
+            busy = false;
+        }
+    }
+
+    async function requestDeleteFile(file: FlatFile) {
+        fileActionTarget = null;
+        const result = await openConfirmSheet({
+            title: "删除这个文件？",
+            message: `${file.name} 会从当前 EPUB 缓存副本中移除，保存并导出后才会体现在导出文件里。`,
+            confirmLabel: "删除文件",
+            secondaryLabel: "",
+            cancelLabel: "取消",
+            tone: "danger",
+        });
+        if (result !== "confirm" || !selectedPath) return;
+
+        try {
+            busy = true;
+            await invoke("delete_epub_file", {
+                epubPath: selectedPath,
+                filePath: file.path,
+            });
+            if (editingFile?.path === file.path) {
+                resetEditorState();
+            }
+            if (thumbnailUrls.has(file.path)) {
+                const url = thumbnailUrls.get(file.path);
+                if (url) URL.revokeObjectURL(url);
+                const nextThumbs = new Map(thumbnailUrls);
+                nextThumbs.delete(file.path);
+                thumbnailUrls = nextThumbs;
+            }
+            status = `已删除：${file.path}`;
+            await reloadTree(new Set(openGroups), file.group);
+        } catch (err) {
+            await message(`删除文件失败：${err}`, { title: "删除文件", kind: "error" });
+        } finally {
+            busy = false;
+        }
     }
 
     function activeSearchFiles() {
@@ -804,6 +1031,7 @@
 
     function resetEditorState() {
         clearPreviewUrl();
+        clearFontPreviewFace();
         editingFile = null;
         epubEditorComponent = null;
         editingContent = "";
@@ -847,10 +1075,7 @@
                 filePath: targetPath,
                 content: Array.from(bytes),
             });
-            fileTree = await invoke<EpubFileNode[]>("extract_epub", { epubPath: selectedPath });
-            refreshFlatFiles(fileTree);
-            openGroups.add(addTargetGroup.name);
-            openGroups = new Set(openGroups);
+            await reloadTree(new Set(openGroups), addTargetGroup.name);
             status = `已添加：${targetPath}`;
         } catch (err) {
             status = "添加文件失败";
@@ -909,6 +1134,9 @@
         window.addEventListener("popstate", handlePopState);
         return () => {
             window.removeEventListener("popstate", handlePopState);
+            clearPreviewUrl();
+            clearFontPreviewFace();
+            clearThumbnailUrls();
         };
     });
 </script>
@@ -922,7 +1150,11 @@
     <input bind:this={addFileInputEl} class="file-input" type="file" on:change={onAddFileChange} />
 
     <header class="topbar">
-        <button class="back-button" type="button" aria-label="返回" on:click={leaveEditorPage}>‹</button>
+        <button class="back-button" type="button" aria-label="返回" on:click={leaveEditorPage}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15 6L9 12L15 18"></path>
+            </svg>
+        </button>
         <h1>{bookTitle}</h1>
     </header>
 
@@ -941,21 +1173,48 @@
                         <button class="group-title" type="button" on:click={() => toggleGroup(group.name)}>
                             <span>{group.name}</span>
                         </button>
-                        <button class="group-add" type="button" aria-label={`向 ${group.name} 添加文件`} on:click={() => openAddFilePicker(group)}>＋</button>
-                        <button class="group-toggle" type="button" aria-label={openGroups.has(group.name) ? "折叠" : "展开"} on:click={() => toggleGroup(group.name)}>
-                            {openGroups.has(group.name) ? "⌄" : "›"}
-                        </button>
+                        <div class="group-actions">
+                            <button class="group-icon group-add" type="button" aria-label={`向 ${group.name} 添加文件`} on:click={() => openAddFilePicker(group)}>
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 5V19"></path>
+                                    <path d="M5 12H19"></path>
+                                </svg>
+                            </button>
+                            <button class="group-icon group-toggle" type="button" aria-label={openGroups.has(group.name) ? "折叠" : "展开"} on:click={() => toggleGroup(group.name)}>
+                                <svg class:open={openGroups.has(group.name)} viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M9 6L15 12L9 18"></path>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     {#if openGroups.has(group.name)}
                         {#each group.files as file}
-                            <button class="file-row" type="button" on:click={() => openFile(file)}>
-                                <span class={iconClass(file)}>{iconFor(file)}</span>
-                                <span class="file-copy">
-                                    <strong>{fileStem(file.name)}</strong>
-                                    <small>{fileDetail(file)}</small>
-                                </span>
-                                <span class="more">⋮</span>
-                            </button>
+                            <div class="file-row">
+                                <button class="file-open" type="button" on:click={() => openFile(file)}>
+                                    {#if isImageFile(file)}
+                                        <span class="thumb-shell">
+                                            {#if thumbnailUrls.get(file.path)}
+                                                <img class="thumb" src={thumbnailUrls.get(file.path)} alt={file.name} />
+                                            {:else}
+                                                <span class={iconClass(file)}>{iconFor(file)}</span>
+                                            {/if}
+                                        </span>
+                                    {:else}
+                                        <span class={iconClass(file)}>{iconFor(file)}</span>
+                                    {/if}
+                                    <span class="file-copy">
+                                        <strong>{fileStem(file.name)}</strong>
+                                        <small>{fileDetail(file)}</small>
+                                    </span>
+                                </button>
+                                <button class="file-more" type="button" aria-label={`${file.name} 更多操作`} on:click={(event) => openFileActions(file, event)}>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <circle cx="12" cy="5" r="1.75"></circle>
+                                        <circle cx="12" cy="12" r="1.75"></circle>
+                                        <circle cx="12" cy="19" r="1.75"></circle>
+                                    </svg>
+                                </button>
+                            </div>
                         {/each}
                     {/if}
                 </div>
@@ -964,8 +1223,8 @@
 
         {#if editingFile}
             <section class={replacePanelOpen ? "mobile-editor replace-open" : "mobile-editor"}>
-                <div class:image-head={isImageFile(editingFile)} class="editor-head">
-                    {#if !isImageFile(editingFile)}
+                <div class:image-head={isImageFile(editingFile) || isFontFile(editingFile)} class="editor-head">
+                    {#if !isImageFile(editingFile) && !isFontFile(editingFile)}
                         <div>
                             <strong>{editingFile.name}</strong>
                             <small>{editingFile.path}</small>
@@ -1023,6 +1282,14 @@
                         {:else}
                             <span>图片加载中</span>
                         {/if}
+                    </div>
+                {:else if isFontFile(editingFile)}
+                    <div class="font-preview">
+                        <div class="font-preview-card" style:font-family={fontPreviewFamily || "inherit"}>
+                            <p class="font-sample-cn">字体预览 ABC abc 12345</p>
+                            <p class="font-sample-cn">古龙世界里的吃瓜剑客</p>
+                            <p class="font-sample-cn">风起云涌，江湖夜雨十年灯。</p>
+                        </div>
                     </div>
                 {:else}
                     <div class="code-editor-wrap">
@@ -1116,6 +1383,45 @@
             </div>
         </div>
     {/if}
+
+    {#if fileActionTarget}
+        <div class="confirm-sheet-backdrop" role="presentation" on:click={closeFileActions}></div>
+        <div class="action-sheet" role="dialog" aria-modal="true" aria-labelledby="file-actions-title">
+            <div class="confirm-sheet-copy">
+                <strong id="file-actions-title">{fileActionTarget.name}</strong>
+                <p>{fileActionTarget.path}</p>
+            </div>
+            <div class="action-sheet-actions">
+                <button class="sheet-confirm" type="button" on:click={() => fileActionTarget && openRenameSheet(fileActionTarget)}>
+                    重命名
+                </button>
+                <button class="sheet-secondary danger" type="button" on:click={() => fileActionTarget && requestDeleteFile(fileActionTarget)}>
+                    删除文件
+                </button>
+                <button class="sheet-cancel" type="button" on:click={closeFileActions}>
+                    取消
+                </button>
+            </div>
+        </div>
+    {/if}
+
+    {#if renameSheet.open}
+        <div class="confirm-sheet-backdrop" role="presentation" on:click={closeRenameSheet}></div>
+        <div class="rename-sheet" role="dialog" aria-modal="true" aria-labelledby="rename-file-title">
+            <div class="confirm-sheet-copy">
+                <strong id="rename-file-title">重命名文件</strong>
+                <p>{renameSheet.file?.path}</p>
+            </div>
+            <label class="rename-field">
+                <span>文件名</span>
+                <input bind:value={renameSheet.value} autocomplete="off" />
+            </label>
+            <div class="confirm-sheet-actions">
+                <button class="sheet-cancel" type="button" on:click={closeRenameSheet}>取消</button>
+                <button class="sheet-confirm" type="button" on:click={submitRenameFile} disabled={busy}>保存名称</button>
+            </div>
+        </div>
+    {/if}
 </main>
 
 <style>
@@ -1165,8 +1471,17 @@
         border-radius: 8px;
         background: transparent;
         color: inherit;
-        font-size: 28px;
-        line-height: 1;
+        padding: 0;
+    }
+
+    .topbar .back-button svg {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
     }
 
     h1 {
@@ -1224,10 +1539,12 @@
     .replace-panel {
         display: grid;
         gap: 7px;
-        margin: 0;
-        border-top: 1px solid rgba(23, 27, 36, 0.08);
-        background: #fbfbfd;
-        padding: 8px 14px max(36px, calc(env(safe-area-inset-bottom) + 6px));
+        margin: 8px 12px max(12px, calc(env(safe-area-inset-bottom) + 6px));
+        border: 0;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 10px 26px rgba(30, 38, 52, 0.08);
+        padding: 12px 14px;
     }
 
     .replace-title {
@@ -1341,43 +1658,45 @@
     }
 
     .file-list {
-        margin-top: 6px;
+        display: grid;
+        gap: 12px;
+        margin: 10px 12px 0;
+        padding-bottom: 12px;
     }
 
     .group {
-        border-top: 1px solid #dedfe6;
+        overflow: hidden;
+        border: 0;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 10px 24px rgba(29, 36, 49, 0.06);
     }
 
     .group-head {
         width: 100%;
-        height: 38px;
+        min-height: 38px;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 28px 28px;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         box-sizing: border-box;
-        padding: 0 14px;
+        padding: 8px 12px 4px;
         background: transparent;
         color: #8a8d96;
     }
 
-    .group-title,
-    .group-add,
-    .group-toggle {
+    .group-title {
         min-width: 0;
         width: 100%;
-        height: 30px;
+        min-height: 26px;
         display: grid;
-        place-items: center;
+        align-items: center;
         border: 0;
-        border-radius: 0;
+        border-radius: 10px;
         background: transparent;
         color: inherit;
-    }
-
-    .group-title {
-        justify-items: start;
         text-align: left;
+        padding: 0;
     }
 
     .group-title span {
@@ -1385,42 +1704,98 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-family: Georgia, "Times New Roman", serif;
-        font-size: 13px;
-        letter-spacing: 0;
+        font-size: 11px;
+        line-height: 1.1;
+        letter-spacing: 0.04em;
     }
 
-    .group-add,
-    .group-toggle {
+    .group-actions {
+        display: grid;
+        grid-auto-flow: column;
+        gap: 0;
+        align-items: center;
+    }
+
+    .group-icon {
+        width: 24px;
+        height: 24px;
+        min-height: 24px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
         color: #a1a3ab;
-        font-size: 18px;
-        font-weight: 400;
-        line-height: 1;
-        text-align: center;
+        box-shadow: none;
     }
 
-    .group-toggle {
-        font-size: 18px;
+    .group-icon:hover {
+        background: rgba(31, 122, 90, 0.08);
+        color: #6d7685;
+    }
+
+    .group-icon svg,
+    .file-more svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.9;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+
+    .group-toggle svg {
+        transition: transform 0.16s ease;
+    }
+
+    .group-toggle svg.open {
+        transform: rotate(90deg);
     }
 
     .file-row {
         width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 34px;
+        align-items: center;
+        gap: 4px;
+        box-sizing: border-box;
+        border-top: 0;
+        padding: 0 8px 0 12px;
+    }
+
+    .file-row + .file-row {
+        position: relative;
+    }
+
+    .file-row + .file-row::before {
+        content: "";
+        position: absolute;
+        left: 52px;
+        right: 12px;
+        top: 0;
+        height: 1px;
+        background: rgba(31, 39, 55, 0.06);
+    }
+
+    .file-open {
+        width: 100%;
         min-height: 58px;
         display: grid;
-        grid-template-columns: 38px minmax(0, 1fr) 20px;
+        grid-template-columns: 38px minmax(0, 1fr);
         align-items: center;
-        gap: 9px;
-        box-sizing: border-box;
-        padding: 7px 14px 7px 58px;
+        gap: 10px;
         border: 0;
-        border-top: 1px solid #e2e4ea;
         background: transparent;
         color: inherit;
+        padding: 10px 0 10px 30px;
         text-align: left;
     }
 
-    .icon {
+    .icon,
+    .thumb-shell {
         width: 34px;
-        height: 36px;
+        height: 34px;
         display: grid;
         place-items: center;
         border-radius: 7px;
@@ -1453,6 +1828,18 @@
         font-family: Georgia, "Times New Roman", serif;
     }
 
+    .thumb-shell {
+        overflow: hidden;
+        background: #e5edf0;
+    }
+
+    .thumb {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+    }
+
     .file-copy {
         min-width: 0;
         display: grid;
@@ -1477,11 +1864,28 @@
         line-height: 1.3;
     }
 
-    .more {
+    .file-more {
+        width: 30px;
+        height: 30px;
+        min-height: 30px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
         color: #848894;
-        font-size: 22px;
-        line-height: 1;
-        text-align: center;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    .file-more:hover {
+        background: rgba(31, 122, 90, 0.08);
+        color: #5f6673;
+    }
+
+    .file-more svg {
+        fill: currentColor;
+        stroke: none;
     }
 
     .mobile-editor {
@@ -1496,7 +1900,9 @@
         min-height: 100dvh;
         overflow: hidden;
         padding: 0;
-        background: #f2f3f8;
+        background:
+            radial-gradient(circle at top, rgba(255, 255, 255, 0.88), rgba(242, 243, 248, 0.96) 40%),
+            #f2f3f8;
     }
 
     .confirm-sheet-backdrop {
@@ -1524,6 +1930,24 @@
         padding: 16px;
     }
 
+    .action-sheet,
+    .rename-sheet {
+        position: fixed;
+        left: 14px;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        max-width: 420px;
+        margin: 0 auto;
+        z-index: 31;
+        display: grid;
+        gap: 14px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 18px 40px rgba(25, 31, 43, 0.16);
+        padding: 16px;
+    }
+
     .confirm-sheet-copy {
         display: grid;
         gap: 7px;
@@ -1547,13 +1971,20 @@
         gap: 8px;
     }
 
-    .confirm-sheet-actions button {
+    .action-sheet-actions {
+        display: grid;
+        gap: 8px;
+    }
+
+    .confirm-sheet-actions button,
+    .action-sheet-actions button {
         min-height: 38px;
         min-width: 0;
         border: 0;
         border-radius: 10px;
         font-size: 13px;
         font-weight: 900;
+        box-shadow: none;
     }
 
     .sheet-cancel {
@@ -1562,6 +1993,11 @@
     }
 
     .sheet-secondary {
+        background: #f4ecee;
+        color: #9b3d4f;
+    }
+
+    .sheet-secondary.danger {
         background: #f4ecee;
         color: #9b3d4f;
     }
@@ -1575,13 +2011,73 @@
         background: #cf5e50;
     }
 
+    .rename-field {
+        display: grid;
+        gap: 6px;
+    }
+
+    .rename-field span {
+        color: #626a78;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .rename-field input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid rgba(23, 27, 36, 0.12);
+        border-radius: 8px;
+        background: #fff;
+        color: inherit;
+        min-height: 38px;
+        padding: 8px 10px;
+        font: inherit;
+    }
+
+    .font-preview {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+        padding: 8px 12px 16px;
+    }
+
+    .font-preview-card {
+        display: grid;
+        gap: 10px;
+        border: 0;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 12px 28px rgba(29, 36, 49, 0.08);
+        padding: 18px;
+    }
+
+    .font-preview-card p {
+        margin: 0;
+        color: #1a1f29;
+        line-height: 1.45;
+    }
+
+    .font-sample-cn:first-child {
+        font-size: 14px;
+        opacity: 0.82;
+    }
+
+    .font-sample-cn:nth-child(2) {
+        font-size: 28px;
+    }
+
+    .font-sample-cn:last-child {
+        font-size: 18px;
+        opacity: 0.9;
+    }
+
     .editor-head {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 10px;
         align-items: center;
-        padding: max(10px, env(safe-area-inset-top)) 14px 8px;
-        background: #f2f3f8;
+        padding: max(10px, env(safe-area-inset-top)) 12px 8px;
+        background: transparent;
         position: sticky;
         top: 0;
         z-index: 2;
@@ -1674,9 +2170,11 @@
         display: grid;
         place-items: center;
         overflow: auto;
-        border: 1px solid #d6dbe4;
-        border-radius: 8px;
-        background: #eef0f5;
+        margin: 0 12px 12px;
+        border: 0;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: inset 0 0 0 1px rgba(214, 219, 228, 0.6);
         color: #7d8490;
         font-size: 12px;
     }
@@ -1692,12 +2190,14 @@
         width: 100%;
         height: 100%;
         box-sizing: border-box;
+        margin: 0 12px;
         border: 0;
-        border-top: 1px solid #d6dbe4;
-        border-bottom: 1px solid #d6dbe4;
-        border-radius: 0;
+        border-radius: 18px;
         overflow: hidden;
         background: #fff;
+        box-shadow:
+            0 10px 28px rgba(29, 36, 49, 0.08),
+            inset 0 0 0 1px rgba(214, 219, 228, 0.7);
     }
 
     .mobile-editor.replace-open .code-editor-wrap {
