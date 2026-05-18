@@ -1,7 +1,7 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
     import { message } from "@tauri-apps/plugin-dialog";
-    import { buildMobileRoute, cacheBrowserFile } from "$lib/mobileFlow";
+    import { buildMobileRoute, cacheBrowserFileStable } from "$lib/mobileFlow";
 
     interface MobileModule {
         title: string;
@@ -47,6 +47,7 @@
     let decryptInputEl: HTMLInputElement | null = null;
     let editInputEl: HTMLInputElement | null = null;
     let busy = false;
+    let pickToken = 0;
     let status = "点击功能入口后直接选择文件。";
 
     function inputFor(route: string) {
@@ -66,10 +67,13 @@
         input.value = "";
         if (!file) return;
 
+        const token = ++pickToken;
         try {
             busy = true;
             status = `正在导入 ${file.name}...`;
-            const cachedPath = await cacheBrowserFile(file, item.fallbackExt);
+            const cachedPath = await cacheBrowserFileStable(file, item.fallbackExt);
+            if (token !== pickToken) return;
+            busy = false;
             await goto(
                 buildMobileRoute(item.route, {
                     path: cachedPath,
@@ -77,10 +81,11 @@
                 }),
             );
         } catch (err) {
+            if (token !== pickToken) return;
             status = "导入文件失败";
             await message(`导入文件失败：${err}`, { title: item.title, kind: "error" });
         } finally {
-            busy = false;
+            if (token === pickToken) busy = false;
         }
     }
 </script>

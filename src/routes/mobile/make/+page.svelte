@@ -3,7 +3,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { message } from "@tauri-apps/plugin-dialog";
     import {
-        cacheBrowserFile,
+        cacheBrowserFileStable,
         exportEpubPath,
         readMobileSelection,
         safeFileName,
@@ -186,7 +186,7 @@
         if (!file) return;
 
         try {
-            const cachedPath = await cacheBrowserFile(file, "txt");
+            const cachedPath = await cacheBrowserFileStable(file, "txt");
             await loadSource(cachedPath, file.name);
         } catch (err) {
             status = "导入文本失败";
@@ -201,7 +201,7 @@
         if (!file) return;
 
         try {
-            coverPath = await cacheBrowserFile(file, "cover");
+            coverPath = await cacheBrowserFileStable(file, "cover");
             coverName = file.name;
             if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
             coverPreviewUrl = URL.createObjectURL(file);

@@ -3,7 +3,7 @@
     import { goto } from "$app/navigation";
     import { invoke } from "@tauri-apps/api/core";
     import { message } from "@tauri-apps/plugin-dialog";
-    import { buildMobileRoute, cacheBrowserFile, readMobileSelection, selectionName } from "$lib/mobileFlow";
+    import { buildMobileRoute, cacheBrowserFileStable, readMobileSelection, selectionName } from "$lib/mobileFlow";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
 
     interface EpubFileNode {
@@ -152,7 +152,7 @@
         if (!file) return;
 
         try {
-            const cachedPath = await cacheBrowserFile(file, "epub");
+            const cachedPath = await cacheBrowserFileStable(file, "epub");
             await loadEpub(cachedPath, file.name);
         } catch (err) {
             status = "导入 EPUB 失败";

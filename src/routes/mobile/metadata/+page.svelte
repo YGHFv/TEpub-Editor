@@ -5,7 +5,7 @@
     import { message } from "@tauri-apps/plugin-dialog";
     import {
         buildMobileRoute,
-        cacheBrowserFile,
+        cacheBrowserFileStable,
         exportEpubPath,
         safeFileName,
         selectionName,
@@ -145,7 +145,7 @@
         if (!file) return;
 
         try {
-            const cachedPath = await cacheBrowserFile(file, "epub");
+            const cachedPath = await cacheBrowserFileStable(file, "epub");
             await loadMetadata(cachedPath, file.name);
         } catch (err) {
             status = "导入 EPUB 失败";
@@ -254,11 +254,11 @@
     }
 
     onMount(() => {
-        void syncFromQuery(true);
+        void syncFromQuery();
     });
 
     afterNavigate(() => {
-        void syncFromQuery(true);
+        void syncFromQuery();
     });
 </script>
 

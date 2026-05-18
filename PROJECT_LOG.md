@@ -32,6 +32,54 @@ Main areas:
 
 ## Change History
 
+### 2026-05-18 11:52 +08:00
+
+Request: fix the Android/mobile flow where repeatedly selecting files across EPUB editing, returning home, then selecting TXT to make EPUB can get stuck on the mobile home import state after the second selection.
+
+Changes:
+
+- Added `cacheBrowserFileStable` in `src/lib/mobileFlow.ts`:
+  - reads the selected browser `File` once with a timeout,
+  - for files up to 12 MB, writes the cached copy through the existing Rust `mobile_cache_input_file` command to avoid flaky repeated Android WebView file writes,
+  - falls back to the original plugin-fs cache write path if the backend cache write fails or the file is larger.
+- Updated Android/mobile file-selection pages to use the stable cache helper:
+  - `src/routes/mobile/+page.svelte`
+  - `src/routes/mobile/make/+page.svelte`
+  - `src/routes/mobile/metadata/+page.svelte`
+  - `src/routes/mobile/edit/+page.svelte`
+  - `src/routes/mobile/decrypt/+page.svelte`
+- Hardened the mobile home import flow:
+  - added a per-selection token so stale async imports cannot overwrite a newer selection state,
+  - releases the home `busy` state before navigation once the file has been cached, preventing the home page from visually remaining stuck on importing if navigation is slow.
+- Reduced duplicate metadata loading by letting `syncFromQuery()` dedupe the initial `onMount` and `afterNavigate` calls instead of force-loading the same query twice.
+
+Touched files:
+
+- `src/lib/mobileFlow.ts`
+- `src/routes/mobile/+page.svelte`
+- `src/routes/mobile/make/+page.svelte`
+- `src/routes/mobile/metadata/+page.svelte`
+- `src/routes/mobile/edit/+page.svelte`
+- `src/routes/mobile/decrypt/+page.svelte`
+- `PROJECT_LOG.md`
+
+Verification:
+
+- `pnpm build` passed.
+- `git diff --check` passed.
+- `pnpm tauri android build --target aarch64 --apk true --aab false` completed and produced:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release-unsigned.apk`
+- Signed the release APK with the local Android debug keystore and verified APK Signature Scheme v2/v3:
+  - `E:\MTool\Work\TEpub-Editor\src-tauri\gen\android\app\build\outputs\apk\universal\release\TEpub-Editor-android-arm64-release-signed.apk`
+- `adb install -r` succeeded on connected device `4e2d9aa2`.
+- `adb shell am start -n com.tepubeditor.app/.MainActivity` launched successfully.
+- Activity dump confirms `com.tepubeditor.app/.MainActivity` is resumed on device `4e2d9aa2`.
+
+Caveats:
+
+- Android packaging still emits the existing Java source/target 8 deprecation warning, Gradle deprecation notice, bundle identifier warning, and `Unable to strip ... libtepub_editor_lib.so`; the APK still builds, signs, installs, and launches successfully.
+- The fix targets the repeated-file-selection import/cache/navigation race. Manual long-run reproduction across many large files may still depend on Android system file picker responsiveness.
+
 ### 2026-05-18 10:53 +08:00
 
 Request: bump the app version to `0.5.9`, push the update to GitHub, and trigger the release Action.

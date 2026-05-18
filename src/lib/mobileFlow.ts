@@ -72,6 +72,33 @@ export async function cacheBrowserFile(file: File, fallbackExt: string) {
     return cachedPath;
 }
 
+export async function cacheBrowserFileStable(file: File, fallbackExt: string) {
+    const bytes = new Uint8Array(await withTimeout(file.arrayBuffer(), 45000, "read selected file timed out"));
+
+    if (bytes.byteLength <= 12 * 1024 * 1024) {
+        try {
+            return await withTimeout(
+                invoke<string>("mobile_cache_input_file", {
+                    sourceName: file.name,
+                    data: Array.from(bytes),
+                    fallbackExt,
+                }),
+                45000,
+                "cache selected file timed out",
+            );
+        } catch (err) {
+            console.warn("mobile_cache_input_file failed; falling back to plugin-fs cache write", err);
+        }
+    }
+
+    const root = await appDataDir();
+    const dir = await join(root, "mobile-imports");
+    await mkdir(dir, { recursive: true });
+    const cachedPath = await join(dir, `${Date.now()}_${safeFileName(file.name, fallbackExt)}`);
+    await withTimeout(writeFile(cachedPath, bytes), 45000, "write selected file cache timed out");
+    return cachedPath;
+}
+
 export async function offerSystemExport(path: string, fileName: string) {
     try {
         const data = await readFile(path);

@@ -3,7 +3,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { message } from "@tauri-apps/plugin-dialog";
     import {
-        cacheBrowserFile,
+        cacheBrowserFileStable,
         exportEpubPath,
         readMobileSelection,
         safeFileName,
@@ -51,7 +51,7 @@
         if (!file) return;
 
         try {
-            const cachedPath = await cacheBrowserFile(file, "epub");
+            const cachedPath = await cacheBrowserFileStable(file, "epub");
             await processEpub(cachedPath, file.name);
         } catch (err) {
             status = "导入 EPUB 失败";
