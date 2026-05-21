@@ -365,7 +365,7 @@
 
     function createAiProviderFromProofing(config: AiProofingConfig): AiProviderConfig {
         return {
-            id: `provider-${Date.now().toString(36)}`,
+            id: newAiProviderId(),
             name: config.model || "默认 API",
             baseUrl: config.baseUrl,
             apiKey: config.apiKey,
@@ -413,6 +413,24 @@
 
     function proofingConfigForProvider(providerId: string) {
         return providerToProofingConfig(findAiProvider(providerId), aiProofingConfig);
+    }
+
+    function newAiProviderId() {
+        return `provider-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    }
+
+    function createBlankAiProvider(seed: Partial<AiProviderConfig> = {}): AiProviderConfig {
+        return normalizeAiProvider(
+            {
+                id: seed.id || newAiProviderId(),
+                name: seed.name || "新 API",
+                baseUrl: seed.baseUrl || DEFAULT_AI_PROOFING.baseUrl,
+                apiKey: seed.apiKey || "",
+                model: seed.model || DEFAULT_AI_PROOFING.model,
+                temperature: seed.temperature ?? DEFAULT_AI_PROOFING.temperature,
+            },
+            aiProviders.length,
+        );
     }
 
     function isLegacyLooseMetaRegex(pattern: string | undefined) {
@@ -550,7 +568,6 @@
     let showSettingsPanel = false;
     let settingsActiveTab: "display" | "fonts" | "styles" | "toc" | "ai" | "proofLogs" | "history" = "display";
     let showEpubModal = false;
-    let showStylePanel = false;
     let showCheckPanel = false;
     let showProofPanel = false;
     let showHistoryPanel = false;
@@ -890,6 +907,7 @@
         },
     ];
     let styleBlocks: StyleBlock[] = cloneStyleBlocks(STYLE_BLOCK_DEFAULTS);
+    let activeStyleBlockId = STYLE_BLOCK_DEFAULTS.find((block) => !block.hiddenInBlockEditor)?.id || "";
 
     const STYLE_TEMPLATE_BUILTIN_ID = "builtin";
     const STYLE_TEMPLATE_HEADER = `@charset "utf-8";
@@ -1018,6 +1036,10 @@
             ...block,
             properties: block.properties.filter((prop) => !prop.hiddenInBlockEditor),
         }));
+    $: if (visibleStyleBlocks.length > 0 && !visibleStyleBlocks.some((block) => block.id === activeStyleBlockId)) {
+        activeStyleBlockId = visibleStyleBlocks[0].id;
+    }
+    $: activeStyleBlock = visibleStyleBlocks.find((block) => block.id === activeStyleBlockId) || visibleStyleBlocks[0];
 
     function buildStyleBlocksCss(blocks = styleBlocks) {
         return blocks
@@ -1462,6 +1484,7 @@
             if (!txtAiProofingConfig.approvalProviderId || !findAiProvider(txtAiProofingConfig.approvalProviderId)) {
                 txtAiProofingConfig.approvalProviderId = txtAiProofingConfig.providerId;
             }
+            aiProviderDraftId = txtAiProofingConfig.providerId || aiProviders[0]?.id || "";
             aiProofingConfig = providerToProofingConfig(findAiProvider(txtAiProofingConfig.providerId), aiProofingConfig);
             const action = libraryData?.config?.txtEditorCloseAction;
             if (action === "exit" || action === "library") {
@@ -1475,12 +1498,22 @@
                 providerId: aiProviders[0]?.id || "",
                 approvalProviderId: aiProviders[0]?.id || "",
             };
+            aiProviderDraftId = txtAiProofingConfig.providerId;
         }
     }
 
     async function saveSharedAiProofingSettings() {
         aiProofingConfig = normalizeAiProofingConfig(aiProofingConfig);
         aiProviders = aiProviders.map(normalizeAiProvider);
+        if (aiProviders.length === 0) {
+            aiProviders = [createBlankAiProvider({ name: "默认 API" })];
+        }
+        if (!txtAiProofingConfig.providerId || !findAiProvider(txtAiProofingConfig.providerId)) {
+            txtAiProofingConfig.providerId = aiProviders[0]?.id || "";
+        }
+        if (!txtAiProofingConfig.approvalProviderId || !findAiProvider(txtAiProofingConfig.approvalProviderId)) {
+            txtAiProofingConfig.approvalProviderId = txtAiProofingConfig.providerId;
+        }
         const provider = findAiProvider(txtAiProofingConfig.providerId);
         if (provider) {
             aiProofingConfig = providerToProofingConfig(provider, aiProofingConfig);
@@ -1509,6 +1542,43 @@
         settingsActiveTab = "ai";
         aiSettingsMessage = "";
         loadSharedLibrarySettings();
+    }
+
+    function selectedTxtAiProvider() {
+        return findAiProvider(aiProviderDraftId);
+    }
+
+    function updateSelectedTxtAiProvider(field: keyof AiProviderConfig, value: string | number) {
+        const providerId = aiProviderDraftId || aiProviders[0]?.id || "";
+        if (!providerId) return;
+        aiProviders = aiProviders.map((provider) =>
+            provider.id === providerId ? normalizeAiProvider({ ...provider, [field]: value }, 0) : provider,
+        );
+        if (txtAiProofingConfig.providerId === providerId) {
+            aiProofingConfig = providerToProofingConfig(findAiProvider(providerId), aiProofingConfig);
+        }
+    }
+
+    async function addTxtAiProvider() {
+        const provider = createBlankAiProvider({ name: `API ${aiProviders.length + 1}` });
+        aiProviders = [...aiProviders, provider];
+        aiProviderDraftId = provider.id;
+        if (!txtAiProofingConfig.providerId) txtAiProofingConfig.providerId = provider.id;
+        if (!txtAiProofingConfig.approvalProviderId) txtAiProofingConfig.approvalProviderId = provider.id;
+        await saveSharedAiProofingSettings();
+    }
+
+    async function removeTxtAiProvider(providerId: string) {
+        if (aiProviders.length <= 1) {
+            await message("至少保留一个 API 配置", { kind: "warning" });
+            return;
+        }
+        aiProviders = aiProviders.filter((provider) => provider.id !== providerId);
+        const fallbackId = aiProviders[0]?.id || "";
+        if (txtAiProofingConfig.providerId === providerId) txtAiProofingConfig.providerId = fallbackId;
+        if (txtAiProofingConfig.approvalProviderId === providerId) txtAiProofingConfig.approvalProviderId = txtAiProofingConfig.providerId || fallbackId;
+        aiProviderDraftId = fallbackId;
+        await saveSharedAiProofingSettings();
     }
 
     async function openSettingsHistoryTab() {
@@ -1603,6 +1673,9 @@
         settingsActiveTab = "styles";
         styleSettingsMessage = "";
         await loadStyleTemplates();
+        applyResolvedStyleTemplateCss(epubMeta.styles["main.css"] || selectedStyleTemplateCss || getBuiltinStyleTemplateCss());
+        styleSourceDraft = epubMeta.styles["main.css"];
+        captureStylePanelBaseline();
     }
 
     async function importExternalFont() {
@@ -2663,6 +2736,7 @@
     let libraryData: LibraryData | null = null;
     let aiProofingConfig: AiProofingConfig = { ...DEFAULT_AI_PROOFING };
     let aiProviders: AiProviderConfig[] = [];
+    let aiProviderDraftId = "";
     let txtAiProofingConfig: TxtAiProofingConfig = { ...DEFAULT_TXT_AI_PROOFING };
     let aiSettingsMessage = "";
     let isClosingEditorWindow = false;
@@ -4310,7 +4384,6 @@
     function closeAllPanels() {
         showSettingsPanel = false;
         showEpubModal = false;
-        showStylePanel = false;
         showCheckPanel = false;
         showProofPanel = false;
         showHistoryPanel = false;
@@ -4325,17 +4398,6 @@
         showProofPanel = true;
     }
 
-    function toggleStylePanel() {
-        if (showStylePanel) {
-            showStylePanel = false;
-            return;
-        }
-        closeAllPanels();
-        applyResolvedStyleTemplateCss(epubMeta.styles["main.css"] || selectedStyleTemplateCss || getBuiltinStyleTemplateCss());
-        styleSourceDraft = epubMeta.styles["main.css"];
-        captureStylePanelBaseline();
-        showStylePanel = true;
-    }
 </script>
 
 <svelte:head>
@@ -4367,30 +4429,6 @@
                 on:click={() => editorComponent.triggerRedo()}>↪️</button
             >
             <button
-                class="btn-secondary proof-tool-btn"
-                title="校对"
-                aria-label="校对"
-                on:click={toggleProofPanel}
-            >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M5 4.5h10.2a2.3 2.3 0 0 1 2.3 2.3v3.45" />
-                    <path d="M5 8.5h8.5" />
-                    <path d="M5 12.5h6.2" />
-                    <path d="M5 16.5h4.1" />
-                    <path d="m14.2 16.7 2.05 2.05L20.8 14.2" />
-                    <path d="M4.5 3.5h11.2a3.8 3.8 0 0 1 3.8 3.8v2.2" />
-                </svg>
-            </button
-            >
-            <button
-                class="btn-secondary style-tool-btn"
-                title="EPUB 样式"
-                aria-label="EPUB 样式"
-                on:click={toggleStylePanel}
-            >
-                Aa
-            </button>
-            <button
                 class="btn-secondary"
                 on:click={() => (showSidebar = !showSidebar)}>📖</button
             >
@@ -4420,6 +4458,22 @@
                 }}>🔍</button
             >
             <button
+                class="btn-secondary proof-tool-btn"
+                title="校对"
+                aria-label="校对"
+                on:click={toggleProofPanel}
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 4.5h10.2a2.3 2.3 0 0 1 2.3 2.3v3.45" />
+                    <path d="M5 8.5h8.5" />
+                    <path d="M5 12.5h6.2" />
+                    <path d="M5 16.5h4.1" />
+                    <path d="m14.2 16.7 2.05 2.05L20.8 14.2" />
+                    <path d="M4.5 3.5h11.2a3.8 3.8 0 0 1 3.8 3.8v2.2" />
+                </svg>
+            </button
+            >
+            <button
                 class="btn-secondary"
                 title="偏好设置"
                 on:click={() => {
@@ -4432,102 +4486,6 @@
     </header>
 
     <div class="main-body">
-        {#if showStylePanel}
-            <aside class="style-panel">
-                <div class="style-panel-header">
-                    <div>
-                        <div class="style-panel-title">EPUB 样式</div>
-                        <div class="style-panel-subtitle">当前模板：{currentStyleTemplateName}</div>
-                    </div>
-                    <div class="style-panel-actions">
-                        <button class="mini-action" on:click={() => {
-                            if (showStyleSourceEditor) {
-                                applyResolvedStyleTemplateCss(styleSourceDraft);
-                                showStyleSourceEditor = false;
-                            } else {
-                                syncToolbarStyleToEpubMeta();
-                                styleSourceDraft = epubMeta.styles["main.css"];
-                                showStyleSourceEditor = true;
-                            }
-                        }}>{showStyleSourceEditor ? "块编辑" : "编辑"}</button>
-                        <button class="mini-action" on:click={resetToolbarStyleBlocks}>重置</button>
-                        <button class="mini-action primary" disabled={isSavingStyleTemplate} on:click={saveCurrentStyleTemplate}>{isSavingStyleTemplate ? "保存中..." : "保存"}</button>
-                        <button class="mini-action" on:click={() => showStylePanel = false}>关闭</button>
-                    </div>
-                </div>
-                {#if showStyleSourceEditor}
-                    <div class="style-source-editor">
-                        <textarea
-                            spellcheck="false"
-                            bind:value={styleSourceDraft}
-                            on:input={() => {
-                                epubMeta.styles["main.css"] = styleSourceDraft;
-                                epubMeta.styles = { ...epubMeta.styles };
-                            }}
-                        ></textarea>
-                    </div>
-                {:else}
-                    <div class="style-block-list">
-                        {#each visibleStyleBlocks as block}
-                            <section class="style-block-card" style={`--block-accent:${block.accent}`}>
-                                <header class="style-block-head">
-                                    <div>
-                                        <strong>{block.title}</strong>
-                                        <span>{block.note}</span>
-                                    </div>
-                                    <code>
-                                        {#each block.selector.split(",").map((item) => item.trim()).filter(Boolean) as selector}
-                                            <span>{selector}</span>
-                                        {/each}
-                                    </code>
-                                </header>
-                                <div class="style-prop-list">
-                                    {#each block.properties as prop}
-                                        <label class="style-prop-row">
-                                            <span class="prop-title">
-                                                <span class="prop-label">{prop.label}</span>
-                                                <span class="prop-name">{prop.name}</span>
-                                            </span>
-                                            {#if prop.options}
-                                                <select
-                                                    value={prop.value}
-                                                    on:change={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === block.id), styleBlocks.find((item) => item.id === block.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}>
-                                                    {#each (prop.name === "font-family" ? fontFamilyOptions : prop.options) as option}
-                                                        <option value={option.value}>{option.label}</option>
-                                                    {/each}
-                                                </select>
-                                            {:else if prop.color}
-                                                {@const parsedColor = parseCssColorValue(prop.value)}
-                                                <span class="color-value-control">
-                                                    <input
-                                                        class="color-swatch"
-                                                        type="color"
-                                                        value={parsedColor.swatch}
-                                                        title={prop.value}
-                                                        on:input={(event) => updateToolbarColorValue(block.id, prop.name, event.currentTarget.value)}
-                                                    />
-                                                    <input
-                                                        class="color-hex-input"
-                                                        value={parsedColor.hex}
-                                                        placeholder="#RRGGBB / #RRGGBBAA"
-                                                        on:input={(event) => updateToolbarColorValue(block.id, prop.name, event.currentTarget.value)}
-                                                    />
-                                                </span>
-                                            {:else}
-                                                <input
-                                                    value={prop.value}
-                                                    on:input={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === block.id), styleBlocks.find((item) => item.id === block.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}
-                                                />
-                                            {/if}
-                                        </label>
-                                    {/each}
-                                </div>
-                            </section>
-                        {/each}
-                    </div>
-                {/if}
-            </aside>
-        {/if}
         {#if showSidebar && isMobile}
             <div
                 role="presentation"
@@ -4647,6 +4605,28 @@
                 </div>
             </aside>
         {/if}
+
+        <section class="editor-wrapper">
+            {#if isLoading}<div class="loading">加载中...</div>{/if}
+            <Editor
+                bind:this={editorComponent}
+                doc={fileContent}
+                titleLines={flatToc.map((n) => n.line)}
+                onChange={(v) => {
+                    fileContent = v;
+                    isModified = true;
+                    // Debounced TOC Sync
+                    clearTimeout(autoRefreshTimer);
+                    autoRefreshTimer = setTimeout(() => scanToc(v), 200);
+                }}
+                onScroll={handleScroll}
+                onSelectionChange={handleSelectionChange}
+                wordWrap={appSettings.wordWrap}
+                showWhitespace={appSettings.showWhitespace}
+                showLineBreaks={appSettings.showLineBreaks}
+                onTocSearch={handleTocSearch}
+            />
+        </section>
 
         {#if showProofPanel}
             <aside class="proof-panel">
@@ -5171,27 +5151,6 @@
             </aside>
         {/if}
 
-        <section class="editor-wrapper">
-            {#if isLoading}<div class="loading">加载中...</div>{/if}
-            <Editor
-                bind:this={editorComponent}
-                doc={fileContent}
-                titleLines={flatToc.map((n) => n.line)}
-                onChange={(v) => {
-                    fileContent = v;
-                    isModified = true;
-                    // Debounced TOC Sync
-                    clearTimeout(autoRefreshTimer);
-                    autoRefreshTimer = setTimeout(() => scanToc(v), 200);
-                }}
-                onScroll={handleScroll}
-                onSelectionChange={handleSelectionChange}
-                wordWrap={appSettings.wordWrap}
-                showWhitespace={appSettings.showWhitespace}
-                showLineBreaks={appSettings.showLineBreaks}
-                onTocSearch={handleTocSearch}
-            />
-        </section>
     </div>
 
     {#if showSettingsPanel || showEpubModal || showHistoryPanel}
@@ -5306,15 +5265,29 @@
                                 </div>
                             </div>
                         {:else if settingsActiveTab === 'styles'}
-                            <div class="font-settings-panel">
+                            <div class="font-settings-panel style-settings-panel">
                                 <div class="font-settings-head">
                                     <div>
                                         <div class="font-settings-title">样式模板</div>
-                                        <div class="font-settings-note">模板只保存 CSS 文件。这里选择默认模板，样式侧栏保存时会写回当前选中的模板。</div>
+                                        <div class="font-settings-note">选择默认 CSS 模板，并直接编辑当前 EPUB 输出样式。</div>
                                     </div>
-                                    <button class="grid-btn blue" disabled={isImportingStyleTemplate} on:click={importStyleTemplateFile}>
-                                        {isImportingStyleTemplate ? "导入中..." : "导入 CSS"}
-                                    </button>
+                                    <div class="style-settings-actions">
+                                        <button class="grid-btn blue" disabled={isImportingStyleTemplate} on:click={importStyleTemplateFile}>
+                                            {isImportingStyleTemplate ? "导入中..." : "导入 CSS"}
+                                        </button>
+                                        <button class="mini-action" on:click={() => {
+                                            if (showStyleSourceEditor) {
+                                                applyResolvedStyleTemplateCss(styleSourceDraft);
+                                                showStyleSourceEditor = false;
+                                            } else {
+                                                syncToolbarStyleToEpubMeta();
+                                                styleSourceDraft = epubMeta.styles["main.css"];
+                                                showStyleSourceEditor = true;
+                                            }
+                                        }}>{showStyleSourceEditor ? "块编辑" : "源码"}</button>
+                                        <button class="mini-action" on:click={resetToolbarStyleBlocks}>重置</button>
+                                        <button class="mini-action primary" disabled={isSavingStyleTemplate} on:click={saveCurrentStyleTemplate}>{isSavingStyleTemplate ? "保存中..." : "保存模板"}</button>
+                                    </div>
                                 </div>
                                 {#if styleSettingsMessage}
                                     <div class="font-settings-status">{styleSettingsMessage}</div>
@@ -5342,6 +5315,100 @@
                                             {/if}
                                         </label>
                                     {/each}
+                                </div>
+                                <div class="style-settings-editor">
+                                    <div class="style-panel-header in-settings">
+                                        <div>
+                                            <div class="style-panel-title">样式编辑</div>
+                                            <div class="style-panel-subtitle">当前模板：{currentStyleTemplateName}</div>
+                                        </div>
+                                    </div>
+                                    {#if showStyleSourceEditor}
+                                        <div class="style-source-editor">
+                                            <textarea
+                                                spellcheck="false"
+                                                bind:value={styleSourceDraft}
+                                                on:input={() => {
+                                                    epubMeta.styles["main.css"] = styleSourceDraft;
+                                                    epubMeta.styles = { ...epubMeta.styles };
+                                                }}
+                                            ></textarea>
+                                        </div>
+                                    {:else}
+                                        <div class="style-block-editor-layout">
+                                            <nav class="style-block-nav" aria-label="样式块">
+                                            {#each visibleStyleBlocks as block}
+                                                <button
+                                                    type="button"
+                                                    class:active={activeStyleBlockId === block.id}
+                                                    style={`--block-accent:${block.accent}`}
+                                                    on:click={() => (activeStyleBlockId = block.id)}
+                                                >
+                                                    <strong>{block.title}</strong>
+                                                    <span>{block.note}</span>
+                                                </button>
+                                            {/each}
+                                            </nav>
+                                            <div class="style-block-detail">
+                                            {#if activeStyleBlock}
+                                                <section class="style-block-card" style={`--block-accent:${activeStyleBlock.accent}`}>
+                                                    <header class="style-block-head">
+                                                        <div>
+                                                            <strong>{activeStyleBlock.title}</strong>
+                                                            <span>{activeStyleBlock.note}</span>
+                                                        </div>
+                                                        <code>
+                                                            {#each activeStyleBlock.selector.split(",").map((item) => item.trim()).filter(Boolean) as selector}
+                                                                <span>{selector}</span>
+                                                            {/each}
+                                                        </code>
+                                                    </header>
+                                                    <div class="style-prop-list">
+                                                        {#each activeStyleBlock.properties as prop}
+                                                            <label class="style-prop-row">
+                                                                <span class="prop-title">
+                                                                    <span class="prop-label">{prop.label}</span>
+                                                                    <span class="prop-name">{prop.name}</span>
+                                                                </span>
+                                                                {#if prop.options}
+                                                                    <select
+                                                                        value={prop.value}
+                                                                        on:change={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === activeStyleBlock.id), styleBlocks.find((item) => item.id === activeStyleBlock.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}>
+                                                                        {#each (prop.name === "font-family" ? fontFamilyOptions : prop.options) as option}
+                                                                            <option value={option.value}>{option.label}</option>
+                                                                        {/each}
+                                                                    </select>
+                                                                {:else if prop.color}
+                                                                    {@const parsedColor = parseCssColorValue(prop.value)}
+                                                                    <span class="color-value-control">
+                                                                        <input
+                                                                            class="color-swatch"
+                                                                            type="color"
+                                                                            value={parsedColor.swatch}
+                                                                            title={prop.value}
+                                                                            on:input={(event) => updateToolbarColorValue(activeStyleBlock.id, prop.name, event.currentTarget.value)}
+                                                                        />
+                                                                        <input
+                                                                            class="color-hex-input"
+                                                                            value={parsedColor.hex}
+                                                                            placeholder="#RRGGBB / #RRGGBBAA"
+                                                                            on:input={(event) => updateToolbarColorValue(activeStyleBlock.id, prop.name, event.currentTarget.value)}
+                                                                        />
+                                                                    </span>
+                                                                {:else}
+                                                                    <input
+                                                                        value={prop.value}
+                                                                        on:input={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === activeStyleBlock.id), styleBlocks.find((item) => item.id === activeStyleBlock.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}
+                                                                    />
+                                                                {/if}
+                                                            </label>
+                                                        {/each}
+                                                    </div>
+                                                </section>
+                                            {/if}
+                                            </div>
+                                        </div>
+                                    {/if}
                                 </div>
                             </div>
                         {:else if settingsActiveTab === 'toc'}
@@ -5409,9 +5476,50 @@
                                 {#if aiSettingsMessage}
                                     <div class="font-settings-status">{aiSettingsMessage}</div>
                                 {/if}
+                                <div class="font-settings-head ai-provider-head">
+                                    <div>
+                                        <div class="font-settings-title">API 配置</div>
+                                        <div class="font-settings-note">可添加多个 OpenAI 兼容 API，分别供校对和自动审批选择。</div>
+                                    </div>
+                                    <div class="style-settings-actions">
+                                        <button class="mini-action" type="button" on:click={addTxtAiProvider}>新增</button>
+                                        <button class="mini-action danger" type="button" on:click={() => removeTxtAiProvider(aiProviderDraftId)}>删除</button>
+                                    </div>
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiProviderDraft">当前 API:</label>
+                                    <select id="aiProviderDraft" bind:value={aiProviderDraftId}>
+                                        {#each aiProviders as provider}
+                                            <option value={provider.id}>{provider.name || provider.model}</option>
+                                        {/each}
+                                    </select>
+                                </div>
+                                {#if selectedTxtAiProvider()}
+                                    <div class="set-row">
+                                        <label for="aiProviderName">名称:</label>
+                                        <input id="aiProviderName" type="text" value={selectedTxtAiProvider()?.name || ""} on:input={(e) => updateSelectedTxtAiProvider("name", e.currentTarget.value)} />
+                                    </div>
+                                    <div class="set-row">
+                                        <label for="aiProviderBaseUrl">API 地址:</label>
+                                        <input id="aiProviderBaseUrl" type="text" value={selectedTxtAiProvider()?.baseUrl || ""} on:input={(e) => updateSelectedTxtAiProvider("baseUrl", e.currentTarget.value)} placeholder="https://api.openai.com/v1" />
+                                    </div>
+                                    <div class="set-row">
+                                        <label for="aiProviderKey">API Key:</label>
+                                        <input id="aiProviderKey" type="password" value={selectedTxtAiProvider()?.apiKey || ""} on:input={(e) => updateSelectedTxtAiProvider("apiKey", e.currentTarget.value)} placeholder="sk-..." />
+                                    </div>
+                                    <div class="set-row">
+                                        <label for="aiProviderModel">模型:</label>
+                                        <input id="aiProviderModel" type="text" value={selectedTxtAiProvider()?.model || ""} on:input={(e) => updateSelectedTxtAiProvider("model", e.currentTarget.value)} placeholder="deepseek-chat / gpt-4o-mini" />
+                                    </div>
+                                    <div class="set-row">
+                                        <label for="aiProviderTemperature">温度:</label>
+                                        <input id="aiProviderTemperature" type="number" min="0" max="1" step="0.1" value={selectedTxtAiProvider()?.temperature ?? 0.1} on:input={(e) => updateSelectedTxtAiProvider("temperature", Number(e.currentTarget.value))} />
+                                    </div>
+                                {/if}
+                                <div class="ai-settings-divider"></div>
                                 <div class="set-row">
                                     <label for="aiProofProvider">校对 API:</label>
-                                    <select id="aiProofProvider" bind:value={txtAiProofingConfig.providerId}>
+                                    <select id="aiProofProvider" bind:value={txtAiProofingConfig.providerId} on:change={() => (aiProofingConfig = proofingConfigForProvider(txtAiProofingConfig.providerId))}>
                                         {#each aiProviders as provider}
                                             <option value={provider.id}>{provider.name || provider.model}</option>
                                         {/each}
@@ -5424,14 +5532,6 @@
                                             <option value={provider.id}>{provider.name || provider.model}</option>
                                         {/each}
                                     </select>
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiBaseUrl">API 地址:</label>
-                                    <input id="aiBaseUrl" type="text" value={findAiProvider(txtAiProofingConfig.providerId)?.baseUrl || ""} readonly />
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiModel">模型:</label>
-                                    <input id="aiModel" type="text" value={findAiProvider(txtAiProofingConfig.providerId)?.model || ""} readonly />
                                 </div>
                                 <div class="set-row">
                                     <label for="aiMaxChars">单章上限:</label>
@@ -6038,12 +6138,11 @@
     }
 
     .proof-panel {
-        order: -1;
         width: 400px;
         min-width: 360px;
         max-width: min(440px, 44vw);
         background: #fff;
-        border-right: 1px solid #ddd;
+        border-left: 1px solid #ddd;
         display: flex;
         flex-direction: column;
         flex-shrink: 0;
@@ -6065,30 +6164,6 @@
         stroke-width: 1.9;
         stroke-linecap: round;
         stroke-linejoin: round;
-    }
-
-    .style-tool-btn {
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: 17px;
-        font-weight: 800;
-        color: #8b6718;
-    }
-
-    .style-panel {
-        order: -2;
-        width: 400px;
-        min-width: 360px;
-        max-width: min(440px, 44vw);
-        height: 100%;
-        max-height: 100%;
-        min-height: 0;
-        background: #f6f7fb;
-        border-right: 1px solid #dfe5ec;
-        display: flex;
-        flex-direction: column;
-        flex-shrink: 0;
-        overflow: hidden;
-        box-shadow: 10px 0 24px rgba(23, 36, 52, 0.06);
     }
 
     .style-panel-header {
@@ -6117,14 +6192,6 @@
         margin-top: 2px;
     }
 
-    .style-panel-actions {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 6px;
-        flex-shrink: 0;
-    }
-
     .mini-action {
         height: 28px;
         min-width: 0;
@@ -6143,16 +6210,75 @@
         color: #11679f;
     }
 
-    .style-block-list {
+    .mini-action.danger {
+        border-color: #f1b8b8;
+        color: #c03535;
+    }
+
+    .style-block-editor-layout {
         flex: 1;
         min-height: 0;
-        height: 100%;
-        overflow-y: auto;
         display: grid;
-        align-content: start;
-        grid-auto-rows: max-content;
-        gap: 16px;
-        padding: 14px 14px 18px;
+        grid-template-columns: 178px minmax(0, 1fr);
+        gap: 0;
+        overflow: hidden;
+    }
+
+    .style-block-nav {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 12px;
+        border-right: 1px solid #e1e6ee;
+        background: rgba(248, 250, 252, 0.9);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .style-block-nav button {
+        width: 100%;
+        height: auto;
+        min-width: 0;
+        display: grid;
+        justify-items: start;
+        gap: 3px;
+        padding: 10px 11px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: #536171;
+        text-align: left;
+        box-shadow: none;
+        transform: none;
+    }
+
+    .style-block-nav button.active {
+        border-color: rgba(22, 119, 184, 0.24);
+        background: #fff;
+        color: var(--block-accent);
+        box-shadow: 0 6px 14px rgba(23, 36, 52, 0.07);
+    }
+
+    .style-block-nav strong {
+        font-size: 13px;
+        line-height: 1.25;
+    }
+
+    .style-block-nav span {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #8793a2;
+        font-size: 11px;
+        line-height: 1.25;
+    }
+
+    .style-block-detail {
+        min-width: 0;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 14px;
     }
 
     .style-block-card {
@@ -6217,7 +6343,7 @@
 
     .style-prop-row {
         display: grid;
-        grid-template-columns: minmax(142px, 0.9fr) minmax(130px, 1fr);
+        grid-template-columns: minmax(112px, 150px) minmax(0, 1fr);
         align-items: center;
         gap: 14px;
         min-height: 58px;
@@ -6395,6 +6521,31 @@
         line-height: 1.5;
     }
 
+    .style-settings-panel {
+        gap: 16px;
+    }
+
+    .style-settings-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+
+    .style-settings-editor {
+        min-height: 360px;
+        overflow: hidden;
+        border: 1px solid #e1e6ee;
+        border-radius: 10px;
+        background: #f6f7fb;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .style-panel-header.in-settings {
+        min-height: 50px;
+    }
+
     .ai-settings-form {
         display: flex;
         flex-direction: column;
@@ -6407,8 +6558,17 @@
         margin-bottom: 0;
     }
 
-    .ai-settings-form .set-row label,
-    .ai-settings-form .ai-setting-label {
+    .ai-provider-head {
+        margin-bottom: 4px;
+    }
+
+    .ai-settings-divider {
+        height: 1px;
+        margin: 2px 0;
+        background: #e7edf4;
+    }
+
+    .ai-settings-form .set-row label {
         width: 110px;
         flex-shrink: 0;
         font-weight: bold;
@@ -8513,10 +8673,9 @@
     }
 
     @media (max-width: 768px) {
-        .proof-panel,
-        .style-panel {
+        .proof-panel {
             position: absolute;
-            inset: 0 auto 0 0;
+            inset: 0 0 0 auto;
             width: min(92vw, 400px);
             max-width: 92vw;
             z-index: 80;

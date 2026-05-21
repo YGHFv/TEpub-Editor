@@ -9,7 +9,7 @@
    *
    * Svelte 4 兼容写法（项目其他组件也是 export let + $:），方便 svelte 5 兼容模式。
    */
-  export interface TocNode {
+  interface TocNode {
     title: string;
     spineIdx: number;     // -1 表示无对应 spine 项（仅作分组标题）
     children: TocNode[];

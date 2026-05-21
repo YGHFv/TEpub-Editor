@@ -1651,8 +1651,8 @@
           book={selectedBook}
           {coverCache}
           {formatFileSize}
-          on:open={selectedBook ? () => handleBookOpen(selectedBook) : undefined}
-          on:remove={selectedBook ? () => removeBook(selectedBook) : undefined}
+          on:open={() => selectedBook && handleBookOpen(selectedBook)}
+          on:remove={() => selectedBook && removeBook(selectedBook)}
         />
       </div>
     {/if}
