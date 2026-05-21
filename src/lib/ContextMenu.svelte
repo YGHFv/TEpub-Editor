@@ -79,6 +79,7 @@
   function onContextMenu(e: MouseEvent) {
     // 1. Check for Context Data Attribute (File Tree / TOC)
     const target = e.target as HTMLElement;
+    if (target.closest("[data-native-context-menu='true']")) return;
     const contextNode = target.closest("[data-context-type]") as HTMLElement;
 
     // 2. Check for Editor

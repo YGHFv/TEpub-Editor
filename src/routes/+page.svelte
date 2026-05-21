@@ -48,6 +48,40 @@
     closeLibraryOnEpubOpen?: boolean;
     /** TXT 编辑器主窗口关闭行为："exit"=退出应用 / "library"=返回书库 */
     txtEditorCloseAction?: "exit" | "library";
+    aiProofing: AiProofingConfig;
+    aiProviders?: AiProviderConfig[];
+    txtAiProofing?: TxtAiProofingConfig;
+    libraryAiMatch?: LibraryAiMatchConfig;
+  }
+
+  interface AiProofingConfig {
+    enabled: boolean;
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    temperature: number;
+    maxChapterChars: number;
+    autoApprove: boolean;
+    extraPrompt: string;
+  }
+
+  interface AiProviderConfig {
+    id: string;
+    name: string;
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    temperature: number;
+  }
+
+  interface TxtAiProofingConfig {
+    providerId: string;
+    approvalProviderId: string;
+  }
+
+  interface LibraryAiMatchConfig {
+    providerId: string;
+    extraPrompt: string;
   }
 
   interface LibraryData {
@@ -63,6 +97,19 @@
     closeLibraryOnTxtOpen: true,
     closeLibraryOnEpubOpen: true,
     txtEditorCloseAction: "library",
+    aiProofing: {
+      enabled: false,
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "",
+      model: "gpt-4o-mini",
+      temperature: 0.1,
+      maxChapterChars: 12000,
+      autoApprove: false,
+      extraPrompt: "",
+    },
+    aiProviders: [],
+    txtAiProofing: { providerId: "", approvalProviderId: "" },
+    libraryAiMatch: { providerId: "", extraPrompt: "" },
   };
   let selectedBook: BookEntry | null = null;
   let viewMode: "grid" | "list-cover" | "list-simple" = "grid";
@@ -71,6 +118,11 @@
   let sortAsc = false;
   let isLoading = true;
   let showSettings = false;
+  let librarySettingsActiveTab: "storage" | "assoc" | "editor" | "ai" | "shelf" = "storage";
+  let aiProviderDraftId = "";
+  let aiMatchRunning = false;
+  let aiMatchMessage = "";
+  let aiMatchResult: { description: string; tags: string[]; reason: string } | null = null;
   let showMetaEditor = false;
   let savingMetadata = false;
   let ingestStatus: "" | "ingesting" | "decrypting" = "";
@@ -106,6 +158,130 @@
   };
   let tagInput = "";   // "添加标签"输入框的当前值
   let tagPanelOpen = false;  // 点击输入框时展开的选择面板
+
+  const DEFAULT_AI_PROOFING: AiProofingConfig = {
+    enabled: false,
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    model: "gpt-4o-mini",
+    temperature: 0.1,
+    maxChapterChars: 12000,
+    autoApprove: false,
+    extraPrompt: "",
+  };
+
+  function normalizeAiProofingConfig(config: Partial<AiProofingConfig> | undefined): AiProofingConfig {
+    const merged = { ...DEFAULT_AI_PROOFING, ...(config || {}) };
+    merged.enabled = Boolean(merged.enabled);
+    merged.baseUrl = String(merged.baseUrl || DEFAULT_AI_PROOFING.baseUrl).trim();
+    merged.apiKey = String(merged.apiKey || "");
+    merged.model = String(merged.model || DEFAULT_AI_PROOFING.model).trim();
+    merged.temperature = Math.max(0, Math.min(1, Number(merged.temperature) || DEFAULT_AI_PROOFING.temperature));
+    merged.maxChapterChars = Math.max(1000, Math.floor(Number(merged.maxChapterChars) || DEFAULT_AI_PROOFING.maxChapterChars));
+    merged.autoApprove = Boolean(merged.autoApprove);
+    merged.extraPrompt = String(merged.extraPrompt || "");
+    return merged;
+  }
+
+  function newAiProvider(seed?: Partial<AiProviderConfig>): AiProviderConfig {
+    const model = String(seed?.model || DEFAULT_AI_PROOFING.model).trim();
+    return {
+      id: String(seed?.id || `api-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`),
+      name: String(seed?.name || model || "AI API").trim(),
+      baseUrl: String(seed?.baseUrl || DEFAULT_AI_PROOFING.baseUrl).trim(),
+      apiKey: String(seed?.apiKey || ""),
+      model,
+      temperature: Math.max(0, Math.min(1, Number(seed?.temperature) || DEFAULT_AI_PROOFING.temperature)),
+    };
+  }
+
+  function normalizeAiProvider(provider: Partial<AiProviderConfig> | undefined, index = 0): AiProviderConfig {
+    return newAiProvider({
+      id: String(provider?.id || `api-${index + 1}`),
+      name: provider?.name,
+      baseUrl: provider?.baseUrl,
+      apiKey: provider?.apiKey,
+      model: provider?.model,
+      temperature: provider?.temperature,
+    });
+  }
+
+  function normalizeAiProviders(config: LibraryConfig) {
+    const list = (config.aiProviders || []).map(normalizeAiProvider).filter(p => p.id);
+    if (list.length > 0) return list;
+    return [newAiProvider(config.aiProofing || DEFAULT_AI_PROOFING)];
+  }
+
+  function ensureAiProviderSelections() {
+    libraryConfig.aiProviders = normalizeAiProviders(libraryConfig);
+    const firstId = libraryConfig.aiProviders[0]?.id || "";
+    libraryConfig.txtAiProofing = {
+      providerId: libraryConfig.txtAiProofing?.providerId || firstId,
+      approvalProviderId: libraryConfig.txtAiProofing?.approvalProviderId || libraryConfig.txtAiProofing?.providerId || firstId,
+    };
+    libraryConfig.libraryAiMatch = {
+      providerId: libraryConfig.libraryAiMatch?.providerId || firstId,
+      extraPrompt: String(libraryConfig.libraryAiMatch?.extraPrompt || ""),
+    };
+    if (!libraryConfig.aiProviders.some(p => p.id === libraryConfig.txtAiProofing!.providerId)) {
+      libraryConfig.txtAiProofing.providerId = firstId;
+    }
+    if (!libraryConfig.aiProviders.some(p => p.id === libraryConfig.txtAiProofing!.approvalProviderId)) {
+      libraryConfig.txtAiProofing.approvalProviderId = libraryConfig.txtAiProofing.providerId || firstId;
+    }
+    if (!libraryConfig.aiProviders.some(p => p.id === libraryConfig.libraryAiMatch!.providerId)) {
+      libraryConfig.libraryAiMatch.providerId = firstId;
+    }
+    if (!aiProviderDraftId || !libraryConfig.aiProviders.some(p => p.id === aiProviderDraftId)) {
+      aiProviderDraftId = firstId;
+    }
+  }
+
+  function selectedAiProvider() {
+    ensureAiProviderSelections();
+    return libraryConfig.aiProviders?.find(p => p.id === aiProviderDraftId) || libraryConfig.aiProviders?.[0];
+  }
+
+  function updateSelectedAiProvider(field: keyof AiProviderConfig, value: string | number) {
+    ensureAiProviderSelections();
+    libraryConfig.aiProviders = (libraryConfig.aiProviders || []).map(provider =>
+      provider.id === aiProviderDraftId ? { ...provider, [field]: value } : provider,
+    );
+  }
+
+  function providerToProofingConfig(provider: AiProviderConfig | undefined, base = libraryConfig.aiProofing) {
+    const fallback = normalizeAiProofingConfig(base);
+    if (!provider) return fallback;
+    return normalizeAiProofingConfig({
+      ...fallback,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: provider.model,
+      temperature: provider.temperature,
+    });
+  }
+
+  function addAiProvider() {
+    ensureAiProviderSelections();
+    const provider = newAiProvider({ name: `API ${(libraryConfig.aiProviders?.length || 0) + 1}` });
+    libraryConfig.aiProviders = [...(libraryConfig.aiProviders || []), provider];
+    aiProviderDraftId = provider.id;
+    saveLibraryConfig();
+  }
+
+  async function removeAiProvider(providerId: string) {
+    ensureAiProviderSelections();
+    if ((libraryConfig.aiProviders || []).length <= 1) {
+      await message("至少保留一个 API 配置", { kind: "warning" });
+      return;
+    }
+    libraryConfig.aiProviders = (libraryConfig.aiProviders || []).filter(p => p.id !== providerId);
+    if (libraryConfig.txtAiProofing?.providerId === providerId) libraryConfig.txtAiProofing.providerId = "";
+    if (libraryConfig.txtAiProofing?.approvalProviderId === providerId) libraryConfig.txtAiProofing.approvalProviderId = "";
+    if (libraryConfig.libraryAiMatch?.providerId === providerId) libraryConfig.libraryAiMatch.providerId = "";
+    ensureAiProviderSelections();
+    await saveLibraryConfig();
+  }
 
   // 标签分类体系 —— 前三级有固定枚举，之后可自由多选
   const TAG_L1: readonly string[] = ["男频", "女频", "出版"];
@@ -457,7 +633,12 @@
         closeLibraryOnTxtOpen: libraryConfig.closeLibraryOnTxtOpen ?? true,
         closeLibraryOnEpubOpen: libraryConfig.closeLibraryOnEpubOpen ?? true,
         txtEditorCloseAction: libraryConfig.txtEditorCloseAction ?? "library",
+        aiProofing: normalizeAiProofingConfig(libraryConfig.aiProofing),
+        aiProviders: libraryConfig.aiProviders || [],
+        txtAiProofing: libraryConfig.txtAiProofing || { providerId: "", approvalProviderId: "" },
+        libraryAiMatch: libraryConfig.libraryAiMatch || { providerId: "", extraPrompt: "" },
       };
+      ensureAiProviderSelections();
       // 写一份空 library.json 到该目录，建立 pointer
       await invoke("save_library", { data: { config: libraryConfig, books: [] } });
       firstLaunchOpen = false;
@@ -494,6 +675,8 @@
       if (libraryConfig.txtEditorCloseAction !== "exit" && libraryConfig.txtEditorCloseAction !== "library") {
         libraryConfig.txtEditorCloseAction = "library";
       }
+      libraryConfig.aiProofing = normalizeAiProofingConfig(libraryConfig.aiProofing);
+      ensureAiProviderSelections();
       syncNamingPresetFromConfig();
       // 安装版没有 copy_portable 选项，旧配置或异常状态下自动迁移到 copy_custom
       if (appMode && !appMode.isPortable && libraryConfig.storageMode === "copy_portable") {
@@ -735,6 +918,64 @@
       .split(/\r?\n/)
       .map(line => line.replace(/^[　\s ]+/, ""))
       .join("\n");
+  }
+
+  const LIBRARY_MATCH_SYSTEM_PROMPT = `?????????????????????????????????????????????
+??? JSON??? Markdown????
+{"description":"80?300???","tags":["??1","??2"],"reason":"??40?"}
+???
+1. ?????????????????????
+2. ???????????????????????????
+3. ???? 3 ? 8 ????????????????????????????`;
+
+  function parseLibraryMatch(content: string) {
+    const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const parsed = JSON.parse(trimmed);
+    return {
+      description: String(parsed.description || ""),
+      tags: Array.isArray(parsed.tags) ? parsed.tags.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 10) : [],
+      reason: String(parsed.reason || ""),
+    };
+  }
+
+  async function runLibraryAutoMatch() {
+    if (!selectedBook) return;
+    ensureAiProviderSelections();
+    const provider = (libraryConfig.aiProviders || []).find(p => p.id === libraryConfig.libraryAiMatch?.providerId);
+    const config = providerToProofingConfig(provider);
+    if (!config.apiKey.trim() || !config.baseUrl.trim() || !config.model.trim()) {
+      aiMatchMessage = "??????????? API";
+      return;
+    }
+    aiMatchRunning = true;
+    aiMatchMessage = "??????...";
+    aiMatchResult = null;
+    try {
+      const response = await invoke<{ content: string }>("run_ai_proofing", {
+        request: {
+          config,
+          systemPrompt: LIBRARY_MATCH_SYSTEM_PROMPT,
+          userPrompt: [
+            `???${selectedBook.title}`,
+            `???${selectedBook.author || "??"}`,
+            `????${selectedBook.subtitle || ""}`,
+            `?????${selectedBook.description || ""}`,
+            `?????${(selectedBook.tags || []).join("?") || "?"}`,
+            `?????${Array.from(TAXONOMY_SET).join("?")}`,
+            libraryConfig.libraryAiMatch?.extraPrompt ? `?????${libraryConfig.libraryAiMatch.extraPrompt}` : "",
+          ].filter(Boolean).join("\n"),
+        },
+      });
+      aiMatchResult = parseLibraryMatch(response.content);
+      metaForm.description = descToForm(aiMatchResult.description || descFromForm(metaForm.description));
+      metaForm.tags = Array.from(new Set([...(aiMatchResult.tags || [])]));
+      aiMatchMessage = `??????${aiMatchResult.reason ? `?${aiMatchResult.reason}` : ""}`;
+    } catch (error) {
+      console.error("??????:", error);
+      aiMatchMessage = `???????${error}`;
+    } finally {
+      aiMatchRunning = false;
+    }
   }
 
   function openEditMetadata(book: BookEntry) {
@@ -1079,6 +1320,8 @@
 
   async function saveLibraryConfig() {
     try {
+      libraryConfig.aiProofing = normalizeAiProofingConfig(libraryConfig.aiProofing);
+      ensureAiProviderSelections();
       const data = await invoke<LibraryData>("load_library");
       await invoke("save_library", {
         data: { ...data, config: libraryConfig }
@@ -1448,8 +1691,16 @@
           <button class="settings-close" on:click={() => showSettings = false} title="关闭">×</button>
         </div>
 
+        <div class="settings-tabs library-settings-tabs">
+          <button class="tab-btn {librarySettingsActiveTab === 'storage' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'storage'}>文件存储</button>
+          <button class="tab-btn {librarySettingsActiveTab === 'assoc' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'assoc'}>文件关联</button>
+          <button class="tab-btn {librarySettingsActiveTab === 'editor' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'editor'}>编辑器窗口</button>
+          <button class="tab-btn {librarySettingsActiveTab === 'ai' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'ai'}>智能校对</button>
+          <button class="tab-btn {librarySettingsActiveTab === 'shelf' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'shelf'}>书架显示</button>
+        </div>
+
         <div class="settings-body">
-          <!-- 文件存储 -->
+          {#if librarySettingsActiveTab === 'storage'}
           <section class="settings-section">
             <div class="section-title">文件存储</div>
             <div class="set-row">
@@ -1517,7 +1768,7 @@
             {/if}
           </section>
 
-          <!-- 文件关联 -->
+          {:else if librarySettingsActiveTab === 'assoc'}
           <section class="settings-section">
             <div class="section-title">注册文件打开方式</div>
             <p class="section-hint">右键 .epub / .txt 文件时显示的菜单项。</p>
@@ -1547,7 +1798,7 @@
             </label>
           </section>
 
-          <!-- 书架显示 -->
+          {:else if librarySettingsActiveTab === 'editor'}
           <section class="settings-section">
             <div class="section-title">编辑器窗口</div>
             <label class="set-row toggle-row">
@@ -1579,6 +1830,144 @@
             </div>
           </section>
 
+          {:else if librarySettingsActiveTab === 'ai'}
+          <section class="settings-section">
+            <div class="section-title">AI 接口</div>
+            <p class="section-hint">可添加多个 OpenAI 兼容 API，分别供 TXT 校对、自动审批、书库自动匹配使用。</p>
+            <div class="set-row">
+              <label class="set-label">当前 API</label>
+              <select class="set-control" bind:value={aiProviderDraftId}>
+                {#each (libraryConfig.aiProviders || []) as provider}
+                  <option value={provider.id}>{provider.name || provider.model}</option>
+                {/each}
+              </select>
+              <button class="tb-btn" type="button" on:click={addAiProvider}>新增</button>
+              <button class="tb-btn danger" type="button" on:click={() => removeAiProvider(aiProviderDraftId)}>删除</button>
+            </div>
+            {#if selectedAiProvider()}
+              <div class="set-row">
+                <label class="set-label">名称</label>
+                <input class="set-control" type="text" value={selectedAiProvider()!.name} on:input={(e) => updateSelectedAiProvider("name", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="例如 DeepSeek / 本地模型" />
+              </div>
+              <div class="set-row">
+                <label class="set-label">API 地址</label>
+                <input class="set-control" type="text" value={selectedAiProvider()!.baseUrl} on:input={(e) => updateSelectedAiProvider("baseUrl", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="https://api.openai.com/v1" />
+              </div>
+              <div class="set-row">
+                <label class="set-label">API Key</label>
+                <input class="set-control" type="password" value={selectedAiProvider()!.apiKey} on:input={(e) => updateSelectedAiProvider("apiKey", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="sk-..." />
+              </div>
+              <div class="set-row">
+                <label class="set-label">模型</label>
+                <input class="set-control" type="text" value={selectedAiProvider()!.model} on:input={(e) => updateSelectedAiProvider("model", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="gpt-4o-mini / deepseek-chat" />
+              </div>
+              <div class="set-row">
+                <label class="set-label">温度</label>
+                <input class="set-control" type="number" min="0" max="1" step="0.1" value={selectedAiProvider()!.temperature} on:input={(e) => updateSelectedAiProvider("temperature", Number(e.currentTarget.value))} on:change={saveLibraryConfig} />
+              </div>
+            {/if}
+          </section>
+          <section class="settings-section">
+            <div class="section-title">自动匹配</div>
+            <p class="section-hint">用于自动匹配书库图书的标签和简介，不再和 TXT 编辑器智能校对共用用途设置。</p>
+            <div class="set-row">
+              <label class="set-label">匹配 API</label>
+              <select class="set-control" bind:value={libraryConfig.libraryAiMatch!.providerId} on:change={saveLibraryConfig}>
+                {#each (libraryConfig.aiProviders || []) as provider}
+                  <option value={provider.id}>{provider.name || provider.model}</option>
+                {/each}
+              </select>
+            </div>
+            <div class="set-row" style="align-items: flex-start;">
+              <label class="set-label">额外要求</label>
+              <textarea class="set-control" rows="3" bind:value={libraryConfig.libraryAiMatch!.extraPrompt} on:change={saveLibraryConfig} placeholder="例如：标签优先使用书库现有分类；简介不要剧透。"></textarea>
+            </div>
+          </section>
+          <section class="settings-section legacy-ai-proofing-settings">
+            <div class="section-title">智能校对 API</div>
+            <p class="section-hint">用于 TXT 编辑器逐章智能校对，设置会与 TXT 编辑器偏好设置互通。</p>
+            <label class="set-row toggle-row">
+              <span class="set-label">启用智能校对</span>
+              <input
+                type="checkbox"
+                bind:checked={libraryConfig.aiProofing.enabled}
+                on:change={saveLibraryConfig}
+              />
+            </label>
+            <div class="set-row">
+              <label class="set-label">API 地址</label>
+              <input
+                class="set-control"
+                type="text"
+                bind:value={libraryConfig.aiProofing.baseUrl}
+                on:change={saveLibraryConfig}
+                placeholder="https://api.openai.com/v1"
+              />
+            </div>
+            <div class="set-row">
+              <label class="set-label">API Key</label>
+              <input
+                class="set-control"
+                type="password"
+                bind:value={libraryConfig.aiProofing.apiKey}
+                on:change={saveLibraryConfig}
+                placeholder="sk-..."
+              />
+            </div>
+            <div class="set-row">
+              <label class="set-label">模型</label>
+              <input
+                class="set-control"
+                type="text"
+                bind:value={libraryConfig.aiProofing.model}
+                on:change={saveLibraryConfig}
+                placeholder="gpt-4o-mini / deepseek-chat"
+              />
+            </div>
+            <div class="set-row">
+              <label class="set-label">温度</label>
+              <input
+                class="set-control"
+                type="number"
+                min="0"
+                max="1"
+                step="0.1"
+                bind:value={libraryConfig.aiProofing.temperature}
+                on:change={saveLibraryConfig}
+              />
+            </div>
+            <div class="set-row">
+              <label class="set-label">单章上限</label>
+              <input
+                class="set-control"
+                type="number"
+                min="1000"
+                step="1000"
+                bind:value={libraryConfig.aiProofing.maxChapterChars}
+                on:change={saveLibraryConfig}
+              />
+            </div>
+            <label class="set-row toggle-row">
+              <span class="set-label">自动审批</span>
+              <input
+                type="checkbox"
+                bind:checked={libraryConfig.aiProofing.autoApprove}
+                on:change={saveLibraryConfig}
+              />
+            </label>
+            <div class="set-row" style="align-items: flex-start;">
+              <label class="set-label">额外要求</label>
+              <textarea
+                class="set-control"
+                rows="3"
+                bind:value={libraryConfig.aiProofing.extraPrompt}
+                on:change={saveLibraryConfig}
+                placeholder="例如：保留作者口癖，不做风格润色。"
+              ></textarea>
+            </div>
+          </section>
+
+          {:else}
           <section class="settings-section">
             <div class="section-title">书架显示</div>
             <div class="set-row">
@@ -1640,6 +2029,7 @@
               </select>
             </div>
           </section>
+          {/if}
         </div>
 
         <div class="settings-footer">
@@ -1937,6 +2327,17 @@
                           </div>
                         {/if}
                       </div>
+                    {/if}
+                  </div>
+                </div>
+                <div class="set-row meta-ai-match-row">
+                  <label></label>
+                  <div class="meta-ai-match-actions">
+                    <button class="tb-btn" type="button" disabled={aiMatchRunning} on:click={runLibraryAutoMatch}>
+                      {aiMatchRunning ? "匹配中..." : "AI 自动匹配标签/简介"}
+                    </button>
+                    {#if aiMatchMessage}
+                      <span>{aiMatchMessage}</span>
                     {/if}
                   </div>
                 </div>
@@ -2402,9 +2803,14 @@
 
   .library-settings-panel {
     border-radius: 14px;
+    width: min(92vw, 760px);
     min-width: 720px;
-    max-width: 820px;
+    max-width: 760px;
+    min-height: 520px;
     max-height: 84vh;
+    display: grid;
+    grid-template-columns: 170px 1fr;
+    grid-template-rows: 58px 1fr 64px;
   }
 
   @keyframes panelIn {
@@ -2419,6 +2825,14 @@
     padding: 16px 22px;
     border-bottom: 1px solid var(--color-border);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.96));
+  }
+
+  .library-settings-panel .settings-header {
+    grid-column: 1 / -1;
+    height: 58px;
+    box-sizing: border-box;
+    padding: 0 20px;
+    background: var(--color-surface);
   }
 
   .settings-panel h3 {
@@ -2457,11 +2871,51 @@
   }
 
   .library-settings-panel .settings-body {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    overflow: auto;
     padding: 18px 20px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--color-surface);
+  }
+
+  .library-settings-panel .settings-tabs {
+    grid-column: 1;
+    grid-row: 2 / 4;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 16px;
+    border-right: 1px solid var(--color-border);
     background: var(--color-canvas);
+  }
+
+  .library-settings-panel .settings-tabs .tab-btn {
+    width: 100%;
+    justify-content: flex-start;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--color-muted);
+    padding: 9px 12px;
+    text-align: left;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .library-settings-panel .settings-tabs .tab-btn:hover {
+    background: var(--color-hover);
+  }
+
+  .library-settings-panel .settings-tabs .tab-btn.active {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
   }
 
   .settings-section {
@@ -2471,16 +2925,16 @@
   }
 
   .library-settings-panel .settings-section {
-    gap: 10px;
+    gap: 12px;
     min-width: 0;
-    padding: 14px;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.82);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
   }
 
-  .library-settings-panel .settings-section:first-child {
-    grid-column: 1 / -1;
+  .library-settings-panel .legacy-ai-proofing-settings {
+    display: none;
   }
 
   .section-title {
@@ -2503,6 +2957,15 @@
     background: var(--color-canvas);
   }
 
+  .library-settings-panel .settings-footer {
+    grid-column: 2;
+    grid-row: 3;
+    align-items: center;
+    padding: 12px 20px;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+
   .set-row {
     display: flex;
     align-items: center;
@@ -2519,13 +2982,40 @@
 
   .set-control {
     flex: 1;
-    padding: 6px 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-surface);
     color: var(--color-text);
     font-size: 13px;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  input.set-control,
+  textarea.set-control {
+    padding: 6px 10px;
+  }
+
+  select.set-control,
+  .set-row select {
+    min-height: var(--control-height);
+    padding: 7px 38px 7px 12px;
+    background-color: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
+      linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(241, 248, 253, 0.82));
+    background-position:
+      calc(100% - 20px) 50%,
+      calc(100% - 14px) 50%,
+      0 0;
+    background-size:
+      6px 6px,
+      6px 6px,
+      100% 100%;
+    background-repeat: no-repeat;
+    appearance: none;
+    -webkit-appearance: none;
+    box-shadow: var(--shadow-xs);
   }
 
   .set-control:focus {
@@ -2572,26 +3062,53 @@
   .set-row input,
   .set-row textarea {
     flex: 1;
-    padding: 6px 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-surface);
     color: var(--color-text);
   }
 
+  .set-row input {
+    padding: 6px 10px;
+  }
+
   .set-row textarea {
     resize: vertical;
     font-family: var(--font-ui);
+    padding: 6px 10px;
   }
 
   @media (max-width: 760px) {
     .library-settings-panel {
+      display: flex;
       min-width: 0;
       width: min(96vw, 520px);
+      min-height: 0;
+    }
+
+    .library-settings-panel .settings-tabs {
+      flex-direction: row;
+      grid-column: auto;
+      grid-row: auto;
+      overflow-x: auto;
+      border-right: 0;
+      border-bottom: 1px solid var(--color-border);
+      padding: 10px 14px;
+    }
+
+    .library-settings-panel .settings-tabs .tab-btn {
+      width: auto;
+      white-space: nowrap;
     }
 
     .library-settings-panel .settings-body {
-      grid-template-columns: 1fr;
+      grid-column: auto;
+      grid-row: auto;
+    }
+
+    .library-settings-panel .settings-footer {
+      grid-column: auto;
+      grid-row: auto;
     }
   }
 
@@ -3064,6 +3581,16 @@
     border-color: var(--color-accent);
     box-shadow: var(--focus-ring);
     outline: none;
+  }
+
+  .meta-ai-match-actions {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--color-muted);
+    font-size: 12px;
   }
 
   /* 简介行：textarea 跟随 set-row 节奏(空 label + flex:1 textarea)，

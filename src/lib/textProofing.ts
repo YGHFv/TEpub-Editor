@@ -1,7 +1,7 @@
 export type ProofTitleScope = "all" | "volumes" | "chapters" | "regex" | "numbers-only";
 export type ProofNumberStyle = "arabic" | "chinese";
 export type ProofConvertDirection = "simplified-to-traditional" | "traditional-to-simplified";
-export type ProofBuiltinRuleId = "title-brackets" | "ads" | "pinyin";
+export type ProofBuiltinRuleId = "title-brackets" | "ads" | "pinyin" | "indent";
 
 export interface ProofTocNode {
   id?: string;
@@ -184,6 +184,11 @@ export const PROOF_BUILTIN_REGEX_RULES: ProofBuiltinRegexRule[] = [
     id: "pinyin",
     name: "拼音",
     description: "括号内拼音、独立拼音行和行尾拼音注音，替换为空",
+  },
+  {
+    id: "indent",
+    name: "段落缩进",
+    description: "正文段落统一缩进两个全角空格，跳过目录标题行",
   },
 ];
 
@@ -408,6 +413,12 @@ function isTitleLikeLine(line: string) {
   if (/^\d{1,5}(?:\s*[\.\．、:：\-—]\s*|\s+|(?=[\u4e00-\u9fff])).+/.test(trimmed)) return true;
   if (/^[一二三四五六七八九十百千万零〇两]{1,6}(?:\s*[\.\．、:：\-—]\s*|\s+).+/.test(trimmed)) return true;
   return false;
+}
+
+function normalizeParagraphIndent(line: string) {
+  const trimmed = line.trimStart();
+  if (!trimmed) return line;
+  return `　　${trimmed}`;
 }
 
 function toChineseNumber(num: number): string {
@@ -948,6 +959,22 @@ export function buildBuiltinRegexPreview(
         pushRow(index + 1, index + 1, line, "");
       }
       index++;
+    }
+    return rows;
+  }
+
+  if (ruleId === "indent") {
+    const titleLines = new Set(tocNodes.map((node) => node.line));
+    for (let index = 0; index < lines.length; index++) {
+      const lineNumber = index + 1;
+      const original = lines[index];
+      if (!original.trim() || titleLines.has(lineNumber) || isTitleLikeLine(original)) {
+        continue;
+      }
+      const replacement = normalizeParagraphIndent(original);
+      if (replacement !== original) {
+        pushRow(lineNumber, lineNumber, original, replacement);
+      }
     }
     return rows;
   }

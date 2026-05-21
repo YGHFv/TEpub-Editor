@@ -512,6 +512,15 @@ struct HistoryMeta {
     date_str: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProofLogInfo {
+    file_name: String,
+    path: String,
+    timestamp: u64,
+    size: u64,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 struct AssetInfo {
     name: String,
@@ -5406,6 +5415,101 @@ struct LibraryConfig {
     close_library_on_epub_open: bool,
     #[serde(default)]
     txt_editor_close_action: String,
+    #[serde(default)]
+    ai_proofing: AiProofingConfig,
+    #[serde(default)]
+    ai_providers: Vec<AiProviderConfig>,
+    #[serde(default)]
+    txt_ai_proofing: TxtAiProofingConfig,
+    #[serde(default)]
+    library_ai_match: LibraryAiMatchConfig,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct AiProofingConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default = "default_ai_base_url")]
+    base_url: String,
+    #[serde(default)]
+    api_key: String,
+    #[serde(default = "default_ai_model")]
+    model: String,
+    #[serde(default = "default_ai_temperature")]
+    temperature: f32,
+    #[serde(default = "default_ai_max_chapter_chars")]
+    max_chapter_chars: usize,
+    #[serde(default)]
+    auto_approve: bool,
+    #[serde(default)]
+    extra_prompt: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+struct AiProviderConfig {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default = "default_ai_base_url")]
+    base_url: String,
+    #[serde(default)]
+    api_key: String,
+    #[serde(default = "default_ai_model")]
+    model: String,
+    #[serde(default = "default_ai_temperature")]
+    temperature: f32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct TxtAiProofingConfig {
+    #[serde(default)]
+    provider_id: String,
+    #[serde(default)]
+    approval_provider_id: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct LibraryAiMatchConfig {
+    #[serde(default)]
+    provider_id: String,
+    #[serde(default)]
+    extra_prompt: String,
+}
+
+impl Default for AiProofingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: default_ai_base_url(),
+            api_key: String::new(),
+            model: default_ai_model(),
+            temperature: default_ai_temperature(),
+            max_chapter_chars: default_ai_max_chapter_chars(),
+            auto_approve: false,
+            extra_prompt: String::new(),
+        }
+    }
+}
+
+fn default_ai_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+
+fn default_ai_model() -> String {
+    "gpt-4o-mini".to_string()
+}
+
+fn default_ai_temperature() -> f32 {
+    0.1
+}
+
+fn default_ai_max_chapter_chars() -> usize {
+    12000
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -5509,6 +5613,10 @@ fn library_covers_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn library_history_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(library_data_dir(app)?.join("history"))
+}
+
+fn library_proof_logs_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(library_data_dir(app)?.join("proof_logs"))
 }
 
 fn library_extract_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -5894,6 +6002,250 @@ fn get_app_mode_info(app: tauri::AppHandle) -> Result<AppModeInfo, String> {
 #[tauri::command]
 async fn save_library(app: tauri::AppHandle, data: LibraryData) -> Result<(), String> {
     write_library_data_atomic(&app, &data)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiProofingRequest {
+    config: AiProofingConfig,
+    system_prompt: String,
+    user_prompt: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiProofingResponse {
+    content: String,
+}
+
+fn preview_ai_response_body(text: &str) -> String {
+    const LIMIT: usize = 1200;
+    let compact = text.replace('\r', "\\r").replace('\n', "\\n");
+    if compact.chars().count() > LIMIT {
+        format!("{}...", compact.chars().take(LIMIT).collect::<String>())
+    } else {
+        compact
+    }
+}
+
+#[tauri::command]
+async fn run_ai_proofing(request: AiProofingRequest) -> Result<AiProofingResponse, String> {
+    let base_url = request.config.base_url.trim().trim_end_matches('/').to_string();
+    if base_url.is_empty() {
+        return Err("请先填写 API 地址".to_string());
+    }
+    if request.config.api_key.trim().is_empty() {
+        return Err("请先填写 API Key".to_string());
+    }
+    if request.config.model.trim().is_empty() {
+        return Err("请先填写模型名".to_string());
+    }
+
+    let endpoint = if base_url.ends_with("/chat/completions") {
+        base_url
+    } else {
+        format!("{}/chat/completions", base_url)
+    };
+    let model_name = request.config.model.trim();
+    let body = serde_json::json!({
+        "model": request.config.model,
+        "temperature": request.config.temperature.clamp(0.0, 1.0),
+        "max_tokens": 8192,
+        "response_format": { "type": "json_object" },
+        "thinking": { "type": "disabled" },
+        "stream": false,
+        "messages": [
+            { "role": "system", "content": request.system_prompt },
+            { "role": "user", "content": request.user_prompt }
+        ]
+    });
+    let fallback_body = serde_json::json!({
+        "model": request.config.model,
+        "temperature": request.config.temperature.clamp(0.0, 1.0),
+        "max_tokens": 8192,
+        "thinking": { "type": "disabled" },
+        "stream": false,
+        "messages": [
+            { "role": "system", "content": request.system_prompt },
+            { "role": "user", "content": request.user_prompt }
+        ]
+    });
+
+    let client = reqwest::Client::builder()
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let send_ai_request = |body: &serde_json::Value| {
+        client
+            .post(&endpoint)
+            .bearer_auth(request.config.api_key.trim())
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("Accept-Encoding", "identity")
+            .body(body.to_string())
+    };
+    let resp = send_ai_request(&body)
+        .send()
+        .await
+        .map_err(|e| format!("请求智能校对接口失败: {}", e))?;
+    let status = resp.status();
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "读取智能校对响应超时：模型超过 300 秒仍未返回完整结果，请调小单章上限或换更快模型".to_string()
+            } else {
+                format!("读取智能校对响应失败: {}", e)
+            }
+        })?;
+    let mut text = String::from_utf8_lossy(&bytes).to_string();
+
+    if !status.is_success()
+        && text.contains("response_format")
+        && model_name.to_ascii_lowercase().contains("deepseek")
+    {
+        let retry_resp = send_ai_request(&fallback_body)
+            .send()
+            .await
+            .map_err(|e| format!("重试智能校对接口失败: {}", e))?;
+        let retry_status = retry_resp.status();
+        let retry_bytes = retry_resp
+            .bytes()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    "读取智能校对重试响应超时：模型超过 300 秒仍未返回完整结果，请调小单章上限或换更快模型".to_string()
+                } else {
+                    format!("读取智能校对重试响应失败: {}", e)
+                }
+            })?;
+        text = String::from_utf8_lossy(&retry_bytes).to_string();
+        if !retry_status.is_success() {
+            return Err(format!(
+                "智能校对接口返回 {}: {}",
+                retry_status,
+                preview_ai_response_body(&text)
+            ));
+        }
+    } else if !status.is_success() {
+        return Err(format!(
+            "智能校对接口返回 {}: {}",
+            status,
+            preview_ai_response_body(&text)
+        ));
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| {
+            format!(
+                "解析智能校对响应失败: {}；响应片段: {}",
+                e,
+                preview_ai_response_body(&text)
+            )
+        })?;
+    let content = value
+        .get("choices")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .or_else(|| {
+            value
+                .get("choices")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|choice| choice.get("text"))
+                .and_then(|content| content.as_str())
+        })
+        .ok_or_else(|| {
+            format!(
+                "智能校对响应缺少 choices[0].message.content；响应片段: {}",
+                preview_ai_response_body(&text)
+            )
+        })?
+        .to_string();
+
+    Ok(AiProofingResponse { content })
+}
+
+#[tauri::command]
+async fn save_ai_proofing_log(
+    app: tauri::AppHandle,
+    txt_path: String,
+    model: String,
+    content: String,
+) -> Result<String, String> {
+    let dir = library_proof_logs_dir(&app)?;
+    ensure_dir(&dir)?;
+
+    let txt_stem = Path::new(&txt_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("未命名");
+    let stem = {
+        let safe = sanitize_filename_part(txt_stem);
+        if safe.is_empty() { "未命名".to_string() } else { safe }
+    };
+    let model_name = {
+        let safe = sanitize_filename_part(model.trim());
+        if safe.is_empty() { "unknown-model".to_string() } else { safe }
+    };
+    let time_text = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let mut file_name = format!("{}-{}-{}.log", stem, time_text, model_name);
+    let mut path = dir.join(&file_name);
+    let mut suffix = 2;
+    while path.exists() {
+        file_name = format!("{}-{}-{}-{}.log", stem, time_text, model_name, suffix);
+        path = dir.join(&file_name);
+        suffix += 1;
+    }
+    fs::write(&path, content).map_err(|e| format!("写入校对日志失败: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn list_ai_proofing_logs(app: tauri::AppHandle) -> Result<Vec<ProofLogInfo>, String> {
+    let dir = library_proof_logs_dir(&app)?;
+    ensure_dir(&dir)?;
+    let mut list = Vec::new();
+    let entries = fs::read_dir(&dir).map_err(|e| format!("读取校对日志目录失败: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !ext.eq_ignore_ascii_case("log") && !ext.eq_ignore_ascii_case("txt") {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            list.push(ProofLogInfo {
+                file_name: entry.file_name().to_string_lossy().to_string(),
+                path: path.to_string_lossy().to_string(),
+                timestamp: meta
+                    .modified()
+                    .unwrap_or(SystemTime::now())
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                size: meta.len(),
+            });
+        }
+    }
+    list.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(list)
+}
+
+#[tauri::command]
+async fn read_ai_proofing_log(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| format!("读取校对日志失败: {}", e))
 }
 
 // ============================================================
@@ -7853,6 +8205,10 @@ pub fn run() {
             // ===== Library Phase 1 =====
             load_library,
             save_library,
+            run_ai_proofing,
+            save_ai_proofing_log,
+            list_ai_proofing_logs,
+            read_ai_proofing_log,
             get_app_mode_info,
             // ===== Library Phase 2 =====
             add_book_to_library,

@@ -453,6 +453,11 @@
   export function getContent() {
     return view ? view.state.doc.toString() : lastKnownDoc;
   }
+  export function getCursorLine() {
+    if (!view) return null;
+    const line = view.state.doc.lineAt(view.state.selection.main.head);
+    return { number: line.number, text: line.text };
+  }
   export function scrollToLine(l: number, toTop: boolean = false) {
     if (!view) return;
     try {

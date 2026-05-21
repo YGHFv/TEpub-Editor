@@ -118,7 +118,115 @@
         timestamp: number;
         size: number;
     }
+    interface ProofLogInfo {
+        fileName: string;
+        path: string;
+        timestamp: number;
+        size: number;
+    }
+    interface AiProofingConfig {
+        enabled: boolean;
+        baseUrl: string;
+        apiKey: string;
+        model: string;
+        temperature: number;
+        maxChapterChars: number;
+        autoApprove: boolean;
+        extraPrompt: string;
+    }
+    interface AiProviderConfig {
+        id: string;
+        name: string;
+        baseUrl: string;
+        apiKey: string;
+        model: string;
+        temperature: number;
+    }
+    interface TxtAiProofingConfig {
+        providerId: string;
+        approvalProviderId: string;
+    }
+    interface LibraryAiMatchConfig {
+        providerId: string;
+        extraPrompt: string;
+    }
+    interface LibraryConfig {
+        aiProofing?: AiProofingConfig;
+        aiProviders?: AiProviderConfig[];
+        txtAiProofing?: TxtAiProofingConfig;
+        libraryAiMatch?: LibraryAiMatchConfig;
+        txtEditorCloseAction?: "exit" | "library";
+    }
+    interface LibraryData {
+        config: LibraryConfig;
+        books?: unknown[];
+    }
+    interface AiProofingResponse {
+        content: string;
+    }
+    interface AiProofingSuggestion {
+        original: string;
+        replacement: string;
+        reason: string;
+        type: string;
+        confidence: number;
+    }
+    interface AiProofingApproval {
+        original: string;
+        approved: boolean;
+        reason?: string;
+    }
+    interface AiProofingRow extends AiProofingSuggestion {
+        id: string;
+        chapterTitle: string;
+        fullChapterRemoval?: boolean;
+        lineStart: number;
+        startChar: number;
+        endChar: number;
+        globalStart: number;
+        globalEnd: number;
+    }
+    type AiProofingScope = "current" | "volume" | "all";
+    interface AiProofingChapterRange {
+        id: string;
+        title: string;
+        parentId?: string;
+        startLine: number;
+        endLine: number;
+        startOffset: number;
+        text: string;
+    }
+    interface AiProofingCacheState {
+        filePath: string;
+        contentMd5: string;
+        savedAt: number;
+        model: string;
+        scope: AiProofingScope;
+        view: "suggestions" | "approval" | "log";
+        rows: AiProofingRow[];
+        selectedIds: string[];
+        logs: string[];
+        approvalBatches?: AiApprovalAppliedBatch[];
+        message: string;
+        logPath?: string;
+    }
+    interface AiApprovalAppliedBatch {
+        id: string;
+        chapterTitle: string;
+        rows: AiProofingRow[];
+        beforeText: string;
+        afterText: string;
+        appliedAt: number;
+        reverted: boolean;
+    }
     type ManualTitleKind = "Volume" | "Chapter" | "Ignore";
+    interface ManualTitleOverrideEntry {
+        kind: ManualTitleKind;
+        line: number;
+        title: string;
+        prevTitle?: string;
+        nextTitle?: string;
+    }
 
     // --- [2. 默认配置 (三大正则回归 & 新增动态生成规则)] ---
     interface CustomRegexRule {
@@ -164,6 +272,69 @@
         metaRegex: DEFAULT_META_VOLUME_REGEX,
     };
 
+    const DEFAULT_AI_PROOFING: AiProofingConfig = {
+        enabled: false,
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "",
+        model: "gpt-4o-mini",
+        temperature: 0.1,
+        maxChapterChars: 12000,
+        autoApprove: false,
+        extraPrompt: "",
+    };
+
+    const DEFAULT_TXT_AI_PROOFING: TxtAiProofingConfig = {
+        providerId: "",
+        approvalProviderId: "",
+    };
+
+    const AI_PROOFING_SYSTEM_PROMPT = `你是网文小说文本校对助手。必须保守、精确，只处理确定的问题，不改变作者文风、人称、剧情、人物设定和叙述节奏。
+
+校对标准：
+一、标点符号类：
+1. 网文中文正文中不应出现大部分半角标点，例如 , ! ? ; 以及不分左右的英文半角引号 " "。英文中括号 [] 应改为【】。破折号错误写作 —、一一、--、一— 等时，必须结合上下文确认确实应为破折号后才改为——。&、%、反斜杠等应转全角。
+2. 允许的半角符号：英文词汇中的连接符 -；@#$^* 用于代替粗口；小数点；分数斜杠如 1/2。
+3. 省略号只允许标准完整省略号……。不允许单个…、英文省略号...、两个及以上句号代替省略号。两个句号需要结合上下文判断。
+4. 不允许嵌套双引号，内层引号应使用单引号。
+5. 单引号不能独用，只能包含在双引号内。
+6. 所有左右引号、括号都应匹配。
+7. 禁止逗号句号等不规则标点连用。例外：？！、！？、……？、……！允许；？……、！……不允许。
+
+二、需要删除：
+1. 删除广告，包括章节开头宣传语、正文乱码、平台来源、QQ群号及其谐音/生僻字散布形式。
+2. 删除章末或章首非剧情作者碎碎念，如求票、求收藏、PS 等；无 PS 标识也要根据上下文判断。
+3. 删除防盗暗码：括号内三个无意义汉字组合，如（诺德好）；双引号内连续中文数字；正文中无意义阿拉伯数字或小数，如“夕阳下594赛跑”“夕阳下5.4赛跑”。必须区分真实剧情数字。
+4. 如果整个章节明显不是剧情正文，而是请假条、上架感言、完结感言、作者的话、求票公告、更新说明等，应提出移除整章建议。此类建议 type 使用 remove_chapter，original 可填写章节标题或整章开头片段，replacement 为空。
+
+三、需要修改：
+1. 修正常见成语、短语错别字。
+2. 修正错误的“的地得”。
+3. 删除错误赘写叠字，如“我的的东西”。
+4. 繁体字全部改为简体字，唯一例外是“薙”字不可改。
+5. 中文之间不能出现普通空格。专有名词内部空格改为间隔号，例如【终极 龙炎炮】改为【终极·龙炎炮】。
+6. 禁止硬回车。谨慎判断没有正确段尾标点的段落，是硬回车则合并，是漏标点则补标点。
+
+只返回 JSON 对象，不要返回 Markdown。格式：
+{"suggestions":[{"original":"原文中的精确片段；整章移除时可填章节标题或整章开头片段","replacement":"替换后的片段，删除则为空字符串","reason":"简短原因","type":"punctuation|delete|remove_chapter|typo|grammar|spacing|linebreak|traditional|other","confidence":0.0}]}
+要求：
+1. original 必须是本章原文中连续存在的精确片段。
+2. 最多返回 20 条最高置信建议，reason 必须少于 40 个中文字符。
+3. 保留段首缩进、空行、表情符号、颜文字、特殊符号、系统提示符号和括号内设定说明，不得把它们当乱码删除。
+4. 人名、地名、专有名词、技能名、魔法名、等级名、角色口癖，除非上下文明确写错且可证明，否则不要修改。
+5. 不要把“如同/好像/仿佛/似乎/大概/也许”等风格表达强行改成更直白的词。
+6. 不要输出整章删除建议，除非整章几乎全是非正文公告/请假/感言，且没有连续剧情内容。
+7. 不能确定的问题不要输出。`;
+
+    const AI_APPROVAL_SYSTEM_PROMPT = `你是小说校对建议审批助手。你只判断给定建议是否应该自动应用。
+审批原则：
+1. 只批准确定无争议、不会改变剧情/设定/文风的建议。
+2. 标点规范、明确错别字、明显重复字可批准。
+3. 涉及用词风格、专有名词、战力设定、作者有意表达、剧情含义变化的建议必须拒绝。
+4. 章删、广告删除、作者碎碎念删除，只有明显非正文时才批准。
+5. 删除表情符号、颜文字、特殊符号、括号内设定说明、段首缩进的建议必须拒绝。
+只返回 JSON，不要 Markdown。格式：
+{"decisions":[{"original":"建议里的 original","approved":true,"reason":"少于20字"}]}`;
+
     const REGEX_PRESETS = [
         { label: "自定义", value: "" },
         { label: "^\\s*第[一二三..]+章.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+章.*$" },
@@ -178,6 +349,71 @@
         { label: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$", value: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$" },
         { label: "^\\s*\\d+\\s*$", value: "^\\s*\\d+\\s*$" }
     ];
+
+    function normalizeAiProofingConfig(config: Partial<AiProofingConfig> | undefined): AiProofingConfig {
+        const merged = { ...DEFAULT_AI_PROOFING, ...(config || {}) };
+        merged.enabled = Boolean(merged.enabled);
+        merged.baseUrl = String(merged.baseUrl || DEFAULT_AI_PROOFING.baseUrl).trim();
+        merged.apiKey = String(merged.apiKey || "");
+        merged.model = String(merged.model || DEFAULT_AI_PROOFING.model).trim();
+        merged.temperature = Math.max(0, Math.min(1, Number(merged.temperature) || DEFAULT_AI_PROOFING.temperature));
+        merged.maxChapterChars = Math.max(1000, Math.floor(Number(merged.maxChapterChars) || DEFAULT_AI_PROOFING.maxChapterChars));
+        merged.autoApprove = Boolean(merged.autoApprove);
+        merged.extraPrompt = String(merged.extraPrompt || "");
+        return merged;
+    }
+
+    function createAiProviderFromProofing(config: AiProofingConfig): AiProviderConfig {
+        return {
+            id: `provider-${Date.now().toString(36)}`,
+            name: config.model || "默认 API",
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            model: config.model,
+            temperature: config.temperature,
+        };
+    }
+
+    function normalizeAiProvider(provider: Partial<AiProviderConfig> | undefined, index = 0): AiProviderConfig {
+        const id = String(provider?.id || `provider-${index + 1}`).trim();
+        const model = String(provider?.model || DEFAULT_AI_PROOFING.model).trim();
+        return {
+            id,
+            name: String(provider?.name || model || `API ${index + 1}`).trim(),
+            baseUrl: String(provider?.baseUrl || DEFAULT_AI_PROOFING.baseUrl).trim(),
+            apiKey: String(provider?.apiKey || ""),
+            model,
+            temperature: Math.max(0, Math.min(1, Number(provider?.temperature) || DEFAULT_AI_PROOFING.temperature)),
+        };
+    }
+
+    function normalizeAiProviders(config: LibraryConfig | undefined, fallback: AiProofingConfig) {
+        const providers = (config?.aiProviders || []).map(normalizeAiProvider).filter((item) => item.id);
+        if (providers.length > 0) return providers;
+        if (fallback.apiKey || fallback.baseUrl || fallback.model) {
+            return [createAiProviderFromProofing(fallback)];
+        }
+        return [createAiProviderFromProofing(DEFAULT_AI_PROOFING)];
+    }
+
+    function providerToProofingConfig(provider: AiProviderConfig | undefined, base: AiProofingConfig) {
+        const normalized = normalizeAiProvider(provider, 0);
+        return normalizeAiProofingConfig({
+            ...base,
+            baseUrl: normalized.baseUrl,
+            apiKey: normalized.apiKey,
+            model: normalized.model,
+            temperature: normalized.temperature,
+        });
+    }
+
+    function findAiProvider(providerId: string) {
+        return aiProviders.find((provider) => provider.id === providerId) || aiProviders[0];
+    }
+
+    function proofingConfigForProvider(providerId: string) {
+        return providerToProofingConfig(findAiProvider(providerId), aiProofingConfig);
+    }
 
     function isLegacyLooseMetaRegex(pattern: string | undefined) {
         if (!pattern) return false;
@@ -291,7 +527,7 @@
     let fileContent = "";
     let tocTree: TocNode[] = [];
     let flatToc: FlatNode[] = [];
-    let manualTitleOverrides: Record<string, ManualTitleKind> = {};
+    let manualTitleOverrides: Record<string, ManualTitleOverrideEntry> = {};
     let stats = { volumes: 0, chapters: 0 };
     let activeChapterId = "";
     let userCollapsedVolumeKeys = new Set<string>();
@@ -312,7 +548,7 @@
 
     // 面板显示状态
     let showSettingsPanel = false;
-    let settingsActiveTab: "display" | "fonts" | "styles" | "toc" | "history" = "display";
+    let settingsActiveTab: "display" | "fonts" | "styles" | "toc" | "ai" | "proofLogs" | "history" = "display";
     let showEpubModal = false;
     let showStylePanel = false;
     let showCheckPanel = false;
@@ -346,6 +582,10 @@
     let customMetadata: { key: string; value: string }[] = [];
     let appSettings = { ...DEFAULT_SETTINGS };
     let historyList: HistoryMeta[] = [];
+    let proofLogList: ProofLogInfo[] = [];
+    let selectedProofLogPath = "";
+    let selectedProofLogContent = "";
+    let proofLogMessage = "";
     let importedFonts: ImportedFontInfo[] = [];
     let isImportingFont = false;
     let renamingFontFileName = "";
@@ -1047,6 +1287,9 @@
         };
     }
 
+    let visibleProofPreviewRows: ProofTitlePreviewRow[] = [];
+    let proofCheckMessage = "";
+
     $: {
         fileContent;
         flatToc;
@@ -1071,7 +1314,9 @@
                       ? "没有匹配到可重排标题"
                       : proofActiveTab === "builtin"
                         ? builtinRegexMessage
-                        : proofActiveTab === "check"
+                        : proofActiveTab === "ai"
+                          ? `智能校对 ${aiProofingRows.length} 条建议`
+                          : proofActiveTab === "check"
                           ? proofCheckMessage
                           : "没有可预览的标题";
         } catch (e: any) {
@@ -1126,7 +1371,7 @@
         clearTimeout(autoRefreshTimer);
         await tick();
         await scanToc(result.text);
-        updateMd5(result.text);
+        await updateMd5(result.text);
         saveStateToCache(0);
     }
 
@@ -1202,6 +1447,70 @@
         await applyProofResult(result);
     }
 
+    async function loadSharedLibrarySettings() {
+        try {
+            libraryData = await invoke<LibraryData>("load_library");
+            aiProofingConfig = normalizeAiProofingConfig(libraryData?.config?.aiProofing);
+            aiProviders = normalizeAiProviders(libraryData?.config, aiProofingConfig);
+            txtAiProofingConfig = {
+                ...DEFAULT_TXT_AI_PROOFING,
+                ...(libraryData?.config?.txtAiProofing || {}),
+            };
+            if (!txtAiProofingConfig.providerId || !findAiProvider(txtAiProofingConfig.providerId)) {
+                txtAiProofingConfig.providerId = aiProviders[0]?.id || "";
+            }
+            if (!txtAiProofingConfig.approvalProviderId || !findAiProvider(txtAiProofingConfig.approvalProviderId)) {
+                txtAiProofingConfig.approvalProviderId = txtAiProofingConfig.providerId;
+            }
+            aiProofingConfig = providerToProofingConfig(findAiProvider(txtAiProofingConfig.providerId), aiProofingConfig);
+            const action = libraryData?.config?.txtEditorCloseAction;
+            if (action === "exit" || action === "library") {
+                txtEditorCloseAction = action;
+            }
+        } catch (error) {
+            console.warn("读取书库设置失败:", error);
+            aiProofingConfig = normalizeAiProofingConfig(undefined);
+            aiProviders = normalizeAiProviders(undefined, aiProofingConfig);
+            txtAiProofingConfig = {
+                providerId: aiProviders[0]?.id || "",
+                approvalProviderId: aiProviders[0]?.id || "",
+            };
+        }
+    }
+
+    async function saveSharedAiProofingSettings() {
+        aiProofingConfig = normalizeAiProofingConfig(aiProofingConfig);
+        aiProviders = aiProviders.map(normalizeAiProvider);
+        const provider = findAiProvider(txtAiProofingConfig.providerId);
+        if (provider) {
+            aiProofingConfig = providerToProofingConfig(provider, aiProofingConfig);
+        }
+        aiSettingsMessage = "正在保存...";
+        try {
+            const data = await invoke<LibraryData>("load_library");
+            libraryData = {
+                ...data,
+                config: {
+                    ...(data.config || {}),
+                    aiProofing: aiProofingConfig,
+                    aiProviders,
+                    txtAiProofing: txtAiProofingConfig,
+                },
+            };
+            await invoke("save_library", { data: libraryData });
+            aiSettingsMessage = "已保存，书库设置与 TXT 编辑器设置已同步";
+        } catch (error) {
+            console.error("保存智能校对设置失败:", error);
+            aiSettingsMessage = `保存失败：${error}`;
+        }
+    }
+
+    function openSettingsAiTab() {
+        settingsActiveTab = "ai";
+        aiSettingsMessage = "";
+        loadSharedLibrarySettings();
+    }
+
     async function openSettingsHistoryTab() {
         settingsActiveTab = "history";
         if (!filePath || filePath === "请打开一本小说...") {
@@ -1211,6 +1520,41 @@
         historyList = await invoke("get_history_list", {
             originalPath: filePath,
         });
+    }
+
+    async function loadProofLogs(selectFirst = false) {
+        proofLogMessage = "正在读取校对日志...";
+        try {
+            proofLogList = await invoke<ProofLogInfo[]>("list_ai_proofing_logs");
+            proofLogMessage = proofLogList.length ? "" : "暂无校对日志";
+            if (selectFirst && proofLogList.length > 0) {
+                await openProofLog(proofLogList[0]);
+            }
+        } catch (error) {
+            console.error("读取校对日志失败:", error);
+            proofLogList = [];
+            selectedProofLogPath = "";
+            selectedProofLogContent = "";
+            proofLogMessage = `读取校对日志失败：${error}`;
+        }
+    }
+
+    async function openSettingsProofLogsTab() {
+        settingsActiveTab = "proofLogs";
+        await loadProofLogs(!selectedProofLogPath);
+    }
+
+    async function openProofLog(log: ProofLogInfo) {
+        selectedProofLogPath = log.path;
+        proofLogMessage = "正在打开日志...";
+        try {
+            selectedProofLogContent = await invoke<string>("read_ai_proofing_log", { path: log.path });
+            proofLogMessage = "";
+        } catch (error) {
+            console.error("打开校对日志失败:", error);
+            selectedProofLogContent = "";
+            proofLogMessage = `打开日志失败：${error}`;
+        }
     }
 
     async function loadImportedFonts() {
@@ -1418,8 +1762,11 @@
             "app-settings",
             JSON.stringify(appSettings),
         );
+        if (settingsActiveTab === "ai") {
+            await saveSharedAiProofingSettings();
+        }
         await applySelectedStyleTemplate(appSettings.selectedStyleTemplateId);
-        closeAllPanels();
+        showSettingsPanel = false;
         scanToc();
     }
 
@@ -1494,6 +1841,766 @@
         proofMessage = "已定位到可转换内容";
     }
 
+    function buildLineOffsets(text: string) {
+        const offsets: number[] = [];
+        let cursor = 0;
+        const lines = text.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+            offsets.push(cursor);
+            cursor += lines[i].length + (i < lines.length - 1 ? 1 : 0);
+        }
+        return offsets;
+    }
+
+    function offsetToLineChar(offsets: number[], offset: number) {
+        let low = 0;
+        let high = offsets.length - 1;
+        while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            if (offsets[mid] <= offset) low = mid + 1;
+            else high = mid - 1;
+        }
+        const lineIndex = Math.max(0, high);
+        return { line: lineIndex + 1, char: offset - offsets[lineIndex] };
+    }
+
+    function getChapterRanges(): AiProofingChapterRange[] {
+        const lines = fileContent.split("\n");
+        const offsets = buildLineOffsets(fileContent);
+        const chapters = flatToc
+            .filter((node) => node.type === "Chapter")
+            .sort((a, b) => a.line - b.line);
+        if (chapters.length === 0) {
+            return [{
+                id: "full-text",
+                title: "全文",
+                startLine: 1,
+                endLine: lines.length,
+                startOffset: 0,
+                text: fileContent,
+            }];
+        }
+        return chapters.map((node, index) => {
+            const next = chapters[index + 1];
+            const startLine = Math.max(1, node.line);
+            const endLine = next ? Math.max(startLine, next.line - 1) : lines.length;
+            const startOffset = offsets[startLine - 1] ?? 0;
+            const endOffset =
+                endLine >= lines.length
+                    ? fileContent.length
+                    : offsets[endLine] - 1;
+            return {
+                id: node.id,
+                title: node.title,
+                parentId: node.parentId,
+                startLine,
+                endLine,
+                startOffset,
+                text: fileContent.slice(startOffset, endOffset),
+            };
+        });
+    }
+
+    function getEditorCursorLineNumber() {
+        return editorComponent?.getCursorLine?.()?.number || null;
+    }
+
+    function findChapterRangeAtLine(chapters: AiProofingChapterRange[], lineNumber: number | null) {
+        if (!lineNumber) return chapters[0] || null;
+        return chapters.find((chapter) => lineNumber >= chapter.startLine && lineNumber <= chapter.endLine) || chapters[0] || null;
+    }
+
+    function currentProofingChapters(scope: AiProofingScope, cursorLine: number | null) {
+        const chapters = getChapterRanges();
+        if (scope === "current") {
+            const current = findChapterRangeAtLine(chapters, cursorLine);
+            return current ? [current] : chapters.slice(0, 1);
+        }
+        if (scope === "volume") {
+            const current = findChapterRangeAtLine(chapters, cursorLine);
+            if (!current) return chapters.slice(0, 1);
+            if (!current.parentId) return [current];
+            const volumeChapters = chapters.filter((chapter) => chapter.parentId === current.parentId);
+            return volumeChapters.length > 0 ? volumeChapters : [current];
+        }
+        return chapters;
+    }
+
+    $: hasProofVolumeScope = flatToc.some((node) => node.type === "Chapter" && Boolean(node.parentId));
+    $: if (!hasProofVolumeScope && aiProofingScope === "volume") {
+        aiProofingScope = "current";
+    }
+
+    function appendAiProofingLog(message: string) {
+        const time = new Date().toLocaleTimeString();
+        aiProofingLogs = [...aiProofingLogs, `[${time}] ${message}`];
+    }
+
+    function isAiFullChapterRemoval(suggestion: AiProofingSuggestion) {
+        const type = suggestion.type.toLowerCase().replace(/[\s-]+/g, "_");
+        return type === "remove_chapter" || type === "chapter_delete" || type === "delete_chapter";
+    }
+
+    function differsOnlyByDeDiDe(original: string, replacement: string) {
+        if (!original || original.length !== replacement.length) return false;
+        let changed = false;
+        for (let i = 0; i < original.length; i += 1) {
+            if (original[i] === replacement[i]) continue;
+            if (!/[的地得]/.test(original[i]) || !/[的地得]/.test(replacement[i])) {
+                return false;
+            }
+            changed = true;
+        }
+        return changed;
+    }
+
+    function isBracketedNarrativeText(text: string) {
+        const trimmed = text.trim();
+        return /^[（(【\[][\s\S]{1,160}[）)】\]]$/.test(trimmed);
+    }
+
+    function containsEmojiOrSymbolOnly(text: string) {
+        const trimmed = text.trim();
+        if (!trimmed) return false;
+        if (/[\uD800-\uDBFF][\uDC00-\uDFFF]/.test(trimmed)) return true;
+        if (/^[^\p{L}\p{N}\s]{1,12}$/u.test(trimmed)) return true;
+        if (/^[TtＴｔ]{2,}$/.test(trimmed)) return true;
+        if (/^[QAQqwQW；;:：'"\-_=+~^*#@!！?？<>/\\|()[\]{}【】（）…。，、·]+$/u.test(trimmed)) return true;
+        return false;
+    }
+
+    function changesLeadingIndent(original: string, replacement: string) {
+        const originalIndent = original.match(/^\s+/)?.[0] || "";
+        const replacementIndent = replacement.match(/^\s+/)?.[0] || "";
+        return originalIndent.length > replacementIndent.length;
+    }
+
+    function isShortNameLikeReplacement(original: string, replacement: string) {
+        const o = original.trim();
+        const r = replacement.trim();
+        if (o === r || o.length > 4 || r.length > 4) return false;
+        if (/^[A-Za-z]{1,4}[\u4e00-\u9fff]+$/.test(o) && /^[\u4e00-\u9fff]+$/.test(r)) return true;
+        return /^[\u4e00-\u9fffA-Za-z·.]{1,4}$/.test(o) && /^[\u4e00-\u9fffA-Za-z·.]{1,4}$/.test(r);
+    }
+
+    function isStylePreferenceReplacement(original: string, replacement: string) {
+        const pair = `${original.trim()}=>${replacement.trim()}`;
+        return /如同=>如果|好像=>像|仿佛=>像|似乎=>好像|大概=>可能|也许=>可能|可以=>能够|一些=>一系列/.test(pair);
+    }
+
+    function getAiProofingRiskReason(row: AiProofingRow) {
+        const type = row.type.toLowerCase().replace(/[\s-]+/g, "_");
+        if (row.fullChapterRemoval || type === "remove_chapter") return "整章移除风险高";
+        if ((type === "delete" || row.replacement === "") && containsEmojiOrSymbolOnly(row.original)) return "疑似表情/特殊符号";
+        if ((type === "delete" || row.replacement === "") && isBracketedNarrativeText(row.original)) return "括号内描述不删除";
+        if (changesLeadingIndent(row.original, row.replacement)) return "保留段首缩进";
+        if (isShortNameLikeReplacement(row.original, row.replacement)) return "疑似人名/专名";
+        if (isStylePreferenceReplacement(row.original, row.replacement)) return "疑似风格改写";
+        return "";
+    }
+
+    function isAiProofingUnsafeSuggestion(row: AiProofingRow) {
+        return Boolean(getAiProofingRiskReason(row));
+    }
+
+    function isAiProofingAutoApplySuggestion(suggestion: AiProofingSuggestion) {
+        const type = suggestion.type.toLowerCase().replace(/[\s-]+/g, "_");
+        const reason = `${suggestion.reason} ${suggestion.original} ${suggestion.replacement}`;
+        return (
+            type === "punctuation" ||
+            reason.includes("的地得") ||
+            differsOnlyByDeDiDe(suggestion.original, suggestion.replacement) ||
+            /[的地得][”"]?\s*应为\s*[“"]?[的地得]/.test(reason)
+        );
+    }
+
+    function buildLocalEllipsisRows(chapter: { id: string; title: string; startOffset: number; text: string }, lineOffsets: number[]) {
+        const rows: AiProofingRow[] = [];
+        const pattern = /(\.{3,}|。{2,}|…+)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(chapter.text))) {
+            const original = match[0];
+            if (original === "……") continue;
+            const before = chapter.text[Math.max(0, match.index - 1)] || "";
+            const after = chapter.text[match.index + original.length] || "";
+            if (/^\.+$/.test(original) && /[A-Za-z0-9]/.test(before) && /[A-Za-z0-9]/.test(after)) {
+                continue;
+            }
+            const globalStart = chapter.startOffset + match.index;
+            const globalEnd = globalStart + original.length;
+            const pos = offsetToLineChar(lineOffsets, globalStart);
+            rows.push({
+                id: `${chapter.id}-ellipsis-${globalStart}`,
+                chapterTitle: chapter.title,
+                original,
+                replacement: "……",
+                reason: "省略号应使用标准完整省略号",
+                type: "punctuation",
+                confidence: 1,
+                lineStart: pos.line,
+                startChar: pos.char,
+                endChar: pos.char + original.length,
+                globalStart,
+                globalEnd,
+            });
+        }
+        return rows;
+    }
+
+    function getAiProofingCacheKey(path = filePath) {
+        if (!path || path === "请打开一本小说...") return "";
+        return `ai-proofing-cache:${path}`;
+    }
+
+    function compactAiProofingLogText(text: string, limit = 180) {
+        const compact = text.replace(/\s+/g, " ").trim();
+        return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
+    }
+
+    function logAiProofingSuggestion(stage: string, row: AiProofingRow | AiProofingSuggestion, chapterTitle: string, extra = "") {
+        appendAiProofingLog(
+            [
+                `建议/${stage}：${chapterTitle}`,
+                `${row.type} ${(Number(row.confidence || 0) * 100).toFixed(0)}%`,
+                `${compactAiProofingLogText(row.original)} -> ${compactAiProofingLogText(row.replacement || "删除")}`,
+                row.reason ? `原因：${row.reason}` : "",
+                extra,
+            ].filter(Boolean).join("；"),
+        );
+    }
+
+    function buildAiProofingLogContent(logPath = "") {
+        const rows = aiProofingRows.map((row) => ({
+            chapterTitle: row.chapterTitle,
+            original: row.original,
+            replacement: row.replacement,
+            reason: row.reason,
+            type: row.type,
+            confidence: row.confidence,
+            lineStart: row.lineStart,
+            fullChapterRemoval: Boolean(row.fullChapterRemoval),
+        }));
+        const header = [
+            `TXT: ${filePath}`,
+            `模型: ${aiProofingConfig.model}`,
+            `范围: ${aiProofingScope === "all" ? "全书逐章" : aiProofingScope === "volume" ? "当前卷" : "当前章"}`,
+            `时间: ${new Date().toLocaleString()}`,
+            logPath ? `日志文件: ${logPath}` : "",
+        ].filter(Boolean);
+        return [
+            ...header,
+            "",
+            "===== 日志 =====",
+            aiProofingLogs.join("\n") || "暂无日志",
+            "",
+            "===== 当前人工建议 =====",
+            rows.length ? JSON.stringify(rows, null, 2) : "暂无待人工审核建议",
+        ].join("\n");
+    }
+
+    function saveAiProofingCache(logPath = "") {
+        const key = getAiProofingCacheKey();
+        if (!key) return;
+        const state: AiProofingCacheState = {
+            filePath,
+            contentMd5: epubMeta.md5 || "",
+            savedAt: Date.now(),
+            model: aiProofingConfig.model,
+            scope: aiProofingScope,
+            view: aiProofingView,
+            rows: aiProofingRows,
+            selectedIds: Array.from(aiProofingSelectedIds),
+            logs: aiProofingLogs,
+            approvalBatches: aiApprovalAppliedBatches,
+            message: proofMessage,
+            logPath,
+        };
+        try {
+            localStorage.setItem(key, JSON.stringify(state));
+        } catch (error) {
+            console.warn("保存智能校对缓存失败:", error);
+        }
+    }
+
+    function loadAiProofingCache() {
+        const key = getAiProofingCacheKey();
+        if (!key) return;
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return;
+            const state = JSON.parse(raw) as Partial<AiProofingCacheState>;
+            if (!Array.isArray(state.rows) || !Array.isArray(state.logs)) return;
+            if (state.contentMd5 && epubMeta.md5 && state.contentMd5 !== epubMeta.md5) {
+                aiProofingRows = [];
+                aiProofingSelectedIds = new Set();
+                aiProofingLogs = [`[${new Date().toLocaleTimeString()}] 已跳过旧校对缓存：当前文本内容已变化`];
+                proofMessage = "旧智能校对缓存已跳过：当前文本内容已变化";
+                return;
+            }
+            aiProofingScope = state.scope === "all" || state.scope === "volume" || state.scope === "current" ? state.scope : "current";
+            aiProofingView = state.view === "log" || state.view === "approval" ? state.view : "suggestions";
+            aiProofingRows = state.rows as AiProofingRow[];
+            const validIds = new Set(aiProofingRows.map((row) => row.id));
+            aiProofingSelectedIds = new Set((state.selectedIds || []).filter((id) => validIds.has(id)));
+            aiProofingLogs = state.logs;
+            aiApprovalAppliedBatches = Array.isArray(state.approvalBatches) ? state.approvalBatches : [];
+            proofMessage = state.message || (aiProofingRows.length ? `已恢复 ${aiProofingRows.length} 条智能校对建议` : "");
+        } catch (error) {
+            console.warn("读取智能校对缓存失败:", error);
+        }
+    }
+
+    async function persistAiProofingLogFile() {
+        if (!filePath || filePath === "请打开一本小说..." || aiProofingLogs.length === 0) {
+            saveAiProofingCache();
+            return "";
+        }
+        try {
+            const path = await invoke<string>("save_ai_proofing_log", {
+                txtPath: filePath,
+                model: aiProofingConfig.model,
+                content: buildAiProofingLogContent(),
+            });
+            appendAiProofingLog(`日志已保存：${path}`);
+            saveAiProofingCache(path);
+            return path;
+        } catch (error) {
+            appendAiProofingLog(`日志保存失败：${error}`);
+            saveAiProofingCache();
+            return "";
+        }
+    }
+
+    function parseAiProofingSuggestions(content: string): AiProofingSuggestion[] {
+        const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        let parsed: any;
+        try {
+            parsed = JSON.parse(trimmed);
+        } catch (error) {
+            const recovered = recoverAiProofingSuggestionsFromPartialJson(trimmed);
+            if (recovered.length > 0) return recovered;
+            throw error;
+        }
+        const source = Array.isArray(parsed) ? parsed : parsed?.suggestions;
+        if (!Array.isArray(source)) return [];
+        return normalizeAiProofingSuggestions(source);
+    }
+
+    function normalizeAiProofingSuggestions(source: any[]): AiProofingSuggestion[] {
+        return source
+            .map((item: any) => ({
+                original: String(item?.original || ""),
+                replacement: String(item?.replacement ?? ""),
+                reason: String(item?.reason || ""),
+                type: String(item?.type || "other"),
+                confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+            }))
+            .filter((item) => item.original && item.original !== item.replacement);
+    }
+
+    function recoverAiProofingSuggestionsFromPartialJson(content: string): AiProofingSuggestion[] {
+        const suggestions: any[] = [];
+        const objectPattern =
+            /\{\s*"original"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"replacement"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"reason"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"type"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"confidence"\s*:\s*([0-9.]+)[^}]*\}/g;
+        let match: RegExpExecArray | null;
+        while ((match = objectPattern.exec(content))) {
+            try {
+                suggestions.push({
+                    original: JSON.parse(`"${match[1]}"`),
+                    replacement: JSON.parse(`"${match[2]}"`),
+                    reason: JSON.parse(`"${match[3]}"`),
+                    type: JSON.parse(`"${match[4]}"`),
+                    confidence: Number(match[5]),
+                });
+            } catch (_) {}
+        }
+        return normalizeAiProofingSuggestions(suggestions);
+    }
+
+    function buildAiUserPrompt(chapterTitle: string, chapterText: string) {
+        const extra = aiProofingConfig.extraPrompt.trim();
+        return [
+            `章节标题：${chapterTitle || "未命名章节"}`,
+            extra ? `用户额外要求：${extra}` : "",
+            "请根据系统校对标准检查以下章节，只输出 JSON：",
+            chapterText,
+        ].filter(Boolean).join("\n\n");
+    }
+
+    function parseAiApprovalDecisions(content: string): AiProofingApproval[] {
+        const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        const parsed = JSON.parse(trimmed);
+        const source = Array.isArray(parsed) ? parsed : parsed?.decisions;
+        if (!Array.isArray(source)) return [];
+        return source
+            .map((item: any) => ({
+                original: String(item?.original || ""),
+                approved: Boolean(item?.approved),
+                reason: String(item?.reason || ""),
+            }))
+            .filter((item) => item.original);
+    }
+
+    function buildAiApprovalPrompt(chapterTitle: string, chapterText: string, rows: AiProofingRow[]) {
+        const suggestions = rows.map((row) => ({
+            original: row.original,
+            replacement: row.replacement,
+            reason: row.reason,
+            type: row.type,
+            confidence: row.confidence,
+        }));
+        return [
+            `章节标题：${chapterTitle || "未命名章节"}`,
+            "正文：",
+            chapterText,
+            "待审批建议 JSON：",
+            JSON.stringify({ suggestions }, null, 2),
+        ].join("\n\n");
+    }
+
+    async function approveAiProofingRows(chapterTitle: string, chapterText: string, rows: AiProofingRow[]) {
+        if (!aiProofingConfig.autoApprove || rows.length === 0) {
+            return { approvedRows: [] as AiProofingRow[], pendingRows: rows };
+        }
+        appendAiProofingLog(`自动审批：${chapterTitle}，待审 ${rows.length} 条`);
+        try {
+            const response = await invoke<AiProofingResponse>("run_ai_proofing", {
+                request: {
+                    config: proofingConfigForProvider(txtAiProofingConfig.approvalProviderId),
+                    systemPrompt: AI_APPROVAL_SYSTEM_PROMPT,
+                    userPrompt: buildAiApprovalPrompt(chapterTitle, chapterText, rows),
+                },
+            });
+            const decisions = parseAiApprovalDecisions(response.content);
+            const approvedKeys = new Set(
+                decisions.filter((item) => item.approved).map((item) => item.original),
+            );
+            const approvedRows = rows.filter((row) => approvedKeys.has(row.original));
+            const pendingRows = rows.filter((row) => !approvedKeys.has(row.original));
+            appendAiProofingLog(`自动审批完成：通过 ${approvedRows.length} 条，存疑 ${pendingRows.length} 条`);
+            return { approvedRows, pendingRows };
+        } catch (error) {
+            appendAiProofingLog(`自动审批失败，全部转人工审核：${error}`);
+            return { approvedRows: [] as AiProofingRow[], pendingRows: rows };
+        }
+    }
+
+    async function runAiProofing() {
+        await loadSharedLibrarySettings();
+        aiProofingConfig = proofingConfigForProvider(txtAiProofingConfig.providerId);
+        if (!aiProofingConfig.apiKey.trim() || !aiProofingConfig.baseUrl.trim() || !aiProofingConfig.model.trim()) {
+            proofMessage = "请先补全 API 地址、Key 和模型名";
+            return;
+        }
+        if (!fileContent.trim()) {
+            proofMessage = "请先打开文本文件";
+            return;
+        }
+        if (flatToc.length === 0) {
+            await scanToc(fileContent);
+        }
+
+        const cursorLine = getEditorCursorLineNumber();
+        const chapters = currentProofingChapters(aiProofingScope, cursorLine);
+        aiProofingRows = [];
+        aiProofingSelectedIds = new Set();
+        aiProofingLogs = [];
+        aiProofingView = "suggestions";
+        aiProofingRunning = true;
+        aiProofingAbortRequested = false;
+        const lineOffsets = buildLineOffsets(fileContent);
+        let skipped = 0;
+        let accepted = 0;
+        let pendingRows: AiProofingRow[] = [];
+        let autoApplyRows: AiProofingRow[] = [];
+        let approvedApplyRows: AiProofingRow[] = [];
+
+        try {
+            const scopeLabel = aiProofingScope === "all" ? "全书逐章" : aiProofingScope === "volume" ? "当前卷" : "当前章";
+            appendAiProofingLog(`开始智能校对：${scopeLabel}，指针行 ${cursorLine || "未知"}，共 ${chapters.length} 章`);
+            for (let i = 0; i < chapters.length; i++) {
+                if (aiProofingAbortRequested) {
+                    appendAiProofingLog("用户请求停止，结束剩余章节");
+                    break;
+                }
+                const chapter = chapters[i];
+                if (chapter.text.length > aiProofingConfig.maxChapterChars) {
+                    skipped++;
+                    proofMessage = `跳过超长章节：${chapter.title}`;
+                    appendAiProofingLog(`跳过超长章节 ${i + 1}/${chapters.length}：${chapter.title}（${chapter.text.length} 字）`);
+                    continue;
+                }
+                proofMessage = `智能校对中 ${i + 1}/${chapters.length}：${chapter.title}`;
+                appendAiProofingLog(`请求章节 ${i + 1}/${chapters.length}：${chapter.title}（发送 ${chapter.text.length}/${chapter.text.length} 字）`);
+                let suggestions: AiProofingSuggestion[] = [];
+                try {
+                    const response = await invoke<AiProofingResponse>("run_ai_proofing", {
+                        request: {
+                            config: aiProofingConfig,
+                            systemPrompt: AI_PROOFING_SYSTEM_PROMPT,
+                            userPrompt: buildAiUserPrompt(chapter.title, chapter.text),
+                        },
+                    });
+                    try {
+                        suggestions = parseAiProofingSuggestions(response.content);
+                    } catch (parseError) {
+                        appendAiProofingLog(`响应 JSON 解析失败：${chapter.title}；${parseError}`);
+                        appendAiProofingLog(`响应片段：${response.content.slice(0, 500).replace(/\s+/g, " ")}`);
+                        throw parseError;
+                    }
+                    if (suggestions.length > 0 && !response.content.trim().endsWith("}")) {
+                        appendAiProofingLog(`响应可能被截断，已采用 ${suggestions.length} 条完整建议`);
+                    }
+                    for (const suggestion of suggestions) {
+                        logAiProofingSuggestion("返回", suggestion, chapter.title);
+                    }
+                } catch (error) {
+                    appendAiProofingLog(`章节失败：${chapter.title}；${error}`);
+                    throw error;
+                }
+                const chapterRows: AiProofingRow[] = [];
+                const usedOffsets = new Set<number>();
+                const localEllipsisRows = buildLocalEllipsisRows(chapter, lineOffsets);
+                for (const row of localEllipsisRows) {
+                    usedOffsets.add(row.globalStart - chapter.startOffset);
+                }
+                for (const suggestion of suggestions) {
+                    const fullChapterRemoval = isAiFullChapterRemoval(suggestion);
+                    const localStart = fullChapterRemoval ? 0 : chapter.text.indexOf(suggestion.original);
+                    if (localStart < 0 || usedOffsets.has(localStart)) {
+                        appendAiProofingLog(`忽略未匹配建议：${chapter.title} / ${suggestion.type} / ${suggestion.reason || suggestion.original.slice(0, 20)}`);
+                        logAiProofingSuggestion("未匹配", suggestion, chapter.title);
+                        continue;
+                    }
+                    usedOffsets.add(localStart);
+                    const globalStart = chapter.startOffset + localStart;
+                    const globalEnd = fullChapterRemoval
+                        ? chapter.startOffset + chapter.text.length
+                        : globalStart + suggestion.original.length;
+                    const pos = offsetToLineChar(lineOffsets, globalStart);
+                    chapterRows.push({
+                        ...suggestion,
+                        id: `${chapter.id}-${globalStart}-${chapterRows.length}`,
+                        chapterTitle: chapter.title,
+                        original: fullChapterRemoval ? chapter.title : suggestion.original,
+                        replacement: fullChapterRemoval ? "" : suggestion.replacement,
+                        fullChapterRemoval,
+                        lineStart: pos.line,
+                        startChar: pos.char,
+                        endChar: fullChapterRemoval ? pos.char + Math.min(chapter.title.length || 1, chapter.text.length) : pos.char + suggestion.original.length,
+                        globalStart,
+                        globalEnd,
+                    });
+                }
+                const allChapterRows = [...localEllipsisRows, ...chapterRows];
+                const safeChapterRows: AiProofingRow[] = [];
+                let blockedRows = 0;
+                for (const row of allChapterRows) {
+                    const riskReason = getAiProofingRiskReason(row);
+                    if (riskReason) {
+                        blockedRows++;
+                        appendAiProofingLog(`拦截高风险建议：${row.original} -> ${row.replacement || "删除"}（${riskReason}）`);
+                        logAiProofingSuggestion("拦截", row, row.chapterTitle, `风险：${riskReason}`);
+                    } else {
+                        safeChapterRows.push(row);
+                    }
+                }
+                const autoRows = safeChapterRows.filter((row) => isAiProofingAutoApplySuggestion(row));
+                const manualCandidates = safeChapterRows.filter((row) => !isAiProofingAutoApplySuggestion(row));
+                const approvalResult = await approveAiProofingRows(chapter.title, chapter.text, manualCandidates);
+                const approvedRows = approvalResult.approvedRows;
+                const manualRows = approvalResult.pendingRows;
+                if (autoRows.length > 0) {
+                    appendAiProofingLog(`自动应用：${chapter.title}，${autoRows.length} 条标点/的地得修正`);
+                    for (const row of autoRows) {
+                        appendAiProofingLog(`自动：${row.original} -> ${row.replacement || "删除"}（${row.reason}）`);
+                        logAiProofingSuggestion("自动应用", row, row.chapterTitle);
+                    }
+                }
+                if (approvedRows.length > 0) {
+                    appendAiProofingLog(`审批通过自动应用：${chapter.title}，${approvedRows.length} 条`);
+                    for (const row of approvedRows) {
+                        appendAiProofingLog(`审批通过：${row.original} -> ${row.replacement || "删除"}（${row.reason}）`);
+                        logAiProofingSuggestion("审批通过", row, row.chapterTitle);
+                    }
+                }
+                for (const row of manualRows) {
+                    logAiProofingSuggestion("人工待审", row, row.chapterTitle);
+                }
+                autoApplyRows = [...autoApplyRows, ...autoRows];
+                approvedApplyRows = [...approvedApplyRows, ...approvedRows];
+                pendingRows = [...pendingRows, ...manualRows];
+                accepted += manualRows.length;
+                aiProofingRows = pendingRows;
+                appendAiProofingLog(`完成章节：${chapter.title}，返回 ${suggestions.length} 条，本地 ${localEllipsisRows.length} 条，自动 ${autoRows.length + approvedRows.length} 条，建议 ${manualRows.length} 条，拦截 ${blockedRows} 条`);
+            }
+            if (autoApplyRows.length > 0) {
+                const result = applyAiProofingRowsToText(autoApplyRows, fileContent);
+                if (result.changed > 0) {
+                    await applyProofResult({
+                        text: result.text,
+                        changedCount: result.changed,
+                        message: `已自动应用 ${result.changed} 条标点/的地得修正`,
+                    });
+                    pendingRows = shiftAiProofingRowsAfterEdits(pendingRows, result.edits);
+                    aiProofingRows = pendingRows;
+                    appendAiProofingLog(`已自动写入 ${result.changed} 条修正`);
+                } else {
+                    appendAiProofingLog("自动修正未写入：原文已变化或未匹配");
+                }
+            }
+            if (approvedApplyRows.length > 0) {
+                const beforeText = fileContent;
+                const result = applyAiProofingRowsToText(approvedApplyRows, fileContent);
+                if (result.changed > 0) {
+                    await applyProofResult({
+                        text: result.text,
+                        changedCount: result.changed,
+                        message: `已应用 ${result.changed} 条 AI 审批建议`,
+                    });
+                    pendingRows = shiftAiProofingRowsAfterEdits(pendingRows, result.edits);
+                    aiProofingRows = pendingRows;
+                    aiApprovalAppliedBatches = [
+                        ...aiApprovalAppliedBatches,
+                        {
+                            id: `approval-${Date.now()}`,
+                            chapterTitle: approvedApplyRows[0]?.chapterTitle || "AI 审批",
+                            rows: approvedApplyRows.filter((row) => result.appliedIds.has(row.id)),
+                            beforeText,
+                            afterText: result.text,
+                            appliedAt: Date.now(),
+                            reverted: false,
+                        },
+                    ];
+                    appendAiProofingLog(`已写入 AI 审批修正 ${result.changed} 条，可在审批页撤销`);
+                } else {
+                    appendAiProofingLog("AI 审批修正未写入：原文已变化或未匹配");
+                }
+            }
+            await updateMd5(fileContent);
+            aiProofingSelectedIds = new Set(aiProofingRows.map((row) => row.id));
+            proofMessage = aiProofingAbortRequested
+                ? `已停止，找到 ${aiProofingRows.length} 条建议`
+                : `智能校对完成，找到 ${accepted} 条建议${skipped ? `，跳过 ${skipped} 个超长章节` : ""}`;
+            appendAiProofingLog(proofMessage);
+        } catch (error) {
+            console.error("智能校对失败:", error);
+            proofMessage = `智能校对失败：${error}`;
+            appendAiProofingLog(proofMessage);
+        } finally {
+            aiProofingRunning = false;
+            aiProofingAbortRequested = false;
+            await persistAiProofingLogFile();
+        }
+    }
+
+    function applyAiProofingRowsToText(rows: AiProofingRow[], sourceText: string) {
+        const sorted = [...rows].sort((a, b) => b.globalStart - a.globalStart);
+        let text = sourceText;
+        let changed = 0;
+        const appliedIds = new Set<string>();
+        const edits: Array<{ start: number; oldLength: number; newLength: number }> = [];
+
+        for (const row of sorted) {
+            if (isAiProofingUnsafeSuggestion(row)) continue;
+            const removeLength = row.globalEnd - row.globalStart;
+            const current = text.slice(row.globalStart, row.globalStart + removeLength);
+            if (row.fullChapterRemoval) {
+                continue;
+            }
+            if (current !== row.original) continue;
+            text = text.slice(0, row.globalStart) + row.replacement + text.slice(row.globalStart + row.original.length);
+            changed++;
+            appliedIds.add(row.id);
+            edits.push({ start: row.globalStart, oldLength: row.original.length, newLength: row.replacement.length });
+        }
+
+        return { text, changed, appliedIds, edits };
+    }
+
+    function shiftAiProofingRowsAfterEdits(rows: AiProofingRow[], edits: Array<{ start: number; oldLength: number; newLength: number }>) {
+        if (edits.length === 0) return rows;
+        const orderedEdits = [...edits].sort((a, b) => a.start - b.start);
+        return rows.map((row) => {
+            let delta = 0;
+            for (const edit of orderedEdits) {
+                if (edit.start < row.globalStart) {
+                    delta += edit.newLength - edit.oldLength;
+                }
+            }
+            if (delta === 0) return row;
+            return {
+                ...row,
+                globalStart: row.globalStart + delta,
+                globalEnd: row.globalEnd + delta,
+            };
+        });
+    }
+
+    function stopAiProofing() {
+        aiProofingAbortRequested = true;
+        proofMessage = "正在停止智能校对...";
+    }
+
+    function toggleAiProofingRow(rowId: string, checked: boolean) {
+        const next = new Set(aiProofingSelectedIds);
+        if (checked) next.add(rowId);
+        else next.delete(rowId);
+        aiProofingSelectedIds = next;
+        saveAiProofingCache();
+    }
+
+    function setAllAiProofingRows(checked: boolean) {
+        aiProofingSelectedIds = checked
+            ? new Set(aiProofingRows.map((row) => row.id))
+            : new Set();
+        saveAiProofingCache();
+    }
+
+    function jumpToAiProofingRow(row: AiProofingRow) {
+        editorComponent?.selectMatch(row.lineStart, row.startChar, row.endChar);
+        proofMessage = "已定位到智能校对建议";
+    }
+
+    async function applySelectedAiProofingRows() {
+        const selected = aiProofingRows
+            .filter((row) => aiProofingSelectedIds.has(row.id))
+            .sort((a, b) => b.globalStart - a.globalStart);
+        if (selected.length === 0) return;
+        const result = applyAiProofingRowsToText(selected, fileContent);
+        await applyProofResult({
+            text: result.text,
+            changedCount: result.changed,
+            message: result.changed > 0 ? `已应用 ${result.changed} 条智能校对建议` : "原文已变化，未应用任何建议",
+        });
+        if (result.changed > 0) {
+            const remainingRows = aiProofingRows.filter((row) => !result.appliedIds.has(row.id));
+            aiProofingRows = shiftAiProofingRowsAfterEdits(remainingRows, result.edits);
+            aiProofingSelectedIds = new Set(aiProofingRows.map((row) => row.id));
+            appendAiProofingLog(`人工应用：${result.changed} 条，剩余 ${aiProofingRows.length} 条`);
+        }
+        saveAiProofingCache();
+    }
+
+    async function revertAiApprovalBatch(batchId: string) {
+        const batch = aiApprovalAppliedBatches.find((item) => item.id === batchId);
+        if (!batch || batch.reverted || fileContent !== batch.afterText) {
+            proofMessage = "当前文本已变化，无法安全撤销该审批";
+            appendAiProofingLog(`审批撤销失败：${batch?.chapterTitle || batchId}，文本已变化`);
+            return;
+        }
+        await applyProofResult({
+            text: batch.beforeText,
+            changedCount: batch.rows.length,
+            message: `已撤销 ${batch.rows.length} 条 AI 审批改动`,
+        });
+        aiApprovalAppliedBatches = aiApprovalAppliedBatches.map((item) =>
+            item.id === batchId ? { ...item, reverted: true } : item,
+        );
+        appendAiProofingLog(`审批撤销：${batch.chapterTitle}，${batch.rows.length} 条`);
+        saveAiProofingCache();
+    }
+
     // 查找替换状态
     let findPattern = "";
     let replacePattern = "";
@@ -1503,16 +2610,15 @@
     let currentMatchIndex = -1;
 
     // 校对面板状态
-    let proofActiveTab: "toc" | "builtin" | "check" | "convert" = "check";
+    let proofActiveTab: "toc" | "builtin" | "check" | "ai" = "check";
+    let proofTextTool: "builtin" | "convert" = "builtin";
     let proofTitleScope: ProofTitleScope = "all";
     let proofTitleRegex = "";
     let proofVolumeNumberStyle: ProofNumberStyle = "chinese";
     let proofChapterNumberStyle: ProofNumberStyle = "arabic";
     let proofPerVolume = false;
     let proofPreviewRows: ProofTitlePreviewRow[] = [];
-    let visibleProofPreviewRows: ProofTitlePreviewRow[] = [];
     let proofCollapsedVolumeKeys = new Set<string>();
-    let proofCheckMessage = "";
     let proofPreviewMessage = "";
     let proofBuiltinRule: ProofBuiltinRuleId = "title-brackets";
     let proofRegexPreviewRows: ProofRegexPreviewRow[] = [];
@@ -1521,6 +2627,14 @@
     let proofConvertDirection: ProofConvertDirection = "traditional-to-simplified";
     let proofConvertPreviewRows: ProofConvertPreviewRow[] = [];
     let proofConvertSelectedIds = new Set<string>();
+    let aiProofingScope: AiProofingScope = "current";
+    let aiProofingRows: AiProofingRow[] = [];
+    let aiProofingSelectedIds = new Set<string>();
+    let aiProofingRunning = false;
+    let aiProofingAbortRequested = false;
+    let aiProofingView: "suggestions" | "approval" | "log" = "suggestions";
+    let aiProofingLogs: string[] = [];
+    let aiApprovalAppliedBatches: AiApprovalAppliedBatch[] = [];
     let proofMessage = "";
 
     // 内容检查状态
@@ -1546,6 +2660,11 @@
     let lastGeneratedEpubPath = ""; // New state variable
     let openedFromLibrary = false;
     let txtEditorCloseAction: "exit" | "library" = "library";
+    let libraryData: LibraryData | null = null;
+    let aiProofingConfig: AiProofingConfig = { ...DEFAULT_AI_PROOFING };
+    let aiProviders: AiProviderConfig[] = [];
+    let txtAiProofingConfig: TxtAiProofingConfig = { ...DEFAULT_TXT_AI_PROOFING };
+    let aiSettingsMessage = "";
     let isClosingEditorWindow = false;
 
     async function closeTxtEditorWindow() {
@@ -1703,6 +2822,7 @@
                     }
                 } catch (e) {}
             }
+            await loadSharedLibrarySettings();
             await loadImportedFonts();
             await loadStyleTemplates();
             if (appSettings.defaultEpubStyles?.["main.css"]?.trim()) {
@@ -1765,7 +2885,8 @@
                             await scanToc(fileContent);
                             epubMeta = extractMetadata(fileContent, filePath);
                             refreshEpubMetadata();
-                            updateMd5(fileContent);
+                            await updateMd5(fileContent);
+                            loadAiProofingCache();
                             if (state.scrollLine) {
                                 setTimeout(() => editorComponent?.scrollToLine(state.scrollLine), 200);
                             }
@@ -1802,8 +2923,8 @@
             try {
                 const sp = new URLSearchParams(window.location.search);
                 openedFromLibrary = sp.get("fromLibrary") === "1";
-                const data = await invoke<any>("load_library");
-                const action = data?.config?.txtEditorCloseAction;
+                if (!libraryData) await loadSharedLibrarySettings();
+                const action = libraryData?.config?.txtEditorCloseAction;
                 if (action === "exit" || action === "library") {
                     txtEditorCloseAction = action;
                 }
@@ -2232,8 +3353,9 @@
 
                 editorComponent?.resetDoc(content);
                 isModified = false;
-                updateMd5(content);
+                await updateMd5(content);
                 await scanToc(content);
+                loadAiProofingCache();
                 if (isCheckModeOn) runFullCheck();
 
                 isLoading = false;
@@ -2309,7 +3431,7 @@
             // Clear crash recovery on explicit save
             localStorage.removeItem("app-crash-recovery");
             // saveStateToCache(0); // Optional: re-save cleanslate or just remove. Removing is safer.
-            updateMd5(fileContent);
+            await updateMd5(fileContent);
             await scanToc(fileContent);
             // await message("保存成功！"); // 移除弹窗，保持静默成功
         } catch (e) {
@@ -2336,10 +3458,29 @@
         try {
             const parsed = JSON.parse(localStorage.getItem(key) || "{}");
             manualTitleOverrides = Object.fromEntries(
-                Object.entries(parsed).filter(([, value]) =>
-                    value === "Volume" || value === "Chapter" || value === "Ignore",
-                ),
-            ) as Record<string, ManualTitleKind>;
+                Object.entries(parsed).flatMap(([lineKey, value]) => {
+                    const line = Number(lineKey);
+                    if (!Number.isInteger(line) || line < 1) return [];
+                    if (value === "Volume" || value === "Chapter" || value === "Ignore") {
+                        return [[lineKey, { kind: value, line, title: "" }]];
+                    }
+                    if (value && typeof value === "object") {
+                        const entry = value as Partial<ManualTitleOverrideEntry>;
+                        if (entry.kind !== "Volume" && entry.kind !== "Chapter" && entry.kind !== "Ignore") {
+                            return [];
+                        }
+                        const savedLine = Number(entry.line);
+                        return [[lineKey, {
+                            kind: entry.kind,
+                            line: Number.isInteger(savedLine) && savedLine > 0 ? savedLine : line,
+                            title: typeof entry.title === "string" ? entry.title : "",
+                            prevTitle: typeof entry.prevTitle === "string" ? entry.prevTitle : undefined,
+                            nextTitle: typeof entry.nextTitle === "string" ? entry.nextTitle : undefined,
+                        }]];
+                    }
+                    return [];
+                }),
+            ) as Record<string, ManualTitleOverrideEntry>;
         } catch (_) {
             manualTitleOverrides = {};
         }
@@ -2349,7 +3490,7 @@
         const key = manualTitleStorageKey();
         if (!key) return;
         const entries = Object.entries(manualTitleOverrides).filter(([, value]) =>
-            value === "Volume" || value === "Chapter" || value === "Ignore",
+            value?.kind === "Volume" || value?.kind === "Chapter" || value?.kind === "Ignore",
         );
         if (entries.length === 0) {
             localStorage.removeItem(key);
@@ -2374,27 +3515,129 @@
         return sorted;
     }
 
+    function normalizeManualTitleText(text: string) {
+        return text.trim().replace(/\s+/g, " ");
+    }
+
+    function findManualTitleLineInRange(
+        lines: string[],
+        title: string,
+        startLine: number,
+        endLine: number,
+    ) {
+        const wanted = normalizeManualTitleText(title);
+        if (!wanted) return null;
+        const start = Math.max(1, Math.min(lines.length, startLine));
+        const end = Math.max(start, Math.min(lines.length, endLine));
+        for (let lineNumber = start; lineNumber <= end; lineNumber += 1) {
+            if (normalizeManualTitleText(lines[lineNumber - 1] || "") === wanted) {
+                return lineNumber;
+            }
+        }
+        return null;
+    }
+
+    function findManualTitleAnchorLine(
+        chapters: RawChapter[],
+        lines: string[],
+        title: string | undefined,
+        fallbackLine: number,
+        side: "prev" | "next",
+    ) {
+        const wanted = normalizeManualTitleText(title || "");
+        if (!wanted) return null;
+        const chapterLines = chapters
+            .filter((chapter) => normalizeManualTitleText(chapter.title) === wanted)
+            .map((chapter) => chapter.line_number);
+        const textLines = lines
+            .map((line, index) => ({ lineNumber: index + 1, text: line }))
+            .filter((line) => normalizeManualTitleText(line.text) === wanted)
+            .map((line) => line.lineNumber);
+        const candidates = [...new Set([...chapterLines, ...textLines])]
+            .filter((lineNumber) => lineNumber >= 1 && lineNumber <= lines.length)
+            .sort((a, b) => a - b);
+        if (candidates.length === 0) return null;
+
+        const directional = candidates.filter((lineNumber) =>
+            side === "prev" ? lineNumber < fallbackLine : lineNumber > fallbackLine,
+        );
+        const pool = directional.length > 0 ? directional : candidates;
+        return pool.reduce((best, lineNumber) =>
+            Math.abs(lineNumber - fallbackLine) < Math.abs(best - fallbackLine)
+                ? lineNumber
+                : best,
+        );
+    }
+
+    function resolveManualTitleOverrideLine(
+        entry: ManualTitleOverrideEntry,
+        lines: string[],
+        chapters: RawChapter[],
+    ) {
+        const originalLine = Number.isInteger(entry.line) ? entry.line : 0;
+        if (lines.length === 0) return null;
+        const referenceLine = Math.max(1, Math.min(lines.length, originalLine || 1));
+        const savedTitle = normalizeManualTitleText(entry.title);
+        if (!savedTitle) return referenceLine;
+
+        if (originalLine >= 1 && originalLine <= lines.length && normalizeManualTitleText(lines[originalLine - 1] || "") === savedTitle) {
+            return originalLine;
+        }
+
+        const prevLine = findManualTitleAnchorLine(chapters, lines, entry.prevTitle, referenceLine, "prev");
+        const nextLine = findManualTitleAnchorLine(chapters, lines, entry.nextTitle, referenceLine, "next");
+        if (prevLine === null || nextLine === null || prevLine < nextLine) {
+            const rangeLine = findManualTitleLineInRange(
+                lines,
+                entry.title,
+                prevLine === null ? 1 : prevLine + 1,
+                nextLine === null ? lines.length : nextLine - 1,
+            );
+            if (rangeLine !== null) return rangeLine;
+        }
+
+        const nearbyLine = findManualTitleLineInRange(
+            lines,
+            entry.title,
+            referenceLine - 80,
+            referenceLine + 80,
+        );
+        if (nearbyLine !== null) return nearbyLine;
+
+        return findManualTitleLineInRange(lines, entry.title, 1, lines.length);
+    }
+
+    function getResolvedManualTitleOverrideMap(text: string, chapters: RawChapter[]) {
+        const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
+        const resolved = new Map<number, ManualTitleOverrideEntry>();
+        for (const entry of Object.values(manualTitleOverrides)) {
+            const lineNumber = resolveManualTitleOverrideLine(entry, lines, chapters);
+            if (lineNumber === null) continue;
+            resolved.set(lineNumber, { ...entry, line: lineNumber });
+        }
+        return resolved;
+    }
+
     function mergeManualTitleOverrides(text: string, chapters: RawChapter[]) {
         const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
         const byLine = new Map<number, RawChapter>();
+        const resolvedOverrides = getResolvedManualTitleOverrideMap(text, chapters);
 
         for (const chapter of chapters) {
-            const override = manualTitleOverrides[String(chapter.line_number)];
-            if (override === "Ignore") continue;
-            if (override === "Volume" || override === "Chapter") continue;
+            const override = resolvedOverrides.get(chapter.line_number);
+            if (override?.kind === "Ignore") continue;
+            if (override?.kind === "Volume" || override?.kind === "Chapter") continue;
             byLine.set(chapter.line_number, chapter);
         }
 
-        for (const [lineKey, kind] of Object.entries(manualTitleOverrides)) {
-            if (kind !== "Volume" && kind !== "Chapter") continue;
-            const lineNumber = Number(lineKey);
-            if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > lines.length) continue;
+        for (const [lineNumber, override] of resolvedOverrides) {
+            if (override.kind !== "Volume" && override.kind !== "Chapter") continue;
             const title = lines[lineNumber - 1]?.trim();
             if (!title) continue;
             byLine.set(lineNumber, {
                 title,
                 line_number: lineNumber,
-                level: kind === "Volume" ? 1 : 3,
+                level: override.kind === "Volume" ? 1 : 3,
                 is_meta: false,
                 word_count: 0,
             });
@@ -2413,9 +3656,10 @@
                 content: text,
                 rules: appSettings.customRegexRules,
             });
+            const resolvedManualOverrides = getResolvedManualTitleOverrideMap(text, rawList);
             const tocItems = mergeManualTitleOverrides(text, rawList).filter((item) => {
-                const override = manualTitleOverrides[String(item.line_number)];
-                return override === "Volume" || override === "Chapter" || isLikelyTocTitle(item.title, item.level);
+                const override = resolvedManualOverrides.get(item.line_number);
+                return override?.kind === "Volume" || override?.kind === "Chapter" || isLikelyTocTitle(item.title, item.level);
             });
 
             const tree: TocNode[] = [];
@@ -2588,17 +3832,29 @@
         handleScroll({ top: line, bottom: line, isAtBottom: false });
     }
 
+    function buildManualTitleOverrideEntry(kind: ManualTitleKind, line: { number: number; text: string }) {
+        const prev = [...flatToc].reverse().find((node) => node.line < line.number);
+        const next = flatToc.find((node) => node.line > line.number);
+        return {
+            kind,
+            line: line.number,
+            title: line.text.trim(),
+            prevTitle: prev?.title,
+            nextTitle: next?.title,
+        };
+    }
+
     async function applyEditorLineTitleAction(action: string, context: any) {
         if (!editorComponent || !context) return;
         const line = editorComponent.getLineAtClientPos(Number(context.clientX), Number(context.clientY));
         if (!line) return;
 
         if (action === "make-volume-title") {
-            manualTitleOverrides[String(line.number)] = "Volume";
+            manualTitleOverrides[String(line.number)] = buildManualTitleOverrideEntry("Volume", line);
         } else if (action === "make-chapter-title") {
-            manualTitleOverrides[String(line.number)] = "Chapter";
+            manualTitleOverrides[String(line.number)] = buildManualTitleOverrideEntry("Chapter", line);
         } else if (action === "remove-title") {
-            manualTitleOverrides[String(line.number)] = "Ignore";
+            manualTitleOverrides[String(line.number)] = buildManualTitleOverrideEntry("Ignore", line);
         } else {
             return;
         }
@@ -2944,9 +4200,10 @@
                 rules: appSettings.customRegexRules,
             });
             loadManualTitleOverrides();
+            const resolvedManualOverrides = getResolvedManualTitleOverrideMap(fileContent, chapters);
             chapters = mergeManualTitleOverrides(fileContent, chapters).filter((chapter) => {
-                const override = manualTitleOverrides[String(chapter.line_number)];
-                return override === "Volume" || override === "Chapter" || isLikelyTocTitle(chapter.title, chapter.level);
+                const override = resolvedManualOverrides.get(chapter.line_number);
+                return override?.kind === "Volume" || override?.kind === "Chapter" || isLikelyTocTitle(chapter.title, chapter.level);
             });
 
             // 智能清洗
@@ -3166,8 +4423,9 @@
                 class="btn-secondary"
                 title="偏好设置"
                 on:click={() => {
-                    closeAllPanels();
                     showSettingsPanel = true;
+                    showEpubModal = false;
+                    showHistoryPanel = false;
                 }}>⚙️</button
             >
         </div>
@@ -3421,8 +4679,8 @@
                         on:click={() => (proofActiveTab = "builtin")}>文本检查</button
                     >
                     <button
-                        class:active={proofActiveTab === "convert"}
-                        on:click={() => (proofActiveTab = "convert")}>繁简转换</button
+                        class:active={proofActiveTab === "ai"}
+                        on:click={() => (proofActiveTab = "ai")}>智能校对</button
                     >
                 </div>
 
@@ -3520,6 +4778,22 @@
                     {:else if proofActiveTab === "builtin"}
                         <div class="proof-section proof-regex-controls">
                             <div class="proof-row">
+                                <label for="proof-text-tool">类型</label>
+                                <select
+                                    id="proof-text-tool"
+                                    bind:value={proofTextTool}
+                                    on:change={() => {
+                                        proofRegexSelectedIds = new Set();
+                                        proofConvertPreviewRows = [];
+                                        proofConvertSelectedIds = new Set();
+                                    }}
+                                >
+                                    <option value="builtin">内置规则</option>
+                                    <option value="convert">繁简转换</option>
+                                </select>
+                            </div>
+                            {#if proofTextTool === "builtin"}
+                            <div class="proof-row">
                                 <label for="proof-builtin-rule">规则</label>
                                 <select id="proof-builtin-rule" bind:value={proofBuiltinRule}>
                                     {#each PROOF_BUILTIN_REGEX_RULES as rule}
@@ -3544,8 +4818,45 @@
                                     on:click={applyAllBuiltinRegex}
                                 >全部替换</button>
                             </div>
+                            {:else}
+                            <div class="proof-row">
+                                <label for="proof-convert-direction">方向</label>
+                                <select
+                                    id="proof-convert-direction"
+                                    bind:value={proofConvertDirection}
+                                    on:change={() => {
+                                        proofConvertPreviewRows = [];
+                                        proofConvertSelectedIds = new Set();
+                                    }}
+                                >
+                                    <option value="traditional-to-simplified">繁体转简体</option>
+                                    <option value="simplified-to-traditional">简体转繁体</option>
+                                </select>
+                            </div>
+                            <div class="proof-actions-row proof-convert-actions">
+                                <button class="proof-primary inline" on:click={runProofConvertPreview}>
+                                    查找
+                                </button>
+                                <button on:click={() => setAllProofConvertRows(true)}>全选</button>
+                                <button on:click={() => setAllProofConvertRows(false)}>全不选</button>
+                                <button
+                                    class="proof-primary inline"
+                                    disabled={proofConvertSelectedIds.size === 0}
+                                    on:click={applySelectedConvertRows}
+                                >替换选中</button>
+                                <button
+                                    class="proof-primary inline"
+                                    disabled={proofConvertPreviewRows.length === 0}
+                                    on:click={applyAllConvertRows}
+                                >全部替换</button>
+                                <button class="proof-primary inline" on:click={runProofFullConvert}>
+                                    转换全文
+                                </button>
+                            </div>
+                            {/if}
                         </div>
 
+                        {#if proofTextTool === "builtin"}
                         <div class="proof-regex-preview">
                             <div class="proof-regex-head">
                                 <span></span>
@@ -3584,6 +4895,44 @@
                                 <div class="proof-empty">暂无匹配</div>
                             {/each}
                         </div>
+                        {:else}
+                        <div class="proof-regex-preview">
+                            <div class="proof-regex-head">
+                                <span></span>
+                                <span>原文</span>
+                                <span>转换后</span>
+                            </div>
+                            {#each proofConvertPreviewRows as row}
+                                <label class="proof-regex-row">
+                                    <input
+                                        type="checkbox"
+                                        checked={proofConvertSelectedIds.has(row.id)}
+                                        on:change={(e) =>
+                                            toggleProofConvertRow(
+                                                row.id,
+                                                (e.currentTarget as HTMLInputElement).checked,
+                                            )}
+                                    />
+                                    <span
+                                        role="button"
+                                        tabindex="0"
+                                        title={row.original}
+                                        on:click|preventDefault={() => jumpToProofConvertRow(row)}
+                                        on:keydown|preventDefault={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                jumpToProofConvertRow(row);
+                                            }
+                                        }}
+                                    >
+                                        {row.original}
+                                    </span>
+                                    <span title={row.replacement}>{row.replacement}</span>
+                                </label>
+                            {:else}
+                                <div class="proof-empty">点击查找后显示可转换内容</div>
+                            {/each}
+                        </div>
+                        {/if}
                     {:else if proofActiveTab === "check"}
                         <div class="proof-check-panel">
                             <div class="proof-section proof-word-check-controls">
@@ -3691,54 +5040,63 @@
                     {:else}
                         <div class="proof-section">
                             <div class="proof-row">
-                                <label for="proof-convert-direction">方向</label>
-                                <select
-                                    id="proof-convert-direction"
-                                    bind:value={proofConvertDirection}
-                                    on:change={() => {
-                                        proofConvertPreviewRows = [];
-                                        proofConvertSelectedIds = new Set();
-                                    }}
-                                >
-                                    <option value="traditional-to-simplified">繁体转简体</option>
-                                    <option value="simplified-to-traditional">简体转繁体</option>
-                                </select>
+                                <label for="ai-proof-scope">范围</label>
+                <select id="ai-proof-scope" bind:value={aiProofingScope} disabled={aiProofingRunning}>
+                    <option value="current">当前章</option>
+                    {#if hasProofVolumeScope}
+                    <option value="volume">当前卷</option>
+                    {/if}
+                    <option value="all">全书逐章</option>
+                </select>
                             </div>
                             <div class="proof-actions-row proof-convert-actions">
-                                <button class="proof-primary inline" on:click={runProofConvertPreview}>
-                                    查找
-                                </button>
-                                <button on:click={() => setAllProofConvertRows(true)}>全选</button>
-                                <button on:click={() => setAllProofConvertRows(false)}>全不选</button>
                                 <button
                                     class="proof-primary inline"
-                                    disabled={proofConvertSelectedIds.size === 0}
-                                    on:click={applySelectedConvertRows}
-                                >替换选中</button>
+                                    disabled={aiProofingRunning}
+                                    on:click={runAiProofing}
+                                >{aiProofingRunning ? "校对中..." : "开始校对"}</button>
+                                <button disabled={!aiProofingRunning} on:click={stopAiProofing}>停止</button>
                                 <button
-                                    class="proof-primary inline"
-                                    disabled={proofConvertPreviewRows.length === 0}
-                                    on:click={applyAllConvertRows}
-                                >全部替换</button>
-                                <button class="proof-primary inline" on:click={runProofFullConvert}>
-                                    转换全文
-                                </button>
+                                    class:active={aiProofingView === "suggestions"}
+                                    on:click={() => (aiProofingView = "suggestions")}
+                                >建议</button>
+                                {#if aiProofingConfig.autoApprove}
+                                <button
+                                    class:active={aiProofingView === "approval"}
+                                    on:click={() => (aiProofingView = "approval")}
+                                >审批</button>
+                                {/if}
+                                <button
+                                    class:active={aiProofingView === "log"}
+                                    on:click={() => (aiProofingView = "log")}
+                                >日志</button>
                             </div>
                         </div>
 
+                        {#if aiProofingView === "suggestions"}
                         <div class="proof-regex-preview">
                             <div class="proof-regex-head">
                                 <span></span>
                                 <span>原文</span>
-                                <span>转换后</span>
+                                <span>建议</span>
                             </div>
-                            {#each proofConvertPreviewRows as row}
+                            <div class="ai-proof-selection-bar">
+                                <span>已选 {aiProofingSelectedIds.size} / {aiProofingRows.length}</span>
+                                <button disabled={aiProofingRunning} on:click={() => setAllAiProofingRows(true)}>全选</button>
+                                <button disabled={aiProofingRunning} on:click={() => setAllAiProofingRows(false)}>全不选</button>
+                                <button
+                                    class="proof-primary inline"
+                                    disabled={aiProofingRunning || aiProofingSelectedIds.size === 0}
+                                    on:click={applySelectedAiProofingRows}
+                                >应用选中</button>
+                            </div>
+                            {#each aiProofingRows as row}
                                 <label class="proof-regex-row">
                                     <input
                                         type="checkbox"
-                                        checked={proofConvertSelectedIds.has(row.id)}
+                                        checked={aiProofingSelectedIds.has(row.id)}
                                         on:change={(e) =>
-                                            toggleProofConvertRow(
+                                            toggleAiProofingRow(
                                                 row.id,
                                                 (e.currentTarget as HTMLInputElement).checked,
                                             )}
@@ -3746,22 +5104,64 @@
                                     <span
                                         role="button"
                                         tabindex="0"
-                                        title={row.original}
-                                        on:click|preventDefault={() => jumpToProofConvertRow(row)}
+                                        title={`${row.chapterTitle}\n${row.reason}`}
+                                        on:click|preventDefault={() => jumpToAiProofingRow(row)}
                                         on:keydown|preventDefault={(e) => {
                                             if (e.key === "Enter" || e.key === " ") {
-                                                jumpToProofConvertRow(row);
+                                                jumpToAiProofingRow(row);
                                             }
                                         }}
                                     >
                                         {row.original}
                                     </span>
-                                    <span title={row.replacement}>{row.replacement}</span>
+                                    <span title={`${row.type} · ${(row.confidence * 100).toFixed(0)}% · ${row.reason}`}>
+                                        {row.fullChapterRemoval ? "移除整章" : (row.replacement || "删除")}
+                                    </span>
                                 </label>
                             {:else}
-                                <div class="proof-empty">点击查找后显示可转换内容</div>
+                                <div class="proof-empty">点击开始校对后显示建议</div>
                             {/each}
                         </div>
+                        {:else if aiProofingView === "approval"}
+                        <div class="proof-regex-preview">
+                            <div class="proof-regex-head approval-head">
+                                <span>状态</span>
+                                <span>审批通过</span>
+                                <span>操作</span>
+                            </div>
+                            {#each aiApprovalAppliedBatches as batch}
+                                <div class="proof-regex-row approval-row">
+                                    <span>{batch.reverted ? "已撤销" : "已应用"}</span>
+                                    <span title={batch.rows.map((row) => `${row.original} -> ${row.replacement || "删除"}（${row.reason}）`).join("\n")}>
+                                        {batch.chapterTitle} · {batch.rows.length} 条
+                                    </span>
+                                    <span>
+                                        <button
+                                            type="button"
+                                            class="mini-action"
+                                            disabled={batch.reverted || aiProofingRunning}
+                                            on:click={() => revertAiApprovalBatch(batch.id)}
+                                        >撤销</button>
+                                    </span>
+                                </div>
+                            {:else}
+                                <div class="proof-empty">暂无 AI 审批应用记录</div>
+                            {/each}
+                        </div>
+                        {:else}
+                        <div
+                            role="log"
+                            class="ai-proof-log ai-proof-log-view"
+                            data-native-context-menu="true"
+                            on:contextmenu|stopPropagation
+                        >
+                            {#each aiProofingLogs as item}
+                                <div>{item}</div>
+                            {:else}
+                                <div>暂无日志</div>
+                            {/each}
+                        </div>
+                        {/if}
                     {/if}
                 </div>
 
@@ -3798,7 +5198,11 @@
         <div
             role="presentation"
             class="modal-overlay"
-            on:click={closeAllPanels}
+            on:click={() => {
+                showSettingsPanel = false;
+                showEpubModal = false;
+                showHistoryPanel = false;
+            }}
         >
             <div
                 role="presentation"
@@ -3810,7 +5214,7 @@
                 {#if showSettingsPanel}
                     <div class="p-header">
                         <span>偏好设置</span>
-                        <button class="icon-close" on:click={closeAllPanels}
+                        <button class="icon-close" on:click={() => (showSettingsPanel = false)}
                             >✕</button
                         >
                     </div>
@@ -3820,6 +5224,8 @@
                         <button class="tab-btn {settingsActiveTab === 'fonts' ? 'active' : ''}" on:click={openSettingsFontsTab}>字体</button>
                         <button class="tab-btn {settingsActiveTab === 'styles' ? 'active' : ''}" on:click={openSettingsStylesTab}>样式</button>
                         <button class="tab-btn {settingsActiveTab === 'toc' ? 'active' : ''}" on:click={() => settingsActiveTab = 'toc'}>目录</button>
+                        <button class="tab-btn {settingsActiveTab === 'ai' ? 'active' : ''}" on:click={openSettingsAiTab}>智能校对</button>
+                        <button class="tab-btn {settingsActiveTab === 'proofLogs' ? 'active' : ''}" on:click={openSettingsProofLogsTab}>校对日志</button>
                         <button class="tab-btn {settingsActiveTab === 'history' ? 'active' : ''}" on:click={openSettingsHistoryTab}>历史版本</button>
                     </div>
                     <div class="p-body">
@@ -3998,6 +5404,81 @@
                                 }}>＋ 新增正则</button>
                             </div>
 
+                        {:else if settingsActiveTab === 'ai'}
+                            <div class="ai-settings-form">
+                                {#if aiSettingsMessage}
+                                    <div class="font-settings-status">{aiSettingsMessage}</div>
+                                {/if}
+                                <div class="set-row">
+                                    <label for="aiProofProvider">校对 API:</label>
+                                    <select id="aiProofProvider" bind:value={txtAiProofingConfig.providerId}>
+                                        {#each aiProviders as provider}
+                                            <option value={provider.id}>{provider.name || provider.model}</option>
+                                        {/each}
+                                    </select>
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiApprovalProvider">审批 API:</label>
+                                    <select id="aiApprovalProvider" bind:value={txtAiProofingConfig.approvalProviderId}>
+                                        {#each aiProviders as provider}
+                                            <option value={provider.id}>{provider.name || provider.model}</option>
+                                        {/each}
+                                    </select>
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiBaseUrl">API 地址:</label>
+                                    <input id="aiBaseUrl" type="text" value={findAiProvider(txtAiProofingConfig.providerId)?.baseUrl || ""} readonly />
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiModel">模型:</label>
+                                    <input id="aiModel" type="text" value={findAiProvider(txtAiProofingConfig.providerId)?.model || ""} readonly />
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiMaxChars">单章上限:</label>
+                                    <input id="aiMaxChars" type="number" min="1000" step="1000" bind:value={aiProofingConfig.maxChapterChars} />
+                                </div>
+                                <label class="set-row ai-toggle-row" for="aiAutoApprove">
+                                    <span>自动审批:</span>
+                                    <input id="aiAutoApprove" type="checkbox" bind:checked={aiProofingConfig.autoApprove} />
+                                    <small>AI 审核非自动建议，通过则自动应用，存疑保留人工审核。</small>
+                                </label>
+                                <div class="set-row ai-textarea-row">
+                                    <label for="aiExtraPrompt">额外要求:</label>
+                                    <textarea id="aiExtraPrompt" rows="4" bind:value={aiProofingConfig.extraPrompt} placeholder="例如：保留作者口癖，不做风格润色。"></textarea>
+                                </div>
+                            </div>
+                        {:else if settingsActiveTab === 'proofLogs'}
+                            <div class="proof-log-settings">
+                                <div class="proof-log-toolbar">
+                                    <span>{proofLogMessage || `共 ${proofLogList.length} 个日志文件`}</span>
+                                    <button class="mini-action" type="button" on:click={() => loadProofLogs(false)}>刷新</button>
+                                </div>
+                                <div class="proof-log-browser">
+                                    <div class="proof-log-list">
+                                        {#each proofLogList as log}
+                                            <button
+                                                type="button"
+                                                class:active={selectedProofLogPath === log.path}
+                                                on:click={() => openProofLog(log)}
+                                            >
+                                                <span class="proof-log-name">{log.fileName}</span>
+                                                <span class="proof-log-meta">
+                                                    {new Date(log.timestamp * 1000).toLocaleString()} · {(log.size / 1024).toFixed(1)}KB
+                                                </span>
+                                            </button>
+                                        {:else}
+                                            <div class="empty-msg">暂无校对日志</div>
+                                        {/each}
+                                    </div>
+                                    <textarea
+                                        class="proof-log-content"
+                                        readonly
+                                        value={selectedProofLogContent || "选择左侧日志后查看完整内容"}
+                                        data-native-context-menu="true"
+                                        on:contextmenu|stopPropagation
+                                    ></textarea>
+                                </div>
+                            </div>
                         {:else}
                             <div class="history-settings-card">
                                 {#each historyList as h}
@@ -4914,6 +6395,158 @@
         line-height: 1.5;
     }
 
+    .ai-settings-form {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 100%;
+        padding-top: 8px;
+    }
+
+    .ai-settings-form .set-row {
+        margin-bottom: 0;
+    }
+
+    .ai-settings-form .set-row label,
+    .ai-settings-form .ai-setting-label {
+        width: 110px;
+        flex-shrink: 0;
+        font-weight: bold;
+        color: #444;
+        font-size: 15px;
+    }
+
+    .ai-settings-form .set-row {
+        align-items: center;
+        justify-content: flex-start;
+    }
+
+    .ai-settings-form .set-row input:not([type="checkbox"]),
+    .ai-settings-form .set-row textarea {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 38px;
+        box-sizing: border-box;
+    }
+
+    .ai-settings-form .ai-textarea-row {
+        align-items: flex-start;
+    }
+
+    .ai-settings-form .ai-textarea-row label {
+        padding-top: 8px;
+    }
+
+    .ai-settings-form .set-row textarea {
+        flex: 1;
+        width: 100%;
+        min-height: 86px;
+        resize: vertical;
+    }
+
+    .ai-settings-form .ai-toggle-row {
+        display: grid;
+        grid-template-columns: 110px 24px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+    }
+
+    .ai-settings-form .ai-toggle-row input {
+        width: 16px;
+        height: 16px;
+        min-height: 0;
+        accent-color: #0b92b3;
+    }
+
+    .ai-settings-form .ai-toggle-row small {
+        color: #667085;
+        font-size: 12px;
+        line-height: 1.45;
+    }
+
+    .proof-log-settings {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 0;
+        height: 100%;
+    }
+
+    .proof-log-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        color: #52606d;
+        font-size: 12px;
+    }
+
+    .proof-log-browser {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.35fr);
+        gap: 10px;
+    }
+
+    .proof-log-list {
+        min-height: 0;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-right: 2px;
+    }
+
+    .proof-log-list button {
+        width: 100%;
+        min-height: 54px;
+        display: grid;
+        gap: 4px;
+        padding: 9px 10px;
+        border: 1px solid #e0e6ed;
+        border-radius: 8px;
+        background: #fff;
+        text-align: left;
+    }
+
+    .proof-log-list button.active {
+        border-color: #1677b8;
+        background: #eef8ff;
+        box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.1);
+    }
+
+    .proof-log-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #1b2d3f;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .proof-log-meta {
+        color: #748295;
+        font-size: 11px;
+    }
+
+    .proof-log-content {
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+        resize: none;
+        padding: 10px;
+        border: 1px solid #d6e0eb;
+        border-radius: 8px;
+        background: #fbfcfe;
+        color: #334155;
+        font-family: Consolas, "Microsoft YaHei", monospace;
+        font-size: 11px;
+        line-height: 1.55;
+        box-sizing: border-box;
+    }
+
     .font-settings-list {
         display: grid;
         gap: 8px;
@@ -5130,11 +6763,38 @@
         box-sizing: border-box;
         border: 1px solid #ccc;
         border-radius: 6px;
-        background: #fff;
         color: #333;
-        padding: 7px 9px;
         font-size: 13px;
         outline: none;
+    }
+
+    .proof-row input {
+        padding: 7px 9px;
+        background: #fff;
+    }
+
+    .proof-row select,
+    .set-row select,
+    .rule-type {
+        min-height: var(--control-height);
+        padding: 7px 38px 7px 12px;
+        background-color: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
+        background-image:
+            linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
+            linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(241, 248, 253, 0.82));
+        background-position:
+            calc(100% - 20px) 50%,
+            calc(100% - 14px) 50%,
+            0 0;
+        background-size:
+            6px 6px,
+            6px 6px,
+            100% 100%;
+        background-repeat: no-repeat;
+        appearance: none;
+        -webkit-appearance: none;
+        box-shadow: var(--shadow-xs);
     }
 
     .proof-row input:focus,
@@ -5320,9 +6980,29 @@
         border: 1px solid #e5e8ed;
     }
 
+    .ai-proof-log {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+        overflow: auto;
+        padding: 8px 10px;
+        border: 1px solid #dfe5ec;
+        border-radius: 6px;
+        background: #fbfcfe;
+        color: #52606d;
+        font-family: Consolas, "Microsoft YaHei", monospace;
+        font-size: 11px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        cursor: text;
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        user-select: text;
+    }
+
     .proof-actions-row {
         display: grid;
-        grid-template-columns: 56px 68px 1fr 1fr;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 8px;
         align-items: center;
     }
@@ -5337,11 +7017,46 @@
     }
 
     .proof-convert-actions {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
     }
 
     .proof-convert-actions button {
         width: 100%;
+    }
+
+    .proof-convert-actions button.active {
+        border-color: #1697b8;
+        background: #e5f7fb;
+        color: #087a98;
+        font-weight: 800;
+    }
+
+    .ai-proof-selection-bar {
+        position: sticky;
+        top: 29px;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 58px 68px 86px;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 10px;
+        border-top: 1px solid #e7edf3;
+        border-bottom: 1px solid #e7edf3;
+        background: #fbfdff;
+        color: #607086;
+        font-size: 12px;
+    }
+
+    .ai-proof-selection-bar button {
+        min-width: 0;
+        height: 30px;
+        padding: 0 8px;
+        border: 1px solid #dce4ec;
+        border-radius: 6px;
+        background: #fff;
+        color: #52606d;
+        font-size: 12px;
+        white-space: nowrap;
     }
 
     .proof-regex-preview {
@@ -5392,6 +7107,17 @@
         height: 16px;
         margin: auto;
         accent-color: #0066b8;
+    }
+
+    .approval-head,
+    .approval-row {
+        grid-template-columns: 74px minmax(0, 1fr) 82px;
+    }
+
+    .approval-row .mini-action {
+        width: 100%;
+        height: 26px;
+        font-size: 12px;
     }
 
     .proof-footer {
@@ -5603,10 +7329,11 @@
 
     /* 偏好设置面板增强样式 */
     .editor-settings-modal {
-        max-width: 760px;
+        max-width: 860px;
+        height: min(76vh, 640px);
         min-height: 520px;
         display: grid;
-        grid-template-columns: 170px 1fr;
+        grid-template-columns: 150px 1fr;
         grid-template-rows: 58px 1fr 64px;
         border-radius: 14px;
     }
@@ -5642,6 +7369,7 @@
         grid-column: 2;
         grid-row: 2;
         min-width: 0;
+        min-height: 0;
         overflow: auto;
         padding: 18px 20px;
     }
@@ -5707,6 +7435,10 @@
             border-bottom: 1px solid #e8edf3;
         }
 
+        .proof-log-browser {
+            grid-template-columns: 1fr;
+        }
+
         .editor-settings-modal .editor-settings-footer {
             justify-content: stretch;
         }
@@ -5756,11 +7488,9 @@
     .rule-type {
         width: 85px;
         height: 32px;
-        padding: 0 5px;
         border: 1px solid #ccc;
         border-radius: 6px;
         font-size: 13px;
-        background: #fff;
     }
     .rule-input-group {
         display: flex;
@@ -6647,6 +8377,8 @@
     }
 
     .set-row input,
+    .set-row select,
+    .set-row textarea,
     .epub-input-small,
     .epub-textarea,
     .rule-type,
@@ -6662,6 +8394,8 @@
     }
 
     .set-row input:focus,
+    .set-row select:focus,
+    .set-row textarea:focus,
     .epub-input-small:focus,
     .epub-textarea:focus,
     .rule-type:focus,

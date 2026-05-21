@@ -71,8 +71,89 @@ select {
     font: inherit;
 }
 
+.set-control:is(select),
+.set-row select,
+.proof-row select,
+.fr-select,
+.rule-type,
+.repo-actions select,
+.rd-font-picker select,
+.replace-panel select {
+    min-height: var(--control-height);
+    padding: 7px 38px 7px 12px;
+    background-color: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
+        linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(241, 248, 253, 0.82));
+    background-position:
+        calc(100% - 20px) 50%,
+        calc(100% - 14px) 50%,
+        0 0;
+    background-size:
+        6px 6px,
+        6px 6px,
+        100% 100%;
+    background-repeat: no-repeat;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
 button {
     color: inherit;
+}
+
+select {
+    min-height: var(--control-height);
+    box-sizing: border-box;
+    padding: 7px 38px 7px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background-color: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
+        linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(241, 248, 253, 0.82));
+    background-position:
+        calc(100% - 20px) 50%,
+        calc(100% - 14px) 50%,
+        0 0;
+    background-size:
+        6px 6px,
+        6px 6px,
+        100% 100%;
+    background-repeat: no-repeat;
+    color: var(--color-text);
+    box-shadow: var(--shadow-xs);
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    transition:
+        border-color var(--transition-fast),
+        box-shadow var(--transition-fast),
+        background-color var(--transition-fast);
+}
+
+select:hover {
+    border-color: var(--color-border-strong);
+    background-color: var(--color-surface);
+}
+
+select:focus,
+select:focus-visible {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring), var(--shadow-xs);
+}
+
+select option {
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
+select option:checked {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
 }
 
 button:disabled,
@@ -80,6 +161,11 @@ input:disabled,
 textarea:disabled,
 select:disabled {
     cursor: not-allowed;
+}
+
+select:disabled {
+    opacity: 0.62;
+    background-color: var(--color-surface-soft);
 }
 
 *:focus-visible {
@@ -397,24 +483,43 @@ select:disabled {
 }
 
 :root[data-theme="dark"] input,
-:root[data-theme="dark"] select,
 :root[data-theme="dark"] textarea,
 :root[data-theme="dark"] .set-control,
 :root[data-theme="dark"] .set-row input,
-:root[data-theme="dark"] .set-row select,
 :root[data-theme="dark"] .set-row textarea,
 :root[data-theme="dark"] .fr-input,
-:root[data-theme="dark"] .fr-select,
 :root[data-theme="dark"] .fr-dropdown-btn,
 :root[data-theme="dark"] .epub-input-small,
 :root[data-theme="dark"] .epub-textarea,
-:root[data-theme="dark"] .rule-type,
 :root[data-theme="dark"] .rule-input,
 :root[data-theme="dark"] .prompt-input,
 :root[data-theme="dark"] .search-box input {
     background: #151b24 !important;
     border-color: var(--color-border) !important;
     color: var(--color-text) !important;
+}
+
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] .set-row select,
+:root[data-theme="dark"] .fr-select,
+:root[data-theme="dark"] .rule-type {
+    background-color: #151b24 !important;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
+        linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
+        linear-gradient(180deg, rgba(30, 36, 48, 0.96), rgba(21, 27, 36, 0.96)) !important;
+    border-color: var(--color-border) !important;
+    color: var(--color-text) !important;
+}
+
+:root[data-theme="dark"] select option {
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
+:root[data-theme="dark"] select option:checked {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
 }
 
 :root[data-theme="dark"] input::placeholder,
