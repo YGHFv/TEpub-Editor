@@ -1,6 +1,8 @@
 name: Release
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -49,9 +51,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: v__VERSION__ # the action automatically replaces __VERSION__ with the app version
-          releaseName: 'App v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
+          releaseName: 'TEpub-Editor v__VERSION__'
+          releaseBody: 'Automated build release. Download installers from Assets.'
+          releaseDraft: false
           prerelease: false
 
   android:
@@ -142,9 +144,17 @@ jobs:
           name: TEpub-Editor-android-arm64-release-signed
           path: src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk
 
+      - name: read app version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: attach Android APK to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          files: src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "v${APP_VERSION}" \
+            src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk \
+            --clobber
