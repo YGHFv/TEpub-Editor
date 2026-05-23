@@ -5440,6 +5440,8 @@ struct AiProofingConfig {
     temperature: f32,
     #[serde(default = "default_ai_max_chapter_chars")]
     max_chapter_chars: usize,
+    #[serde(default = "default_ai_response_timeout_sec")]
+    response_timeout_sec: u64,
     #[serde(default)]
     auto_approve: bool,
     #[serde(default)]
@@ -5490,6 +5492,7 @@ impl Default for AiProofingConfig {
             model: default_ai_model(),
             temperature: default_ai_temperature(),
             max_chapter_chars: default_ai_max_chapter_chars(),
+            response_timeout_sec: default_ai_response_timeout_sec(),
             auto_approve: false,
             extra_prompt: String::new(),
         }
@@ -5510,6 +5513,10 @@ fn default_ai_temperature() -> f32 {
 
 fn default_ai_max_chapter_chars() -> usize {
     12000
+}
+
+fn default_ai_response_timeout_sec() -> u64 {
+    300
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -6046,6 +6053,7 @@ async fn run_ai_proofing(request: AiProofingRequest) -> Result<AiProofingRespons
     } else {
         format!("{}/chat/completions", base_url)
     };
+    let timeout_secs = request.config.response_timeout_sec.clamp(30, 1800);
     let model_name = request.config.model.trim();
     let body = serde_json::json!({
         "model": request.config.model,
@@ -6075,7 +6083,7 @@ async fn run_ai_proofing(request: AiProofingRequest) -> Result<AiProofingRespons
         .no_gzip()
         .no_brotli()
         .no_deflate()
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
     let send_ai_request = |body: &serde_json::Value| {
@@ -6097,7 +6105,10 @@ async fn run_ai_proofing(request: AiProofingRequest) -> Result<AiProofingRespons
         .await
         .map_err(|e| {
             if e.is_timeout() {
-                "读取智能校对响应超时：模型超过 300 秒仍未返回完整结果，请调小单章上限或换更快模型".to_string()
+                format!(
+                    "读取智能校对响应超时：模型超过 {} 秒仍未返回完整结果，请调小单章上限、调大响应时间或换更快模型",
+                    timeout_secs
+                )
             } else {
                 format!("读取智能校对响应失败: {}", e)
             }
@@ -6118,7 +6129,10 @@ async fn run_ai_proofing(request: AiProofingRequest) -> Result<AiProofingRespons
             .await
             .map_err(|e| {
                 if e.is_timeout() {
-                    "读取智能校对重试响应超时：模型超过 300 秒仍未返回完整结果，请调小单章上限或换更快模型".to_string()
+                    format!(
+                        "读取智能校对重试响应超时：模型超过 {} 秒仍未返回完整结果，请调小单章上限、调大响应时间或换更快模型",
+                        timeout_secs
+                    )
                 } else {
                     format!("读取智能校对重试响应失败: {}", e)
                 }

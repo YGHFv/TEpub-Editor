@@ -7,6 +7,7 @@
   import LibraryGrid from "$lib/LibraryGrid.svelte";
   import LibraryListSimple from "$lib/LibraryListSimple.svelte";
   import LibraryPreview from "$lib/LibraryPreview.svelte";
+  import SettingsShell from "$lib/SettingsShell.svelte";
 
   interface BookEntry {
     id: string;
@@ -61,6 +62,7 @@
     model: string;
     temperature: number;
     maxChapterChars: number;
+    responseTimeoutSec: number;
     autoApprove: boolean;
     extraPrompt: string;
   }
@@ -104,6 +106,7 @@
       model: "gpt-4o-mini",
       temperature: 0.1,
       maxChapterChars: 12000,
+      responseTimeoutSec: 300,
       autoApprove: false,
       extraPrompt: "",
     },
@@ -118,7 +121,15 @@
   let sortAsc = false;
   let isLoading = true;
   let showSettings = false;
-  let librarySettingsActiveTab: "storage" | "assoc" | "editor" | "ai" | "shelf" = "storage";
+  let librarySettingsActiveTab: "storage" | "assoc" | "editor" | "api" | "ai" | "shelf" = "storage";
+  const librarySettingsTabs = [
+    { id: "storage", label: "文件存储" },
+    { id: "assoc", label: "文件关联" },
+    { id: "editor", label: "应用窗口" },
+    { id: "api", label: "API 配置" },
+    { id: "ai", label: "智能匹配" },
+    { id: "shelf", label: "书架显示" },
+  ];
   let aiProviderDraftId = "";
   let aiMatchRunning = false;
   let aiMatchMessage = "";
@@ -166,6 +177,7 @@
     model: "gpt-4o-mini",
     temperature: 0.1,
     maxChapterChars: 12000,
+    responseTimeoutSec: 300,
     autoApprove: false,
     extraPrompt: "",
   };
@@ -178,6 +190,7 @@
     merged.model = String(merged.model || DEFAULT_AI_PROOFING.model).trim();
     merged.temperature = Math.max(0, Math.min(1, Number(merged.temperature) || DEFAULT_AI_PROOFING.temperature));
     merged.maxChapterChars = Math.max(1000, Math.floor(Number(merged.maxChapterChars) || DEFAULT_AI_PROOFING.maxChapterChars));
+    merged.responseTimeoutSec = Math.max(30, Math.min(1800, Math.floor(Number(merged.responseTimeoutSec) || DEFAULT_AI_PROOFING.responseTimeoutSec)));
     merged.autoApprove = Boolean(merged.autoApprove);
     merged.extraPrompt = String(merged.extraPrompt || "");
     return merged;
@@ -1320,8 +1333,11 @@
 
   async function saveLibraryConfig() {
     try {
-      libraryConfig.aiProofing = normalizeAiProofingConfig(libraryConfig.aiProofing);
       ensureAiProviderSelections();
+      libraryConfig.aiProofing = providerToProofingConfig(
+        (libraryConfig.aiProviders || []).find(p => p.id === libraryConfig.txtAiProofing?.providerId),
+        libraryConfig.aiProofing,
+      );
       const data = await invoke<LibraryData>("load_library");
       await invoke("save_library", {
         data: { ...data, config: libraryConfig }
@@ -1685,21 +1701,17 @@
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div class="settings-overlay" on:click={(e) => { if (e.target === e.currentTarget) showSettings = false; }}>
-      <div class="settings-panel library-settings-panel">
-        <div class="settings-header">
-          <h3>书库设置</h3>
-          <button class="settings-close" on:click={() => showSettings = false} title="关闭">×</button>
-        </div>
-
-        <div class="settings-tabs library-settings-tabs">
-          <button class="tab-btn {librarySettingsActiveTab === 'storage' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'storage'}>文件存储</button>
-          <button class="tab-btn {librarySettingsActiveTab === 'assoc' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'assoc'}>文件关联</button>
-          <button class="tab-btn {librarySettingsActiveTab === 'editor' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'editor'}>编辑器窗口</button>
-          <button class="tab-btn {librarySettingsActiveTab === 'ai' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'ai'}>智能校对</button>
-          <button class="tab-btn {librarySettingsActiveTab === 'shelf' ? 'active' : ''}" on:click={() => librarySettingsActiveTab = 'shelf'}>书架显示</button>
-        </div>
-
-        <div class="settings-body">
+      <SettingsShell
+        title="书库设置"
+        tabs={librarySettingsTabs}
+        activeTab={librarySettingsActiveTab}
+        onTabChange={(tabId) => (librarySettingsActiveTab = tabId as typeof librarySettingsActiveTab)}
+        onClose={() => (showSettings = false)}
+        actionLabel="完成"
+        onAction={() => (showSettings = false)}
+        shellClass="library-settings-panel"
+        contentClass="library-settings-content"
+      >
           {#if librarySettingsActiveTab === 'storage'}
           <section class="settings-section">
             <div class="section-title">文件存储</div>
@@ -1800,7 +1812,7 @@
 
           {:else if librarySettingsActiveTab === 'editor'}
           <section class="settings-section">
-            <div class="section-title">编辑器窗口</div>
+            <div class="section-title">应用窗口</div>
             <label class="set-row toggle-row">
               <span class="set-label">打开 TXT 编辑器时隐藏书库</span>
               <input
@@ -1830,7 +1842,7 @@
             </div>
           </section>
 
-          {:else if librarySettingsActiveTab === 'ai'}
+          {:else if librarySettingsActiveTab === 'api'}
           <section class="settings-section">
             <div class="section-title">AI 接口</div>
             <p class="section-hint">可添加多个 OpenAI 兼容 API，分别供 TXT 校对、自动审批、书库自动匹配使用。</p>
@@ -1845,6 +1857,7 @@
               <button class="tb-btn danger" type="button" on:click={() => removeAiProvider(aiProviderDraftId)}>删除</button>
             </div>
             {#if selectedAiProvider()}
+              {#key aiProviderDraftId}
               <div class="set-row">
                 <label class="set-label">名称</label>
                 <input class="set-control" type="text" value={selectedAiProvider()!.name} on:input={(e) => updateSelectedAiProvider("name", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="例如 DeepSeek / 本地模型" />
@@ -1865,12 +1878,14 @@
                 <label class="set-label">温度</label>
                 <input class="set-control" type="number" min="0" max="1" step="0.1" value={selectedAiProvider()!.temperature} on:input={(e) => updateSelectedAiProvider("temperature", Number(e.currentTarget.value))} on:change={saveLibraryConfig} />
               </div>
+              {/key}
             {/if}
           </section>
-          <section class="settings-section">
-            <div class="section-title">自动匹配</div>
+          {:else if librarySettingsActiveTab === 'ai'}
+          <section class="settings-section legacy-ai-proofing-settings">
+            <div class="section-title">智能匹配</div>
             <p class="section-hint">用于自动匹配书库图书的标签和简介，不再和 TXT 编辑器智能校对共用用途设置。</p>
-            <div class="set-row">
+            <div class="set-row" style="align-items: flex-start;">
               <label class="set-label">匹配 API</label>
               <select class="set-control" bind:value={libraryConfig.libraryAiMatch!.providerId} on:change={saveLibraryConfig}>
                 {#each (libraryConfig.aiProviders || []) as provider}
@@ -1880,89 +1895,12 @@
             </div>
             <div class="set-row" style="align-items: flex-start;">
               <label class="set-label">额外要求</label>
-              <textarea class="set-control" rows="3" bind:value={libraryConfig.libraryAiMatch!.extraPrompt} on:change={saveLibraryConfig} placeholder="例如：标签优先使用书库现有分类；简介不要剧透。"></textarea>
-            </div>
-          </section>
-          <section class="settings-section legacy-ai-proofing-settings">
-            <div class="section-title">智能校对 API</div>
-            <p class="section-hint">用于 TXT 编辑器逐章智能校对，设置会与 TXT 编辑器偏好设置互通。</p>
-            <label class="set-row toggle-row">
-              <span class="set-label">启用智能校对</span>
-              <input
-                type="checkbox"
-                bind:checked={libraryConfig.aiProofing.enabled}
-                on:change={saveLibraryConfig}
-              />
-            </label>
-            <div class="set-row">
-              <label class="set-label">API 地址</label>
-              <input
-                class="set-control"
-                type="text"
-                bind:value={libraryConfig.aiProofing.baseUrl}
-                on:change={saveLibraryConfig}
-                placeholder="https://api.openai.com/v1"
-              />
-            </div>
-            <div class="set-row">
-              <label class="set-label">API Key</label>
-              <input
-                class="set-control"
-                type="password"
-                bind:value={libraryConfig.aiProofing.apiKey}
-                on:change={saveLibraryConfig}
-                placeholder="sk-..."
-              />
-            </div>
-            <div class="set-row">
-              <label class="set-label">模型</label>
-              <input
-                class="set-control"
-                type="text"
-                bind:value={libraryConfig.aiProofing.model}
-                on:change={saveLibraryConfig}
-                placeholder="gpt-4o-mini / deepseek-chat"
-              />
-            </div>
-            <div class="set-row">
-              <label class="set-label">温度</label>
-              <input
-                class="set-control"
-                type="number"
-                min="0"
-                max="1"
-                step="0.1"
-                bind:value={libraryConfig.aiProofing.temperature}
-                on:change={saveLibraryConfig}
-              />
-            </div>
-            <div class="set-row">
-              <label class="set-label">单章上限</label>
-              <input
-                class="set-control"
-                type="number"
-                min="1000"
-                step="1000"
-                bind:value={libraryConfig.aiProofing.maxChapterChars}
-                on:change={saveLibraryConfig}
-              />
-            </div>
-            <label class="set-row toggle-row">
-              <span class="set-label">自动审批</span>
-              <input
-                type="checkbox"
-                bind:checked={libraryConfig.aiProofing.autoApprove}
-                on:change={saveLibraryConfig}
-              />
-            </label>
-            <div class="set-row" style="align-items: flex-start;">
-              <label class="set-label">额外要求</label>
               <textarea
                 class="set-control"
                 rows="3"
-                bind:value={libraryConfig.aiProofing.extraPrompt}
+                bind:value={libraryConfig.libraryAiMatch!.extraPrompt}
                 on:change={saveLibraryConfig}
-                placeholder="例如：保留作者口癖，不做风格润色。"
+                placeholder="例如：标签优先使用书库现有分类；简介不要剧透。"
               ></textarea>
             </div>
           </section>
@@ -2030,12 +1968,7 @@
             </div>
           </section>
           {/if}
-        </div>
-
-        <div class="settings-footer">
-          <button class="tb-btn primary" on:click={() => showSettings = false}>完成</button>
-        </div>
-      </div>
+      </SettingsShell>
     </div>
   {/if}
 
@@ -2519,12 +2452,6 @@
     color: var(--color-text);
   }
 
-  .tb-btn.active {
-    background: var(--color-accent-soft);
-    color: var(--color-accent-deep);
-    border-color: var(--color-accent);
-  }
-
   .tb-btn.primary {
     background: var(--gradient-accent);
     color: #fff;
@@ -2552,28 +2479,6 @@
     box-shadow: var(--focus-ring);
     outline: none;
   }
-
-  @media (max-width: 760px) {
-    .library-settings-panel {
-      min-width: 0;
-      width: min(96vw, 520px);
-    }
-
-    .library-settings-panel .settings-body {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .view-toggles {
-    display: flex;
-    gap: 2px;
-  }
-
-  .view-toggles .tb-btn {
-    padding: 6px 10px;
-    font-size: 16px;
-  }
-
 
   .book-count {
     color: var(--color-muted);
@@ -2801,18 +2706,6 @@
     animation: panelIn 0.2s ease-out;
   }
 
-  .library-settings-panel {
-    border-radius: 14px;
-    width: min(92vw, 760px);
-    min-width: 720px;
-    max-width: 760px;
-    min-height: 520px;
-    max-height: 84vh;
-    display: grid;
-    grid-template-columns: 170px 1fr;
-    grid-template-rows: 58px 1fr 64px;
-  }
-
   @keyframes panelIn {
     from { opacity: 0; transform: translateY(8px) scale(0.98); }
     to { opacity: 1; transform: translateY(0) scale(1); }
@@ -2825,14 +2718,6 @@
     padding: 16px 22px;
     border-bottom: 1px solid var(--color-border);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.96));
-  }
-
-  .library-settings-panel .settings-header {
-    grid-column: 1 / -1;
-    height: 58px;
-    box-sizing: border-box;
-    padding: 0 20px;
-    background: var(--color-surface);
   }
 
   .settings-panel h3 {
@@ -2870,84 +2755,6 @@
     gap: 18px;
   }
 
-  .library-settings-panel .settings-body {
-    grid-column: 2;
-    grid-row: 2;
-    min-width: 0;
-    overflow: auto;
-    padding: 18px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    background: var(--color-surface);
-  }
-
-  .library-settings-panel .settings-tabs {
-    grid-column: 1;
-    grid-row: 2 / 4;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-    padding: 16px;
-    border-right: 1px solid var(--color-border);
-    background: var(--color-canvas);
-  }
-
-  .library-settings-panel .settings-tabs .tab-btn {
-    width: 100%;
-    justify-content: flex-start;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--color-muted);
-    padding: 9px 12px;
-    text-align: left;
-    font-size: 15px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-
-  .library-settings-panel .settings-tabs .tab-btn:hover {
-    background: var(--color-hover);
-  }
-
-  .library-settings-panel .settings-tabs .tab-btn.active {
-    background: var(--color-accent-soft);
-    color: var(--color-accent-deep);
-  }
-
-  .settings-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .library-settings-panel .settings-section {
-    gap: 12px;
-    min-width: 0;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .library-settings-panel .legacy-ai-proofing-settings {
-    display: none;
-  }
-
-  .section-title {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--color-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--color-border);
-    margin-bottom: 4px;
-  }
-
   .settings-footer {
     display: flex;
     justify-content: flex-end;
@@ -2957,160 +2764,6 @@
     background: var(--color-canvas);
   }
 
-  .library-settings-panel .settings-footer {
-    grid-column: 2;
-    grid-row: 3;
-    align-items: center;
-    padding: 12px 20px;
-    border-top: 1px solid var(--color-border);
-    background: var(--color-surface);
-  }
-
-  .set-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 0;
-  }
-
-  .set-label {
-    flex-shrink: 0;
-    color: var(--color-text-soft);
-    font-size: 13px;
-    min-width: 120px;
-  }
-
-  .set-control {
-    flex: 1;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    color: var(--color-text);
-    font-size: 13px;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-  }
-
-  input.set-control,
-  textarea.set-control {
-    padding: 6px 10px;
-  }
-
-  select.set-control,
-  .set-row select {
-    min-height: var(--control-height);
-    padding: 7px 38px 7px 12px;
-    background-color: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
-    background-image:
-      linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
-      linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(241, 248, 253, 0.82));
-    background-position:
-      calc(100% - 20px) 50%,
-      calc(100% - 14px) 50%,
-      0 0;
-    background-size:
-      6px 6px,
-      6px 6px,
-      100% 100%;
-    background-repeat: no-repeat;
-    appearance: none;
-    -webkit-appearance: none;
-    box-shadow: var(--shadow-xs);
-  }
-
-  .set-control:focus {
-    border-color: var(--color-accent);
-    box-shadow: var(--focus-ring);
-    outline: none;
-  }
-
-  /* 复选框行：标签占据空间，复选框靠右 */
-  .toggle-row {
-    cursor: pointer;
-    padding: 6px 8px;
-    margin: 0 -8px;
-    border-radius: var(--radius-sm);
-    transition: background var(--transition-fast);
-  }
-
-  .toggle-row:hover {
-    background: var(--color-hover);
-  }
-
-  .toggle-row .set-label {
-    flex: 1;
-    min-width: 0;
-    color: var(--color-text);
-  }
-
-  .toggle-row input[type="checkbox"] {
-    flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    accent-color: var(--color-accent);
-    cursor: pointer;
-  }
-
-  /* 兼容旧式 .set-row label / input / select / textarea（元数据编辑面板仍在使用） */
-  .set-row label {
-    flex-shrink: 0;
-    color: var(--color-text-soft);
-    font-size: 13px;
-  }
-
-  .set-row select,
-  .set-row input,
-  .set-row textarea {
-    flex: 1;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    color: var(--color-text);
-  }
-
-  .set-row input {
-    padding: 6px 10px;
-  }
-
-  .set-row textarea {
-    resize: vertical;
-    font-family: var(--font-ui);
-    padding: 6px 10px;
-  }
-
-  @media (max-width: 760px) {
-    .library-settings-panel {
-      display: flex;
-      min-width: 0;
-      width: min(96vw, 520px);
-      min-height: 0;
-    }
-
-    .library-settings-panel .settings-tabs {
-      flex-direction: row;
-      grid-column: auto;
-      grid-row: auto;
-      overflow-x: auto;
-      border-right: 0;
-      border-bottom: 1px solid var(--color-border);
-      padding: 10px 14px;
-    }
-
-    .library-settings-panel .settings-tabs .tab-btn {
-      width: auto;
-      white-space: nowrap;
-    }
-
-    .library-settings-panel .settings-body {
-      grid-column: auto;
-      grid-row: auto;
-    }
-
-    .library-settings-panel .settings-footer {
-      grid-column: auto;
-      grid-row: auto;
-    }
-  }
 
   /* 元数据编辑面板：复用 settings-panel 头/体/底三段式 */
   .meta-editor-panel {
@@ -3744,6 +3397,7 @@
     color: var(--color-muted);
     font-size: 12px;
     line-height: 1.5;
+    max-width: 780px;
   }
   .toggle-row .set-label small {
     color: var(--color-muted);

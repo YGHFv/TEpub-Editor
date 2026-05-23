@@ -37,6 +37,8 @@
 
   // 内部状态跟踪
   let lastKnownDoc = "";
+  let isRestoringProgrammaticScroll = false;
+  let programmaticScrollRestoreId = 0;
 
   // 静态标题装饰生成器，不依赖 ViewPlugin 防止重绘死锁
   function createTitleDecorations(lines: number[], state: EditorState) {
@@ -365,6 +367,7 @@
             update.viewportChanged ||
             update.docChanged
           ) {
+            if (isRestoringProgrammaticScroll) return;
             try {
               const scrollDOM = view.scrollDOM;
               const scrollY = scrollDOM.scrollTop;
@@ -446,8 +449,34 @@
   }
   export function replaceAllContent(n: string) {
     if (!view) return;
+    const scrollDOM = view.scrollDOM;
+    const scrollTop = scrollDOM.scrollTop;
+    const scrollLeft = scrollDOM.scrollLeft;
+    const selection = view.state.selection.main;
+    const restoreId = ++programmaticScrollRestoreId;
+    isRestoringProgrammaticScroll = true;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: n },
+      selection: {
+        anchor: Math.min(selection.anchor, n.length),
+        head: Math.min(selection.head, n.length),
+      },
+    });
+    const restoreScroll = () => {
+      if (!view || restoreId !== programmaticScrollRestoreId) return;
+      const nextScrollDOM = view.scrollDOM;
+      const maxTop = Math.max(0, nextScrollDOM.scrollHeight - nextScrollDOM.clientHeight);
+      nextScrollDOM.scrollTop = Math.min(scrollTop, maxTop);
+      nextScrollDOM.scrollLeft = scrollLeft;
+    };
+    requestAnimationFrame(() => {
+      restoreScroll();
+      requestAnimationFrame(() => {
+        restoreScroll();
+        if (restoreId === programmaticScrollRestoreId) {
+          isRestoringProgrammaticScroll = false;
+        }
+      });
     });
   }
   export function getContent() {

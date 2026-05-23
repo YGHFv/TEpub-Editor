@@ -103,6 +103,423 @@ button {
     color: inherit;
 }
 
+.settings-shell {
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    box-shadow: 0 28px 80px rgba(15, 23, 42, 0.18);
+}
+
+.settings-shell-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-sizing: border-box;
+    height: 58px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+
+.settings-shell-header h3 {
+    margin: 0;
+    color: var(--color-text);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.settings-shell-close {
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-muted);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+        background var(--transition-fast),
+        color var(--transition-fast);
+}
+
+.settings-shell-close:hover {
+    background: var(--color-hover);
+    color: var(--color-text);
+}
+
+.settings-shell-tabs {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 16px;
+    border-right: 1px solid var(--color-border);
+    background: #eef5fb;
+}
+
+.settings-shell-tabs .tab-btn {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: #6b7b8e;
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.3;
+    cursor: pointer;
+    transition:
+        background var(--transition-fast),
+        color var(--transition-fast);
+}
+
+.settings-shell-tabs .tab-btn:hover {
+    background: #e3eef8;
+}
+
+.settings-shell-tabs .tab-btn.active {
+    background: #d7ebfb;
+    color: #005f9e;
+}
+
+.settings-shell-body {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    padding: 18px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--color-surface);
+}
+
+.settings-shell-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+
+.settings-shell-action {
+    min-width: 132px;
+    min-height: 42px;
+    padding: 9px 18px;
+    border-radius: 14px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.settings-shell-action-primary {
+    border-color: transparent;
+    background: var(--gradient-accent);
+    color: #fff;
+    box-shadow: 0 12px 26px rgba(22, 119, 184, 0.22);
+}
+
+.settings-shell-action-primary:hover:not(:disabled) {
+    border-color: transparent;
+    background: linear-gradient(135deg, #218fd4 0%, #16b0aa 100%);
+    color: #fff;
+}
+
+.settings-shell-action-primary:active:not(:disabled) {
+    border-color: transparent;
+    background: linear-gradient(135deg, #187fbe 0%, #119792 100%);
+    color: #fff;
+}
+
+.settings-shell-action-primary:disabled {
+    color: rgba(255, 255, 255, 0.82);
+    background: linear-gradient(135deg, rgba(26, 136, 206, 0.52) 0%, rgba(19, 166, 162, 0.52) 100%);
+    box-shadow: none;
+}
+
+.settings-shell.library-settings-panel {
+    width: min(92vw, 920px);
+    min-width: 780px;
+    max-width: 920px;
+    min-height: 520px;
+    max-height: 84vh;
+    display: grid;
+    grid-template-columns: 164px 1fr;
+    grid-template-rows: 58px 1fr 64px;
+}
+
+.settings-shell.editor-settings-modal {
+    width: min(92vw, 920px);
+    min-width: 780px;
+    max-width: 920px;
+    height: min(76vh, 640px);
+    min-height: 520px;
+    max-height: 84vh;
+    display: grid;
+    grid-template-columns: 164px 1fr;
+    grid-template-rows: 58px 1fr 64px;
+}
+
+.settings-shell.library-settings-panel .settings-shell-header,
+.settings-shell.editor-settings-modal .settings-shell-header {
+    grid-column: 1 / -1;
+}
+
+.settings-shell.library-settings-panel .settings-shell-tabs,
+.settings-shell.editor-settings-modal .settings-shell-tabs {
+    grid-column: 1;
+    grid-row: 2 / 4;
+}
+
+.settings-shell.library-settings-panel .settings-shell-body,
+.settings-shell.editor-settings-modal .settings-shell-body {
+    grid-column: 2;
+    grid-row: 2;
+}
+
+.settings-shell.library-settings-panel .settings-shell-footer,
+.settings-shell.editor-settings-modal .settings-shell-footer {
+    grid-column: 2;
+    grid-row: 3;
+}
+
+@media (max-width: 760px) {
+    .settings-shell-footer {
+        justify-content: stretch;
+    }
+
+    .settings-shell-action {
+        width: 100%;
+    }
+
+    .settings-shell.library-settings-panel,
+    .settings-shell.editor-settings-modal {
+        display: flex;
+        min-width: 0;
+        width: min(96vw, 520px);
+        min-height: 0;
+        height: auto;
+        max-height: min(90vh, 720px);
+    }
+
+    .settings-shell.library-settings-panel .settings-shell-tabs,
+    .settings-shell.editor-settings-modal .settings-shell-tabs {
+        flex-direction: row;
+        grid-column: auto;
+        grid-row: auto;
+        overflow-x: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+        padding: 10px 14px;
+    }
+
+    .settings-shell.library-settings-panel .settings-shell-tabs .tab-btn,
+    .settings-shell.editor-settings-modal .settings-shell-tabs .tab-btn {
+        width: auto;
+        white-space: nowrap;
+    }
+
+    .settings-shell.library-settings-panel .settings-shell-body,
+    .settings-shell.library-settings-panel .settings-shell-footer,
+    .settings-shell.editor-settings-modal .settings-shell-body,
+    .settings-shell.editor-settings-modal .settings-shell-footer {
+        grid-column: auto;
+        grid-row: auto;
+    }
+}
+
+.settings-shell .settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.settings-shell .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 4px;
+}
+
+.settings-shell .section-hint {
+    margin: -4px 0 8px 0;
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 780px;
+}
+
+.settings-shell .set-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+}
+
+.settings-shell .set-label,
+.settings-shell .set-row label {
+    flex-shrink: 0;
+    color: var(--color-text-soft);
+    font-size: 13px;
+    line-height: 1.4;
+    min-width: 110px;
+}
+
+.settings-shell .set-control,
+.settings-shell .set-row input,
+.settings-shell .set-row textarea,
+.settings-shell .set-row select {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+.settings-shell .set-control {
+    min-height: 34px;
+}
+
+.settings-shell input.set-control,
+.settings-shell textarea.set-control,
+.settings-shell .set-row input,
+.settings-shell .set-row textarea {
+    padding: 6px 10px;
+}
+
+.settings-shell .set-row textarea {
+    resize: vertical;
+    font-family: var(--font-ui);
+    line-height: 1.55;
+}
+
+.settings-shell .set-control:focus,
+.settings-shell .set-row input:focus,
+.settings-shell .set-row textarea:focus,
+.settings-shell .set-row select:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring);
+}
+
+.settings-shell .toggle-row {
+    cursor: pointer;
+    padding: 6px 8px;
+    margin: 0 -8px;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+}
+
+.settings-shell .toggle-row:hover {
+    background: var(--color-hover);
+}
+
+.settings-shell .toggle-row .set-label {
+    flex: 1;
+    min-width: 0;
+    color: var(--color-text);
+}
+
+.settings-shell .toggle-row .set-label small {
+    color: var(--color-muted);
+    font-size: 11px;
+    margin-left: 4px;
+}
+
+.settings-shell .toggle-row input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-accent);
+    cursor: pointer;
+}
+
+.settings-shell .set-row input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-accent);
+}
+
+.settings-shell .settings-toggle-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settings-shell .settings-toggle-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 18px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
+    cursor: pointer;
+    transition:
+        border-color var(--transition-fast),
+        box-shadow var(--transition-fast),
+        background var(--transition-fast);
+}
+
+.settings-shell .settings-toggle-card:hover {
+    border-color: color-mix(in srgb, var(--color-border) 55%, var(--color-accent));
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+    background: color-mix(in srgb, var(--color-surface) 90%, var(--color-accent-quiet));
+}
+
+.settings-shell .settings-toggle-copy {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.settings-shell .settings-toggle-title {
+    color: var(--color-text);
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.settings-shell .settings-toggle-note {
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.settings-shell .settings-toggle-card input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--color-accent);
+    cursor: pointer;
+}
+
 select {
     min-height: var(--control-height);
     box-sizing: border-box;
@@ -382,13 +799,15 @@ select:disabled {
 :root[data-theme="dark"] .proof-footer,
 :root[data-theme="dark"] .find-header,
 :root[data-theme="dark"] .p-header,
-:root[data-theme="dark"] .settings-header {
+:root[data-theme="dark"] .settings-header,
+:root[data-theme="dark"] .settings-shell-header {
     background: var(--color-surface-soft) !important;
     border-color: var(--color-border) !important;
     color: var(--color-text);
 }
 
 :root[data-theme="dark"] .settings-panel,
+:root[data-theme="dark"] .settings-shell,
 :root[data-theme="dark"] .dialog,
 :root[data-theme="dark"] .modal-content,
 :root[data-theme="dark"] .prompt-dialog {
@@ -398,8 +817,9 @@ select:disabled {
 }
 
 :root[data-theme="dark"] .settings-body,
-:root[data-theme="dark"] .library-settings-panel .settings-body,
+:root[data-theme="dark"] .settings-shell-body,
 :root[data-theme="dark"] .settings-footer,
+:root[data-theme="dark"] .settings-shell-footer,
 :root[data-theme="dark"] .tree-content,
 :root[data-theme="dark"] .toc-list,
 :root[data-theme="dark"] .toc-container,
@@ -413,7 +833,16 @@ select:disabled {
     color: var(--color-text);
 }
 
-:root[data-theme="dark"] .library-settings-panel .settings-section,
+:root[data-theme="dark"] .settings-shell-tabs {
+    background: var(--color-surface-soft) !important;
+    border-color: var(--color-border) !important;
+}
+
+:root[data-theme="dark"] .settings-shell-tabs .tab-btn {
+    color: var(--color-text-soft) !important;
+}
+
+:root[data-theme="dark"] .settings-shell .settings-section,
 :root[data-theme="dark"] .meta-section,
 :root[data-theme="dark"] .proof-preview,
 :root[data-theme="dark"] .proof-regex-preview,
@@ -475,7 +904,7 @@ select:disabled {
 :root[data-theme="dark"] .tree-node.selected,
 :root[data-theme="dark"] .vol-title,
 :root[data-theme="dark"] .tab.active,
-:root[data-theme="dark"] .settings-tabs .tab-btn.active {
+:root[data-theme="dark"] .settings-shell-tabs .tab-btn.active {
     background: var(--color-accent-soft) !important;
     border-color: var(--color-accent) !important;
     color: var(--color-accent-deep) !important;

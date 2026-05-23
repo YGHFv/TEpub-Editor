@@ -8,6 +8,7 @@
     import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
     import Editor from "$lib/Editor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
+    import SettingsShell from "$lib/SettingsShell.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
     import {
         applyTitleRewrite,
@@ -131,6 +132,7 @@
         model: string;
         temperature: number;
         maxChapterChars: number;
+        responseTimeoutSec: number;
         autoApprove: boolean;
         extraPrompt: string;
     }
@@ -218,6 +220,7 @@
         afterText: string;
         appliedAt: number;
         reverted: boolean;
+        revertedRowIds?: string[];
     }
     type ManualTitleKind = "Volume" | "Chapter" | "Ignore";
     interface ManualTitleOverrideEntry {
@@ -279,6 +282,7 @@
         model: "gpt-4o-mini",
         temperature: 0.1,
         maxChapterChars: 12000,
+        responseTimeoutSec: 300,
         autoApprove: false,
         extraPrompt: "",
     };
@@ -358,6 +362,7 @@
         merged.model = String(merged.model || DEFAULT_AI_PROOFING.model).trim();
         merged.temperature = Math.max(0, Math.min(1, Number(merged.temperature) || DEFAULT_AI_PROOFING.temperature));
         merged.maxChapterChars = Math.max(1000, Math.floor(Number(merged.maxChapterChars) || DEFAULT_AI_PROOFING.maxChapterChars));
+        merged.responseTimeoutSec = Math.max(30, Math.min(1800, Math.floor(Number(merged.responseTimeoutSec) || DEFAULT_AI_PROOFING.responseTimeoutSec)));
         merged.autoApprove = Boolean(merged.autoApprove);
         merged.extraPrompt = String(merged.extraPrompt || "");
         return merged;
@@ -566,7 +571,17 @@
 
     // 面板显示状态
     let showSettingsPanel = false;
-    let settingsActiveTab: "display" | "fonts" | "styles" | "toc" | "ai" | "proofLogs" | "history" = "display";
+    let settingsActiveTab: "display" | "fonts" | "styles" | "toc" | "api" | "ai" | "proofLogs" | "history" = "display";
+    const editorSettingsTabs = [
+        { id: "display", label: "显示" },
+        { id: "fonts", label: "字体" },
+        { id: "styles", label: "样式" },
+        { id: "toc", label: "目录" },
+        { id: "api", label: "API 配置" },
+        { id: "ai", label: "智能校对" },
+        { id: "proofLogs", label: "校对日志" },
+        { id: "history", label: "历史版本" },
+    ];
     let showEpubModal = false;
     let showCheckPanel = false;
     let showProofPanel = false;
@@ -1394,7 +1409,7 @@
         await tick();
         await scanToc(result.text);
         await updateMd5(result.text);
-        saveStateToCache(0);
+        saveStateToCache(filePath ? (flatToc.find((node) => node.id === activeChapterId)?.line || 1) : 1);
     }
 
     async function applyProofTitleRewrite() {
@@ -1536,6 +1551,12 @@
             console.error("保存智能校对设置失败:", error);
             aiSettingsMessage = `保存失败：${error}`;
         }
+    }
+
+    function openSettingsApiTab() {
+        settingsActiveTab = "api";
+        aiSettingsMessage = "";
+        loadSharedLibrarySettings();
     }
 
     function openSettingsAiTab() {
@@ -1835,7 +1856,7 @@
             "app-settings",
             JSON.stringify(appSettings),
         );
-        if (settingsActiveTab === "ai") {
+        if (settingsActiveTab === "ai" || settingsActiveTab === "api") {
             await saveSharedAiProofingSettings();
         }
         await applySelectedStyleTemplate(appSettings.selectedStyleTemplateId);
@@ -2076,6 +2097,15 @@
         return Boolean(getAiProofingRiskReason(row));
     }
 
+    function isAiProofingHardBlockedSuggestion(row: AiProofingRow) {
+        const type = row.type.toLowerCase().replace(/[\s-]+/g, "_");
+        if (row.fullChapterRemoval || type === "remove_chapter") return true;
+        if ((type === "delete" || row.replacement === "") && containsEmojiOrSymbolOnly(row.original)) return true;
+        if ((type === "delete" || row.replacement === "") && isBracketedNarrativeText(row.original)) return true;
+        if (changesLeadingIndent(row.original, row.replacement)) return true;
+        return false;
+    }
+
     function isAiProofingAutoApplySuggestion(suggestion: AiProofingSuggestion) {
         const type = suggestion.type.toLowerCase().replace(/[\s-]+/g, "_");
         const reason = `${suggestion.reason} ${suggestion.original} ${suggestion.replacement}`;
@@ -2264,11 +2294,23 @@
             .map((item: any) => ({
                 original: String(item?.original || ""),
                 replacement: String(item?.replacement ?? ""),
-                reason: String(item?.reason || ""),
+                reason: readAiProofingReason(item),
                 type: String(item?.type || "other"),
                 confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
             }))
             .filter((item) => item.original && item.original !== item.replacement);
+    }
+
+    function readAiProofingReason(item: any) {
+        return String(
+            item?.reason ??
+            item?.["原因"] ??
+            item?.explanation ??
+            item?.["理由"] ??
+            item?.note ??
+            item?.comment ??
+            "",
+        ).trim();
     }
 
     function recoverAiProofingSuggestionsFromPartialJson(content: string): AiProofingSuggestion[] {
@@ -2309,7 +2351,7 @@
             .map((item: any) => ({
                 original: String(item?.original || ""),
                 approved: Boolean(item?.approved),
-                reason: String(item?.reason || ""),
+                reason: readAiProofingReason(item),
             }))
             .filter((item) => item.original);
     }
@@ -2467,13 +2509,15 @@
                 }
                 const allChapterRows = [...localEllipsisRows, ...chapterRows];
                 const safeChapterRows: AiProofingRow[] = [];
+                const blockedManualRows: AiProofingRow[] = [];
                 let blockedRows = 0;
                 for (const row of allChapterRows) {
                     const riskReason = getAiProofingRiskReason(row);
-                    if (riskReason) {
+                    if (riskReason && isAiProofingHardBlockedSuggestion(row)) {
                         blockedRows++;
                         appendAiProofingLog(`拦截高风险建议：${row.original} -> ${row.replacement || "删除"}（${riskReason}）`);
                         logAiProofingSuggestion("拦截", row, row.chapterTitle, `风险：${riskReason}`);
+                        blockedManualRows.push(row);
                     } else {
                         safeChapterRows.push(row);
                     }
@@ -2482,7 +2526,7 @@
                 const manualCandidates = safeChapterRows.filter((row) => !isAiProofingAutoApplySuggestion(row));
                 const approvalResult = await approveAiProofingRows(chapter.title, chapter.text, manualCandidates);
                 const approvedRows = approvalResult.approvedRows;
-                const manualRows = approvalResult.pendingRows;
+                const manualRows = [...approvalResult.pendingRows, ...blockedManualRows];
                 if (autoRows.length > 0) {
                     appendAiProofingLog(`自动应用：${chapter.title}，${autoRows.length} 条标点/的地得修正`);
                     for (const row of autoRows) {
@@ -2516,6 +2560,7 @@
                         message: `已自动应用 ${result.changed} 条标点/的地得修正`,
                     });
                     pendingRows = shiftAiProofingRowsAfterEdits(pendingRows, result.edits);
+                    approvedApplyRows = shiftAiProofingRowsAfterEdits(approvedApplyRows, result.edits);
                     aiProofingRows = pendingRows;
                     appendAiProofingLog(`已自动写入 ${result.changed} 条修正`);
                 } else {
@@ -2524,7 +2569,7 @@
             }
             if (approvedApplyRows.length > 0) {
                 const beforeText = fileContent;
-                const result = applyAiProofingRowsToText(approvedApplyRows, fileContent);
+                const result = applyAiProofingRowsToText(approvedApplyRows, fileContent, { allowUnsafe: true });
                 if (result.changed > 0) {
                     await applyProofResult({
                         text: result.text,
@@ -2567,7 +2612,7 @@
         }
     }
 
-    function applyAiProofingRowsToText(rows: AiProofingRow[], sourceText: string) {
+    function applyAiProofingRowsToText(rows: AiProofingRow[], sourceText: string, options: { allowUnsafe?: boolean } = {}) {
         const sorted = [...rows].sort((a, b) => b.globalStart - a.globalStart);
         let text = sourceText;
         let changed = 0;
@@ -2575,7 +2620,7 @@
         const edits: Array<{ start: number; oldLength: number; newLength: number }> = [];
 
         for (const row of sorted) {
-            if (isAiProofingUnsafeSuggestion(row)) continue;
+            if (!options.allowUnsafe && isAiProofingUnsafeSuggestion(row)) continue;
             const removeLength = row.globalEnd - row.globalStart;
             const current = text.slice(row.globalStart, row.globalStart + removeLength);
             if (row.fullChapterRemoval) {
@@ -2635,12 +2680,46 @@
         proofMessage = "已定位到智能校对建议";
     }
 
+    function compactAiTooltipText(value: string, maxLength = 160) {
+        const compact = value.replace(/\s+/g, " ").trim();
+        return compact.length > maxLength
+            ? `${compact.slice(0, maxLength - 1)}…`
+            : compact;
+    }
+
+    function compactAiProofingCellText(value: string, maxLength = 34) {
+        return compactAiTooltipText(value || "删除", maxLength);
+    }
+
+    function aiProofingReasonText(row: Pick<AiProofingSuggestion, "reason" | "type">) {
+        const reason = String(row.reason || "").trim();
+        if (reason) return reason;
+        const type = String(row.type || "").trim();
+        return type ? `未返回具体原因（类型：${type}）` : "未返回具体原因";
+    }
+
+    function buildAiProofingReplacementPreview(row: AiProofingRow) {
+        if (row.fullChapterRemoval) {
+            return "修改后：整章移除";
+        }
+        return `修改后：${compactAiTooltipText(row.replacement || "删除")}`;
+    }
+
+    function buildAiProofingReplacementTooltip(row: AiProofingRow) {
+        return [
+            `类型：${row.type}`,
+            `置信度：${(row.confidence * 100).toFixed(0)}%`,
+            `原因：${aiProofingReasonText(row)}`,
+            buildAiProofingReplacementPreview(row),
+        ].join("\n");
+    }
+
     async function applySelectedAiProofingRows() {
         const selected = aiProofingRows
             .filter((row) => aiProofingSelectedIds.has(row.id))
             .sort((a, b) => b.globalStart - a.globalStart);
         if (selected.length === 0) return;
-        const result = applyAiProofingRowsToText(selected, fileContent);
+        const result = applyAiProofingRowsToText(selected, fileContent, { allowUnsafe: true });
         await applyProofResult({
             text: result.text,
             changedCount: result.changed,
@@ -2655,22 +2734,91 @@
         saveAiProofingCache();
     }
 
-    async function revertAiApprovalBatch(batchId: string) {
+    async function revertAiApprovalRow(batchId: string, rowId: string) {
         const batch = aiApprovalAppliedBatches.find((item) => item.id === batchId);
         if (!batch || batch.reverted || fileContent !== batch.afterText) {
             proofMessage = "当前文本已变化，无法安全撤销该审批";
-            appendAiProofingLog(`审批撤销失败：${batch?.chapterTitle || batchId}，文本已变化`);
+            appendAiProofingLog(`审批撤销失败：${batch?.chapterTitle || batchId} / ${rowId}，文本已变化`);
+            return;
+        }
+        const targetRow = batch.rows.find((row) => row.id === rowId);
+        if (!targetRow) {
+            proofMessage = "未找到对应审批结果";
+            return;
+        }
+        if (batch.revertedRowIds?.includes(rowId)) {
+            proofMessage = "该审批结果已撤销";
+            return;
+        }
+        const revertedRows = new Set(batch.revertedRowIds || []);
+        const remainingRows = batch.rows.filter((row) => !revertedRows.has(row.id) && row.id !== rowId);
+        const reapplyResult = applyAiProofingRowsToText(remainingRows, batch.beforeText);
+        if (reapplyResult.changed !== remainingRows.length) {
+            proofMessage = "当前文本已变化，无法安全撤销该审批";
+            appendAiProofingLog(`审批撤销失败：${batch.chapterTitle} / ${targetRow.original}，重建文本未完全匹配`);
             return;
         }
         await applyProofResult({
-            text: batch.beforeText,
-            changedCount: batch.rows.length,
-            message: `已撤销 ${batch.rows.length} 条 AI 审批改动`,
+            text: reapplyResult.text,
+            changedCount: 1,
+            message: `已撤销 1 条 AI 审批改动`,
         });
         aiApprovalAppliedBatches = aiApprovalAppliedBatches.map((item) =>
-            item.id === batchId ? { ...item, reverted: true } : item,
+            item.id === batchId
+                ? {
+                    ...item,
+                    afterText: reapplyResult.text,
+                    reverted: remainingRows.length === 0,
+                    revertedRowIds: [...revertedRows, rowId],
+                }
+                : item,
         );
-        appendAiProofingLog(`审批撤销：${batch.chapterTitle}，${batch.rows.length} 条`);
+        appendAiProofingLog(`审批撤销：${batch.chapterTitle} / ${targetRow.original}`);
+        saveAiProofingCache();
+    }
+
+    async function reapplyAiApprovalRow(batchId: string, rowId: string) {
+        const batch = aiApprovalAppliedBatches.find((item) => item.id === batchId);
+        if (!batch || fileContent !== batch.afterText) {
+            proofMessage = "当前文本已变化，无法安全恢复该审批";
+            appendAiProofingLog(`审批恢复失败：${batch?.chapterTitle || batchId} / ${rowId}，文本已变化`);
+            return;
+        }
+        const targetRow = batch.rows.find((row) => row.id === rowId);
+        if (!targetRow) {
+            proofMessage = "未找到对应审批结果";
+            return;
+        }
+        const revertedRows = new Set(batch.revertedRowIds || []);
+        if (!revertedRows.has(rowId)) {
+            proofMessage = "该审批结果当前已处于应用状态";
+            return;
+        }
+        const activeRows = batch.rows.filter((row) => !revertedRows.has(row.id));
+        const nextRows = [...activeRows, targetRow].sort((a, b) => b.globalStart - a.globalStart);
+        const reapplyResult = applyAiProofingRowsToText(nextRows, batch.beforeText);
+        if (reapplyResult.changed !== nextRows.length) {
+            proofMessage = "当前文本已变化，无法安全恢复该审批";
+            appendAiProofingLog(`审批恢复失败：${batch.chapterTitle} / ${targetRow.original}，重建文本未完全匹配`);
+            return;
+        }
+        await applyProofResult({
+            text: reapplyResult.text,
+            changedCount: 1,
+            message: `已恢复 1 条 AI 审批改动`,
+        });
+        revertedRows.delete(rowId);
+        aiApprovalAppliedBatches = aiApprovalAppliedBatches.map((item) =>
+            item.id === batchId
+                ? {
+                    ...item,
+                    afterText: reapplyResult.text,
+                    reverted: false,
+                    revertedRowIds: Array.from(revertedRows),
+                }
+                : item,
+        );
+        appendAiProofingLog(`审批恢复：${batch.chapterTitle} / ${targetRow.original}`);
         saveAiProofingCache();
     }
 
@@ -5029,24 +5177,27 @@
                     <option value="all">全书逐章</option>
                 </select>
                             </div>
-                            <div class="proof-actions-row proof-convert-actions">
+                            <div class="proof-actions-row proof-convert-actions proof-ai-actions">
                                 <button
-                                    class="proof-primary inline"
+                                    class="proof-primary proof-ai-action-btn"
                                     disabled={aiProofingRunning}
                                     on:click={runAiProofing}
-                                >{aiProofingRunning ? "校对中..." : "开始校对"}</button>
-                                <button disabled={!aiProofingRunning} on:click={stopAiProofing}>停止</button>
+                                >{aiProofingRunning ? "校对中..." : "开始"}</button>
+                                <button class="proof-ai-action-btn" disabled={!aiProofingRunning} on:click={stopAiProofing}>停止</button>
                                 <button
+                                    class="proof-ai-action-btn"
                                     class:active={aiProofingView === "suggestions"}
                                     on:click={() => (aiProofingView = "suggestions")}
                                 >建议</button>
                                 {#if aiProofingConfig.autoApprove}
                                 <button
+                                    class="proof-ai-action-btn"
                                     class:active={aiProofingView === "approval"}
                                     on:click={() => (aiProofingView = "approval")}
                                 >审批</button>
                                 {/if}
                                 <button
+                                    class="proof-ai-action-btn"
                                     class:active={aiProofingView === "log"}
                                     on:click={() => (aiProofingView = "log")}
                                 >日志</button>
@@ -5084,7 +5235,7 @@
                                     <span
                                         role="button"
                                         tabindex="0"
-                                        title={`${row.chapterTitle}\n${row.reason}`}
+                                        title={`${row.chapterTitle}\n原因：${aiProofingReasonText(row)}\n原文：${row.original}`}
                                         on:click|preventDefault={() => jumpToAiProofingRow(row)}
                                         on:keydown|preventDefault={(e) => {
                                             if (e.key === "Enter" || e.key === " ") {
@@ -5092,10 +5243,16 @@
                                             }
                                         }}
                                     >
-                                        {row.original}
+                                        {compactAiProofingCellText(row.original)}
                                     </span>
-                                    <span title={`${row.type} · ${(row.confidence * 100).toFixed(0)}% · ${row.reason}`}>
-                                        {row.fullChapterRemoval ? "移除整章" : (row.replacement || "删除")}
+                                    <span
+                                        class="ai-proof-replacement-cell"
+                                        title={buildAiProofingReplacementTooltip(row)}
+                                        aria-label={buildAiProofingReplacementTooltip(row)}
+                                    >
+                                        <span class="ai-proof-replacement-text">
+                                            {row.fullChapterRemoval ? "移除整章" : compactAiProofingCellText(row.replacement || "删除")}
+                                        </span>
                                     </span>
                                 </label>
                             {:else}
@@ -5110,20 +5267,41 @@
                                 <span>操作</span>
                             </div>
                             {#each aiApprovalAppliedBatches as batch}
-                                <div class="proof-regex-row approval-row">
-                                    <span>{batch.reverted ? "已撤销" : "已应用"}</span>
-                                    <span title={batch.rows.map((row) => `${row.original} -> ${row.replacement || "删除"}（${row.reason}）`).join("\n")}>
-                                        {batch.chapterTitle} · {batch.rows.length} 条
-                                    </span>
-                                    <span>
-                                        <button
-                                            type="button"
-                                            class="mini-action"
-                                            disabled={batch.reverted || aiProofingRunning}
-                                            on:click={() => revertAiApprovalBatch(batch.id)}
-                                        >撤销</button>
-                                    </span>
-                                </div>
+                                {#each batch.rows as row}
+                                    <div class="proof-regex-row approval-row">
+                                        <span>{(batch.revertedRowIds || []).includes(row.id) ? "已撤销" : "已应用"}</span>
+                                        <span
+                                            role="button"
+                                            tabindex="0"
+                                            class="approval-result-cell approval-result-link"
+                                            on:click|preventDefault={() => jumpToAiProofingRow(row)}
+                                            on:keydown|preventDefault={(e) => {
+                                                if (e.key === "Enter" || e.key === " ") {
+                                                    jumpToAiProofingRow(row);
+                                                }
+                                            }}
+                                        >
+                                            <small>{row.original} -> {row.replacement || "删除"}（{row.reason}）</small>
+                                        </span>
+                                        <span class="approval-action-cell">
+                                            {#if (batch.revertedRowIds || []).includes(row.id)}
+                                                <button
+                                                    type="button"
+                                                    class="mini-action"
+                                                    disabled={aiProofingRunning}
+                                                    on:click={() => reapplyAiApprovalRow(batch.id, row.id)}
+                                                >应用</button>
+                                            {:else}
+                                                <button
+                                                    type="button"
+                                                    class="mini-action"
+                                                    disabled={aiProofingRunning}
+                                                    on:click={() => revertAiApprovalRow(batch.id, row.id)}
+                                                >撤销</button>
+                                            {/if}
+                                        </span>
+                                    </div>
+                                {/each}
                             {:else}
                                 <div class="proof-empty">暂无 AI 审批应用记录</div>
                             {/each}
@@ -5153,12 +5331,482 @@
 
     </div>
 
-    {#if showSettingsPanel || showEpubModal || showHistoryPanel}
+    {#if showSettingsPanel}
         <div
             role="presentation"
             class="modal-overlay"
             on:click={() => {
                 showSettingsPanel = false;
+            }}
+        >
+            <div role="presentation" on:click|stopPropagation>
+                <SettingsShell
+                    title="偏好设置"
+                    tabs={editorSettingsTabs}
+                    activeTab={settingsActiveTab}
+                    onTabChange={(tabId) => {
+                        if (tabId === "fonts") openSettingsFontsTab();
+                        else if (tabId === "styles") openSettingsStylesTab();
+                        else if (tabId === "api") openSettingsApiTab();
+                        else if (tabId === "ai") openSettingsAiTab();
+                        else if (tabId === "proofLogs") openSettingsProofLogsTab();
+                        else if (tabId === "history") openSettingsHistoryTab();
+                        else settingsActiveTab = tabId as typeof settingsActiveTab;
+                    }}
+                    onClose={() => (showSettingsPanel = false)}
+                    actionLabel="保存并应用"
+                    onAction={saveEditorSettings}
+                    shellClass="editor-settings-modal"
+                    contentClass="editor-settings-content"
+                >
+                    {#if settingsActiveTab === 'display'}
+                        <div class="settings-section display-settings-panel">
+                            <div class="section-title">显示设置</div>
+                            <div class="section-hint">把常用开关收成一列卡片，减少左右拉扯，和书库设置页保持同一套节奏。</div>
+                            <div class="settings-toggle-list">
+                                <label class="settings-toggle-card" for="wordWrap">
+                                    <div class="settings-toggle-copy">
+                                        <span class="settings-toggle-title">自动换行</span>
+                                        <span class="settings-toggle-note">编辑时按容器宽度自动换行，减少横向滚动。</span>
+                                    </div>
+                                    <input id="wordWrap" type="checkbox" bind:checked={appSettings.wordWrap} />
+                                </label>
+                                <label class="settings-toggle-card" for="showWhitespace">
+                                    <div class="settings-toggle-copy">
+                                        <span class="settings-toggle-title">显示空格</span>
+                                        <span class="settings-toggle-note">把空格可视化，便于清理多余缩进和格式噪点。</span>
+                                    </div>
+                                    <input id="showWhitespace" type="checkbox" bind:checked={appSettings.showWhitespace} />
+                                </label>
+                                <label class="settings-toggle-card" for="showLineBreaks">
+                                    <div class="settings-toggle-copy">
+                                        <span class="settings-toggle-title">显示换行符</span>
+                                        <span class="settings-toggle-note">把段落换行位置标出来，排查断行和章节格式更直接。</span>
+                                    </div>
+                                    <input id="showLineBreaks" type="checkbox" bind:checked={appSettings.showLineBreaks} />
+                                </label>
+                                <label class="settings-toggle-card" for="clh">
+                                    <div class="settings-toggle-copy">
+                                        <span class="settings-toggle-title">保存清空撤销</span>
+                                        <span class="settings-toggle-note">保存成功后重置当前撤销栈，避免历史状态和新内容混在一起。</span>
+                                    </div>
+                                    <input id="clh" type="checkbox" bind:checked={appSettings.clearHistoryOnSave} />
+                                </label>
+                                <label class="settings-toggle-card" for="subsetFonts">
+                                    <div class="settings-toggle-copy">
+                                        <span class="settings-toggle-title">字体子集化</span>
+                                        <span class="settings-toggle-note">导出时只保留用到的字形，通常能进一步压缩 EPUB 体积。</span>
+                                    </div>
+                                    <input id="subsetFonts" type="checkbox" bind:checked={appSettings.subsetFonts} />
+                                </label>
+                            </div>
+                        </div>
+                        <!-- 撤销开关 -->
+                        <div class="set-row" style="display: none;">
+                            <label for="wth" style="display: none;">单章字数检查:</label>
+                            <input
+                                id="wth"
+                                type="hidden"
+                                bind:value={appSettings.wordCountMaxThreshold}
+                                style="width: 80px;"
+                            />
+                        </div>
+                    {:else if settingsActiveTab === 'fonts'}
+                        <div class="font-settings-panel">
+                            <div class="font-settings-head">
+                                <div>
+                                    <div class="font-settings-title">外部字体</div>
+                                    <div class="font-settings-note">导入后自动复制到当前书库目录下的“字体”文件夹，并可直接在块编辑里选择使用。</div>
+                                </div>
+                                <button class="grid-btn blue" disabled={isImportingFont} on:click={importExternalFont}>
+                                    {isImportingFont ? "导入中..." : "导入字体"}
+                                </button>
+                            </div>
+                            {#if fontSettingsMessage}
+                                <div class="font-settings-status">{fontSettingsMessage}</div>
+                            {/if}
+                            <div class="font-settings-list">
+                                {#each importedFonts as font}
+                                    <div class="font-settings-item">
+                                        <div class="font-settings-item-top">
+                                            <div class="font-settings-meta">
+                                                <strong>{font.family}</strong>
+                                                <span>{font.file_name}</span>
+                                            </div>
+                                            <div class="font-settings-actions">
+                                                <button
+                                                    class="mini-action"
+                                                    type="button"
+                                                    disabled={renamingFontFileName === font.file_name || deletingFontFileName === font.file_name}
+                                                    on:click={() => renameImportedFont(font)}
+                                                >{renamingFontFileName === font.file_name ? "重命名中..." : "重命名"}</button>
+                                                <button
+                                                    class="mini-action"
+                                                    type="button"
+                                                    disabled={deletingFontFileName === font.file_name || renamingFontFileName === font.file_name}
+                                                    on:click={() => deleteImportedFont(font)}
+                                                >{deletingFontFileName === font.file_name ? "删除中..." : "删除"}</button>
+                                            </div>
+                                        </div>
+                                        <code>{font.css_value}</code>
+                                    </div>
+                                {:else}
+                                    <div class="empty-msg">还没有导入外部字体</div>
+                                {/each}
+                            </div>
+                        </div>
+                    {:else if settingsActiveTab === 'styles'}
+                        <div class="font-settings-panel style-settings-panel">
+                            <div class="font-settings-head">
+                                <div>
+                                    <div class="font-settings-title">样式模板</div>
+                                    <div class="font-settings-note">选择默认 CSS 模板，并直接编辑当前 EPUB 输出样式。</div>
+                                </div>
+                                <div class="style-settings-actions">
+                                    <button class="mini-action style-toolbar-btn style-toolbar-btn-primary" disabled={isImportingStyleTemplate} on:click={importStyleTemplateFile}>
+                                        {isImportingStyleTemplate ? "导入中..." : "导入 CSS"}
+                                    </button>
+                                    <button class="mini-action style-toolbar-btn" on:click={() => {
+                                        if (showStyleSourceEditor) {
+                                            applyResolvedStyleTemplateCss(styleSourceDraft);
+                                            showStyleSourceEditor = false;
+                                        } else {
+                                            syncToolbarStyleToEpubMeta();
+                                            styleSourceDraft = epubMeta.styles["main.css"];
+                                            showStyleSourceEditor = true;
+                                        }
+                                    }}>{showStyleSourceEditor ? "块编辑" : "源码"}</button>
+                                    <button class="mini-action style-toolbar-btn" on:click={resetToolbarStyleBlocks}>重置</button>
+                                    <button class="mini-action primary style-toolbar-btn" disabled={isSavingStyleTemplate} on:click={saveCurrentStyleTemplate}>{isSavingStyleTemplate ? "保存中..." : "保存模板"}</button>
+                                </div>
+                            </div>
+                            {#if styleSettingsMessage}
+                                <div class="font-settings-status">{styleSettingsMessage}</div>
+                            {/if}
+                            <div class="style-template-list">
+                                {#each styleTemplates as template}
+                                    <label class="style-template-item {appSettings.selectedStyleTemplateId === template.id ? 'active' : ''}">
+                                        <div class="style-template-main">
+                                            <input
+                                                type="radio"
+                                                name="editor-style-template"
+                                                checked={appSettings.selectedStyleTemplateId === template.id}
+                                                on:change={() => {
+                                                    appSettings.selectedStyleTemplateId = template.id;
+                                                    currentStyleTemplateName = template.name;
+                                                }}
+                                            />
+                                            <div class="style-template-meta">
+                                                <strong>{template.name}</strong>
+                                                <span>{template.is_builtin ? "内置模板（始终置顶）" : template.file_name}</span>
+                                            </div>
+                                        </div>
+                                        {#if template.is_builtin}
+                                            <button class="mini-action" type="button" on:click|stopPropagation={restoreBuiltinStyleTemplateToDefault}>恢复默认样式</button>
+                                        {/if}
+                                    </label>
+                                {/each}
+                            </div>
+                            <div class="style-settings-editor">
+                                <div class="style-panel-header in-settings">
+                                    <div>
+                                        <div class="style-panel-title">样式编辑</div>
+                                        <div class="style-panel-subtitle">当前模板：{currentStyleTemplateName}</div>
+                                    </div>
+                                </div>
+                                {#if showStyleSourceEditor}
+                                    <div class="style-source-editor">
+                                        <textarea
+                                            spellcheck="false"
+                                            bind:value={styleSourceDraft}
+                                            on:input={() => {
+                                                epubMeta.styles["main.css"] = styleSourceDraft;
+                                                epubMeta.styles = { ...epubMeta.styles };
+                                            }}
+                                        ></textarea>
+                                    </div>
+                                {:else}
+                                    <div class="style-block-editor-layout">
+                                        <nav class="style-block-nav" aria-label="样式块">
+                                        {#each visibleStyleBlocks as block}
+                                            <button
+                                                type="button"
+                                                class:active={activeStyleBlockId === block.id}
+                                                style={`--block-accent:${block.accent}`}
+                                                on:click={() => (activeStyleBlockId = block.id)}
+                                            >
+                                                <strong>{block.title}</strong>
+                                                <span>{block.note}</span>
+                                            </button>
+                                        {/each}
+                                        </nav>
+                                        <div class="style-block-detail">
+                                        {#if activeStyleBlock}
+                                            <section class="style-block-card" style={`--block-accent:${activeStyleBlock.accent}`}>
+                                                <header class="style-block-head">
+                                                    <div>
+                                                        <strong>{activeStyleBlock.title}</strong>
+                                                        <span>{activeStyleBlock.note}</span>
+                                                    </div>
+                                                    <code>
+                                                        {#each activeStyleBlock.selector.split(",").map((item) => item.trim()).filter(Boolean) as selector}
+                                                            <span>{selector}</span>
+                                                        {/each}
+                                                    </code>
+                                                </header>
+                                                <div class="style-prop-list">
+                                                    {#each activeStyleBlock.properties as prop}
+                                                        <label class="style-prop-row">
+                                                            <span class="prop-title">
+                                                                <span class="prop-label">{prop.label}</span>
+                                                                <span class="prop-name">{prop.name}</span>
+                                                            </span>
+                                                            {#if prop.options}
+                                                                <select
+                                                                    value={prop.value}
+                                                                    on:change={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === activeStyleBlock.id), styleBlocks.find((item) => item.id === activeStyleBlock.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}>
+                                                                    {#each (prop.name === "font-family" ? fontFamilyOptions : prop.options) as option}
+                                                                        <option value={option.value}>{option.label}</option>
+                                                                    {/each}
+                                                                </select>
+                                                            {:else if prop.color}
+                                                                {@const parsedColor = parseCssColorValue(prop.value)}
+                                                                <span class="color-value-control">
+                                                                    <input
+                                                                        class="color-swatch"
+                                                                        type="color"
+                                                                        value={parsedColor.swatch}
+                                                                        title={prop.value}
+                                                                        on:input={(event) => updateToolbarColorValue(activeStyleBlock.id, prop.name, event.currentTarget.value)}
+                                                                    />
+                                                                    <input
+                                                                        class="color-hex-input"
+                                                                        value={parsedColor.hex}
+                                                                        placeholder="#RRGGBB / #RRGGBBAA"
+                                                                        on:input={(event) => updateToolbarColorValue(activeStyleBlock.id, prop.name, event.currentTarget.value)}
+                                                                    />
+                                                                </span>
+                                                            {:else}
+                                                                <input
+                                                                    value={prop.value}
+                                                                    on:input={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === activeStyleBlock.id), styleBlocks.find((item) => item.id === activeStyleBlock.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}
+                                                                />
+                                                            {/if}
+                                                        </label>
+                                                    {/each}
+                                                </div>
+                                            </section>
+                                        {/if}
+                                        </div>
+                                    </div>
+                                {/if}
+                            </div>
+                        </div>
+                    {:else if settingsActiveTab === 'toc'}
+                        <div class="rules-header">正则表达式</div>
+                        <div class="rules-list">
+                            {#each appSettings.customRegexRules as rule, idx}
+                                <div class="rule-item" style="gap: 8px; align-items: center;">
+                                    <select class="rule-type" bind:value={rule.level} style="width: 80px; flex-shrink: 0;">
+                                        <option value={1}>层级 1</option>
+                                        <option value={2}>层级 2</option>
+                                        <option value={3}>层级 3</option>
+                                        <option value={4}>层级 4</option>
+                                        <option value={5}>层级 5</option>
+                                    </select>
+
+                                    <div class="rule-input-group">
+                                        <input
+                                            class="rule-input"
+                                            type="text"
+                                            bind:value={rule.pattern}
+                                            placeholder="输入正则表达式"
+                                        />
+                                        <div class="rule-arrow-visual">▼</div>
+                                        <select
+                                            class="rule-hidden-select"
+                                            on:change={(e) => {
+                                                const val = e.currentTarget.value;
+                                                if(val) rule.pattern = val;
+                                                e.currentTarget.value = "";
+                                            }}
+                                        >
+                                            <option value="">选择预设正则</option>
+                                            {#each REGEX_PRESETS as preset}
+                                                {#if preset.value}
+                                                    <option value={preset.value}>{preset.value}</option>
+                                                {/if}
+                                            {/each}
+                                        </select>
+                                    </div>
+
+                                    <button class="rule-btn remove" on:click={() => {
+                                        appSettings.customRegexRules.splice(idx, 1);
+                                        appSettings.customRegexRules = [...appSettings.customRegexRules];
+                                    }}>－</button>
+                                </div>
+                            {/each}
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                            <button class="grid-btn" style="padding: 4px 10px; font-size: 13px;" on:click={() => {
+                                appSettings.customRegexRules = [
+                                    { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
+                                    { level: 1, pattern: DEFAULT_SETTINGS.volRegex },
+                                    { level: 3, pattern: DEFAULT_META_BODY_REGEX },
+                                    { level: 3, pattern: DEFAULT_SETTINGS.chapRegex }
+                                ];
+                            }}>↺ 还原正则</button>
+                            <button class="grid-btn" style="padding: 4px 10px; font-size: 13px; color: #0066b8; border-color: #0066b8;" on:click={() => {
+                                appSettings.customRegexRules.push({ level: 3, pattern: "" });
+                                appSettings.customRegexRules = [...appSettings.customRegexRules];
+                            }}>＋ 新增正则</button>
+                        </div>
+
+                    {:else if settingsActiveTab === 'api'}
+                        <div class="ai-settings-form">
+                            {#if aiSettingsMessage}
+                                <div class="font-settings-status">{aiSettingsMessage}</div>
+                            {/if}
+                            <div class="font-settings-head ai-provider-head">
+                                <div>
+                                    <div class="font-settings-title">API 配置</div>
+                                    <div class="font-settings-note">可添加多个 OpenAI 兼容 API，分别供校对和自动审批选择。</div>
+                                </div>
+                                <div class="style-settings-actions">
+                                    <button class="mini-action" type="button" on:click={addTxtAiProvider}>新增</button>
+                                    <button class="mini-action danger" type="button" on:click={() => removeTxtAiProvider(aiProviderDraftId)}>删除</button>
+                                </div>
+                            </div>
+                            <div class="set-row">
+                                <label for="aiProviderDraft">当前 API:</label>
+                                <select id="aiProviderDraft" bind:value={aiProviderDraftId}>
+                                    {#each aiProviders as provider}
+                                        <option value={provider.id}>{provider.name || provider.model}</option>
+                                    {/each}
+                                </select>
+                            </div>
+                            {#if selectedTxtAiProvider()}
+                                {#key aiProviderDraftId}
+                                <div class="set-row">
+                                    <label for="aiProviderName">名称:</label>
+                                    <input id="aiProviderName" type="text" value={selectedTxtAiProvider()?.name || ""} on:input={(e) => updateSelectedTxtAiProvider("name", e.currentTarget.value)} />
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiProviderBaseUrl">API 地址:</label>
+                                    <input id="aiProviderBaseUrl" type="text" value={selectedTxtAiProvider()?.baseUrl || ""} on:input={(e) => updateSelectedTxtAiProvider("baseUrl", e.currentTarget.value)} placeholder="https://api.openai.com/v1" />
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiProviderKey">API Key:</label>
+                                    <input id="aiProviderKey" type="password" value={selectedTxtAiProvider()?.apiKey || ""} on:input={(e) => updateSelectedTxtAiProvider("apiKey", e.currentTarget.value)} placeholder="sk-..." />
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiProviderModel">模型:</label>
+                                    <input id="aiProviderModel" type="text" value={selectedTxtAiProvider()?.model || ""} on:input={(e) => updateSelectedTxtAiProvider("model", e.currentTarget.value)} placeholder="deepseek-chat / gpt-4o-mini" />
+                                </div>
+                                <div class="set-row">
+                                    <label for="aiProviderTemperature">温度:</label>
+                                    <input id="aiProviderTemperature" type="number" min="0" max="1" step="0.1" value={selectedTxtAiProvider()?.temperature ?? 0.1} on:input={(e) => updateSelectedTxtAiProvider("temperature", Number(e.currentTarget.value))} />
+                                </div>
+                                {/key}
+                            {/if}
+                        </div>
+                    {:else if settingsActiveTab === 'ai'}
+                        <div class="ai-settings-form">
+                            {#if aiSettingsMessage}
+                                <div class="font-settings-status">{aiSettingsMessage}</div>
+                            {/if}
+                            <div class="set-row">
+                                <label for="aiProofProvider">校对 API:</label>
+                                <select id="aiProofProvider" bind:value={txtAiProofingConfig.providerId} on:change={() => (aiProofingConfig = proofingConfigForProvider(txtAiProofingConfig.providerId))}>
+                                    {#each aiProviders as provider}
+                                        <option value={provider.id}>{provider.name || provider.model}</option>
+                                    {/each}
+                                </select>
+                            </div>
+                            <div class="set-row">
+                                <label for="aiApprovalProvider">审批 API:</label>
+                                <select id="aiApprovalProvider" bind:value={txtAiProofingConfig.approvalProviderId}>
+                                    {#each aiProviders as provider}
+                                        <option value={provider.id}>{provider.name || provider.model}</option>
+                                    {/each}
+                                </select>
+                            </div>
+                            <div class="set-row">
+                                <label for="aiMaxChars">单章上限:</label>
+                                <input id="aiMaxChars" type="number" min="1000" step="1000" bind:value={aiProofingConfig.maxChapterChars} />
+                            </div>
+                            <div class="set-row">
+                                <label for="aiTimeoutSec">最长响应时间:</label>
+                                <input id="aiTimeoutSec" type="number" min="30" max="1800" step="30" bind:value={aiProofingConfig.responseTimeoutSec} />
+                            </div>
+                            <label class="set-row ai-toggle-row" for="aiAutoApprove">
+                                <span>自动审批:</span>
+                                <input id="aiAutoApprove" type="checkbox" bind:checked={aiProofingConfig.autoApprove} />
+                                <small>AI 审核非自动建议，通过则自动应用，存疑保留人工审核。</small>
+                            </label>
+                            <div class="set-row ai-textarea-row">
+                                <label for="aiExtraPrompt">额外要求:</label>
+                                <textarea id="aiExtraPrompt" rows="4" bind:value={aiProofingConfig.extraPrompt} placeholder="例如：保留作者口癖，不做风格润色。"></textarea>
+                            </div>
+                        </div>
+                    {:else if settingsActiveTab === 'proofLogs'}
+                        <div class="proof-log-settings">
+                            <div class="proof-log-toolbar">
+                                <span>{proofLogMessage || `共 ${proofLogList.length} 个日志文件`}</span>
+                                <button class="mini-action" type="button" on:click={() => loadProofLogs(false)}>刷新</button>
+                            </div>
+                            <div class="proof-log-browser">
+                                <div class="proof-log-list">
+                                    {#each proofLogList as log}
+                                        <button
+                                            type="button"
+                                            class:active={selectedProofLogPath === log.path}
+                                            on:click={() => openProofLog(log)}
+                                        >
+                                            <span class="proof-log-name">{log.fileName}</span>
+                                            <span class="proof-log-meta">
+                                                {new Date(log.timestamp * 1000).toLocaleString()} · {(log.size / 1024).toFixed(1)}KB
+                                            </span>
+                                        </button>
+                                    {:else}
+                                        <div class="empty-msg">暂无校对日志</div>
+                                    {/each}
+                                </div>
+                                <textarea
+                                    class="proof-log-content"
+                                    readonly
+                                    value={selectedProofLogContent || "选择左侧日志后查看完整内容"}
+                                    data-native-context-menu="true"
+                                    on:contextmenu|stopPropagation
+                                ></textarea>
+                            </div>
+                        </div>
+                    {:else}
+                        <div class="history-settings-card">
+                            {#each historyList as h}
+                                <button
+                                    class="hist-item"
+                                    on:click={() => {
+                                        restoreTargetSnapshot = h;
+                                        showRestoreConfirm = true;
+                                    }}
+                                >
+                                    <span class="hist-time">{new Date(h.timestamp * 1000).toLocaleString()}</span>
+                                    <span class="hist-size">{(h.size / 1024).toFixed(1)}KB</span>
+                                </button>
+                            {:else}
+                                <div class="empty-msg">暂无历史快照</div>
+                            {/each}
+                        </div>
+                    {/if}
+                </SettingsShell>
+            </div>
+        </div>
+    {:else if showEpubModal || showHistoryPanel}
+        <div
+            role="presentation"
+            class="modal-overlay"
+            on:click={() => {
                 showEpubModal = false;
                 showHistoryPanel = false;
             }}
@@ -5166,442 +5814,10 @@
             <div
                 role="presentation"
                 class="modal-content"
-                class:editor-settings-modal={showSettingsPanel}
                 class:epub-modal-shell={showEpubModal}
                 on:click|stopPropagation
             >
-                {#if showSettingsPanel}
-                    <div class="p-header">
-                        <span>偏好设置</span>
-                        <button class="icon-close" on:click={() => (showSettingsPanel = false)}
-                            >✕</button
-                        >
-                    </div>
-                    
-                    <div class="settings-tabs">
-                        <button class="tab-btn {settingsActiveTab === 'display' ? 'active' : ''}" on:click={() => settingsActiveTab = 'display'}>显示</button>
-                        <button class="tab-btn {settingsActiveTab === 'fonts' ? 'active' : ''}" on:click={openSettingsFontsTab}>字体</button>
-                        <button class="tab-btn {settingsActiveTab === 'styles' ? 'active' : ''}" on:click={openSettingsStylesTab}>样式</button>
-                        <button class="tab-btn {settingsActiveTab === 'toc' ? 'active' : ''}" on:click={() => settingsActiveTab = 'toc'}>目录</button>
-                        <button class="tab-btn {settingsActiveTab === 'ai' ? 'active' : ''}" on:click={openSettingsAiTab}>智能校对</button>
-                        <button class="tab-btn {settingsActiveTab === 'proofLogs' ? 'active' : ''}" on:click={openSettingsProofLogsTab}>校对日志</button>
-                        <button class="tab-btn {settingsActiveTab === 'history' ? 'active' : ''}" on:click={openSettingsHistoryTab}>历史版本</button>
-                    </div>
-                    <div class="p-body">
-                        {#if settingsActiveTab === 'display'}
-                            <div class="set-row">
-                                <label for="wordWrap">自动换行:</label>
-                                <input id="wordWrap" type="checkbox" bind:checked={appSettings.wordWrap} style="width: auto;"/>
-                            </div>
-                            <div class="set-row">
-                                <label for="showWhitespace">显示空格:</label>
-                                <input id="showWhitespace" type="checkbox" bind:checked={appSettings.showWhitespace} style="width: auto;"/>
-                            </div>
-                            <div class="set-row">
-                                <label for="showLineBreaks">显示换行符:</label>
-                                <input id="showLineBreaks" type="checkbox" bind:checked={appSettings.showLineBreaks} style="width: auto;"/>
-                            </div>
-                            <!-- 撤销开关 -->
-                            <div class="set-row" style="display: none;">
-                                <label for="wth" style="display: none;">单章字数检查:</label>
-                                <input
-                                    id="wth"
-                                    type="hidden"
-                                    bind:value={appSettings.wordCountMaxThreshold}
-                                    style="width: 80px;"
-                                />
-                            </div>
-                            
-                            <div class="set-row">
-                                <label for="clh">保存清空撤销:</label>
-                                <input id="clh" type="checkbox" bind:checked={appSettings.clearHistoryOnSave} style="width: auto;"/>
-                            </div>
-                            <div class="set-row">
-                                <label for="subsetFonts">字体子集化:</label>
-                                <input id="subsetFonts" type="checkbox" bind:checked={appSettings.subsetFonts} style="width: auto;"/>
-                            </div>
-                        {:else if settingsActiveTab === 'fonts'}
-                            <div class="font-settings-panel">
-                                <div class="font-settings-head">
-                                    <div>
-                                        <div class="font-settings-title">外部字体</div>
-                                        <div class="font-settings-note">导入后自动复制到当前书库目录下的“字体”文件夹，并可直接在块编辑里选择使用。</div>
-                                    </div>
-                                    <button class="grid-btn blue" disabled={isImportingFont} on:click={importExternalFont}>
-                                        {isImportingFont ? "导入中..." : "导入字体"}
-                                    </button>
-                                </div>
-                                {#if fontSettingsMessage}
-                                    <div class="font-settings-status">{fontSettingsMessage}</div>
-                                {/if}
-                                <div class="font-settings-list">
-                                    {#each importedFonts as font}
-                                        <div class="font-settings-item">
-                                            <div class="font-settings-item-top">
-                                                <div class="font-settings-meta">
-                                                    <strong>{font.family}</strong>
-                                                    <span>{font.file_name}</span>
-                                                </div>
-                                                <div class="font-settings-actions">
-                                                    <button
-                                                        class="mini-action"
-                                                        type="button"
-                                                        disabled={renamingFontFileName === font.file_name || deletingFontFileName === font.file_name}
-                                                        on:click={() => renameImportedFont(font)}
-                                                    >{renamingFontFileName === font.file_name ? "重命名中..." : "重命名"}</button>
-                                                    <button
-                                                        class="mini-action"
-                                                        type="button"
-                                                        disabled={deletingFontFileName === font.file_name || renamingFontFileName === font.file_name}
-                                                        on:click={() => deleteImportedFont(font)}
-                                                    >{deletingFontFileName === font.file_name ? "删除中..." : "删除"}</button>
-                                                </div>
-                                            </div>
-                                            <code>{font.css_value}</code>
-                                        </div>
-                                    {:else}
-                                        <div class="empty-msg">还没有导入外部字体</div>
-                                    {/each}
-                                </div>
-                            </div>
-                        {:else if settingsActiveTab === 'styles'}
-                            <div class="font-settings-panel style-settings-panel">
-                                <div class="font-settings-head">
-                                    <div>
-                                        <div class="font-settings-title">样式模板</div>
-                                        <div class="font-settings-note">选择默认 CSS 模板，并直接编辑当前 EPUB 输出样式。</div>
-                                    </div>
-                                    <div class="style-settings-actions">
-                                        <button class="grid-btn blue" disabled={isImportingStyleTemplate} on:click={importStyleTemplateFile}>
-                                            {isImportingStyleTemplate ? "导入中..." : "导入 CSS"}
-                                        </button>
-                                        <button class="mini-action" on:click={() => {
-                                            if (showStyleSourceEditor) {
-                                                applyResolvedStyleTemplateCss(styleSourceDraft);
-                                                showStyleSourceEditor = false;
-                                            } else {
-                                                syncToolbarStyleToEpubMeta();
-                                                styleSourceDraft = epubMeta.styles["main.css"];
-                                                showStyleSourceEditor = true;
-                                            }
-                                        }}>{showStyleSourceEditor ? "块编辑" : "源码"}</button>
-                                        <button class="mini-action" on:click={resetToolbarStyleBlocks}>重置</button>
-                                        <button class="mini-action primary" disabled={isSavingStyleTemplate} on:click={saveCurrentStyleTemplate}>{isSavingStyleTemplate ? "保存中..." : "保存模板"}</button>
-                                    </div>
-                                </div>
-                                {#if styleSettingsMessage}
-                                    <div class="font-settings-status">{styleSettingsMessage}</div>
-                                {/if}
-                                <div class="style-template-list">
-                                    {#each styleTemplates as template}
-                                        <label class="style-template-item {appSettings.selectedStyleTemplateId === template.id ? 'active' : ''}">
-                                            <div class="style-template-main">
-                                                <input
-                                                    type="radio"
-                                                    name="editor-style-template"
-                                                    checked={appSettings.selectedStyleTemplateId === template.id}
-                                                    on:change={() => {
-                                                        appSettings.selectedStyleTemplateId = template.id;
-                                                        currentStyleTemplateName = template.name;
-                                                    }}
-                                                />
-                                                <div class="style-template-meta">
-                                                    <strong>{template.name}</strong>
-                                                    <span>{template.is_builtin ? "内置模板（始终置顶）" : template.file_name}</span>
-                                                </div>
-                                            </div>
-                                            {#if template.is_builtin}
-                                                <button class="mini-action" type="button" on:click|stopPropagation={restoreBuiltinStyleTemplateToDefault}>恢复默认样式</button>
-                                            {/if}
-                                        </label>
-                                    {/each}
-                                </div>
-                                <div class="style-settings-editor">
-                                    <div class="style-panel-header in-settings">
-                                        <div>
-                                            <div class="style-panel-title">样式编辑</div>
-                                            <div class="style-panel-subtitle">当前模板：{currentStyleTemplateName}</div>
-                                        </div>
-                                    </div>
-                                    {#if showStyleSourceEditor}
-                                        <div class="style-source-editor">
-                                            <textarea
-                                                spellcheck="false"
-                                                bind:value={styleSourceDraft}
-                                                on:input={() => {
-                                                    epubMeta.styles["main.css"] = styleSourceDraft;
-                                                    epubMeta.styles = { ...epubMeta.styles };
-                                                }}
-                                            ></textarea>
-                                        </div>
-                                    {:else}
-                                        <div class="style-block-editor-layout">
-                                            <nav class="style-block-nav" aria-label="样式块">
-                                            {#each visibleStyleBlocks as block}
-                                                <button
-                                                    type="button"
-                                                    class:active={activeStyleBlockId === block.id}
-                                                    style={`--block-accent:${block.accent}`}
-                                                    on:click={() => (activeStyleBlockId = block.id)}
-                                                >
-                                                    <strong>{block.title}</strong>
-                                                    <span>{block.note}</span>
-                                                </button>
-                                            {/each}
-                                            </nav>
-                                            <div class="style-block-detail">
-                                            {#if activeStyleBlock}
-                                                <section class="style-block-card" style={`--block-accent:${activeStyleBlock.accent}`}>
-                                                    <header class="style-block-head">
-                                                        <div>
-                                                            <strong>{activeStyleBlock.title}</strong>
-                                                            <span>{activeStyleBlock.note}</span>
-                                                        </div>
-                                                        <code>
-                                                            {#each activeStyleBlock.selector.split(",").map((item) => item.trim()).filter(Boolean) as selector}
-                                                                <span>{selector}</span>
-                                                            {/each}
-                                                        </code>
-                                                    </header>
-                                                    <div class="style-prop-list">
-                                                        {#each activeStyleBlock.properties as prop}
-                                                            <label class="style-prop-row">
-                                                                <span class="prop-title">
-                                                                    <span class="prop-label">{prop.label}</span>
-                                                                    <span class="prop-name">{prop.name}</span>
-                                                                </span>
-                                                                {#if prop.options}
-                                                                    <select
-                                                                        value={prop.value}
-                                                                        on:change={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === activeStyleBlock.id), styleBlocks.find((item) => item.id === activeStyleBlock.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}>
-                                                                        {#each (prop.name === "font-family" ? fontFamilyOptions : prop.options) as option}
-                                                                            <option value={option.value}>{option.label}</option>
-                                                                        {/each}
-                                                                    </select>
-                                                                {:else if prop.color}
-                                                                    {@const parsedColor = parseCssColorValue(prop.value)}
-                                                                    <span class="color-value-control">
-                                                                        <input
-                                                                            class="color-swatch"
-                                                                            type="color"
-                                                                            value={parsedColor.swatch}
-                                                                            title={prop.value}
-                                                                            on:input={(event) => updateToolbarColorValue(activeStyleBlock.id, prop.name, event.currentTarget.value)}
-                                                                        />
-                                                                        <input
-                                                                            class="color-hex-input"
-                                                                            value={parsedColor.hex}
-                                                                            placeholder="#RRGGBB / #RRGGBBAA"
-                                                                            on:input={(event) => updateToolbarColorValue(activeStyleBlock.id, prop.name, event.currentTarget.value)}
-                                                                        />
-                                                                    </span>
-                                                                {:else}
-                                                                    <input
-                                                                        value={prop.value}
-                                                                        on:input={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === activeStyleBlock.id), styleBlocks.find((item) => item.id === activeStyleBlock.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}
-                                                                    />
-                                                                {/if}
-                                                            </label>
-                                                        {/each}
-                                                    </div>
-                                                </section>
-                                            {/if}
-                                            </div>
-                                        </div>
-                                    {/if}
-                                </div>
-                            </div>
-                        {:else if settingsActiveTab === 'toc'}
-                            <div class="rules-header">正则表达式</div>
-                            <div class="rules-list">
-                                {#each appSettings.customRegexRules as rule, idx}
-                                    <div class="rule-item" style="gap: 8px; align-items: center;">
-                                        <select class="rule-type" bind:value={rule.level} style="width: 80px; flex-shrink: 0;">
-                                            <option value={1}>层级 1</option>
-                                            <option value={2}>层级 2</option>
-                                            <option value={3}>层级 3</option>
-                                            <option value={4}>层级 4</option>
-                                            <option value={5}>层级 5</option>
-                                        </select>
-                                        
-                                        <div class="rule-input-group">
-                                            <input
-                                                class="rule-input"
-                                                type="text"
-                                                bind:value={rule.pattern}
-                                                placeholder="输入正则表达式"
-                                            />
-                                            <div class="rule-arrow-visual">▼</div>
-                                            <select
-                                                class="rule-hidden-select"
-                                                on:change={(e) => {
-                                                    const val = e.currentTarget.value;
-                                                    if(val) rule.pattern = val;
-                                                    e.currentTarget.value = "";
-                                                }}
-                                            >
-                                                <option value="">选择预设正则</option>
-                                                {#each REGEX_PRESETS as preset}
-                                                    {#if preset.value}
-                                                        <option value={preset.value}>{preset.value}</option>
-                                                    {/if}
-                                                {/each}
-                                            </select>
-                                        </div>
-
-                                        <button class="rule-btn remove" on:click={() => {
-                                            appSettings.customRegexRules.splice(idx, 1);
-                                            appSettings.customRegexRules = [...appSettings.customRegexRules];
-                                        }}>－</button>
-                                    </div>
-                                {/each}
-                            </div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                                <button class="grid-btn" style="padding: 4px 10px; font-size: 13px;" on:click={() => {
-                                    appSettings.customRegexRules = [
-                                        { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
-                                        { level: 1, pattern: DEFAULT_SETTINGS.volRegex },
-                                        { level: 3, pattern: DEFAULT_META_BODY_REGEX },
-                                        { level: 3, pattern: DEFAULT_SETTINGS.chapRegex }
-                                    ];
-                                }}>↺ 还原正则</button>
-                                <button class="grid-btn" style="padding: 4px 10px; font-size: 13px; color: #0066b8; border-color: #0066b8;" on:click={() => {
-                                    appSettings.customRegexRules.push({ level: 3, pattern: "" });
-                                    appSettings.customRegexRules = [...appSettings.customRegexRules];
-                                }}>＋ 新增正则</button>
-                            </div>
-
-                        {:else if settingsActiveTab === 'ai'}
-                            <div class="ai-settings-form">
-                                {#if aiSettingsMessage}
-                                    <div class="font-settings-status">{aiSettingsMessage}</div>
-                                {/if}
-                                <div class="font-settings-head ai-provider-head">
-                                    <div>
-                                        <div class="font-settings-title">API 配置</div>
-                                        <div class="font-settings-note">可添加多个 OpenAI 兼容 API，分别供校对和自动审批选择。</div>
-                                    </div>
-                                    <div class="style-settings-actions">
-                                        <button class="mini-action" type="button" on:click={addTxtAiProvider}>新增</button>
-                                        <button class="mini-action danger" type="button" on:click={() => removeTxtAiProvider(aiProviderDraftId)}>删除</button>
-                                    </div>
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiProviderDraft">当前 API:</label>
-                                    <select id="aiProviderDraft" bind:value={aiProviderDraftId}>
-                                        {#each aiProviders as provider}
-                                            <option value={provider.id}>{provider.name || provider.model}</option>
-                                        {/each}
-                                    </select>
-                                </div>
-                                {#if selectedTxtAiProvider()}
-                                    <div class="set-row">
-                                        <label for="aiProviderName">名称:</label>
-                                        <input id="aiProviderName" type="text" value={selectedTxtAiProvider()?.name || ""} on:input={(e) => updateSelectedTxtAiProvider("name", e.currentTarget.value)} />
-                                    </div>
-                                    <div class="set-row">
-                                        <label for="aiProviderBaseUrl">API 地址:</label>
-                                        <input id="aiProviderBaseUrl" type="text" value={selectedTxtAiProvider()?.baseUrl || ""} on:input={(e) => updateSelectedTxtAiProvider("baseUrl", e.currentTarget.value)} placeholder="https://api.openai.com/v1" />
-                                    </div>
-                                    <div class="set-row">
-                                        <label for="aiProviderKey">API Key:</label>
-                                        <input id="aiProviderKey" type="password" value={selectedTxtAiProvider()?.apiKey || ""} on:input={(e) => updateSelectedTxtAiProvider("apiKey", e.currentTarget.value)} placeholder="sk-..." />
-                                    </div>
-                                    <div class="set-row">
-                                        <label for="aiProviderModel">模型:</label>
-                                        <input id="aiProviderModel" type="text" value={selectedTxtAiProvider()?.model || ""} on:input={(e) => updateSelectedTxtAiProvider("model", e.currentTarget.value)} placeholder="deepseek-chat / gpt-4o-mini" />
-                                    </div>
-                                    <div class="set-row">
-                                        <label for="aiProviderTemperature">温度:</label>
-                                        <input id="aiProviderTemperature" type="number" min="0" max="1" step="0.1" value={selectedTxtAiProvider()?.temperature ?? 0.1} on:input={(e) => updateSelectedTxtAiProvider("temperature", Number(e.currentTarget.value))} />
-                                    </div>
-                                {/if}
-                                <div class="ai-settings-divider"></div>
-                                <div class="set-row">
-                                    <label for="aiProofProvider">校对 API:</label>
-                                    <select id="aiProofProvider" bind:value={txtAiProofingConfig.providerId} on:change={() => (aiProofingConfig = proofingConfigForProvider(txtAiProofingConfig.providerId))}>
-                                        {#each aiProviders as provider}
-                                            <option value={provider.id}>{provider.name || provider.model}</option>
-                                        {/each}
-                                    </select>
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiApprovalProvider">审批 API:</label>
-                                    <select id="aiApprovalProvider" bind:value={txtAiProofingConfig.approvalProviderId}>
-                                        {#each aiProviders as provider}
-                                            <option value={provider.id}>{provider.name || provider.model}</option>
-                                        {/each}
-                                    </select>
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiMaxChars">单章上限:</label>
-                                    <input id="aiMaxChars" type="number" min="1000" step="1000" bind:value={aiProofingConfig.maxChapterChars} />
-                                </div>
-                                <label class="set-row ai-toggle-row" for="aiAutoApprove">
-                                    <span>自动审批:</span>
-                                    <input id="aiAutoApprove" type="checkbox" bind:checked={aiProofingConfig.autoApprove} />
-                                    <small>AI 审核非自动建议，通过则自动应用，存疑保留人工审核。</small>
-                                </label>
-                                <div class="set-row ai-textarea-row">
-                                    <label for="aiExtraPrompt">额外要求:</label>
-                                    <textarea id="aiExtraPrompt" rows="4" bind:value={aiProofingConfig.extraPrompt} placeholder="例如：保留作者口癖，不做风格润色。"></textarea>
-                                </div>
-                            </div>
-                        {:else if settingsActiveTab === 'proofLogs'}
-                            <div class="proof-log-settings">
-                                <div class="proof-log-toolbar">
-                                    <span>{proofLogMessage || `共 ${proofLogList.length} 个日志文件`}</span>
-                                    <button class="mini-action" type="button" on:click={() => loadProofLogs(false)}>刷新</button>
-                                </div>
-                                <div class="proof-log-browser">
-                                    <div class="proof-log-list">
-                                        {#each proofLogList as log}
-                                            <button
-                                                type="button"
-                                                class:active={selectedProofLogPath === log.path}
-                                                on:click={() => openProofLog(log)}
-                                            >
-                                                <span class="proof-log-name">{log.fileName}</span>
-                                                <span class="proof-log-meta">
-                                                    {new Date(log.timestamp * 1000).toLocaleString()} · {(log.size / 1024).toFixed(1)}KB
-                                                </span>
-                                            </button>
-                                        {:else}
-                                            <div class="empty-msg">暂无校对日志</div>
-                                        {/each}
-                                    </div>
-                                    <textarea
-                                        class="proof-log-content"
-                                        readonly
-                                        value={selectedProofLogContent || "选择左侧日志后查看完整内容"}
-                                        data-native-context-menu="true"
-                                        on:contextmenu|stopPropagation
-                                    ></textarea>
-                                </div>
-                            </div>
-                        {:else}
-                            <div class="history-settings-card">
-                                {#each historyList as h}
-                                    <button
-                                        class="hist-item"
-                                        on:click={() => {
-                                            restoreTargetSnapshot = h;
-                                            showRestoreConfirm = true;
-                                        }}
-                                    >
-                                        <span class="hist-time">{new Date(h.timestamp * 1000).toLocaleString()}</span>
-                                        <span class="hist-size">{(h.size / 1024).toFixed(1)}KB</span>
-                                    </button>
-                                {:else}
-                                    <div class="empty-msg">暂无历史快照</div>
-                                {/each}
-                            </div>
-                        {/if}
-                    </div>
-                    <div class="settings-footer editor-settings-footer">
-                        <button class="grid-btn blue" on:click={saveEditorSettings}>保存并应用</button>
-                    </div>
-                {:else if showEpubModal}
+                {#if showEpubModal}
                     <div class="p-header">
                         <span>制作 EPUB</span>
                         <button class="icon-close" on:click={closeAllPanels}>✕</button>
@@ -6025,25 +6241,6 @@
         background: #e0e0e0;
         color: #333;
     }
-
-
-
-    .set-row {
-        display: flex;
-        align-items: center;
-        margin-bottom: 12px;
-        gap: 12px;
-    }
-    .set-row label {
-        color: #444;
-        font-size: 14px;
-    }
-    .set-row input[type="checkbox"] {
-        width: 16px;
-        height: 16px;
-        cursor: pointer;
-    }
-
     :global(body) {
         margin: 0;
         background: #fff;
@@ -6193,15 +6390,16 @@
     }
 
     .mini-action {
-        height: 28px;
+        height: 34px;
         min-width: 0;
-        padding: 0 9px;
-        border: 1px solid #cfd8e3;
-        border-radius: 6px;
+        padding: 0 12px;
+        border: 1px solid #d7e0ea;
+        border-radius: 10px;
         background: #fff;
         color: #526071;
         font-size: 12px;
         font-weight: 700;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
     }
 
     .mini-action.primary {
@@ -6239,8 +6437,9 @@
         width: 100%;
         height: auto;
         min-width: 0;
-        display: grid;
-        justify-items: start;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
         gap: 3px;
         padding: 10px 11px;
         border: 1px solid transparent;
@@ -6260,18 +6459,22 @@
     }
 
     .style-block-nav strong {
+        width: 100%;
         font-size: 13px;
-        line-height: 1.25;
+        line-height: 1.3;
+        text-align: left;
     }
 
     .style-block-nav span {
+        width: 100%;
         max-width: 100%;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         color: #8793a2;
-        font-size: 11px;
+        font-size: 10px;
         line-height: 1.25;
+        text-align: left;
     }
 
     .style-block-detail {
@@ -6304,15 +6507,17 @@
         display: block;
         color: var(--block-accent);
         font-family: Georgia, "Times New Roman", serif;
-        font-size: 1.05rem;
+        font-size: 0.98rem;
         letter-spacing: 0;
+        line-height: 1.25;
     }
 
     .style-block-head span {
         display: block;
         margin-top: 2px;
         color: #7b8794;
-        font-size: 11px;
+        font-size: 10px;
+        line-height: 1.35;
     }
 
     .style-block-head code {
@@ -6346,7 +6551,7 @@
         grid-template-columns: minmax(112px, 150px) minmax(0, 1fr);
         align-items: center;
         gap: 14px;
-        min-height: 58px;
+        min-height: 50px;
         border-bottom: 1px solid rgba(226, 232, 240, 0.8);
     }
 
@@ -6356,25 +6561,26 @@
 
     .prop-title {
         display: grid;
-        gap: 4px;
+        gap: 2px;
         min-width: 0;
     }
 
     .prop-label {
         color: #8a94a3;
-        font-size: 11px;
+        font-size: 10px;
         white-space: nowrap;
+        line-height: 1.2;
     }
 
     .prop-name {
         color: #151923;
         font-family: Georgia, "Times New Roman", serif;
-        font-size: 1.04rem;
+        font-size: 0.92rem;
         font-weight: 800;
         letter-spacing: 0;
         overflow: hidden;
         text-overflow: ellipsis;
-        line-height: 1.15;
+        line-height: 1.2;
     }
 
     .style-prop-row input,
@@ -6388,8 +6594,8 @@
         background: rgba(255, 255, 255, 0.78);
         color: #172434;
         font: inherit;
-        font-size: 0.82rem;
-        padding: 8px 10px;
+        font-size: 0.8rem;
+        padding: 7px 10px;
     }
 
     .style-prop-row input:focus,
@@ -6532,6 +6738,23 @@
         gap: 8px;
     }
 
+    .style-toolbar-btn {
+        min-width: 88px;
+        justify-content: center;
+    }
+
+    .style-toolbar-btn-primary {
+        border-color: #1e8fd2;
+        background: linear-gradient(135deg, #2a95d8 0%, #1ab0c8 100%);
+        color: #fff;
+        box-shadow: 0 10px 20px rgba(30, 143, 210, 0.2);
+    }
+
+    .style-toolbar-btn-primary:disabled {
+        opacity: 0.72;
+        box-shadow: none;
+    }
+
     .style-settings-editor {
         min-height: 360px;
         overflow: hidden;
@@ -6549,9 +6772,9 @@
     .ai-settings-form {
         display: flex;
         flex-direction: column;
-        gap: 16px;
+        gap: 12px;
         max-width: 100%;
-        padding-top: 8px;
+        padding-top: 4px;
     }
 
     .ai-settings-form .set-row {
@@ -6562,31 +6785,29 @@
         margin-bottom: 4px;
     }
 
-    .ai-settings-divider {
-        height: 1px;
-        margin: 2px 0;
-        background: #e7edf4;
-    }
-
     .ai-settings-form .set-row label {
         width: 110px;
         flex-shrink: 0;
         font-weight: bold;
         color: #444;
-        font-size: 15px;
+        font-size: 13px;
+        line-height: 1.4;
     }
 
     .ai-settings-form .set-row {
         align-items: center;
         justify-content: flex-start;
+        gap: 10px;
     }
 
     .ai-settings-form .set-row input:not([type="checkbox"]),
+    .ai-settings-form .set-row select,
     .ai-settings-form .set-row textarea {
         flex: 1 1 auto;
         min-width: 0;
-        min-height: 38px;
+        min-height: 34px;
         box-sizing: border-box;
+        font-size: 13px;
     }
 
     .ai-settings-form .ai-textarea-row {
@@ -6600,8 +6821,9 @@
     .ai-settings-form .set-row textarea {
         flex: 1;
         width: 100%;
-        min-height: 86px;
+        min-height: 78px;
         resize: vertical;
+        line-height: 1.55;
     }
 
     .ai-settings-form .ai-toggle-row {
@@ -6620,7 +6842,7 @@
 
     .ai-settings-form .ai-toggle-row small {
         color: #667085;
-        font-size: 12px;
+        font-size: 11px;
         line-height: 1.45;
     }
 
@@ -7269,9 +7491,80 @@
         accent-color: #0066b8;
     }
 
+    .ai-proof-replacement-cell {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .ai-proof-replacement-text {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     .approval-head,
     .approval-row {
         grid-template-columns: 74px minmax(0, 1fr) 82px;
+    }
+
+    .proof-ai-actions {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .proof-ai-actions button {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .proof-ai-action-btn {
+        width: 100%;
+        min-width: 0 !important;
+        height: 36px !important;
+        padding: 0 10px !important;
+        justify-content: center;
+    }
+
+    .approval-result-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: flex-start;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        line-height: 1.45;
+    }
+
+    .approval-result-link {
+        cursor: pointer;
+        transition: background 0.12s ease;
+    }
+
+    .approval-result-link:hover {
+        background: #f7fbff;
+    }
+
+    .approval-result-link:focus {
+        outline: none;
+        background: #f2f9ff;
+        box-shadow: inset 0 0 0 1px rgba(0, 102, 184, 0.24);
+    }
+
+    .approval-result-cell small {
+        display: block;
+        width: 100%;
+        color: #637588;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .approval-action-cell {
+        display: flex;
+        align-items: center;
     }
 
     .approval-row .mini-action {
@@ -7432,27 +7725,6 @@
         flex-direction: column;
         gap: 8px;
     }
-    .set-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 15px;
-        gap: 10px;
-    }
-    .set-row label {
-        width: 110px;
-        flex-shrink: 0;
-        font-weight: bold;
-        color: #444;
-    }
-    .set-row input {
-        flex: 1;
-        padding: 8px;
-        border: 1px solid #ddd;
-        border-radius: 6px;
-        font-size: 15px;
-        background: #fff;
-    }
     .modal-overlay {
         position: fixed;
         inset: 0;
@@ -7487,70 +7759,6 @@
         overflow: auto;
     }
 
-    /* 偏好设置面板增强样式 */
-    .editor-settings-modal {
-        max-width: 860px;
-        height: min(76vh, 640px);
-        min-height: 520px;
-        display: grid;
-        grid-template-columns: 150px 1fr;
-        grid-template-rows: 58px 1fr 64px;
-        border-radius: 14px;
-    }
-
-    .editor-settings-modal .p-header {
-        grid-column: 1 / -1;
-        height: 58px;
-        padding: 0 20px;
-        background: #fff;
-    }
-
-    .editor-settings-modal .settings-tabs {
-        grid-column: 1;
-        grid-row: 2 / 4;
-        flex-direction: column;
-        align-items: stretch;
-        gap: 8px;
-        padding: 16px;
-        border-right: 1px solid #e8edf3;
-        border-bottom: 0;
-        background: #f8fafc;
-    }
-
-    .editor-settings-modal .settings-tabs .tab-btn {
-        width: 100%;
-        justify-content: flex-start;
-        border-radius: 8px;
-        padding: 9px 12px;
-        text-align: left;
-    }
-
-    .editor-settings-modal .p-body {
-        grid-column: 2;
-        grid-row: 2;
-        min-width: 0;
-        min-height: 0;
-        overflow: auto;
-        padding: 18px 20px;
-    }
-
-    .editor-settings-modal .editor-settings-footer {
-        grid-column: 2;
-        grid-row: 3;
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        gap: 10px;
-        padding: 12px 20px;
-        border-top: 1px solid #e8edf3;
-        background: #fff;
-    }
-
-    .editor-settings-modal .editor-settings-footer .grid-btn {
-        min-width: 132px;
-        padding: 9px 18px;
-    }
-
     .history-settings-card {
         display: flex;
         flex-direction: column;
@@ -7583,58 +7791,10 @@
     }
 
     @media (max-width: 760px) {
-        .editor-settings-modal {
-            display: flex;
-            min-height: 0;
-            max-width: 96vw;
-        }
-
-        .editor-settings-modal .settings-tabs {
-            flex-direction: row;
-            border-right: 0;
-            border-bottom: 1px solid #e8edf3;
-        }
-
         .proof-log-browser {
             grid-template-columns: 1fr;
         }
-
-        .editor-settings-modal .editor-settings-footer {
-            justify-content: stretch;
-        }
-
-        .editor-settings-modal .editor-settings-footer .grid-btn {
-            width: 100%;
-        }
     }
-
-    .settings-tabs {
-        display: flex;
-        gap: 15px;
-        padding: 5px 20px 10px;
-        border-bottom: 1px solid #eee;
-    }
-    .settings-tabs .tab-btn {
-        background: none;
-        border: none;
-        border-radius: 6px;
-        padding: 6px 14px;
-        font-size: 15px;
-        font-weight: bold;
-        color: #777;
-        cursor: pointer;
-        transition: 0.2s;
-        height: auto;
-        min-width: 0;
-    }
-    .settings-tabs .tab-btn:hover {
-        background: #f0f0f0;
-    }
-    .settings-tabs .tab-btn.active {
-        color: #0066b8;
-        background: #e3f2fd;
-    }
-
     .rules-list {
         display: flex;
         flex-direction: column;
@@ -8512,28 +8672,6 @@
     .find-header {
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 252, 0.9));
         border-bottom: 1px solid var(--color-border);
-    }
-
-    .settings-tabs {
-        gap: 8px;
-        padding: 8px 18px 12px;
-        border-bottom: 1px solid var(--color-border);
-    }
-
-    .settings-tabs .tab-btn {
-        height: auto;
-        min-width: 0;
-        border-radius: 999px;
-        color: var(--color-muted);
-    }
-
-    .settings-tabs .tab-btn:hover {
-        background: var(--color-hover);
-    }
-
-    .settings-tabs .tab-btn.active {
-        background: var(--color-accent-soft);
-        color: var(--color-accent-deep);
     }
 
     .set-row input,
