@@ -4,6 +4,13 @@ node_modules/
 build/
 .env
 
+# Flutter / Dart
+flutter/**/.dart_tool/
+flutter/**/.packages
+flutter/**/build/
+flutter/**/.flutter-plugins
+flutter/**/.flutter-plugins-dependencies
+
 # Rust / Tauri Artifacts
 src-tauri/target/
 src-tauri/gen/
