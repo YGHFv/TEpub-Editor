@@ -1,39 +1,42 @@
 import 'package:flutter/material.dart';
 
-class ProofingPage extends StatelessWidget {
+import 'widgets/proofing_board.dart';
+import 'widgets/proofing_stage.dart';
+import 'widgets/proofing_stage_switcher.dart';
+import '../../ui/widgets/app_page.dart';
+
+class ProofingPage extends StatefulWidget {
   const ProofingPage({super.key});
 
   @override
+  State<ProofingPage> createState() => _ProofingPageState();
+}
+
+class _ProofingPageState extends State<ProofingPage> {
+  ProofingStage _stage = ProofingStage.suggestions;
+
+  @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('智能校对', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 10,
-          children: [
-            FilledButton(onPressed: () {}, child: const Text('开始')),
-            OutlinedButton(onPressed: null, child: const Text('停止')),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'suggestions', label: Text('建议')),
-                ButtonSegment(value: 'approval', label: Text('审批')),
-                ButtonSegment(value: 'logs', label: Text('日志')),
-              ],
-              selected: const {'suggestions'},
-              onSelectionChanged: (_) {},
-            ),
-          ],
+    return AppPage(
+      title: '智能校对',
+      subtitle: '校对流程会拆成建议、审批、日志三个组件区，错别字自动应用和人工审核分流后续迁移。',
+      actions: [
+        FilledButton.icon(
+          onPressed: () {},
+          icon: const Icon(Icons.play_arrow_rounded),
+          label: const Text('开始校对'),
         ),
-        const SizedBox(height: 16),
-        const Expanded(
-          child: Card(
-            elevation: 0,
-            child: Center(child: Text('AI 校对、审批、日志模块待迁移')),
-          ),
+        OutlinedButton.icon(
+          onPressed: null,
+          icon: const Icon(Icons.pause_outlined),
+          label: const Text('暂停'),
+        ),
+        ProofingStageSwitcher(
+          stage: _stage,
+          onChanged: (stage) => setState(() => _stage = stage),
         ),
       ],
+      child: ProofingBoard(stage: _stage),
     );
   }
 }

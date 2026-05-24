@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../ui/theme/app_theme.dart';
+
 class AppShell extends StatelessWidget {
   const AppShell({required this.child, super.key});
 
@@ -16,17 +18,26 @@ class AppShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final location = GoRouterState.of(context).uri.toString();
+    final selectedIndex = _items.indexWhere(
+      (item) => location.startsWith(item.path),
+    );
 
     return Scaffold(
+      backgroundColor: AppTheme.page,
       body: Row(
         children: [
           NavigationRail(
-            selectedIndex:
-                _items.indexWhere((item) => location.startsWith(item.path)),
+            selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
             minWidth: 78,
             extended: MediaQuery.sizeOf(context).width >= 1180,
             onDestinationSelected: (index) => context.go(_items[index].path),
             labelType: NavigationRailLabelType.none,
+            backgroundColor: Colors.white,
+            selectedIconTheme: const IconThemeData(color: AppTheme.brand),
+            selectedLabelTextStyle: const TextStyle(
+              color: AppTheme.brand,
+              fontWeight: FontWeight.w700,
+            ),
             destinations: [
               for (final item in _items)
                 NavigationRailDestination(

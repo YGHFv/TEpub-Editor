@@ -1,44 +1,34 @@
 import 'package:flutter/material.dart';
 
+import 'widgets/editor_sidebar.dart';
+import 'widgets/editor_workspace.dart';
+import '../../ui/widgets/app_page.dart';
+import '../../ui/widgets/responsive_two_pane.dart';
+
 class EditorPage extends StatelessWidget {
   const EditorPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 280,
-          child: Card(
-            elevation: 0,
-            child: ListView(
-              padding: const EdgeInsets.all(12),
-              children: const [
-                ListTile(title: Text('目录'), subtitle: Text('章节扫描待迁移')),
-              ],
-            ),
-          ),
+    return AppPage(
+      title: '编辑器',
+      subtitle: '先搭好目录、正文和工具区的桌面布局，后续逐步迁移 TXT/EPUB 编辑能力。',
+      actions: [
+        OutlinedButton.icon(
+          onPressed: () {},
+          icon: const Icon(Icons.search),
+          label: const Text('搜索'),
         ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Card(
-            elevation: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: TextField(
-                expands: true,
-                maxLines: null,
-                minLines: null,
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                  hintText: 'TXT 编辑器待迁移...',
-                ),
-                style: const TextStyle(fontSize: 17, height: 1.7),
-              ),
-            ),
-          ),
+        FilledButton.icon(
+          onPressed: () {},
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('保存'),
         ),
       ],
+      child: ResponsiveTwoPane(
+        side: const EditorSidebar(),
+        body: const EditorWorkspace(),
+      ),
     );
   }
 }

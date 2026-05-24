@@ -7,6 +7,7 @@ import 'features/library/library_page.dart';
 import 'features/proofing/proofing_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/shell/app_shell.dart';
+import 'ui/theme/app_theme.dart';
 
 final _router = GoRouter(
   initialLocation: '/library',
@@ -43,15 +44,7 @@ class TEpubFlutterApp extends StatelessWidget {
     return MaterialApp.router(
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0EA5C6),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF4F8FB),
-        visualDensity: VisualDensity.standard,
-      ),
+      theme: AppTheme.light(),
       routerConfig: _router,
     );
   }
