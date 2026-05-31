@@ -11,8 +11,8 @@ class LibraryEmptyPanel extends StatelessWidget {
     return const AppSurface(
       child: EmptyState(
         icon: Icons.auto_stories_outlined,
-        title: '书库组件准备迁移',
-        message: '下一步会接入图书模型、封面列表、排序筛选和导入流程。当前先保留稳定的空态布局。',
+        title: '书库暂无图书',
+        message: '点击右上角“添加图书”导入 TXT / EPUB。重构版会写入独立书库索引，不影响现有打包版本。',
       ),
     );
   }

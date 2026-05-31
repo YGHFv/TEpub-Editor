@@ -13,8 +13,11 @@ class StoragePathList extends StatelessWidget {
       children: [
         _PathTile(label: '数据根目录', path: paths.root.path),
         const Divider(height: 24),
-        _PathTile(label: '配置', path: paths.config.path),
-        _PathTile(label: '书库', path: paths.library.path),
+        _PathTile(label: '配置目录', path: paths.config.path),
+        _PathTile(label: '设置文件', path: paths.settingsFile.path),
+        _PathTile(label: '书库索引', path: paths.libraryIndexFile.path),
+        const Divider(height: 24),
+        _PathTile(label: '书库文件', path: paths.library.path),
         _PathTile(label: '缓存', path: paths.cache.path),
         _PathTile(label: '历史', path: paths.history.path),
         _PathTile(label: '日志', path: paths.logs.path),

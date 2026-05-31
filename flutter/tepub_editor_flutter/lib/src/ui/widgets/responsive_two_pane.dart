@@ -32,9 +32,11 @@ class ResponsiveTwoPane extends StatelessWidget {
 
         return Row(
           children: [
-            SizedBox(width: sideWidth, child: side),
+            RepaintBoundary(
+              child: SizedBox(width: sideWidth, child: side),
+            ),
             SizedBox(width: gap),
-            Expanded(child: body),
+            Expanded(child: RepaintBoundary(child: body)),
           ],
         );
       },

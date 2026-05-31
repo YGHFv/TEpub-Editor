@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -13,6 +14,8 @@ class AppStoragePaths {
     required this.history,
     required this.logs,
     required this.config,
+    required this.fonts,
+    required this.styleTemplates,
   });
 
   final Directory root;
@@ -21,9 +24,14 @@ class AppStoragePaths {
   final Directory history;
   final Directory logs;
   final Directory config;
+  final Directory fonts;
+  final Directory styleTemplates;
 
   File get settingsFile =>
       File(p.join(config.path, AppConstants.configFileName));
+
+  File get libraryIndexFile =>
+      File(p.join(config.path, AppConstants.libraryIndexFileName));
 
   static Future<AppStoragePaths> resolve() async {
     final supportDir = await getApplicationSupportDirectory();
@@ -37,6 +45,8 @@ class AppStoragePaths {
       history: Directory(p.join(root.path, 'history')),
       logs: Directory(p.join(root.path, 'logs')),
       config: Directory(p.join(root.path, 'config')),
+      fonts: Directory(p.join(root.path, 'fonts')),
+      styleTemplates: Directory(p.join(root.path, 'style-templates')),
     );
 
     await paths.ensureCreated();
@@ -44,10 +54,23 @@ class AppStoragePaths {
   }
 
   Future<void> ensureCreated() async {
-    for (final dir in [root, library, cache, history, logs, config]) {
+    for (final dir in [
+      root,
+      library,
+      cache,
+      history,
+      logs,
+      config,
+      fonts,
+      styleTemplates,
+    ]) {
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
     }
   }
 }
+
+final appStoragePathsProvider = FutureProvider<AppStoragePaths>((ref) {
+  return AppStoragePaths.resolve();
+});
