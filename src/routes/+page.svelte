@@ -47,6 +47,8 @@
     closeLibraryOnTxtOpen?: boolean;
     /** 打开 EPUB 编辑器后是否自动隐藏书库窗口 */
     closeLibraryOnEpubOpen?: boolean;
+    /** 打开工具箱后是否自动隐藏书库窗口 */
+    closeLibraryOnToolboxOpen?: boolean;
     /** TXT 编辑器主窗口关闭行为："exit"=退出应用 / "library"=返回书库 */
     txtEditorCloseAction?: "exit" | "library";
     aiProofing: AiProofingConfig;
@@ -98,6 +100,7 @@
     updateModifiedOnEdit: false,
     closeLibraryOnTxtOpen: true,
     closeLibraryOnEpubOpen: true,
+    closeLibraryOnToolboxOpen: true,
     txtEditorCloseAction: "library",
     aiProofing: {
       enabled: false,
@@ -645,6 +648,7 @@
         updateModifiedOnEdit: libraryConfig.updateModifiedOnEdit ?? false,
         closeLibraryOnTxtOpen: libraryConfig.closeLibraryOnTxtOpen ?? true,
         closeLibraryOnEpubOpen: libraryConfig.closeLibraryOnEpubOpen ?? true,
+        closeLibraryOnToolboxOpen: libraryConfig.closeLibraryOnToolboxOpen ?? true,
         txtEditorCloseAction: libraryConfig.txtEditorCloseAction ?? "library",
         aiProofing: normalizeAiProofingConfig(libraryConfig.aiProofing),
         aiProviders: libraryConfig.aiProviders || [],
@@ -685,6 +689,7 @@
       if (!libraryConfig.namingTemplate) libraryConfig.namingTemplate = "{title}-{author}";
       if (typeof libraryConfig.closeLibraryOnTxtOpen !== "boolean") libraryConfig.closeLibraryOnTxtOpen = true;
       if (typeof libraryConfig.closeLibraryOnEpubOpen !== "boolean") libraryConfig.closeLibraryOnEpubOpen = true;
+      if (typeof libraryConfig.closeLibraryOnToolboxOpen !== "boolean") libraryConfig.closeLibraryOnToolboxOpen = true;
       if (libraryConfig.txtEditorCloseAction !== "exit" && libraryConfig.txtEditorCloseAction !== "library") {
         libraryConfig.txtEditorCloseAction = "library";
       }
@@ -792,6 +797,48 @@
     // 多文件：每个独立窗口，主窗不隐藏，方便用户继续操作
     for (const p of paths) {
       await openFilePathInEditor(p, { hideMain: false });
+    }
+  }
+
+  async function openToolbox() {
+    try {
+      let toolboxWin = await WebviewWindow.getByLabel("toolbox");
+      if (toolboxWin) {
+        await toolboxWin.show();
+        await toolboxWin.setFocus();
+        if (libraryConfig.closeLibraryOnToolboxOpen !== false) {
+          const appWindow = getCurrentWindow();
+          await appWindow.hide();
+          toolboxWin.once("tauri://destroyed", async () => {
+            await appWindow.show();
+            await appWindow.setFocus();
+          });
+        }
+        return;
+      }
+
+      toolboxWin = new WebviewWindow("toolbox", {
+        url: "/toolbox",
+        title: "TEpub-Editor 工具箱",
+        width: 1200,
+        height: 740,
+        resizable: true,
+        dragDropEnabled: false,
+        center: true,
+        focus: true,
+      });
+
+      if (libraryConfig.closeLibraryOnToolboxOpen !== false) {
+        const appWindow = getCurrentWindow();
+        await appWindow.hide();
+        toolboxWin.once("tauri://destroyed", async () => {
+          await appWindow.show();
+          await appWindow.setFocus();
+        });
+      }
+    } catch (e: any) {
+      console.error("打开工具箱失败:", e);
+      await message(`打开工具箱失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 
@@ -1571,6 +1618,9 @@
       {/if}
       <span class="book-count">{books.length} 本书</span>
       <button class="tb-btn" on:click={cycleViewMode} title="切换视图">{VIEW_ICONS[viewMode]}</button>
+      <button class="tb-btn icon-btn" on:click={openToolbox} title="工具箱" aria-label="工具箱">
+        <span class="toolbox-entry-icon" aria-hidden="true"></span>
+      </button>
       <button class="tb-btn" on:click={() => showSettings = !showSettings} title="书库设置">⚙</button>
     </div>
   </div>
@@ -1826,6 +1876,14 @@
               <input
                 type="checkbox"
                 bind:checked={libraryConfig.closeLibraryOnEpubOpen}
+                on:change={saveLibraryConfig}
+              />
+            </label>
+            <label class="set-row toggle-row">
+              <span class="set-label">打开工具箱时隐藏书库</span>
+              <input
+                type="checkbox"
+                bind:checked={libraryConfig.closeLibraryOnToolboxOpen}
                 on:change={saveLibraryConfig}
               />
             </label>
@@ -2462,6 +2520,49 @@
 
   .tb-btn.primary:hover {
     opacity: 0.9;
+  }
+
+  .tb-btn.icon-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .toolbox-entry-icon {
+    position: relative;
+    width: 16px;
+    height: 12px;
+    box-sizing: border-box;
+    border: 1.8px solid currentColor;
+    border-radius: 3px;
+    opacity: 0.9;
+  }
+
+  .toolbox-entry-icon::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: -5px;
+    width: 6px;
+    height: 5px;
+    box-sizing: border-box;
+    border: 1.8px solid currentColor;
+    border-bottom: none;
+    border-radius: 3px 3px 0 0;
+  }
+
+  .toolbox-entry-icon::after {
+    content: "";
+    position: absolute;
+    left: -1.8px;
+    right: -1.8px;
+    top: 4px;
+    border-top: 1.8px solid currentColor;
   }
 
   .search-box input {

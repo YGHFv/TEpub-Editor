@@ -232,8 +232,12 @@
     let currentFontSrc: string | null = null;
     let currentFontFamily = "";
     let currentFontInternalName = "";
-    const DEFAULT_FONT_PREVIEW_TEXT =
+    /*
+    const LEGACY_MOJIBAKE_FONT_PREVIEW_TEXT =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n缂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鎮㈤崗灏栨嫽闁诲酣娼ф竟濠偽ｉ鍓х＜闁绘劦鍓欓崝銈囩磽瀹ュ拑韬€殿喖顭烽弫鎰緞婵犲嫷鍚呴梻浣瑰缁诲倿骞夊☉銏犵缂備焦顭囬崢閬嶆⒑闂堟稓澧曢柟鍐查叄椤㈡棃顢橀姀锛勫幐闁诲繒鍋犻褔鍩€椤掍緡娈橀柛鎺撳笒閳诲酣骞嬮悙鑼紡闂備線娼ч…鍫ュ磹濡や降浠氶柟鎯板Г閳锋帒霉閿濆懏鍟為柛鐔哄仱閺岋綁鎮㈤弶鎴濆Б闂佺懓绠嶉崹浠嬬嵁鐎ｎ喗鏅濋柍褜鍓氶、濠囨⒒娴ｅ憡鍟炴繛璇х畵瀹曞綊骞嶉鍙ョ瑝婵犵數濮电喊宥夋偂閺囩喍绻嗛柕鍫濇噹閺嗘瑥霉閻樻瑥鍘捐ぐ鎺撳亹闁告繂瀚Ч妤冪磽娴ｄ粙鍝洪悽顖ょ節楠炲啫鈻庨幙鍐╂櫌闂侀€炲苯澧寸€规洘绻堟俊鍫曞幢閹邦亞鐩庢俊鐐€栭幐鐐叏閹绢喖鍌ㄩ悗鐢电《閸嬫挸鈻撻崹顔界亪濡炪値鍘鹃崗姗€鐛崘顔碱潊闁靛牆妫楁禍妤呮煙閼圭増褰х紓宥呮瀹曨剝銇愰幒鎾嫽婵炶揪绲介幗婊呯矓濞差亝鐓曢悗锝庝悍闊剛鈧?缂?缂?闂?闂?婵?婵?闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鏁愭径濠勵吅闂佹寧绻傞幉娑㈠箻缂佹鍘辨繝鐢靛Т閸婂綊宕戦妷鈺傜厸閻忕偠顕ф慨鍌溾偓娈垮枟閹告娊骞冨▎寰濆湱鈧綆浜欐竟鏇㈡偡濠婂懎顣奸悽顖涘笧婢规洟宕稿Δ浣哄幍闁诲海鏁搁…鍫熺墡闂備礁鎽滄慨鐢稿礉濞嗘挸钃熼柨婵嗘啒閺冨牆鐒垫い鎺戝閸嬪鏌涢埄鍐噮缂佺姵妫冮弻鐔兼倻濡儵鎷荤紒鐐劤閵堟悂寮诲鍫闂佸憡鎸婚懝楣冾敋閵夆晛绀嬫い鎾寸箖閸曞啰绱撴担鍓插剰闁靛洦蓱缁旂喖寮撮姀鈾€鎷虹紓浣割儓濞夋洜绮婚悧鍫涗簻闁挎棁顕ч悘锛勭磼閸屾氨校闁靛牞缍佸畷姗€鍩為悙顒€顏归梻鍌欑閹诧紕绮欓幋锔芥櫇闁靛绠戠欢鐐烘煕閺囥劌鐏￠柣鎾存礋閹鏁愭惔婵堢泿濡炪倕娴氶崣鍐蓟閻旂⒈鏁婄紒娑橆儐閻や礁顪冮妶鍐ㄧ仾闁挎洏鍨洪幈銊╁焵椤掑嫭鐓冮梺娆惧灠娴滈箖姊?123456789 ~!@#$%^&*()";
+    */
+    const DEFAULT_FONT_PREVIEW_TEXT =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n春江潮水连海平，海上明月共潮生。\n永和九年，岁在癸丑，暮春之初。\n天地玄黄 宇宙洪荒 日月盈昃 辰宿列张\n1234567890 ~!@#$%^&*()";
     let fontPreviewText = DEFAULT_FONT_PREVIEW_TEXT;
     let fontStatsLoading = false;
     let fontUsedCharCount = 0;
@@ -4764,7 +4768,7 @@
                 <div class="placeholder">&#35831;&#20174;&#24038;&#20391;&#36873;&#25321;&#19968;&#20010;&#25991;&#20214;</div>
             {/if}
 
-            {#if showFindReplace}
+            {#if showFindReplace && selectedFile && isEditable(selectedFile.file_type)}
                 <div class="find-replace-panel">
                     <div class="fr-row">
                         <span class="fr-label">&#26597;&#25214;:</span>
@@ -5862,9 +5866,10 @@
     }
 
     .font-preview-sample {
-        flex: 1 1 420px;
+        flex: 0 1 auto;
         width: 100%;
-        min-height: 360px;
+        min-height: 240px;
+        height: min(320px, 42vh);
         box-sizing: border-box;
         color: #13233a;
         background: #fff;
@@ -5877,7 +5882,7 @@
         white-space: pre;
         font-size: 46px;
         line-height: 1.45;
-        letter-spacing: 0.02em;
+        letter-spacing: 0;
     }
 
     .font-preview-sample:focus {

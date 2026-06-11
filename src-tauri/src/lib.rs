@@ -1264,10 +1264,12 @@ fn sanitize_zip_entry_name(name: &str) -> String {
 }
 
 fn looks_obfuscated_basename(raw_name: &str) -> bool {
-    let base = Path::new(raw_name)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let normalized = raw_name.replace('\\', "/");
+    let file_name = normalized.rsplit('/').next().unwrap_or("");
+    let base = file_name
+        .rsplit_once('.')
+        .map(|(stem, _ext)| stem)
+        .unwrap_or(file_name);
     if base.is_empty() {
         return true;
     }
@@ -1432,16 +1434,16 @@ fn collect_opf_id_hints(bytes: &[u8]) -> HashMap<String, String> {
             continue;
         }
         let opf_text = String::from_utf8_lossy(&opf_data).to_string();
-        let item_re = match Regex::new(
-            r#"(?is)<item\b[^>]*\bid\s*=\s*["']([^"']+)["'][^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>"#,
-        ) {
+        let item_re = match Regex::new(r#"(?is)<item\b([^>]*)>"#) {
             Ok(r) => r,
             Err(_) => continue,
         };
         let opf_dir = zip_parent(&opf_path);
         for caps in item_re.captures_iter(&opf_text).flatten() {
-            let item_id = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
-            let href_raw = caps.get(2).map(|m| m.as_str()).unwrap_or("").trim();
+            let attrs_text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let attrs = parse_xmlish_attrs(attrs_text);
+            let item_id = attrs.get("id").map(|s| s.trim()).unwrap_or("");
+            let href_raw = attrs.get("href").map(|s| s.trim()).unwrap_or("");
             if item_id.is_empty() || href_raw.is_empty() {
                 continue;
             }
@@ -1534,6 +1536,42 @@ fn is_text_like_entry(path: &str) -> bool {
         || lower.ends_with(".svg")
 }
 
+fn percent_encode_path_ref(path: &str, upper_hex: bool) -> String {
+    let mut out = String::new();
+    for b in path.as_bytes() {
+        match *b {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'~'
+            | b'/' => out.push(*b as char),
+            _ if upper_hex => out.push_str(&format!("%{:02X}", b)),
+            _ => out.push_str(&format!("%{:02x}", b)),
+        }
+    }
+    out
+}
+
+fn push_path_rewrite_variants(pairs: &mut Vec<(String, String)>, old_ref: &str, new_ref: &str) {
+    pairs.push((old_ref.to_string(), new_ref.to_string()));
+    pairs.push((
+        old_ref.replace(' ', "%20"),
+        new_ref.replace(' ', "%20"),
+    ));
+
+    let old_encoded = percent_encode_path_ref(old_ref, true);
+    let new_encoded = percent_encode_path_ref(new_ref, true);
+    pairs.push((old_encoded.clone(), new_encoded.clone()));
+
+    let old_encoded_lower = percent_encode_path_ref(old_ref, false);
+    if old_encoded_lower != old_encoded {
+        pairs.push((old_encoded_lower, new_encoded));
+    }
+}
+
 fn rewrite_text_links(
     text: String,
     current_old_path: &str,
@@ -1550,14 +1588,13 @@ fn rewrite_text_links(
         if old_rel == "." || new_rel == "." {
             continue;
         }
-        pairs.push((old_rel.clone(), new_rel.clone()));
-        pairs.push((old_rel.replace(' ', "%20"), new_rel.replace(' ', "%20")));
+        push_path_rewrite_variants(&mut pairs, &old_rel, &new_rel);
         if !old_rel.starts_with("./") {
-            pairs.push((format!("./{}", old_rel), format!("./{}", new_rel)));
-            pairs.push((
-                format!("./{}", old_rel.replace(' ', "%20")),
-                format!("./{}", new_rel.replace(' ', "%20")),
-            ));
+            push_path_rewrite_variants(
+                &mut pairs,
+                &format!("./{}", old_rel),
+                &format!("./{}", new_rel),
+            );
         }
     }
 
@@ -1601,7 +1638,7 @@ fn rebuild_epub_with_sanitized_names_from_bytes(
                 .or_else(|| opf_name_hints.get(&old_name.to_ascii_lowercase()))
                 .cloned();
 
-            if old_obfuscated {
+            if old_obfuscated || old_invalid {
                 if let Some(hint_name) = hint {
                     let target = if parent.is_empty() {
                         hint_name
@@ -1612,7 +1649,7 @@ fn rebuild_epub_with_sanitized_names_from_bytes(
                         sanitized = target;
                         changed = true;
                     }
-                } else {
+                } else if old_obfuscated {
                     let friendly = friendly_name_for_path(&sanitized, friendly_counter);
                     friendly_counter += 1;
                     sanitized = if parent.is_empty() {
@@ -1706,6 +1743,1295 @@ struct EpubPrepareResult {
     processed_path: String,
     changed: bool,
     action: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxEpubToolResult {
+    source_path: String,
+    output_path: String,
+    changed: bool,
+    action: String,
+    message: String,
+}
+
+#[derive(Clone, Debug)]
+struct ToolboxManifestItem {
+    id: String,
+    href: String,
+    media_type: String,
+    abs_path: String,
+}
+
+fn parse_xmlish_attrs(text: &str) -> HashMap<String, String> {
+    let mut attrs = HashMap::new();
+    let Ok(attr_re) = Regex::new(r#"([:\w.-]+)\s*=\s*(['"])(.*?)\2"#) else {
+        return attrs;
+    };
+    for caps in attr_re.captures_iter(text).flatten() {
+        let key = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        let value = caps.get(3).map(|m| m.as_str()).unwrap_or("").to_string();
+        if !key.is_empty() {
+            attrs.insert(key, value);
+        }
+    }
+    attrs
+}
+
+fn find_opf_path_in_epub_bytes(bytes: &[u8]) -> Result<String, String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+
+    if let Ok(mut container) = archive.by_name("META-INF/container.xml") {
+        let mut data = Vec::new();
+        container
+            .read_to_end(&mut data)
+            .map_err(|e| format!("读取 container.xml 失败: {}", e))?;
+        let text = String::from_utf8_lossy(&data).to_string();
+        if let Ok(re) = Regex::new(r#"<rootfile[^>]*full-path\s*=\s*(['"])(?i:(.*?\.opf))\1"#)
+        {
+            if let Some(caps) = re.captures(&text).ok().flatten() {
+                if let Some(path_match) = caps.get(2) {
+                    return Ok(path_match.as_str().replace('\\', "/"));
+                }
+            }
+        }
+    }
+
+    for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        let name = file.name().replace('\\', "/");
+        if name.to_ascii_lowercase().ends_with(".opf") {
+            return Ok(name);
+        }
+    }
+
+    Err("无法发现 OPF 文件".to_string())
+}
+
+fn read_zip_entry_bytes(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let mut file = archive
+        .by_name(name)
+        .map_err(|e| format!("读取 ZIP 条目失败 {}: {}", name, e))?;
+    let mut data = Vec::new();
+    file.read_to_end(&mut data)
+        .map_err(|e| format!("读取 ZIP 条目数据失败 {}: {}", name, e))?;
+    Ok(data)
+}
+
+fn parse_toolbox_manifest_items(bytes: &[u8], opf_path: &str) -> Result<Vec<ToolboxManifestItem>, String> {
+    let opf_data = read_zip_entry_bytes(bytes, opf_path)?;
+    let opf_text = String::from_utf8_lossy(&opf_data).to_string();
+    let item_re = Regex::new(r#"(?is)<item\b([^>]*)>"#).map_err(|e| e.to_string())?;
+    let opf_dir = zip_parent(opf_path);
+    let mut items = Vec::new();
+    for caps in item_re.captures_iter(&opf_text).flatten() {
+        let attrs_text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let attrs = parse_xmlish_attrs(attrs_text);
+        let id = attrs.get("id").cloned().unwrap_or_default();
+        let href = attrs.get("href").cloned().unwrap_or_default();
+        if id.trim().is_empty() || href.trim().is_empty() {
+            continue;
+        }
+        let href_decoded = percent_decode(&href);
+        let abs_path = zip_join(&opf_dir, &href_decoded);
+        items.push(ToolboxManifestItem {
+            id,
+            href: href_decoded,
+            media_type: attrs.get("media-type").cloned().unwrap_or_default(),
+            abs_path,
+        });
+    }
+    Ok(items)
+}
+
+fn toolbox_file_category(item: &ToolboxManifestItem) -> &'static str {
+    let media = item.media_type.to_ascii_lowercase();
+    let href = item.href.to_ascii_lowercase();
+    if media == "application/xhtml+xml" || href.ends_with(".xhtml") || href.ends_with(".html") {
+        "text"
+    } else if media == "text/css" || href.ends_with(".css") {
+        "css"
+    } else if media.starts_with("image/") {
+        "image"
+    } else if media.starts_with("font/") || href.ends_with(".ttf") || href.ends_with(".otf") || href.ends_with(".woff") || href.ends_with(".woff2") {
+        "font"
+    } else if media.starts_with("audio/") {
+        "audio"
+    } else if media.starts_with("video/") {
+        "video"
+    } else {
+        "other"
+    }
+}
+
+fn toolbox_epub_tool_result(
+    source: &Path,
+    output: &Path,
+    changed: bool,
+    action: &str,
+    message: String,
+) -> ToolboxEpubToolResult {
+    ToolboxEpubToolResult {
+        source_path: source.to_string_lossy().to_string(),
+        output_path: output.to_string_lossy().to_string(),
+        changed,
+        action: action.to_string(),
+        message,
+    }
+}
+
+fn encrypted_href_basename(item_id: &str, href: &str) -> String {
+    let ext = Path::new(href)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("bin")
+        .to_ascii_lowercase();
+    let href_name = Path::new(href)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let id_stem = item_id.split('.').next().unwrap_or(item_id);
+    let lower_id = id_stem.to_ascii_lowercase();
+    let lower_href = href_name.to_ascii_lowercase();
+    let slim_suffix = if lower_id.ends_with("slim")
+        || lower_id.ends_with("_slim")
+        || lower_id.ends_with("-slim")
+        || lower_id.ends_with("~slim")
+        || lower_href.ends_with("slim")
+        || lower_href.ends_with("_slim")
+        || lower_href.ends_with("-slim")
+        || lower_href.ends_with("~slim")
+    {
+        "~slim"
+    } else {
+        ""
+    };
+
+    let digest = md5::compute(id_stem.as_bytes());
+    let mut bits = String::with_capacity(129);
+    bits.push('_');
+    for byte in digest.0 {
+        for shift in (0..8).rev() {
+            bits.push(if (byte >> shift) & 1 == 1 { '*' } else { ':' });
+        }
+    }
+    format!("{}{}.{}", bits, slim_suffix, ext)
+}
+
+fn write_epub_with_path_map(
+    bytes: &[u8],
+    output_path: &Path,
+    path_map: &HashMap<String, String>,
+) -> Result<(), String> {
+    let out_file = fs::File::create(output_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
+    let mut writer = zip::ZipWriter::new(out_file);
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+
+    let mut opf_old_to_new: HashMap<String, String> = HashMap::new();
+    for (old, newp) in path_map {
+        if old.to_ascii_lowercase().ends_with(".opf") && newp.to_ascii_lowercase().ends_with(".opf") {
+            opf_old_to_new.insert(old.clone(), newp.clone());
+        }
+    }
+
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        let old_name = file.name().replace('\\', "/");
+        let new_name = path_map
+            .get(&old_name)
+            .cloned()
+            .unwrap_or_else(|| old_name.clone());
+
+        let options = FileOptions::default().compression_method(file.compression());
+        if new_name.ends_with('/') {
+            writer
+                .add_directory(&new_name, options)
+                .map_err(|e| format!("写入目录失败: {}", e))?;
+            continue;
+        }
+
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)
+            .map_err(|e| format!("读取条目数据失败: {}", e))?;
+
+        if old_name.eq_ignore_ascii_case("META-INF/container.xml") {
+            let mut text = String::from_utf8_lossy(&data).to_string();
+            for (opf_old, opf_new) in &opf_old_to_new {
+                text = text.replace(opf_old, opf_new);
+            }
+            text = rewrite_text_links(text, &old_name, &new_name, path_map);
+            data = text.into_bytes();
+        } else if is_text_like_entry(&old_name) {
+            let text = String::from_utf8_lossy(&data).to_string();
+            data = rewrite_text_links(text, &old_name, &new_name, path_map).into_bytes();
+        }
+
+        writer
+            .start_file(&new_name, options)
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+        writer
+            .write_all(&data)
+            .map_err(|e| format!("写入文件内容失败: {}", e))?;
+    }
+
+    writer.finish().map_err(|e| format!("完成写入失败: {}", e))?;
+    Ok(())
+}
+
+fn toolbox_file_encrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, String> {
+    if !source.exists() {
+        return Err(format!("文件不存在: {}", source.to_string_lossy()));
+    }
+    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let opf_path = find_opf_path_in_epub_bytes(&bytes)?;
+    let manifest_items = parse_toolbox_manifest_items(&bytes, &opf_path)?;
+    if manifest_items.is_empty() {
+        return Err("OPF manifest 为空，无法执行文件加密".to_string());
+    }
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let mut entry_names = Vec::new();
+    for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        entry_names.push(file.name().replace('\\', "/"));
+    }
+
+    let mut manifest_by_abs: HashMap<String, ToolboxManifestItem> = HashMap::new();
+    for item in manifest_items {
+        manifest_by_abs.insert(item.abs_path.clone(), item);
+    }
+
+    let mut used: HashSet<String> = HashSet::new();
+    for name in &entry_names {
+        if !manifest_by_abs.contains_key(name) {
+            used.insert(name.clone());
+        }
+    }
+
+    let mut path_map: HashMap<String, String> = HashMap::new();
+    let mut changed = false;
+    for name in &entry_names {
+        if let Some(item) = manifest_by_abs.get(name) {
+            let parent = zip_parent(name);
+            let basename = encrypted_href_basename(&item.id, &item.href);
+            let target_dir = match toolbox_file_category(item) {
+                // Keep the current directory layout stable. The category is kept here
+                // to mirror epub_tool's manifest classification and leave room for
+                // future full Sigil-style relocation without changing callers.
+                _ => parent,
+            };
+            let target = if target_dir.is_empty() {
+                basename
+            } else {
+                format!("{}/{}", target_dir, basename)
+            };
+            let unique = ensure_unique_zip_name(&target, &mut used);
+            if unique != *name {
+                changed = true;
+            }
+            path_map.insert(name.clone(), unique);
+        } else {
+            path_map.insert(name.clone(), name.clone());
+        }
+    }
+
+    if !changed {
+        return Ok(toolbox_epub_tool_result(
+            source,
+            source,
+            false,
+            "file_encrypt",
+            "未检测到可混淆的 manifest 文件项".to_string(),
+        ));
+    }
+
+    let output_path = build_processed_epub_path(source, "_encrypt");
+    write_epub_with_path_map(&bytes, &output_path, &path_map)?;
+    Ok(toolbox_epub_tool_result(
+        source,
+        &output_path,
+        true,
+        "file_encrypt",
+        "文件加密完成".to_string(),
+    ))
+}
+
+fn toolbox_file_decrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, String> {
+    if !source.exists() {
+        return Err(format!("文件不存在: {}", source.to_string_lossy()));
+    }
+    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let processed = rebuild_epub_with_sanitized_names_from_bytes(source, &bytes, "_decrypt")?;
+    if let Some(output_path) = processed {
+        Ok(toolbox_epub_tool_result(
+            source,
+            &output_path,
+            true,
+            "file_decrypt",
+            "文件解密完成".to_string(),
+        ))
+    } else {
+        Ok(toolbox_epub_tool_result(
+            source,
+            source,
+            false,
+            "file_decrypt",
+            "未检测到文件名混淆，无需处理".to_string(),
+        ))
+    }
+}
+
+const TOOLBOX_FONT_OBFUSCATION_SCRIPT: &str = r##"
+import json
+import html as html_lib
+import re
+import sys
+import unicodedata
+import zipfile
+from collections import Counter, defaultdict
+from io import BytesIO
+from urllib.parse import unquote
+
+MAP_NAME = "META-INF/tepub-font-obfuscation.json"
+
+def is_html_name(name):
+    lower = name.lower()
+    return lower.endswith(".html") or lower.endswith(".xhtml") or lower.endswith(".htm")
+
+def is_font_name(name):
+    lower = name.lower()
+    return lower.endswith(".ttf") or lower.endswith(".otf") or lower.endswith(".woff") or lower.endswith(".woff2")
+
+def decode_text(data):
+    for enc in ("utf-8", "utf-8-sig", "gb18030", "latin-1"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return data.decode("utf-8", errors="replace")
+
+def should_map_char(ch):
+    if ch in "<>&":
+        return False
+    cat = unicodedata.category(ch)
+    if cat.startswith("C") or cat.startswith("Z"):
+        return False
+    code = ord(ch)
+    if 0xE000 <= code <= 0xF8FF or 0xF0000 <= code <= 0x10FFFD:
+        return False
+    return True
+
+def tag_identity(tag):
+    body = tag.strip("<> \t\r\n")
+    closing = body.startswith("/")
+    if closing:
+        body = body[1:].lstrip()
+    if not body:
+        return closing, ""
+    name = body.split(None, 1)[0].split("/", 1)[0].lower()
+    return closing, name
+
+def iter_text_chars(html):
+    raw_tag = None
+    i = 0
+    while i < len(html):
+        ch = html[i]
+        if ch == "<":
+            end = html.find(">", i + 1)
+            if end == -1:
+                break
+            tag = html[i:end + 1]
+            closing, name = tag_identity(tag)
+            if name in ("script", "style"):
+                raw_tag = None if closing else name
+            i = end + 1
+            continue
+        if not raw_tag:
+            if ch == "&":
+                semi = html.find(";", i + 1, i + 16)
+                if semi != -1:
+                    i = semi + 1
+                    continue
+            if should_map_char(ch):
+                yield ch
+        i += 1
+
+def transform_text(html, table):
+    out = []
+    raw_tag = None
+    i = 0
+    while i < len(html):
+        ch = html[i]
+        if ch == "<":
+            end = html.find(">", i + 1)
+            if end == -1:
+                out.append(html[i:])
+                break
+            tag = html[i:end + 1]
+            out.append(tag)
+            closing, name = tag_identity(tag)
+            if name in ("script", "style"):
+                raw_tag = None if closing else name
+            i = end + 1
+            continue
+        if raw_tag:
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "&":
+            semi = html.find(";", i + 1, i + 16)
+            if semi != -1:
+                out.append(html[i:semi + 1])
+                i = semi + 1
+                continue
+        out.append(table.get(ch, ch))
+        i += 1
+    return "".join(out)
+
+def parse_attrs(tag_body):
+    attrs = {}
+    for m in re.finditer(r"([:\w.-]+)\s*=\s*(['\"])(.*?)\2", tag_body, flags=re.S):
+        attrs[m.group(1).lower()] = m.group(3)
+    return attrs
+
+def parse_tag(tag):
+    body = tag.strip("<> \t\r\n")
+    if not body or body.startswith("!") or body.startswith("?"):
+        return True, "", True, {}
+    closing = body.startswith("/")
+    if closing:
+        body = body[1:].lstrip()
+    self_closing = body.endswith("/")
+    if self_closing:
+        body = body[:-1].rstrip()
+    if not body:
+        return closing, "", self_closing, {}
+    name = body.split(None, 1)[0].split("/", 1)[0].lower()
+    rest = body[len(name):]
+    return closing, name, self_closing, parse_attrs(rest)
+
+def first_font_family(value):
+    if not value:
+        return ""
+    parts = []
+    buf = []
+    quote = None
+    for ch in value:
+        if quote:
+            if ch == quote:
+                quote = None
+            else:
+                buf.append(ch)
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            continue
+        if ch == ",":
+            part = "".join(buf).strip().strip("'\"")
+            if part:
+                parts.append(part)
+            buf = []
+            continue
+        buf.append(ch)
+    part = "".join(buf).strip().strip("'\"")
+    if part:
+        parts.append(part)
+    return parts[0].lower() if parts else ""
+
+def font_family_from_style(style):
+    if not style:
+        return ""
+    m = re.search(r"(?is)(?:^|;)\s*font-family\s*:\s*([^;}{]+)", style)
+    if not m:
+        return ""
+    return first_font_family(m.group(1))
+
+def simple_selector_key(selector):
+    selector = selector.strip()
+    selector = selector.split(":", 1)[0].strip()
+    if not selector or any(token in selector for token in (" ", ">", "+", "~", "[", "]", "*")):
+        return None
+    if selector.startswith(".") or selector.startswith("#"):
+        return selector.lower()
+    if re.fullmatch(r"[a-zA-Z][\w-]*(?:[.#][\w-]+)?", selector):
+        return selector.lower()
+    return None
+
+def build_selector_font_rules(infos, contents):
+    selector_fonts = {}
+    for info in infos:
+        name = info.filename
+        if not name.lower().endswith(".css") or name.endswith("/"):
+            continue
+        css = decode_text(contents.get(name, b""))
+        css = re.sub(r"(?s)/\*.*?\*/", "", css)
+        for match in re.finditer(r"(?s)([^{}]+)\{([^{}]*)\}", css):
+            selectors = match.group(1).strip()
+            body = match.group(2)
+            if selectors.startswith("@"):
+                continue
+            family = font_family_from_style(body)
+            if not family:
+                continue
+            for selector in selectors.split(","):
+                key = simple_selector_key(selector)
+                if key:
+                    selector_fonts[key] = family
+    return selector_fonts
+
+def font_for_tag(tag_name, attrs, inherited, selector_fonts):
+    inline_family = font_family_from_style(attrs.get("style", ""))
+    if inline_family:
+        return inline_family
+    tag = (tag_name or "").lower()
+    elem_id = attrs.get("id", "").strip()
+    if elem_id:
+        for key in (f"{tag}#{elem_id.lower()}", f"#{elem_id.lower()}"):
+            if key in selector_fonts:
+                return selector_fonts[key]
+    classes = attrs.get("class", "").split()
+    for cls in classes:
+        cls = cls.lower()
+        for key in (f"{tag}.{cls}", f".{cls}"):
+            if key in selector_fonts:
+                return selector_fonts[key]
+    if tag in selector_fonts:
+        return selector_fonts[tag]
+    return inherited
+
+def zip_parent(name):
+    name = name.replace("\\", "/")
+    return name.rsplit("/", 1)[0] if "/" in name else ""
+
+def zip_join(base_dir, rel):
+    rel = unquote((rel or "").split("#", 1)[0].split("?", 1)[0]).replace("\\", "/").strip()
+    if not rel:
+        return ""
+    if rel.startswith("/"):
+        return rel.lstrip("/")
+    parts = [p for p in base_dir.split("/") if p]
+    for seg in rel.split("/"):
+        if not seg or seg == ".":
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+        else:
+            parts.append(seg)
+    return "/".join(parts)
+
+def strip_markup_text(text):
+    text = re.sub(r"(?is)<(script|style)\b.*?</\1>", "", text)
+    text = re.sub(r"(?is)<[^>]+>", "", text)
+    text = html_lib.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+def extract_title_text(text):
+    m = re.search(r"(?is)<title\b[^>]*>(.*?)</title>", text)
+    return strip_markup_text(m.group(1)) if m else ""
+
+def collect_navigation_data(infos, contents):
+    opf_paths = [info.filename for info in infos if info.filename.lower().endswith(".opf")]
+    nav_paths = set()
+    ncx_paths = set()
+    title_by_target = {}
+    for opf_path in opf_paths:
+        opf_text = decode_text(contents.get(opf_path, b""))
+        opf_dir = zip_parent(opf_path)
+        toc_ids = set()
+        for spine in re.finditer(r"(?is)<spine\b([^>]*)>", opf_text):
+            toc_id = parse_attrs(spine.group(1)).get("toc", "")
+            if toc_id:
+                toc_ids.add(toc_id)
+        for item in re.finditer(r"(?is)<item\b([^>]*)>", opf_text):
+            attrs = parse_attrs(item.group(1))
+            item_id = attrs.get("id", "")
+            href = attrs.get("href", "")
+            if not href:
+                continue
+            media = attrs.get("media-type", "").lower()
+            properties = attrs.get("properties", "").lower().split()
+            abs_path = zip_join(opf_dir, href)
+            lower = abs_path.lower()
+            if "nav" in properties:
+                nav_paths.add(abs_path)
+            if item_id in toc_ids or media == "application/x-dtbncx+xml" or lower.endswith(".ncx"):
+                ncx_paths.add(abs_path)
+
+    for nav_path in list(nav_paths):
+        nav_text = decode_text(contents.get(nav_path, b""))
+        nav_dir = zip_parent(nav_path)
+        for a in re.finditer(r"(?is)<a\b([^>]*)>(.*?)</a>", nav_text):
+            href = parse_attrs(a.group(1)).get("href", "")
+            label = strip_markup_text(a.group(2))
+            target = zip_join(nav_dir, href)
+            if target and label:
+                title_by_target.setdefault(target, label)
+
+    for ncx_path in list(ncx_paths):
+        ncx_text = decode_text(contents.get(ncx_path, b""))
+        ncx_dir = zip_parent(ncx_path)
+        for point in re.finditer(r"(?is)<navPoint\b.*?</navPoint>", ncx_text):
+            block = point.group(0)
+            content = re.search(r"(?is)<content\b([^>]*)>", block)
+            label = re.search(r"(?is)<text\b[^>]*>(.*?)</text>", block)
+            if not content or not label:
+                continue
+            src = parse_attrs(content.group(1)).get("src", "")
+            target = zip_join(ncx_dir, src)
+            text = strip_markup_text(label.group(1))
+            if target and text:
+                title_by_target.setdefault(target, text)
+    return nav_paths, ncx_paths, title_by_target
+
+def collect_title_pairs(contents, title_by_target):
+    pairs = []
+    for target, plain_title in title_by_target.items():
+        html = contents.get(target)
+        if html is None:
+            continue
+        cipher_title = extract_title_text(decode_text(html))
+        if cipher_title and plain_title and cipher_title != plain_title:
+            pairs.append((cipher_title, plain_title))
+    return pairs
+
+def is_ignored_text_char(ch):
+    cat = unicodedata.category(ch)
+    return ch.isspace() or cat.startswith("C") or cat.startswith("Z")
+
+def is_cjk_or_private(ch):
+    code = ord(ch)
+    return (
+        0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x3FFFF
+        or 0xE000 <= code <= 0xF8FF
+        or 0xF0000 <= code <= 0x10FFFD
+    )
+
+def is_alignment_stable(ch):
+    if is_ignored_text_char(ch):
+        return False
+    if is_cjk_or_private(ch):
+        return False
+    cat = unicodedata.category(ch)
+    return ord(ch) < 128 or cat[0] in ("P", "S", "N") or 0xFF00 <= ord(ch) <= 0xFFEF
+
+def is_mapping_candidate(ch):
+    return not is_ignored_text_char(ch) and not is_alignment_stable(ch)
+
+def iter_text_records(html, selector_fonts=None):
+    selector_fonts = selector_fonts or {}
+    stack = []
+    raw_tag = None
+    i = 0
+    while i < len(html):
+        ch = html[i]
+        if ch == "<":
+            end = html.find(">", i + 1)
+            if end == -1:
+                break
+            tag = html[i:end + 1]
+            closing, name, self_closing, attrs = parse_tag(tag)
+            if name in ("script", "style", "title"):
+                raw_tag = None if closing else name
+                i = end + 1
+                continue
+            if name and not raw_tag:
+                if closing:
+                    while stack:
+                        popped, _font = stack.pop()
+                        if popped == name:
+                            break
+                elif not self_closing:
+                    inherited = stack[-1][1] if stack else ""
+                    stack.append((name, font_for_tag(name, attrs, inherited, selector_fonts)))
+            elif name and closing:
+                while stack:
+                    popped, _font = stack.pop()
+                    if popped == name:
+                        break
+            i = end + 1
+            continue
+        if raw_tag:
+            i += 1
+            continue
+        if ch == "&":
+            semi = html.find(";", i + 1, i + 16)
+            if semi != -1:
+                i = semi + 1
+                continue
+        if not is_ignored_text_char(ch):
+            yield ch, (stack[-1][1] if stack else "")
+        i += 1
+
+def transform_text_font_aware(html, global_table, font_table, selector_fonts=None):
+    selector_fonts = selector_fonts or {}
+    out = []
+    stack = []
+    raw_tag = None
+    i = 0
+    while i < len(html):
+        ch = html[i]
+        if ch == "<":
+            end = html.find(">", i + 1)
+            if end == -1:
+                out.append(html[i:])
+                break
+            tag = html[i:end + 1]
+            out.append(tag)
+            closing, name, self_closing, attrs = parse_tag(tag)
+            if name in ("script", "style"):
+                raw_tag = None if closing else name
+                i = end + 1
+                continue
+            if name and not raw_tag:
+                if closing:
+                    while stack:
+                        popped, _font = stack.pop()
+                        if popped == name:
+                            break
+                elif not self_closing:
+                    inherited = stack[-1][1] if stack else ""
+                    stack.append((name, font_for_tag(name, attrs, inherited, selector_fonts)))
+            elif name and closing:
+                while stack:
+                    popped, _font = stack.pop()
+                    if popped == name:
+                        break
+            i = end + 1
+            continue
+        if raw_tag:
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "&":
+            semi = html.find(";", i + 1, i + 16)
+            if semi != -1:
+                out.append(html[i:semi + 1])
+                i = semi + 1
+                continue
+        font_key = stack[-1][1] if stack else ""
+        out.append(font_table.get((font_key, ch), global_table.get(ch, ch)))
+        i += 1
+    return "".join(out)
+
+def normalize_plain_chars(text):
+    return [ch for ch in text if not is_ignored_text_char(ch)]
+
+def char_at(seq, index):
+    item = seq[index]
+    return item[0] if isinstance(item, tuple) else item
+
+def stable_signature(seq, pos, want=8, max_scan=1600):
+    sig = []
+    end = min(len(seq), pos + max_scan)
+    while pos < end and len(sig) < want:
+        ch = char_at(seq, pos)
+        if is_alignment_stable(ch):
+            sig.append(ch)
+        pos += 1
+    return "".join(sig)
+
+def find_resync(cipher_records, ci, plain_chars, pi, window=2400, anchors=8):
+    plain_sigs = {}
+    plain_end = min(len(plain_chars), pi + window)
+    for j in range(pi, plain_end):
+        sig = stable_signature(plain_chars, j, anchors)
+        if len(sig) >= anchors and sig not in plain_sigs:
+            plain_sigs[sig] = j
+    cipher_end = min(len(cipher_records), ci + window)
+    best = None
+    best_cost = None
+    for i in range(ci, cipher_end):
+        sig = stable_signature(cipher_records, i, anchors)
+        if len(sig) < anchors:
+            continue
+        j = plain_sigs.get(sig)
+        if j is None:
+            continue
+        cost = (i - ci) + (j - pi)
+        if best is None or cost < best_cost:
+            best = (i, j)
+            best_cost = cost
+            if cost == 0:
+                break
+    return best
+
+def decode_txt_file(txt_path):
+    with open(txt_path, "rb") as f:
+        return decode_text(f.read())
+
+def pick_mapping(counter):
+    if not counter:
+        return None, 0, 0, 0.0
+    total = sum(counter.values())
+    plain, top = counter.most_common(1)[0]
+    ratio = top / total if total else 0.0
+    return plain, top, total, ratio
+
+def choose_mapping_table(counts):
+    table = {}
+    conflicts = 0
+    for key, counter in counts.items():
+        plain, top, total, ratio = pick_mapping(counter)
+        if plain is None:
+            continue
+        if total >= 5 and ratio < 0.78:
+            conflicts += 1
+        if ratio >= 0.66 and (top >= 2 or top == total):
+            table[key] = plain
+    return table, conflicts
+
+def add_segment_pairs(cipher_records, ci0, ci1, plain_chars, pi0, pi1, global_counts, font_counts):
+    cipher_idxs = [idx for idx in range(ci0, ci1) if is_mapping_candidate(cipher_records[idx][0])]
+    plain_idxs = [idx for idx in range(pi0, pi1) if is_mapping_candidate(plain_chars[idx])]
+    if len(cipher_idxs) != len(plain_idxs):
+        return 0
+    added = 0
+    for ci, pi in zip(cipher_idxs, plain_idxs):
+        cipher, font_key = cipher_records[ci]
+        plain = plain_chars[pi]
+        global_counts[cipher][plain] += 1
+        if font_key:
+            font_counts[(font_key, cipher)][plain] += 1
+        added += 1
+    return added
+
+def add_direct_title_pair(cipher_title, plain_title, global_counts, font_counts, weight=4):
+    cipher_chars = normalize_plain_chars(cipher_title)
+    plain_chars = normalize_plain_chars(plain_title)
+    if len(cipher_chars) != len(plain_chars):
+        return 0
+    added = 0
+    for cipher, plain in zip(cipher_chars, plain_chars):
+        if cipher == plain:
+            continue
+        if is_mapping_candidate(cipher) and is_mapping_candidate(plain):
+            global_counts[cipher][plain] += weight
+            added += weight
+    return added
+
+def build_txt_alignment_tables(cipher_records, plain_chars, direct_title_pairs=None):
+    global_counts = defaultdict(Counter)
+    font_counts = defaultdict(Counter)
+    ci = 0
+    pi = 0
+    pairs = 0
+    stable_matches = 0
+    skipped_cipher = 0
+    skipped_plain = 0
+    while ci < len(cipher_records) and pi < len(plain_chars):
+        cipher, font_key = cipher_records[ci]
+        plain = plain_chars[pi]
+        cipher_stable = is_alignment_stable(cipher)
+        plain_stable = is_alignment_stable(plain)
+        if cipher_stable or plain_stable:
+            if cipher_stable and plain_stable and cipher == plain:
+                ci += 1
+                pi += 1
+                stable_matches += 1
+                continue
+            resync = find_resync(cipher_records, ci, plain_chars, pi)
+            if resync and (resync[0] > ci or resync[1] > pi):
+                pairs += add_segment_pairs(
+                    cipher_records, ci, resync[0], plain_chars, pi, resync[1], global_counts, font_counts
+                )
+                skipped_cipher += max(0, resync[0] - ci)
+                skipped_plain += max(0, resync[1] - pi)
+                ci, pi = resync
+                continue
+            if cipher_stable and not plain_stable:
+                ci += 1
+                skipped_cipher += 1
+            elif plain_stable and not cipher_stable:
+                pi += 1
+                skipped_plain += 1
+            else:
+                ci += 1
+                pi += 1
+                skipped_cipher += 1
+                skipped_plain += 1
+            continue
+        if is_mapping_candidate(cipher) and is_mapping_candidate(plain):
+            global_counts[cipher][plain] += 1
+            if font_key:
+                font_counts[(font_key, cipher)][plain] += 1
+            pairs += 1
+        ci += 1
+        pi += 1
+    title_pairs = 0
+    title_votes = 0
+    for cipher_title, plain_title in direct_title_pairs or []:
+        added = add_direct_title_pair(cipher_title, plain_title, global_counts, font_counts)
+        if added:
+            title_pairs += 1
+            title_votes += added
+    global_table, global_conflicts = choose_mapping_table(global_counts)
+    font_table, font_conflicts = choose_mapping_table(font_counts)
+    stats = {
+        "pairs": pairs,
+        "stable": stable_matches,
+        "skippedCipher": skipped_cipher,
+        "skippedPlain": skipped_plain,
+        "globalChars": len(global_table),
+        "fontChars": len(font_table),
+        "globalConflicts": global_conflicts,
+        "fontConflicts": font_conflicts,
+        "titlePairs": title_pairs,
+        "titleVotes": title_votes,
+    }
+    return global_table, font_table, stats
+
+def neutralize_css_fonts(text):
+    text = re.sub(r"(?is)@font-face\s*\{.*?\}", "", text)
+    text = re.sub(r"(?is)font-family\s*:\s*[^;}{]+;?", "font-family: serif;", text)
+    return text
+
+def neutralize_html_inline_fonts(text):
+    return re.sub(r"(?is)font-family\s*:\s*[^;\"'}]+;?", "font-family: serif;", text)
+
+def private_chars(count):
+    ranges = [(0xE000, 0xF8FF), (0xF0000, 0xFFFFD), (0x100000, 0x10FFFD)]
+    made = []
+    for start, end in ranges:
+        for code in range(start, end + 1):
+            made.append(chr(code))
+            if len(made) >= count:
+                return made
+    raise RuntimeError("可用私用区字符不足")
+
+def collect_supported_chars(font_items):
+    from fontTools.ttLib import TTFont
+
+    supported = set()
+    for _name, font_data in font_items:
+        try:
+            font = TTFont(BytesIO(font_data))
+            best = font.getBestCmap() or {}
+            for code in best.keys():
+                ch = chr(code)
+                if should_map_char(ch):
+                    supported.add(ch)
+        except Exception:
+            continue
+    return supported
+
+def add_private_cmap(font_data, mapping):
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(BytesIO(font_data))
+    best = font.getBestCmap() or {}
+    if "cmap" not in font:
+        return font_data
+    added = 0
+    for plain, shadow in mapping.items():
+        glyph = best.get(ord(plain))
+        if not glyph:
+            continue
+        for table in font["cmap"].tables:
+            if table.isUnicode():
+                table.cmap[ord(shadow)] = glyph
+                added += 1
+    if added == 0:
+        return font_data
+    out = BytesIO()
+    font.save(out)
+    return out.getvalue()
+
+def write_entries(output_path, infos, contents, extra_map=None, skip_map=False):
+    with zipfile.ZipFile(output_path, "w") as zout:
+        for info in infos:
+            if info.filename == "mimetype":
+                zi = zipfile.ZipInfo(info.filename)
+                zi.compress_type = zipfile.ZIP_STORED
+                zout.writestr(zi, contents[info.filename])
+                break
+        for info in infos:
+            name = info.filename
+            if name == "mimetype":
+                continue
+            if skip_map and name == MAP_NAME:
+                continue
+            zi = zipfile.ZipInfo(name)
+            zi.compress_type = info.compress_type if info.compress_type is not None else zipfile.ZIP_DEFLATED
+            zi.external_attr = info.external_attr
+            zi.date_time = info.date_time
+            if name.endswith("/"):
+                zout.writestr(zi, b"")
+            else:
+                zout.writestr(zi, contents[name])
+        if extra_map is not None:
+            zi = zipfile.ZipInfo(MAP_NAME)
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zout.writestr(zi, json.dumps(extra_map, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+def encrypt_epub(input_path, output_path):
+    with zipfile.ZipFile(input_path, "r") as zin:
+        infos = zin.infolist()
+        contents = {info.filename: zin.read(info.filename) for info in infos if not info.filename.endswith("/")}
+        for info in infos:
+            if info.filename.endswith("/"):
+                contents[info.filename] = b""
+        font_names = [info.filename for info in infos if is_font_name(info.filename)]
+        html_names = [info.filename for info in infos if is_html_name(info.filename)]
+        if not font_names:
+            raise RuntimeError("EPUB 内未找到字体文件")
+        if not html_names:
+            raise RuntimeError("EPUB 内未找到 HTML/XHTML 文件")
+        supported_chars = collect_supported_chars((name, contents[name]) for name in font_names)
+        if not supported_chars:
+            raise RuntimeError("内嵌字体未发现可混淆字符")
+        chars = []
+        seen = set()
+        for name in html_names:
+            html = decode_text(contents[name])
+            for ch in iter_text_chars(html):
+                if ch in supported_chars and ch not in seen:
+                    seen.add(ch)
+                    chars.append(ch)
+        if not chars:
+            raise RuntimeError("未找到可加密的正文字符")
+        shadows = private_chars(len(chars))
+        mapping = dict(zip(chars, shadows))
+        for name in html_names:
+            contents[name] = transform_text(decode_text(contents[name]), mapping).encode("utf-8")
+        changed_fonts = 0
+        for name in font_names:
+            new_data = add_private_cmap(contents[name], mapping)
+            if new_data != contents[name]:
+                changed_fonts += 1
+                contents[name] = new_data
+        if changed_fonts == 0:
+            raise RuntimeError("字体 cmap 未能写入私用区映射，无法完成字体加密")
+        payload = {
+            "version": 1,
+            "tool": "TEpub-Editor",
+            "type": "font-obfuscation-map",
+            "map": [[plain, shadow] for plain, shadow in mapping.items()],
+            "fontCount": changed_fonts,
+        }
+        write_entries(output_path, infos, contents, extra_map=payload, skip_map=True)
+        return len(chars), changed_fonts
+
+def decrypt_epub_with_saved_map(input_path, output_path):
+    with zipfile.ZipFile(input_path, "r") as zin:
+        infos = zin.infolist()
+        names = [info.filename for info in infos]
+        if MAP_NAME not in names:
+            raise RuntimeError("未找到字体加密映射文件，无法自动解密")
+        payload = json.loads(zin.read(MAP_NAME).decode("utf-8"))
+        pairs = payload.get("map") or []
+        reverse = {shadow: plain for plain, shadow in pairs}
+        if not reverse:
+            raise RuntimeError("字体加密映射为空")
+        contents = {info.filename: zin.read(info.filename) for info in infos if not info.filename.endswith("/")}
+        for info in infos:
+            if info.filename.endswith("/"):
+                contents[info.filename] = b""
+        restored = 0
+        for info in infos:
+            name = info.filename
+            if is_html_name(name):
+                text = decode_text(contents[name])
+                new_text = transform_text(text, reverse)
+                if new_text != text:
+                    restored += 1
+                    contents[name] = new_text.encode("utf-8")
+        if restored == 0:
+            raise RuntimeError("未发现可恢复的字体加密正文")
+        write_entries(output_path, infos, contents, extra_map=None, skip_map=True)
+        return {"mode": "saved-map", "files": restored, "chars": len(reverse)}
+
+def decrypt_epub_with_txt_alignment(input_path, output_path, txt_path):
+    if not txt_path:
+        raise RuntimeError("未找到 TEpub 字体映射文件，请选择与 EPUB 对应的明文 TXT 进行对齐解密")
+    with zipfile.ZipFile(input_path, "r") as zin:
+        infos = zin.infolist()
+        contents = {info.filename: zin.read(info.filename) for info in infos if not info.filename.endswith("/")}
+        for info in infos:
+            if info.filename.endswith("/"):
+                contents[info.filename] = b""
+        html_names = [info.filename for info in infos if is_html_name(info.filename)]
+        if not html_names:
+            raise RuntimeError("EPUB 内未找到 HTML/XHTML 文件")
+        nav_paths, ncx_paths, title_by_target = collect_navigation_data(infos, contents)
+        nav_path_keys = {path.lower() for path in nav_paths}
+        content_html_names = [name for name in html_names if name.lower() not in nav_path_keys]
+        direct_title_pairs = collect_title_pairs(contents, title_by_target)
+        selector_fonts = build_selector_font_rules(infos, contents)
+        cipher_records = []
+        for name in content_html_names:
+            cipher_records.extend(iter_text_records(decode_text(contents[name]), selector_fonts))
+        plain_chars = normalize_plain_chars(decode_txt_file(txt_path))
+        if len(cipher_records) < 50 or len(plain_chars) < 50:
+            raise RuntimeError("EPUB 或 TXT 文本过短，无法可靠对齐")
+        global_table, font_table, stats = build_txt_alignment_tables(cipher_records, plain_chars, direct_title_pairs)
+        if stats["pairs"] < 30 or (not global_table and not font_table):
+            raise RuntimeError(
+                "TXT 与 EPUB 对齐失败，未能生成可靠映射。请确认 TXT 与 EPUB 是同一版本。"
+            )
+        changed = 0
+        for info in infos:
+            name = info.filename
+            if name.endswith("/"):
+                continue
+            lower = name.lower()
+            if is_html_name(name) and name.lower() not in nav_path_keys:
+                old_text = decode_text(contents[name])
+                new_text = transform_text_font_aware(old_text, global_table, font_table, selector_fonts)
+                new_text = neutralize_html_inline_fonts(new_text)
+                if new_text != old_text:
+                    contents[name] = new_text.encode("utf-8")
+                    changed += 1
+            elif lower.endswith(".css"):
+                old_text = decode_text(contents[name])
+                new_text = neutralize_css_fonts(old_text)
+                if new_text != old_text:
+                    contents[name] = new_text.encode("utf-8")
+        if changed == 0:
+            raise RuntimeError("未发现可替换的字体混淆正文")
+        write_entries(output_path, infos, contents, extra_map=None, skip_map=True)
+        stats["mode"] = "txt-alignment-font-aware" if font_table else "txt-alignment-global"
+        stats["files"] = changed
+        stats["skippedNavFiles"] = len(nav_paths) + len(ncx_paths)
+        return stats
+
+def decrypt_epub(input_path, output_path, txt_path=None):
+    with zipfile.ZipFile(input_path, "r") as zin:
+        names = zin.namelist()
+    if MAP_NAME in names:
+        return decrypt_epub_with_saved_map(input_path, output_path)
+    return decrypt_epub_with_txt_alignment(input_path, output_path, txt_path)
+
+def main():
+    if len(sys.argv) not in (4, 5):
+        raise SystemExit("usage: font_obfuscation.py encrypt|decrypt input.epub output.epub [plain.txt]")
+    mode, input_path, output_path = sys.argv[1:4]
+    txt_path = sys.argv[4] if len(sys.argv) == 5 else None
+    if mode == "encrypt":
+        chars, fonts = encrypt_epub(input_path, output_path)
+        print(json.dumps({"chars": chars, "fonts": fonts}, ensure_ascii=False))
+    elif mode == "decrypt":
+        result = decrypt_epub(input_path, output_path, txt_path)
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        raise SystemExit("unknown mode: " + mode)
+
+if __name__ == "__main__":
+    main()
+"##;
+
+fn run_toolbox_font_obfuscation(
+    source: &Path,
+    output_path: &Path,
+    mode: &str,
+    txt_path: Option<&Path>,
+) -> Result<String, String> {
+    if mode == "encrypt" {
+        ensure_fonttools_available()?;
+    }
+    let temp_dir = tempfile::tempdir().map_err(|e| format!("创建字体工具临时目录失败: {}", e))?;
+    let script_path = temp_dir.path().join("tepub_font_obfuscation.py");
+    fs::write(&script_path, TOOLBOX_FONT_OBFUSCATION_SCRIPT)
+        .map_err(|e| format!("写入字体工具脚本失败: {}", e))?;
+    let mut command = process::Command::new("python");
+    command
+        .arg(&script_path)
+        .arg(mode)
+        .arg(source)
+        .arg(output_path);
+    if let Some(txt_path) = txt_path {
+        command.arg(txt_path);
+    }
+    let output = command
+        .output()
+        .map_err(|e| format!("无法启动 Python 字体工具: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(if stderr.is_empty() { stdout } else { stderr });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn toolbox_font_encrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, String> {
+    if !source.exists() {
+        return Err(format!("文件不存在: {}", source.to_string_lossy()));
+    }
+    let output_path = build_processed_epub_path(source, "_font_encrypt");
+    let details = run_toolbox_font_obfuscation(source, &output_path, "encrypt", None)?;
+    Ok(toolbox_epub_tool_result(
+        source,
+        &output_path,
+        true,
+        "font_encrypt",
+        if details.is_empty() {
+            "字体加密完成".to_string()
+        } else {
+            format!("字体加密完成: {}", details)
+        },
+    ))
+}
+
+fn toolbox_font_decrypt_impl(source: &Path, txt_path: Option<&Path>) -> Result<ToolboxEpubToolResult, String> {
+    if !source.exists() {
+        return Err(format!("文件不存在: {}", source.to_string_lossy()));
+    }
+    if let Some(txt_path) = txt_path {
+        if !txt_path.exists() {
+            return Err(format!("TXT 文件不存在: {}", txt_path.to_string_lossy()));
+        }
+    }
+    let output_path = build_processed_epub_path(source, "_font_decrypt");
+    let details = run_toolbox_font_obfuscation(source, &output_path, "decrypt", txt_path)?;
+    Ok(toolbox_epub_tool_result(
+        source,
+        &output_path,
+        true,
+        "font_decrypt",
+        if details.is_empty() {
+            "字体解密完成".to_string()
+        } else {
+            format!("字体解密完成: {}", details)
+        },
+    ))
+}
+
+#[tauri::command]
+fn toolbox_file_encrypt(epub_path: String) -> Result<ToolboxEpubToolResult, String> {
+    toolbox_file_encrypt_impl(&PathBuf::from(epub_path))
+}
+
+#[tauri::command]
+fn toolbox_file_decrypt(epub_path: String) -> Result<ToolboxEpubToolResult, String> {
+    toolbox_file_decrypt_impl(&PathBuf::from(epub_path))
+}
+
+#[tauri::command]
+fn toolbox_font_encrypt(epub_path: String) -> Result<ToolboxEpubToolResult, String> {
+    toolbox_font_encrypt_impl(&PathBuf::from(epub_path))
+}
+
+#[tauri::command]
+fn toolbox_font_decrypt(epub_path: String, txt_path: Option<String>) -> Result<ToolboxEpubToolResult, String> {
+    let txt_path_buf = txt_path.map(PathBuf::from);
+    toolbox_font_decrypt_impl(
+        &PathBuf::from(epub_path),
+        txt_path_buf.as_deref(),
+    )
 }
 
 // ============================================================
@@ -5413,6 +6739,8 @@ struct LibraryConfig {
     close_library_on_txt_open: bool,
     #[serde(default = "default_true")]
     close_library_on_epub_open: bool,
+    #[serde(default = "default_true")]
+    close_library_on_toolbox_open: bool,
     #[serde(default)]
     txt_editor_close_action: String,
     #[serde(default)]
@@ -8160,6 +9488,200 @@ async fn update_book_cover(
     Ok(cover_path_str)
 }
 
+#[cfg(test)]
+mod toolbox_tests {
+    use super::*;
+
+    fn write_zip_entry(
+        writer: &mut zip::ZipWriter<fs::File>,
+        name: &str,
+        content: &[u8],
+    ) -> Result<(), String> {
+        writer
+            .start_file(name, FileOptions::default())
+            .map_err(|e| e.to_string())?;
+        writer.write_all(content).map_err(|e| e.to_string())
+    }
+
+    fn read_epub_entry(epub_path: &Path, name: &str) -> Result<String, String> {
+        let file = fs::File::open(epub_path).map_err(|e| e.to_string())?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+        let mut entry = archive.by_name(name).map_err(|e| e.to_string())?;
+        let mut text = String::new();
+        entry.read_to_string(&mut text).map_err(|e| e.to_string())?;
+        Ok(text)
+    }
+
+    fn epub_names(epub_path: &Path) -> Result<Vec<String>, String> {
+        let file = fs::File::open(epub_path).map_err(|e| e.to_string())?;
+        let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+        let mut names = Vec::new();
+        for i in 0..archive.len() {
+            names.push(
+                archive
+                    .by_index(i)
+                    .map_err(|e| e.to_string())?
+                    .name()
+                    .replace('\\', "/"),
+            );
+        }
+        Ok(names)
+    }
+
+    fn create_minimal_epub(epub_path: &Path) -> Result<(), String> {
+        let file = fs::File::create(epub_path).map_err(|e| e.to_string())?;
+        let mut writer = zip::ZipWriter::new(file);
+        write_zip_entry(&mut writer, "mimetype", b"application/epub+zip")?;
+        write_zip_entry(
+            &mut writer,
+            "META-INF/container.xml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/content.opf",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <manifest>
+    <item href="Text/chapter one.xhtml" id="chapter" media-type="application/xhtml+xml"/>
+    <item media-type="text/css" href="Styles/main.css" id="style"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Text/chapter one.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><link rel="stylesheet" href="../Styles/main.css"/></head>
+  <body><p>Hello</p></body>
+</html>"#,
+        )?;
+        write_zip_entry(&mut writer, "OPS/Styles/main.css", b"body { color: #111; }")?;
+        writer.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn create_percent_encoded_obfuscated_epub(epub_path: &Path) -> Result<(), String> {
+        let file = fs::File::create(epub_path).map_err(|e| e.to_string())?;
+        let mut writer = zip::ZipWriter::new(file);
+        write_zip_entry(&mut writer, "mimetype", b"application/epub+zip")?;
+        write_zip_entry(
+            &mut writer,
+            "META-INF/container.xml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/content.opf",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <manifest>
+    <item id="gyzw0001.xhtml" href="Text/%7C_%3A%2Achapter.xhtml" media-type="application/xhtml+xml"/>
+    <item id="main.css" href="Styles/%7C_%2Amain.css" media-type="text/css"/>
+  </manifest>
+  <spine>
+    <itemref idref="gyzw0001.xhtml"/>
+  </spine>
+</package>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Text/|_:*chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><link rel="stylesheet" href="../Styles/%7C_%2Amain.css"/></head>
+  <body><p>Hello</p></body>
+</html>"#,
+        )?;
+        write_zip_entry(&mut writer, "OPS/Styles/|_*main.css", b"body { color: #111; }")?;
+        writer.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn toolbox_file_encrypt_decrypt_round_trip_uses_manifest_ids() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let source = temp.path().join("sample.epub");
+        create_minimal_epub(&source)?;
+
+        let encrypted = toolbox_file_encrypt_impl(&source)?;
+        assert!(encrypted.changed);
+        let encrypted_path = PathBuf::from(&encrypted.output_path);
+        let encrypted_names = epub_names(&encrypted_path)?;
+        assert!(encrypted_names.iter().any(|name| name.contains('*') || name.contains(':')));
+
+        let decrypted = toolbox_file_decrypt_impl(&encrypted_path)?;
+        assert!(decrypted.changed);
+        let decrypted_path = PathBuf::from(&decrypted.output_path);
+        let decrypted_names = epub_names(&decrypted_path)?;
+        assert!(decrypted_names.iter().any(|name| name == "OPS/Text/chapter.xhtml"));
+        assert!(decrypted_names.iter().any(|name| name == "OPS/Styles/style.css"));
+
+        let opf = read_epub_entry(&decrypted_path, "OPS/content.opf")?;
+        assert!(opf.contains(r#"href="Text/chapter.xhtml""#));
+        assert!(opf.contains(r#"href="Styles/style.css""#));
+        let chapter = read_epub_entry(&decrypted_path, "OPS/Text/chapter.xhtml")?;
+        assert!(chapter.contains(r#"href="../Styles/style.css""#));
+        Ok(())
+    }
+
+    #[test]
+    fn toolbox_file_decrypt_rewrites_percent_encoded_refs() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let source = temp.path().join("encoded.epub");
+        create_percent_encoded_obfuscated_epub(&source)?;
+        let source_bytes = fs::read(&source).map_err(|e| e.to_string())?;
+        let hints = collect_opf_id_hints(&source_bytes);
+        assert_eq!(
+            hints.get("OPS/Text/|_:*chapter.xhtml").map(String::as_str),
+            Some("gyzw0001.xhtml"),
+            "{:?}",
+            hints
+        );
+
+        let decrypted = toolbox_file_decrypt_impl(&source)?;
+        assert!(decrypted.changed);
+        let decrypted_path = PathBuf::from(&decrypted.output_path);
+        let decrypted_names = epub_names(&decrypted_path)?;
+        assert!(
+            decrypted_names.iter().any(|name| name == "OPS/Text/gyzw0001.xhtml"),
+            "{:?}",
+            decrypted_names
+        );
+        assert!(
+            decrypted_names.iter().any(|name| name == "OPS/Styles/main.css"),
+            "{:?}",
+            decrypted_names
+        );
+
+        let opf = read_epub_entry(&decrypted_path, "OPS/content.opf")?;
+        assert!(opf.contains(r#"href="Text/gyzw0001.xhtml""#));
+        assert!(opf.contains(r#"href="Styles/main.css""#));
+        assert!(!opf.contains("%7C"));
+        assert!(!opf.contains("%3A"));
+        assert!(!opf.contains("%2A"));
+
+        let chapter = read_epub_entry(&decrypted_path, "OPS/Text/gyzw0001.xhtml")?;
+        assert!(chapter.contains(r#"href="../Styles/main.css""#));
+        Ok(())
+    }
+
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -8215,6 +9737,10 @@ pub fn run() {
             rename_book_file,
             rebuild_book_filenames,
             prepare_epub_for_open,
+            toolbox_file_encrypt,
+            toolbox_file_decrypt,
+            toolbox_font_encrypt,
+            toolbox_font_decrypt,
             exit_app,
             // ===== Library Phase 1 =====
             load_library,
