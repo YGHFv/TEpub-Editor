@@ -35,6 +35,17 @@ impl EpubCache {
 
 static EPUB_CACHE: Lazy<Mutex<Option<EpubCache>>> = Lazy::new(|| Mutex::new(None));
 
+fn hidden_process_command(program: &str) -> process::Command {
+    let mut command = process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 // --- 静态资源: 整理后的 CSS ---
 
 const CSS_FONT: &str = r#"@charset "utf-8";
@@ -835,7 +846,7 @@ fn build_font_subset_text(content: &str, metadata: &EpubMetadata) -> String {
 }
 
 fn ensure_fonttools_available() -> Result<(), String> {
-    let check = process::Command::new("python")
+    let check = hidden_process_command("python")
         .args(["-m", "fontTools.subset", "--help"])
         .output();
     if let Ok(output) = check {
@@ -844,7 +855,7 @@ fn ensure_fonttools_available() -> Result<(), String> {
         }
     }
 
-    let install = process::Command::new("python")
+    let install = hidden_process_command("python")
         .args([
             "-m",
             "pip",
@@ -905,7 +916,7 @@ fn try_subset_font_bytes(bytes: &[u8], ext: &str, subset_text: &str) -> Result<V
         args.push(format!("--flavor={}", ext));
     }
 
-    let output = process::Command::new("python")
+    let output = hidden_process_command("python")
         .args(&args)
         .output()
         .map_err(|e| format!("无法启动字体子集化命令: {}", e))?;
@@ -2947,7 +2958,7 @@ fn run_toolbox_font_obfuscation(
     let script_path = temp_dir.path().join("tepub_font_obfuscation.py");
     fs::write(&script_path, TOOLBOX_FONT_OBFUSCATION_SCRIPT)
         .map_err(|e| format!("写入字体工具脚本失败: {}", e))?;
-    let mut command = process::Command::new("python");
+    let mut command = hidden_process_command("python");
     command
         .arg(&script_path)
         .arg(mode)

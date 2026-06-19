@@ -230,7 +230,6 @@
         <h1>工具箱</h1>
         <div class="toolbox-subtitle">常用工具</div>
       </div>
-      <button class="close-btn" type="button" on:click={closeWindow} title="关闭" aria-label="关闭">×</button>
     </div>
   </header>
 
@@ -298,7 +297,7 @@
     margin: 0 auto;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 16px;
   }
 
@@ -315,27 +314,6 @@
     color: var(--color-muted);
     font-size: 12px;
     line-height: 1.2;
-  }
-
-  .close-btn {
-    width: 32px;
-    height: 32px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-muted);
-    cursor: pointer;
-    font-size: 24px;
-    line-height: 1;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-
-  .close-btn:hover {
-    background: var(--color-hover);
-    color: var(--color-text);
   }
 
   .toolbox-content {

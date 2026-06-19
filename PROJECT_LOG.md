@@ -2566,6 +2566,23 @@ Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
 
+### 2026-06-19 00:00 +08:00
+
+Request: release v0.6.5 with the toolbox UI cleanup and Windows font subsetting process fix.
+
+Changes:
+
+- Removed the in-page upper-left close button from the toolbox page so the toolbox window follows the app window chrome instead of rendering a duplicate close control.
+- Added a Windows-only hidden subprocess helper for Python invocations in `src-tauri/src/lib.rs`.
+- Updated fontTools checks, automatic fontTools installation, font subsetting, and toolbox font obfuscation script execution to use the hidden subprocess helper.
+- Bumped app version from 0.6.4 to 0.6.5.
+
+Verification:
+
+- `corepack pnpm check` passed.
+- `cargo check` passed.
+- `cargo test toolbox_file -- --nocapture` passed.
+
 ### 2026-05-18 09:19 +08:00
 
 Request: restore the left indentation in the Android EPUB file list, make the new action buttons less boxy and closer to the rest of the mobile UI, add font preview support in the file-structure editor, and fix the top-left back arrow centering across mobile secondary pages.
