@@ -498,18 +498,26 @@ function parseChineseNumber(text: string): number | null {
   return total + section + number || null;
 }
 
+const PROOF_TITLE_NUMBER = "[0-9零〇一二两三四五六七八九十百千万]+";
+const PROOF_TITLE_SEPARATOR = "[:：、.．\\-—]";
+const PROOF_TITLE_BOUNDARY = `(?:(?:\\s|${PROOF_TITLE_SEPARATOR}|$)|(?=[\\u4e00-\\u9fff]))`;
+const PROOF_NON_REORDER_TITLE_RE =
+  /^(?:新增\s*)?番外(?:\s|[:：、.．\-—]|$)|^(?:内容简介|简介|序(?:章|言)?|前言|楔子|后记|尾声|完本感言|本书相关)(?:\s|[:：、.．\-—]|$)/;
+
 function parseTitleNumber(original: string): number | null {
   const text = normalizeSpaces(original);
   const standard = text.match(
-    /^第\s*([0-9零〇一二两三四五六七八九十百千万]+)\s*(?:章|卷|部|回|节)(?:\s|[:：、.．\-—]|$)/,
+    new RegExp(
+      String.raw`^第\s*(${PROOF_TITLE_NUMBER})\s*(?:章|卷|部|回|节)${PROOF_TITLE_BOUNDARY}`,
+    ),
   );
   if (standard) return parseChineseNumber(standard[1]);
 
-  const chapter = text.match(/^Chapter\s*(\d+)(?:\s|[:：、.．\-—]|$)/i);
+  const chapter = text.match(/^Chapter\s*(\d+)/i);
   if (chapter) return Number.parseInt(chapter[1], 10);
 
   const sequence = text.match(
-    /^序列\s*([0-9零〇一二两三四五六七八九十百千万]+)(?:\s|[:：、.．\-—]|$)/,
+    new RegExp(String.raw`^序列\s*(${PROOF_TITLE_NUMBER})${PROOF_TITLE_BOUNDARY}`),
   );
   if (sequence) return parseChineseNumber(sequence[1]);
 
@@ -526,9 +534,18 @@ function extractTitleBody(original: string) {
   let text = normalizeSpaces(original);
 
   const patterns: RegExp[] = [
-    /^第\s*[0-9零〇一二两三四五六七八九十百千万]+\s*(?:章|卷|部|回|节)\s*[：:、.．\-—\s]*/i,
-    /^Chapter\s*\d+\s*[：:、.．\-—\s]*/i,
-    /^序列\s*[0-9零〇一二两三四五六七八九十百千万]+\s*[：:、.．\-—\s]*/i,
+    new RegExp(
+      String.raw`^第\s*${PROOF_TITLE_NUMBER}\s*(?:章|卷|部|回|节)(?:\s*(?:${PROOF_TITLE_SEPARATOR})\s*|\s+)?`,
+      "i",
+    ),
+    new RegExp(
+      String.raw`^Chapter\s*\d+(?:\s*(?:${PROOF_TITLE_SEPARATOR})\s*|\s+)?`,
+      "i",
+    ),
+    new RegExp(
+      String.raw`^序列\s*${PROOF_TITLE_NUMBER}(?:\s*(?:${PROOF_TITLE_SEPARATOR})\s*|\s+)?`,
+      "i",
+    ),
     /^\(?\s*[（(【\[]?\s*\d+\s*[）)】\]]?\s*[：:、.．\-—\s]+/,
     /^\(?\s*[一二三四五六七八九十百千万零〇两]+\s*[：:、.．\-—\s]+/,
     /^\d{1,5}\s*[：:、.．\-—\s]+/,
@@ -542,8 +559,12 @@ function extractTitleBody(original: string) {
     }
   }
 
-  text = text.replace(/^[：:、.．\-—\s]+/, "");
+  text = text.replace(new RegExp(String.raw`^(?:\s|${PROOF_TITLE_SEPARATOR})+`), "");
   return text.trim();
+}
+
+function shouldSkipTitleRewrite(original: string) {
+  return PROOF_NON_REORDER_TITLE_RE.test(normalizeSpaces(original));
 }
 
 function isIncludedByScope(
@@ -552,7 +573,7 @@ function isIncludedByScope(
   options: ProofTitleRewriteOptions,
   regex: RegExp | null,
 ) {
-  if (!hasExplicitNumberedTitle(kind, original)) return false;
+  if (kind === "chapter" && shouldSkipTitleRewrite(original)) return false;
 
   switch (options.scope) {
     case "volumes":
@@ -567,21 +588,6 @@ function isIncludedByScope(
     default:
       return true;
   }
-}
-
-function hasExplicitNumberedTitle(kind: "volume" | "chapter", original: string) {
-  const text = normalizeSpaces(original);
-  const num = String.raw`[0-9零〇一二两三四五六七八九十百千万]+`;
-  const sep = String.raw`(?:\s|[:：、，,.\-—]|$)`;
-
-  if (kind === "volume") {
-    return new RegExp(String.raw`^(?:第\s*${num}\s*卷|卷\s*${num})${sep}`).test(text);
-  }
-
-  return (
-    new RegExp(String.raw`^第\s*${num}\s*章${sep}`).test(text) ||
-    new RegExp(String.raw`^\d{1,5}${sep}`).test(text)
-  );
 }
 
 function getNodeKind(node: ProofTocNode): "volume" | "chapter" | null {

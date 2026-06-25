@@ -249,7 +249,7 @@
     const DEFAULT_VOLUME_REGEX =
         "^\\s*(?:第\\s*[零〇一二两三四五六七八九十百千万0-9]+\\s*卷|卷\\s*[零〇一二两三四五六七八九十百千万0-9]+)(?:\\s+|[:：、.．\\-—]+)\\S+.*";
     const DEFAULT_CHAPTER_REGEX =
-        "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?番外(?:\\s+|[:：、.．\\-—])\\S+|【\\s*番外\\s*】\\s*\\S+).*";
+        "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*";
 
     const DEFAULT_SETTINGS = {
         customRegexRules: [
@@ -344,7 +344,7 @@
         { label: "^\\s*第[一二三..]+章.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+章.*$" },
         { label: "第X卷 标题 / 卷X 标题", value: DEFAULT_VOLUME_REGEX },
         { label: "终章 标题", value: "^\\s*终章(?:\\s+|[:：、.．\\-—])\\S+.*$" },
-        { label: "番外 / 【番外】", value: "^\\s*(?:(?:新增\\s*)?番外(?:\\s+|[:：、.．\\-—])\\S+|【\\s*番外\\s*】\\s*\\S+).*$" },
+        { label: "番外 / 后日谈", value: "^\\s*(?:(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*$" },
         { label: "^\\s*第[一二三..]+回.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+回.*$" },
         { label: "^\\s*第[一二三..]+节.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+节.*$" },
         { label: "^\\s*第\\d+章.*$", value: "^\\s*第\\d+章.*$" },
@@ -482,6 +482,11 @@
         return [{ level, pattern }];
     }
 
+    function buildTitlePrefixRegex(prefix: string) {
+        const escaped = escapeRegExp(prefix.trim());
+        return `^\\s*(?:(?:新增\\s*)?${escaped}(?:\\s+|[:：、.．\\-—])\\S+.*|【\\s*${escaped}\\s*】\\s*\\S+.*)$`;
+    }
+
     function isLikelyTocTitle(title: string, level: number) {
         const trimmed = title.trim();
         if (!trimmed) return false;
@@ -590,6 +595,8 @@
     let showStyleSourceEditor = false;
     let restoreTargetSnapshot: any = null;
     let epubGenerationStatus: "idle" | "generating" | "success" = "idle";
+    let tocPrefixLevel = 3;
+    let tocPrefixText = "";
 
     // 功能数据
     let epubMeta = {
@@ -5604,10 +5611,38 @@
                         </div>
                     {:else if settingsActiveTab === 'toc'}
                         <div class="rules-header">正则表达式</div>
+                        <div class="rule-helper-row">
+                            <select class="rule-type rule-type-helper" bind:value={tocPrefixLevel}>
+                                <option value={1}>层级 1</option>
+                                <option value={2}>层级 2</option>
+                                <option value={3}>层级 3</option>
+                                <option value={4}>层级 4</option>
+                                <option value={5}>层级 5</option>
+                            </select>
+                            <input
+                                class="rule-prefix-input"
+                                bind:value={tocPrefixText}
+                                placeholder="前缀识别，例如：番外、后日谈"
+                            />
+                            <button
+                                type="button"
+                                class="rule-btn add"
+                                on:click={() => {
+                                    const prefix = tocPrefixText.trim();
+                                    if (!prefix) return;
+                                    appSettings.customRegexRules = [
+                                        ...appSettings.customRegexRules,
+                                        { level: tocPrefixLevel, pattern: buildTitlePrefixRegex(prefix) },
+                                    ];
+                                    tocPrefixText = "";
+                                    tocPrefixLevel = 3;
+                                }}
+                            >＋ 前缀</button>
+                        </div>
                         <div class="rules-list">
                             {#each appSettings.customRegexRules as rule, idx}
                                 <div class="rule-item" style="gap: 8px; align-items: center;">
-                                    <select class="rule-type" bind:value={rule.level} style="width: 80px; flex-shrink: 0;">
+                                    <select class="rule-type" bind:value={rule.level} style="width: 112px; flex-shrink: 0;">
                                         <option value={1}>层级 1</option>
                                         <option value={2}>层级 2</option>
                                         <option value={3}>层级 3</option>
@@ -7806,7 +7841,7 @@
         gap: 10px;
     }
     .rule-type {
-        width: 85px;
+        width: 112px;
         height: 32px;
         border: 1px solid #ccc;
         border-radius: 6px;
@@ -7874,11 +7909,36 @@
         color: #d32f2f;
         border-color: #ffcdd2;
     }
+    .rule-btn.add:hover {
+        background: #f3f8ff;
+        color: #0066b8;
+        border-color: #b9d8ff;
+    }
     .rules-header {
         font-size: 13px;
         font-weight: bold;
         color: #666;
         margin-bottom: 5px;
+    }
+    .rule-helper-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .rule-type-helper {
+        width: 112px;
+        flex-shrink: 0;
+    }
+    .rule-prefix-input {
+        flex: 1;
+        min-width: 0;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 13px;
+        background: #fff;
     }
 
     /* EPUB 制作面板重构样式 */
@@ -8698,6 +8758,12 @@
     .epub-textarea:focus,
     .rule-type:focus,
     .rule-input:focus {
+        outline: none;
+        border-color: var(--color-accent);
+        box-shadow: var(--focus-ring);
+        background: #fff;
+    }
+    .rule-prefix-input:focus {
         outline: none;
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);

@@ -84,7 +84,7 @@
     const DEFAULT_VOLUME_REGEX =
         "^\\s*(?:第\\s*[零〇一二两三四五六七八九十百千万0-9]+\\s*卷|卷\\s*[零〇一二两三四五六七八九十百千万0-9]+)(?:\\s+|[:：、.．\\-—]+)\\S+.*";
     const DEFAULT_CHAPTER_REGEX =
-        "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?番外(?:\\s+|[:：、.．\\-—])\\S+|【\\s*番外\\s*】\\s*\\S+).*";
+        "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*";
 
     let rules: RegexRule[] = [
         { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
@@ -317,7 +317,7 @@
     }
 
     function isMetaTitle(text: string) {
-        return /^(?:内容简介|简介|序(?:章|言)?|前言|楔子|后记|尾声|完本感言|本书相关)(?:\s|[:：、.．\-—]|$)/.test(text.trim());
+        return /^(?:内容简介|简介|序(?:章|言)?|前言|楔子|后记|尾声|完本感言|本书相关|(?:新增\s*)?番外)(?:\s|[:：、.．\-—]|$)/.test(text.trim());
     }
 
     function toggleItem(item: TocItem) {
@@ -517,12 +517,28 @@
     }
 
     function titleBody(text: string) {
-        return text
-            .replace(/^第\s*[0-9零〇一二两三四五六七八九十百千万]+\s*[卷部章节回节]\s*/, "")
-            .replace(/^卷\s*[0-9零〇一二两三四五六七八九十百千万]+\s*/, "")
-            .replace(/^序列\s*[0-9零〇一二两三四五六七八九十百千万]+\s*/, "")
-            .replace(/^[:：、.．\-—\s]+/, "")
-            .trim();
+        const normalized = text.replace(/\u3000/g, " ").replace(/[ \t]+/g, " ").trim();
+        const number = "[0-9零〇一二两三四五六七八九十百千万]+";
+        const separator = "[:：、.．\\-—]";
+        const patterns = [
+            new RegExp(`^第\\s*${number}\\s*[卷部章节回节](?:\\s*(?:${separator})\\s*|\\s+)?`, "i"),
+            new RegExp(`^卷\\s*${number}(?:\\s*(?:${separator})\\s*|\\s+)?`, "i"),
+            new RegExp(`^序列\\s*${number}(?:\\s*(?:${separator})\\s*|\\s+)?`, "i"),
+            /^\(?\s*[（(【\[]?\s*\d+\s*[）)】\]]?\s*[：:、.．\-—\s]+/,
+            /^\(?\s*[一二三四五六七八九十百千万零〇两]+\s*[：:、.．\-—\s]+/,
+            /^\d{1,5}\s*[：:、.．\-—\s]+/,
+            /^\d{1,5}(?=[\u4e00-\u9fff])\s*/,
+        ];
+
+        let body = normalized;
+        for (const re of patterns) {
+            if (re.test(body)) {
+                body = body.replace(re, "");
+                break;
+            }
+        }
+
+        return body.replace(/^(?:\s|[:：、.．\-—])+/, "").trim();
     }
 
     function buildReorderPreviewRows(items = tocItems) {
