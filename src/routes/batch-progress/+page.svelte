@@ -355,12 +355,12 @@
   <section class="source-panel" aria-label="输入源">
     <div class="source-copy">
       <div class="eyebrow">输入源</div>
-      <h2>选择 EPUB、文件夹或目录扫描</h2>
+      <h2>选择目录或添加 EPUB 文件</h2>
       <p>当前队列 {inputPaths.length} 个输入源。</p>
     </div>
     <div class="source-actions">
-      <button class="primary-btn" type="button" on:click={chooseFiles} disabled={running}>选择文件</button>
-      <button class="strong-btn" type="button" on:click={scanDirectory} disabled={running}>扫描目录</button>
+      <button class="primary-btn" type="button" on:click={scanDirectory} disabled={running}>选择目录</button>
+      <button class="strong-btn" type="button" on:click={chooseFiles} disabled={running}>添加 EPUB</button>
       <button class="ghost-btn" type="button" on:click={clearQueue} disabled={running || inputPaths.length === 0}>清空队列</button>
     </div>
   </section>
@@ -453,15 +453,15 @@
 <style>
   :global(body) {
     margin: 0;
-    overflow: hidden;
+    overflow: auto;
     background: var(--color-canvas);
   }
 
   .batch-app {
     box-sizing: border-box;
-    height: 100vh;
+    min-height: 100vh;
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) 220px;
+    grid-template-rows: auto auto auto minmax(180px, 1fr);
     gap: 18px;
     padding: 28px;
     background: var(--color-canvas);
@@ -588,6 +588,7 @@
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
+    align-items: stretch;
     gap: 18px;
   }
 
@@ -647,10 +648,11 @@
   .start-btn {
     width: 100%;
     min-height: 42px;
+    flex: 0 0 auto;
   }
 
   .progress-area {
-    margin-top: auto;
+    margin-top: 0;
   }
 
   .progress-meta {

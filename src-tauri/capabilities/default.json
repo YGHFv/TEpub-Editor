@@ -9,7 +9,8 @@
     "epub-metadata",
     "reader-*",
     "search-replace",
-    "toolbox"
+    "toolbox",
+    "batch-progress-*"
   ],
   "permissions": [
     "core:default",

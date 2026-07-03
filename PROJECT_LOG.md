@@ -2653,6 +2653,29 @@ Caveats:
 
 - Drag-and-drop input is not wired yet; the panel currently supports system file selection and directory scanning buttons.
 
+### 2026-07-03 12:15 +08:00
+
+Request: fix the batch panel where "选择文件" did not respond, make the primary input action choose a directory, and correct the oversized/misaligned start button.
+
+Changes:
+
+- Added `batch-progress-*` to `src-tauri/capabilities/default.json` so the newly opened batch progress windows receive dialog permissions.
+- Updated `src/routes/batch-progress/+page.svelte` input actions:
+  - the primary button is now `选择目录` and opens the directory picker,
+  - direct EPUB selection remains available as the secondary `添加 EPUB` action.
+- Adjusted the batch panel layout so the page can scroll when needed and `开始执行` stays inside the task configuration card instead of visually overlapping the log area.
+
+Verification:
+
+- `pnpm.cmd check` passed with existing project warnings only.
+- `pnpm.cmd build` passed with existing project warnings only.
+- `cargo check` passed after using the rustup/toolchain PATH.
+- Restarted the Tauri dev app so the new capability configuration is active.
+
+Caveats:
+
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.
