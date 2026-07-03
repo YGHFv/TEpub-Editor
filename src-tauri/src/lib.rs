@@ -2106,6 +2106,7 @@ fn toolbox_file_decrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, Str
 const TOOLBOX_FONT_OBFUSCATION_SCRIPT: &str = r##"
 import json
 import html as html_lib
+import random
 import re
 import sys
 import unicodedata
@@ -2132,16 +2133,28 @@ def decode_text(data):
             pass
     return data.decode("utf-8", errors="replace")
 
+def is_private_use_char(ch):
+    code = ord(ch)
+    return 0xE000 <= code <= 0xF8FF or 0xF0000 <= code <= 0x10FFFD
+
+def is_cjk_ideograph(ch):
+    code = ord(ch)
+    return (
+        0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x3FFFF
+    )
+
 def should_map_char(ch):
     if ch in "<>&":
         return False
     cat = unicodedata.category(ch)
-    if cat.startswith("C") or cat.startswith("Z"):
+    if cat.startswith(("C", "Z", "P", "S", "N")):
         return False
-    code = ord(ch)
-    if 0xE000 <= code <= 0xF8FF or 0xF0000 <= code <= 0x10FFFD:
+    if is_private_use_char(ch):
         return False
-    return True
+    return is_cjk_ideograph(ch)
 
 def tag_identity(tag):
     body = tag.strip("<> \t\r\n")
@@ -2714,14 +2727,18 @@ def neutralize_css_fonts(text):
 def neutralize_html_inline_fonts(text):
     return re.sub(r"(?is)font-family\s*:\s*[^;\"'}]+;?", "font-family: serif;", text)
 
-def private_chars(count):
+def private_chars(count, excluded=None):
+    excluded = set(excluded or ())
     ranges = [(0xE000, 0xF8FF), (0xF0000, 0xFFFFD), (0x100000, 0x10FFFD)]
-    made = []
+    available = []
     for start, end in ranges:
         for code in range(start, end + 1):
-            made.append(chr(code))
-            if len(made) >= count:
-                return made
+            ch = chr(code)
+            if ch not in excluded:
+                available.append(ch)
+    if len(available) >= count:
+        random.SystemRandom().shuffle(available)
+        return available[:count]
     raise RuntimeError("可用私用区字符不足")
 
 def collect_supported_chars(font_items):
@@ -2804,18 +2821,20 @@ def encrypt_epub(input_path, output_path):
             raise RuntimeError("EPUB 内未找到 HTML/XHTML 文件")
         supported_chars = collect_supported_chars((name, contents[name]) for name in font_names)
         if not supported_chars:
-            raise RuntimeError("内嵌字体未发现可混淆字符")
+            raise RuntimeError("内嵌字体未发现可加密汉字")
         chars = []
         seen = set()
+        existing_private_chars = set()
         for name in html_names:
             html = decode_text(contents[name])
+            existing_private_chars.update(ch for ch in html if is_private_use_char(ch))
             for ch in iter_text_chars(html):
                 if ch in supported_chars and ch not in seen:
                     seen.add(ch)
                     chars.append(ch)
         if not chars:
-            raise RuntimeError("未找到可加密的正文字符")
-        shadows = private_chars(len(chars))
+            raise RuntimeError("未找到可加密的正文汉字")
+        shadows = private_chars(len(chars), existing_private_chars)
         mapping = dict(zip(chars, shadows))
         for name in html_names:
             contents[name] = transform_text(decode_text(contents[name]), mapping).encode("utf-8")
@@ -2827,14 +2846,7 @@ def encrypt_epub(input_path, output_path):
                 contents[name] = new_data
         if changed_fonts == 0:
             raise RuntimeError("字体 cmap 未能写入私用区映射，无法完成字体加密")
-        payload = {
-            "version": 1,
-            "tool": "TEpub-Editor",
-            "type": "font-obfuscation-map",
-            "map": [[plain, shadow] for plain, shadow in mapping.items()],
-            "fontCount": changed_fonts,
-        }
-        write_entries(output_path, infos, contents, extra_map=payload, skip_map=True)
+        write_entries(output_path, infos, contents, extra_map=None, skip_map=True)
         return len(chars), changed_fonts
 
 def decrypt_epub_with_saved_map(input_path, output_path):

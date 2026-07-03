@@ -2600,6 +2600,24 @@ Verification:
 - `cargo check` passed.
 - `pnpm build` passed.
 
+### 2026-07-03 10:24 +08:00
+
+Request: optimize toolbox font encryption as an irreversible scheme and skip punctuation-like characters to avoid display issues in some EPUB readers.
+
+Changes:
+
+- Changed toolbox font encryption to no longer write `META-INF/tepub-font-obfuscation.json`, and to remove any existing old map from the output EPUB.
+- Restricted encrypted characters to CJK ideographs only; punctuation, symbols, numbers, Latin letters, whitespace, controls, and private-use characters are skipped.
+- Randomized private-use replacement codepoints and avoided codepoints already present in source HTML.
+- Kept the legacy font decrypt path available for older mapped files or TXT-alignment recovery, but new encrypted output no longer carries a built-in recovery map.
+
+Verification:
+
+- `cargo check` passed.
+- Extracted and compiled the embedded Python font-obfuscation script, then verified the character filter maps `汉` and skips `，`, `。`, `,`, `A`, `1`, PUA, and whitespace.
+- `pnpm build` passed with existing warnings.
+- `pnpm exec svelte-check --tsconfig ./tsconfig.json` passed with existing warnings.
+
 ### 2026-06-19 00:00 +08:00
 
 Request: release v0.6.5 with the toolbox UI cleanup and Windows font subsetting process fix.
