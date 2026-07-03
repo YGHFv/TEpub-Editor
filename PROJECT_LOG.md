@@ -2820,6 +2820,34 @@ Caveats:
 
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
 
+### 2026-07-03 13:35 +08:00
+
+Request: continue the remaining optimization work for the function/batch pages.
+
+Changes:
+
+- Added queue filtering to the batch progress window:
+  - `全部`,
+  - `等待`,
+  - `处理中`,
+  - `完成`,
+  - `异常`.
+- Added a queue search box that matches file name, input path, output path, and row message.
+- Changed queue rendering to show only matching rows while keeping the header statistics based on the full queue.
+- Added a visible `显示 x / y` count when filters or search terms narrow the list.
+- Split the queue panel into header, filter toolbar, and scrollable list rows so filtering controls do not disturb long-list scrolling.
+- Added responsive toolbar behavior for narrow windows.
+
+Verification:
+
+- `pnpm.cmd check` passed with the existing Svelte warnings.
+- `pnpm.cmd build` passed with the existing warnings/chunk-size warning.
+- No Rust restart was required because this change only touches the Svelte batch progress page; the running dev app picks it up through Vite.
+
+Caveats:
+
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.

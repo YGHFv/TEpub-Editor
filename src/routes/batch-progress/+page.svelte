@@ -19,6 +19,7 @@
 
   type QueueStatus = "waiting" | "running" | "done" | "warning" | "error";
   type LogLevel = "all" | "info" | "warning" | "error";
+  type QueueFilter = "all" | QueueStatus | "issue";
 
   type QueueRow = {
     inputPath: string;
@@ -85,12 +86,24 @@
   let rows: QueueRow[] = [];
   let logs: LogRow[] = [];
   let logFilter: LogLevel = "all";
+  let queueFilter: QueueFilter = "all";
+  let queueSearch = "";
 
   $: currentMeta = TOOL_META[tool] ?? { title: toolTitleParam, detail: "批量执行 EPUB 工具" };
   $: percent = total > 0 ? Math.round((current / total) * 100) : 0;
   $: canStart = inputPaths.length > 0 && !running && !scanning;
   $: outputLabel = outputDir || resolvedOutputDir || "默认：所选文件夹下 TEpub-batch-output";
   $: filteredLogs = logFilter === "all" ? logs : logs.filter((log) => log.level === logFilter);
+  $: normalizedQueueSearch = queueSearch.trim().toLowerCase();
+  $: visibleRows = rows.filter((row) => {
+    const statusMatches =
+      queueFilter === "all" ||
+      row.status === queueFilter ||
+      (queueFilter === "issue" && (row.status === "warning" || row.status === "error"));
+    if (!statusMatches) return false;
+    if (!normalizedQueueSearch) return true;
+    return `${basename(row.inputPath)} ${row.inputPath} ${row.outputPath} ${row.message}`.toLowerCase().includes(normalizedQueueSearch);
+  });
   $: queueStats = rows.reduce<Record<QueueStatus, number>>(
     (acc, row) => {
       acc[row.status] += 1;
@@ -599,11 +612,32 @@
           <span class="count-pill">{rows.length}</span>
         </div>
       </div>
+      <div class="queue-tools" aria-label="队列筛选">
+        <div class="segmented queue-filter">
+          <button type="button" class:active={queueFilter === "all"} on:click={() => (queueFilter = "all")}>全部</button>
+          <button type="button" class:active={queueFilter === "waiting"} on:click={() => (queueFilter = "waiting")}>等待</button>
+          <button type="button" class:active={queueFilter === "running"} on:click={() => (queueFilter = "running")}>处理中</button>
+          <button type="button" class:active={queueFilter === "done"} on:click={() => (queueFilter = "done")}>完成</button>
+          <button type="button" class:active={queueFilter === "issue"} on:click={() => (queueFilter = "issue")}>异常</button>
+        </div>
+        <input
+          class="queue-search"
+          type="search"
+          bind:value={queueSearch}
+          placeholder="搜索文件名或路径"
+          aria-label="搜索队列文件"
+        />
+        {#if rows.length > 0 && visibleRows.length !== rows.length}
+          <span class="queue-visible-count">显示 {visibleRows.length} / {rows.length}</span>
+        {/if}
+      </div>
       <div class="queue-list">
         {#if rows.length === 0}
           <div class="empty">还没有加入 EPUB 文件或目录。</div>
+        {:else if visibleRows.length === 0}
+          <div class="empty">没有匹配的队列文件。</div>
         {:else}
-          {#each rows as row}
+          {#each visibleRows as row}
             <div class={`queue-row status-${row.status}`}>
               <div class="queue-main">
                 <strong>{basename(row.inputPath)}</strong>
@@ -914,8 +948,15 @@
   .log-panel {
     min-height: 0;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
     gap: 12px;
+  }
+
+  .queue-panel {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .log-panel {
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .log-actions {
@@ -978,6 +1019,44 @@
     font-size: 11px;
     font-weight: 800;
     line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .queue-tools {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(140px, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .queue-filter {
+    justify-self: start;
+  }
+
+  .queue-search {
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 30px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 5px 10px;
+    background: var(--color-canvas);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  .queue-search:focus {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  .queue-visible-count {
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 800;
     white-space: nowrap;
   }
 
@@ -1161,6 +1240,20 @@
 
     .tool-run-row {
       grid-template-columns: 1fr;
+    }
+
+    .queue-tools {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+
+    .queue-filter {
+      max-width: 100%;
+      overflow-x: auto;
+    }
+
+    .queue-visible-count {
+      justify-self: start;
     }
   }
 </style>
