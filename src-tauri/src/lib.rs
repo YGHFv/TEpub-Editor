@@ -1704,15 +1704,31 @@ fn rebuild_epub_with_sanitized_names_from_bytes(
     bytes: &[u8],
     suffix: &str,
 ) -> Result<Option<PathBuf>, String> {
+    let mut noop = |_stage: &str| {};
+    rebuild_epub_with_sanitized_names_from_bytes_with_progress(source, bytes, suffix, &mut noop)
+}
+
+fn rebuild_epub_with_sanitized_names_from_bytes_with_progress<F>(
+    source: &Path,
+    bytes: &[u8],
+    suffix: &str,
+    progress: &mut F,
+) -> Result<Option<PathBuf>, String>
+where
+    F: FnMut(&str),
+{
+    progress("读取 EPUB 目录");
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
         .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
 
     let mut path_map: HashMap<String, String> = HashMap::new();
     let mut used: HashSet<String> = HashSet::new();
+    progress("解析 OPF manifest");
     let opf_name_hints = collect_opf_id_hints(bytes);
     let mut friendly_counter: usize = 1;
     let mut changed = false;
 
+    progress("分析混淆文件名");
     for i in 0..archive.len() {
         let file = archive
             .by_index(i)
@@ -1763,9 +1779,11 @@ fn rebuild_epub_with_sanitized_names_from_bytes(
     }
 
     if !changed {
+        progress("未检测到需要修复的文件名");
         return Ok(None);
     }
 
+    progress("创建修复后的 EPUB");
     let out_path = build_processed_epub_path(source, suffix);
     let out_file = fs::File::create(&out_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
     let mut writer = zip::ZipWriter::new(out_file);
@@ -1780,7 +1798,11 @@ fn rebuild_epub_with_sanitized_names_from_bytes(
         }
     }
 
-    for i in 0..archive2.len() {
+    let total_entries = archive2.len();
+    for i in 0..total_entries {
+        if i == 0 || (i + 1) % 100 == 0 || i + 1 == total_entries {
+            progress(&format!("重写 EPUB 条目 {}/{}", i + 1, total_entries));
+        }
         let mut file = archive2
             .by_index(i)
             .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
@@ -1824,9 +1846,11 @@ fn rebuild_epub_with_sanitized_names_from_bytes(
             .map_err(|e| format!("写入文件内容失败: {}", e))?;
     }
 
+    progress("完成 EPUB 写入");
     writer
         .finish()
         .map_err(|e| format!("完成写入失败: {}", e))?;
+    progress("EPUB 修复写出完成");
     Ok(Some(out_path))
 }
 
@@ -2172,11 +2196,25 @@ fn toolbox_file_encrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, Str
 }
 
 fn toolbox_file_decrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, String> {
+    let mut noop = |_stage: &str| {};
+    toolbox_file_decrypt_impl_with_progress(source, &mut noop)
+}
+
+fn toolbox_file_decrypt_impl_with_progress<F>(
+    source: &Path,
+    progress: &mut F,
+) -> Result<ToolboxEpubToolResult, String>
+where
+    F: FnMut(&str),
+{
     if !source.exists() {
         return Err(format!("文件不存在: {}", source.to_string_lossy()));
     }
+    progress("读取 EPUB 文件");
     let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
-    let processed = rebuild_epub_with_sanitized_names_from_bytes(source, &bytes, "_decrypt")?;
+    let processed = rebuild_epub_with_sanitized_names_from_bytes_with_progress(
+        source, &bytes, "_decrypt", progress,
+    )?;
     if let Some(output_path) = processed {
         Ok(toolbox_epub_tool_result(
             source,
@@ -2617,6 +2655,29 @@ fn emit_toolbox_batch_event(app: &tauri::AppHandle, event: ToolboxBatchEvent) {
     let _ = app.emit("toolbox-batch-event", event);
 }
 
+fn emit_toolbox_batch_stage(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    index: usize,
+    total: usize,
+    input_path: &Path,
+    message: impl Into<String>,
+) {
+    emit_toolbox_batch_event(
+        app,
+        ToolboxBatchEvent {
+            task_id: task_id.to_string(),
+            event: "file-stage".to_string(),
+            level: "info".to_string(),
+            index,
+            total,
+            input_path: Some(input_path.to_string_lossy().to_string()),
+            output_path: None,
+            message: message.into(),
+        },
+    );
+}
+
 fn reset_toolbox_batch_cancel(task_id: &str) {
     if let Ok(mut set) = TOOLBOX_BATCH_CANCEL.lock() {
         set.remove(task_id);
@@ -2909,17 +2970,26 @@ fn run_toolbox_batch_impl(
                 message: format!("开始处理 {}", source.to_string_lossy()),
             },
         );
+        emit_toolbox_batch_stage(&app, &task_id, index, total, source, "读取文件并准备处理");
 
         let result = match normalized_tool.as_str() {
             "file_encrypt" => toolbox_file_encrypt_impl(source),
-            "file_decrypt" => toolbox_file_decrypt_impl(source),
+            "file_decrypt" => {
+                let mut progress = |message: &str| {
+                    emit_toolbox_batch_stage(&app, &task_id, index, total, source, message);
+                };
+                toolbox_file_decrypt_impl_with_progress(source, &mut progress)
+            }
             "font_encrypt" => toolbox_font_encrypt_impl(source),
             "font_decrypt" => toolbox_font_decrypt_impl(source, None),
             "epub_reformat" => toolbox_epub_reformat_impl(source),
             "image_convert" => toolbox_image_convert_impl(source, image_format.as_deref()),
             _ => Err(format!("不支持的批量工具: {}", tool)),
         }
-        .and_then(|done| move_toolbox_result_to_dir(done, &output_dir));
+        .and_then(|done| {
+            emit_toolbox_batch_stage(&app, &task_id, index, total, source, "整理输出文件");
+            move_toolbox_result_to_dir(done, &output_dir)
+        });
 
         match result {
             Ok(done) => {

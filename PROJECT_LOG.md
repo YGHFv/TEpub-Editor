@@ -2566,6 +2566,36 @@ Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
 
+### 2026-07-03 14:15 +08:00
+
+Request: continue the optimization plan step by step, sync GitHub after each completed part, and make long batch EPUB decrypt/rebuild tasks visibly progress instead of looking stuck.
+
+Changes:
+
+- Added staged progress callbacks to EPUB filename repair/deobfuscation:
+  - read EPUB directory,
+  - parse OPF manifest,
+  - analyze obfuscated names,
+  - create repaired EPUB,
+  - rewrite ZIP entries with periodic `N/total` updates,
+  - finish write-out.
+- Kept the existing single-file decrypt API compatible by wrapping the new progress-aware core function with a no-op callback.
+- Connected batch `file_decrypt` to the progress-aware decrypt path and emitted `file-stage` events for per-file stages.
+- Added generic batch stage events for preparing files and organizing output files.
+- Updated the batch progress window to handle `file-stage` events and refresh the current queue row without expanding the queue layout.
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `cargo fmt` passed.
+- `cargo test` passed: 10 tests.
+- `cargo check` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still reports existing Svelte accessibility and unused CSS warnings in unrelated pages/components.
+
 ### 2026-07-03 11:01 +08:00
 
 Request: port EPUB reformat and image conversion features from `cnwxi/epub_tool`, allow file/font encrypt-decrypt and rebuild tools to select folders for batch conversion, and show batch processing progress in a new window.

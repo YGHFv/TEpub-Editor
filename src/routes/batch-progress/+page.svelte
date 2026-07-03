@@ -143,9 +143,10 @@
 
   function upsertRow(event: BatchEvent, status: QueueStatus) {
     if (!event.inputPath) return;
+    const previous = rows.find((item) => item.inputPath === event.inputPath);
     const row: QueueRow = {
       inputPath: event.inputPath,
-      outputPath: event.outputPath ?? "",
+      outputPath: event.outputPath ?? previous?.outputPath ?? "",
       status,
       message: event.message,
     };
@@ -207,6 +208,10 @@
     } else if (event.event === "started") {
       summary = event.message;
     } else if (event.event === "file-start") {
+      current = Math.max(current, event.index - 1);
+      summary = event.message;
+      upsertRow(event, "running");
+    } else if (event.event === "file-stage") {
       current = Math.max(current, event.index - 1);
       summary = event.message;
       upsertRow(event, "running");
