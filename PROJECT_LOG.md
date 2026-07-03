@@ -2765,6 +2765,36 @@ Caveats:
 
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
 
+### 2026-07-03 13:01 +08:00
+
+Request: continue the batch-processing optimization plan, keep the left task area from scrolling, and improve long-running batch task control.
+
+Changes:
+
+- Added cooperative cancellation for toolbox batch jobs:
+  - new backend cancellation registry keyed by batch `taskId`,
+  - new Tauri command `toolbox_cancel_batch`,
+  - batch execution now stops before the next file starts and emits a warning summary instead of leaving the UI waiting.
+- Improved the batch progress window:
+  - added a `取消任务` action while a batch is running,
+  - added close-window protection during scanning/running, with optional cancellation before closing,
+  - changed logs to structured levels and added `全部 / 错误 / 警告` filters,
+  - added log export to a text file and kept log clearing compact.
+- Rechecked the batch layout so the left task/config panel remains non-scrollable; only the file queue and bottom log list scroll.
+
+Verification:
+
+- `pnpm.cmd check` passed with the existing Svelte warnings.
+- `pnpm.cmd build` passed with the existing warnings/chunk-size warning.
+- `cargo check` passed.
+- `cargo test` passed: 9 tests passed.
+- Restarted the Tauri dev app so the new cancel command is active in `target\debug\TEpub-Editor.exe`.
+
+Caveats:
+
+- Batch cancellation is cooperative and takes effect between files, not in the middle of a single EPUB operation, to avoid leaving partially written output in an ambiguous state.
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.

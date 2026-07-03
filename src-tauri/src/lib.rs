@@ -35,6 +35,7 @@ impl EpubCache {
 }
 
 static EPUB_CACHE: Lazy<Mutex<Option<EpubCache>>> = Lazy::new(|| Mutex::new(None));
+static TOOLBOX_BATCH_CANCEL: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 fn hidden_process_command(program: &str) -> process::Command {
     let mut command = process::Command::new(program);
@@ -2528,6 +2529,25 @@ fn emit_toolbox_batch_event(app: &tauri::AppHandle, event: ToolboxBatchEvent) {
     let _ = app.emit("toolbox-batch-event", event);
 }
 
+fn reset_toolbox_batch_cancel(task_id: &str) {
+    if let Ok(mut set) = TOOLBOX_BATCH_CANCEL.lock() {
+        set.remove(task_id);
+    }
+}
+
+fn request_toolbox_batch_cancel(task_id: &str) {
+    if let Ok(mut set) = TOOLBOX_BATCH_CANCEL.lock() {
+        set.insert(task_id.to_string());
+    }
+}
+
+fn is_toolbox_batch_cancelled(task_id: &str) -> bool {
+    TOOLBOX_BATCH_CANCEL
+        .lock()
+        .map(|set| set.contains(task_id))
+        .unwrap_or(false)
+}
+
 fn is_same_path(left: &Path, right: &Path) -> bool {
     let left_canon = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
     let right_canon = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
@@ -2699,6 +2719,7 @@ fn run_toolbox_batch_impl(
     image_format: Option<String>,
     output_dir: Option<String>,
 ) -> Result<ToolboxBatchSummary, String> {
+    reset_toolbox_batch_cancel(&task_id);
     let output_dir = resolve_batch_output_dir(&input_paths, output_dir);
     emit_toolbox_batch_event(
         &app,
@@ -2755,6 +2776,28 @@ fn run_toolbox_batch_impl(
     let mut failed = 0usize;
     for (idx, source) in sources.iter().enumerate() {
         let index = idx + 1;
+        if is_toolbox_batch_cancelled(&task_id) {
+            reset_toolbox_batch_cancel(&task_id);
+            emit_toolbox_batch_event(
+                &app,
+                ToolboxBatchEvent {
+                    task_id: task_id.clone(),
+                    event: "finished".to_string(),
+                    level: "warning".to_string(),
+                    index: idx,
+                    total,
+                    input_path: None,
+                    output_path: None,
+                    message: format!("批量处理已取消：成功 {}，失败 {}，剩余 {}", succeeded, failed, total.saturating_sub(idx)),
+                },
+            );
+            return Ok(ToolboxBatchSummary {
+                task_id,
+                total,
+                succeeded,
+                failed,
+            });
+        }
         emit_toolbox_batch_event(
             &app,
             ToolboxBatchEvent {
@@ -2829,6 +2872,7 @@ fn run_toolbox_batch_impl(
             message: format!("批量处理完成：成功 {}，失败 {}", succeeded, failed),
         },
     );
+    reset_toolbox_batch_cancel(&task_id);
     Ok(ToolboxBatchSummary {
         task_id,
         total,
@@ -3822,6 +3866,15 @@ async fn toolbox_scan_batch_inputs(
     })
     .await
     .map_err(|e| format!("批量目录扫描失败: {}", e))?
+}
+
+#[tauri::command]
+fn toolbox_cancel_batch(task_id: String) -> Result<(), String> {
+    if task_id.trim().is_empty() {
+        return Err("缺少批量任务 ID".to_string());
+    }
+    request_toolbox_batch_cancel(&task_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -10675,6 +10728,7 @@ pub fn run() {
             toolbox_epub_reformat,
             toolbox_image_convert,
             toolbox_scan_batch_inputs,
+            toolbox_cancel_batch,
             toolbox_run_batch,
             exit_app,
             // ===== Library Phase 1 =====

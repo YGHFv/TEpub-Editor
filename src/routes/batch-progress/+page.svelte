@@ -3,7 +3,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { ask, open, save } from "@tauri-apps/plugin-dialog";
+  import { writeTextFile } from "@tauri-apps/plugin-fs";
 
   type BatchEvent = {
     taskId: string;
@@ -17,12 +18,18 @@
   };
 
   type QueueStatus = "waiting" | "running" | "done" | "warning" | "error";
+  type LogLevel = "all" | "info" | "warning" | "error";
 
   type QueueRow = {
     inputPath: string;
     outputPath: string;
     status: QueueStatus;
     message: string;
+  };
+
+  type LogRow = {
+    level: LogLevel;
+    text: string;
   };
 
   type BatchTaskConfig = {
@@ -71,16 +78,19 @@
   let total = 0;
   let current = 0;
   let running = false;
+  let cancelRequested = false;
   let scanning = false;
   let done = false;
   let summary = "请选择 EPUB 文件或扫描目录";
   let rows: QueueRow[] = [];
-  let logs: string[] = [];
+  let logs: LogRow[] = [];
+  let logFilter: LogLevel = "all";
 
   $: currentMeta = TOOL_META[tool] ?? { title: toolTitleParam, detail: "批量执行 EPUB 工具" };
   $: percent = total > 0 ? Math.round((current / total) * 100) : 0;
   $: canStart = inputPaths.length > 0 && !running && !scanning;
   $: outputLabel = outputDir || resolvedOutputDir || "默认：所选文件夹下 TEpub-batch-output";
+  $: filteredLogs = logFilter === "all" ? logs : logs.filter((log) => log.level === logFilter);
 
   function basename(path: string) {
     return path.split(/[\\/]/).pop() || path;
@@ -101,13 +111,14 @@
     }
   }
 
-  function logLine(message: string, prefix = currentMeta.title) {
+  function logLine(message: string, prefix = currentMeta.title, level: LogLevel = "info") {
     const time = new Date().toLocaleTimeString();
-    logs = [`[${time}] ${prefix}: ${message}`, ...logs].slice(0, 400);
+    logs = [{ level, text: `[${time}] ${prefix}: ${message}` }, ...logs].slice(0, 400);
   }
 
   function pushEventLog(event: BatchEvent) {
-    logLine(event.message, event.inputPath ? basename(event.inputPath) : currentMeta.title);
+    const level = event.level === "error" || event.level === "warning" ? event.level : "info";
+    logLine(event.message, event.inputPath ? basename(event.inputPath) : currentMeta.title, level);
   }
 
   function upsertRow(event: BatchEvent, status: QueueStatus) {
@@ -190,6 +201,7 @@
     } else if (event.event === "finished") {
       current = event.total;
       running = false;
+      cancelRequested = false;
       done = true;
       summary = event.message;
     }
@@ -283,7 +295,7 @@
         status: "error",
         message: summary,
       }));
-      logLine(summary);
+      logLine(summary, currentMeta.title, "error");
     } finally {
       scanning = false;
     }
@@ -353,7 +365,7 @@
       await invoke("reveal_in_explorer", { path });
     } catch (e: any) {
       summary = `无法打开位置: ${e}`;
-      logLine(summary);
+      logLine(summary, currentMeta.title, "error");
     }
   }
 
@@ -370,12 +382,50 @@
     logs = [];
   }
 
+  async function exportLogs() {
+    if (logs.length === 0) return;
+    const selected = await save({
+      title: "导出批量处理日志",
+      defaultPath: `${currentMeta.title}-批量日志.txt`,
+      filters: [{ name: "文本文件", extensions: ["txt"] }],
+    });
+    if (!selected) return;
+    const body = logs
+      .slice()
+      .reverse()
+      .map((log) => log.text)
+      .join("\n");
+    try {
+      await writeTextFile(selected, body);
+      summary = "日志已导出";
+      logLine(`日志已导出: ${selected}`);
+    } catch (e: any) {
+      summary = `日志导出失败: ${e}`;
+      logLine(summary, currentMeta.title, "error");
+    }
+  }
+
+  async function cancelBatch() {
+    if (!running || cancelRequested) return;
+    cancelRequested = true;
+    summary = "正在请求取消，当前文件处理完成后停止";
+    logLine("已请求取消批量任务", currentMeta.title, "warning");
+    try {
+      await invoke("toolbox_cancel_batch", { taskId });
+    } catch (e: any) {
+      cancelRequested = false;
+      summary = `取消请求失败: ${e}`;
+      logLine(summary, currentMeta.title, "error");
+    }
+  }
+
   async function startBatch() {
     if (!canStart) {
       summary = "请先加入 EPUB 文件或目录";
       return;
     }
     running = true;
+    cancelRequested = false;
     done = false;
     total = 0;
     current = 0;
@@ -394,6 +444,7 @@
         outputDir: outputDir || resolvedOutputDir || undefined,
       });
       running = false;
+      cancelRequested = false;
       done = true;
       total = result.total;
       current = result.total;
@@ -402,13 +453,24 @@
       }
     } catch (e: any) {
       running = false;
+      cancelRequested = false;
       done = true;
       summary = `批量任务失败: ${e}`;
-      logLine(summary);
+      logLine(summary, currentMeta.title, "error");
     }
   }
 
-  function closeWindow() {
+  async function closeWindow() {
+    if (running || scanning) {
+      const ok = await ask("批量任务仍在执行或扫描，确定关闭窗口吗？", {
+        title: "关闭批量窗口",
+        kind: "warning",
+      });
+      if (!ok) return;
+      if (running) {
+        await cancelBatch();
+      }
+    }
     getCurrentWindow().close();
   }
 
@@ -430,11 +492,28 @@
     }
 
     let unlisten: UnlistenFn | undefined;
+    let unlistenClose: UnlistenFn | undefined;
     listen<BatchEvent>("toolbox-batch-event", (event) => applyEvent(event.payload)).then((fn) => {
       unlisten = fn;
     });
+    getCurrentWindow().onCloseRequested(async (event) => {
+      if (!running && !scanning) return;
+      event.preventDefault();
+      const ok = await ask("批量任务仍在执行或扫描，确定关闭窗口吗？", {
+        title: "关闭批量窗口",
+        kind: "warning",
+      });
+      if (!ok) return;
+      if (running) {
+        await cancelBatch();
+      }
+      await getCurrentWindow().destroy();
+    }).then((fn) => {
+      unlistenClose = fn;
+    });
     return () => {
       unlisten?.();
+      unlistenClose?.();
     };
   });
 </script>
@@ -491,6 +570,11 @@
         <button class="start-btn" type="button" on:click={startBatch} disabled={!canStart}>
           {running ? "执行中" : scanning ? "扫描中" : "开始执行"}
         </button>
+        {#if running}
+          <button class="cancel-btn" type="button" on:click={cancelBatch} disabled={cancelRequested}>
+            {cancelRequested ? "取消中" : "取消任务"}
+          </button>
+        {/if}
       </div>
 
       <div class="progress-area" aria-label="批量进度">
@@ -544,14 +628,22 @@
         <div class="eyebrow">过程</div>
         <h2>处理日志</h2>
       </div>
-      <button class="ghost-btn" type="button" on:click={clearLog} disabled={logs.length === 0}>清空日志</button>
+      <div class="log-actions">
+        <div class="segmented" aria-label="日志筛选">
+          <button type="button" class:active={logFilter === "all"} on:click={() => (logFilter = "all")}>全部</button>
+          <button type="button" class:active={logFilter === "error"} on:click={() => (logFilter = "error")}>错误</button>
+          <button type="button" class:active={logFilter === "warning"} on:click={() => (logFilter = "warning")}>警告</button>
+        </div>
+        <button class="ghost-btn compact-btn" type="button" on:click={exportLogs} disabled={logs.length === 0}>导出日志</button>
+        <button class="ghost-btn compact-btn" type="button" on:click={clearLog} disabled={logs.length === 0}>清空日志</button>
+      </div>
     </div>
     <div class="log-list">
-      {#if logs.length === 0}
+      {#if filteredLogs.length === 0}
         <div class="empty">尚未执行任务。</div>
       {:else}
-        {#each logs as log}
-          <div>{log}</div>
+        {#each filteredLogs as log}
+          <div class={`log-line level-${log.level}`}>{log.text}</div>
         {/each}
       {/if}
     </div>
@@ -679,6 +771,12 @@
     color: var(--color-accent-contrast, #fff);
   }
 
+  .cancel-btn {
+    border-color: color-mix(in srgb, #d14343 28%, var(--color-border));
+    background: color-mix(in srgb, #d14343 10%, var(--color-surface));
+    color: #9b1c1c;
+  }
+
   .strong-btn {
     border-color: var(--color-border-strong);
     background: var(--color-text);
@@ -767,12 +865,13 @@
 
   .tool-run-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 12px;
     align-items: center;
   }
 
-  .start-btn {
+  .start-btn,
+  .cancel-btn {
     min-width: 108px;
     min-height: 36px;
     padding-inline: 16px;
@@ -817,6 +916,38 @@
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 12px;
+  }
+
+  .log-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .segmented {
+    display: inline-flex;
+    align-items: center;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-canvas);
+  }
+
+  .segmented button {
+    min-height: 30px;
+    border: 0;
+    border-radius: 0;
+    padding: 5px 10px;
+    background: transparent;
+    color: var(--color-muted);
+    font-size: 12px;
+  }
+
+  .segmented button.active {
+    background: var(--color-accent);
+    color: var(--color-accent-contrast, #fff);
   }
 
   .count-pill {
@@ -948,6 +1079,18 @@
     line-height: 1.5;
   }
 
+  .log-line {
+    overflow-wrap: anywhere;
+  }
+
+  .log-line.level-warning {
+    color: #8a4b08;
+  }
+
+  .log-line.level-error {
+    color: #9b1c1c;
+  }
+
   .empty {
     padding: 16px;
     color: var(--color-muted);
@@ -990,8 +1133,13 @@
     }
 
     .source-actions,
-    .panel-actions {
+    .panel-actions,
+    .log-actions {
       justify-content: flex-start;
+    }
+
+    .tool-run-row {
+      grid-template-columns: 1fr;
     }
   }
 </style>
