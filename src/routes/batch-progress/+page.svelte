@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { open } from "@tauri-apps/plugin-dialog";
 
   type BatchEvent = {
     taskId: string;
@@ -15,10 +16,12 @@
     message: string;
   };
 
+  type QueueStatus = "waiting" | "running" | "done" | "warning" | "error";
+
   type QueueRow = {
     inputPath: string;
     outputPath: string;
-    status: "waiting" | "running" | "done" | "warning" | "error";
+    status: QueueStatus;
     message: string;
   };
 
@@ -29,7 +32,6 @@
     inputPaths: string[];
     outputDir?: string;
     imageFormat?: string;
-    started?: boolean;
   };
 
   type BatchSummary = {
@@ -41,29 +43,65 @@
 
   const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
   const taskId = params.get("taskId") ?? "";
-  const toolTitle = params.get("tool") ?? "批量处理";
+  const toolTitleParam = params.get("tool") ?? "批量处理";
   const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
 
+  const TOOL_META: Record<string, { title: string; detail: string }> = {
+    "file-encrypt": { title: "文件加密", detail: "混淆 EPUB 内部文件名并同步引用" },
+    "file-decrypt": { title: "文件解密", detail: "还原混淆文件名，支持单本、多本和目录扫描" },
+    "font-encrypt": { title: "字体加密", detail: "对 EPUB 正文字形进行不可逆混淆处理" },
+    "font-decrypt": { title: "字体解密", detail: "使用保存的映射或 TXT 对齐还原字体混淆" },
+    "epub-reformat": { title: "EPUB 重构", detail: "整理 EPUB 目录结构并重写内部引用" },
+    "image-convert": { title: "图片转换", detail: "转换 EPUB 内 WebP 图片并更新引用" },
+  };
+
+  let tool = "";
+  let inputPaths: string[] = [];
+  let outputDir = "";
+  let resolvedOutputDir = "";
+  let imageFormat: string | undefined;
   let total = 0;
   let current = 0;
+  let running = false;
   let done = false;
-  let summary = "等待任务开始";
+  let summary = "请选择 EPUB 文件或扫描目录";
   let rows: QueueRow[] = [];
   let logs: string[] = [];
 
+  $: currentMeta = TOOL_META[tool] ?? { title: toolTitleParam, detail: "批量执行 EPUB 工具" };
   $: percent = total > 0 ? Math.round((current / total) * 100) : 0;
+  $: canStart = inputPaths.length > 0 && !running;
+  $: outputLabel = outputDir || resolvedOutputDir || "默认：所选文件夹下 TEpub-batch-output";
 
   function basename(path: string) {
     return path.split(/[\\/]/).pop() || path;
   }
 
-  function pushLog(event: BatchEvent) {
-    const time = new Date().toLocaleTimeString();
-    const prefix = event.inputPath ? basename(event.inputPath) : toolTitle;
-    logs = [`[${time}] ${prefix}: ${event.message}`, ...logs].slice(0, 300);
+  function statusLabel(status: QueueStatus) {
+    switch (status) {
+      case "running":
+        return "处理中";
+      case "done":
+        return "完成";
+      case "warning":
+        return "跳过";
+      case "error":
+        return "失败";
+      default:
+        return "等待";
+    }
   }
 
-  function upsertRow(event: BatchEvent, status: QueueRow["status"]) {
+  function logLine(message: string, prefix = currentMeta.title) {
+    const time = new Date().toLocaleTimeString();
+    logs = [`[${time}] ${prefix}: ${message}`, ...logs].slice(0, 400);
+  }
+
+  function pushEventLog(event: BatchEvent) {
+    logLine(event.message, event.inputPath ? basename(event.inputPath) : currentMeta.title);
+  }
+
+  function upsertRow(event: BatchEvent, status: QueueStatus) {
     if (!event.inputPath) return;
     const row: QueueRow = {
       inputPath: event.inputPath,
@@ -79,10 +117,49 @@
     }
   }
 
+  function addInputRows(paths: string[], message: string) {
+    const existing = new Set(rows.map((row) => row.inputPath.toLowerCase()));
+    const nextRows = [...rows];
+    for (const path of paths) {
+      const key = path.toLowerCase();
+      if (existing.has(key)) continue;
+      existing.add(key);
+      nextRows.push({
+        inputPath: path,
+        outputPath: "",
+        status: "waiting",
+        message,
+      });
+    }
+    rows = nextRows;
+  }
+
+  function addInputPaths(paths: string[], message: string) {
+    const seen = new Set(inputPaths.map((path) => path.toLowerCase()));
+    const added: string[] = [];
+    for (const path of paths) {
+      if (!path || seen.has(path.toLowerCase())) continue;
+      seen.add(path.toLowerCase());
+      added.push(path);
+    }
+    if (added.length === 0) return;
+    inputPaths = [...inputPaths, ...added];
+    addInputRows(added, message);
+    summary = `已加入 ${inputPaths.length} 个输入源`;
+    logLine(`加入 ${added.length} 个输入源`);
+    saveTaskConfig();
+  }
+
   function applyEvent(event: BatchEvent) {
     if (event.taskId !== taskId) return;
     total = event.total || total;
+    if (event.outputPath && event.event === "scan-start") {
+      resolvedOutputDir = event.outputPath;
+    }
     if (event.event === "scan-start") {
+      rows = [];
+      current = 0;
+      total = 0;
       summary = event.message;
     } else if (event.event === "scan-file") {
       summary = event.message;
@@ -103,13 +180,15 @@
       upsertRow(event, "error");
     } else if (event.event === "finished") {
       current = event.total;
+      running = false;
       done = true;
       summary = event.message;
     }
-    pushLog(event);
+    pushEventLog(event);
   }
 
   function readTaskConfig() {
+    if (typeof window === "undefined") return null;
     const raw = localStorage.getItem(`${BATCH_TASK_PREFIX}${taskId}`);
     if (!raw) return null;
     try {
@@ -119,35 +198,118 @@
     }
   }
 
-  async function startBatchFromConfig() {
-    const config = readTaskConfig();
-    if (!config) {
-      done = true;
-      summary = "未找到批量任务配置，请从工具箱重新启动批量处理";
-      logs = [`[${new Date().toLocaleTimeString()}] ${summary}`];
+  function saveTaskConfig() {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(
+      `${BATCH_TASK_PREFIX}${taskId}`,
+      JSON.stringify({
+        taskId,
+        tool,
+        toolTitle: currentMeta.title,
+        inputPaths,
+        outputDir: outputDir || undefined,
+        imageFormat,
+      }),
+    );
+  }
+
+  async function chooseFiles() {
+    if (running) return;
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: "EPUB 文件", extensions: ["epub"] }],
+    });
+    if (!selected) return;
+    addInputPaths(Array.isArray(selected) ? selected : [selected], "文件待处理");
+  }
+
+  async function scanDirectory() {
+    if (running) return;
+    const selected = await open({
+      directory: true,
+      multiple: true,
+      title: "选择 EPUB 目录",
+    });
+    if (!selected) return;
+    addInputPaths(Array.isArray(selected) ? selected : [selected], "目录待扫描");
+  }
+
+  async function chooseOutputDir() {
+    if (running) return;
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择输出目录",
+    });
+    if (!selected || Array.isArray(selected)) return;
+    outputDir = selected;
+    resolvedOutputDir = "";
+    summary = "已选择输出目录";
+    logLine(`输出目录: ${outputDir}`);
+    saveTaskConfig();
+  }
+
+  function resetOutputDir() {
+    if (running) return;
+    outputDir = "";
+    resolvedOutputDir = "";
+    summary = "已恢复默认输出目录";
+    logLine("已恢复默认输出目录");
+    saveTaskConfig();
+  }
+
+  function clearQueue() {
+    if (running) return;
+    inputPaths = [];
+    rows = [];
+    total = 0;
+    current = 0;
+    done = false;
+    resolvedOutputDir = "";
+    summary = "队列已清空";
+    logLine("队列已清空");
+    saveTaskConfig();
+  }
+
+  function clearLog() {
+    logs = [];
+  }
+
+  async function startBatch() {
+    if (!canStart) {
+      summary = "请先加入 EPUB 文件或目录";
       return;
     }
-    if (config.started) {
-      return;
-    }
-    config.started = true;
-    localStorage.setItem(`${BATCH_TASK_PREFIX}${taskId}`, JSON.stringify(config));
+    running = true;
+    done = false;
+    total = 0;
+    current = 0;
+    resolvedOutputDir = "";
+    rows = [];
+    summary = "正在启动批量任务";
+    logLine("开始执行批量任务");
+    saveTaskConfig();
 
     try {
       const result = await invoke<BatchSummary>("toolbox_run_batch", {
-        taskId: config.taskId,
-        tool: config.tool,
-        inputPaths: config.inputPaths,
-        imageFormat: config.imageFormat,
-        outputDir: config.outputDir,
+        taskId,
+        tool,
+        inputPaths,
+        imageFormat,
+        outputDir: outputDir || undefined,
       });
+      running = false;
       done = true;
       total = result.total;
       current = result.total;
+      if (result.total === 0) {
+        summary = "未找到 EPUB 文件";
+      }
     } catch (e: any) {
+      running = false;
       done = true;
       summary = `批量任务失败: ${e}`;
-      logs = [`[${new Date().toLocaleTimeString()}] ${summary}`, ...logs];
+      logLine(summary);
     }
   }
 
@@ -156,10 +318,23 @@
   }
 
   onMount(() => {
+    const config = readTaskConfig();
+    if (config) {
+      tool = config.tool;
+      inputPaths = config.inputPaths ?? [];
+      outputDir = config.outputDir ?? "";
+      imageFormat = config.imageFormat;
+      if (inputPaths.length > 0) {
+        addInputRows(inputPaths, "等待执行");
+        summary = `已加入 ${inputPaths.length} 个输入源`;
+      }
+    } else {
+      summary = "未找到批量任务配置，请从工具箱重新打开";
+    }
+
     let unlisten: UnlistenFn | undefined;
     listen<BatchEvent>("toolbox-batch-event", (event) => applyEvent(event.payload)).then((fn) => {
       unlisten = fn;
-      startBatchFromConfig();
     });
     return () => {
       unlisten?.();
@@ -170,49 +345,102 @@
 <main class="batch-app">
   <header class="batch-head">
     <div>
-      <h1>{toolTitle}</h1>
-      <p>{summary}</p>
+      <div class="eyebrow">功能执行</div>
+      <h1>{currentMeta.title}</h1>
+      <p>{currentMeta.detail}</p>
     </div>
-    <button type="button" on:click={closeWindow} disabled={!done && current < total}>关闭</button>
+    <button class="ghost-btn" type="button" on:click={closeWindow}>关闭</button>
   </header>
 
-  <section class="progress-area" aria-label="批量进度">
-    <div class="progress-meta">
-      <span>{current} / {total}</span>
-      <strong>{percent}%</strong>
+  <section class="source-panel" aria-label="输入源">
+    <div class="source-copy">
+      <div class="eyebrow">输入源</div>
+      <h2>选择 EPUB、文件夹或目录扫描</h2>
+      <p>当前队列 {inputPaths.length} 个输入源。</p>
     </div>
-    <div class="progress-track">
-      <div class="progress-bar" style={`width: ${percent}%`}></div>
+    <div class="source-actions">
+      <button class="primary-btn" type="button" on:click={chooseFiles} disabled={running}>选择文件</button>
+      <button class="strong-btn" type="button" on:click={scanDirectory} disabled={running}>扫描目录</button>
+      <button class="ghost-btn" type="button" on:click={clearQueue} disabled={running || inputPaths.length === 0}>清空队列</button>
     </div>
   </section>
 
-  <section class="queue-area" aria-label="处理队列">
-    <div class="section-title">队列</div>
-    <div class="queue-list">
-      {#if rows.length === 0}
-        <div class="empty">等待后端发送文件队列</div>
-      {:else}
-        {#each rows as row}
-          <div class={`queue-row status-${row.status}`}>
-            <div class="queue-main">
-              <strong>{basename(row.inputPath)}</strong>
-              <span>{row.message}</span>
-              {#if row.outputPath}
-                <small>{row.outputPath}</small>
-              {/if}
+  <section class="workspace">
+    <section class="panel execute-panel" aria-label="任务配置">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">任务配置</div>
+          <h2>输出与执行</h2>
+        </div>
+        <div class="panel-actions">
+          <button class="ghost-btn" type="button" on:click={chooseOutputDir} disabled={running}>选择输出目录</button>
+          <button class="ghost-btn" type="button" on:click={resetOutputDir} disabled={running || !outputDir}>重置输出路径</button>
+        </div>
+      </div>
+
+      <div class="field-block">
+        <span>输出目录</span>
+        <strong title={outputLabel}>{outputLabel}</strong>
+      </div>
+
+      <div class="tool-summary">
+        <strong>{currentMeta.title}</strong>
+        <span>{summary}</span>
+      </div>
+
+      <button class="start-btn" type="button" on:click={startBatch} disabled={!canStart}>
+        {running ? "执行中" : "开始执行"}
+      </button>
+
+      <div class="progress-area" aria-label="批量进度">
+        <div class="progress-meta">
+          <span>{current} / {total}</span>
+          <strong>{percent}%</strong>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" style={`width: ${percent}%`}></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel queue-panel" aria-label="文件队列">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">文件队列</div>
+          <h2>待处理列表</h2>
+        </div>
+        <span class="count-pill">{rows.length}</span>
+      </div>
+      <div class="queue-list">
+        {#if rows.length === 0}
+          <div class="empty">还没有加入 EPUB 文件或目录。</div>
+        {:else}
+          {#each rows as row}
+            <div class={`queue-row status-${row.status}`}>
+              <div class="queue-main">
+                <strong>{basename(row.inputPath)}</strong>
+                <span>{row.message}</span>
+                <small title={row.outputPath || row.inputPath}>{row.outputPath || row.inputPath}</small>
+              </div>
+              <span class="queue-status">{statusLabel(row.status)}</span>
             </div>
-            <span class="queue-status">{row.status}</span>
-          </div>
-        {/each}
-      {/if}
-    </div>
+          {/each}
+        {/if}
+      </div>
+    </section>
   </section>
 
-  <section class="log-area" aria-label="处理日志">
-    <div class="section-title">日志</div>
+  <section class="panel log-panel" aria-label="处理日志">
+    <div class="panel-head">
+      <div>
+        <div class="eyebrow">过程</div>
+        <h2>处理日志</h2>
+      </div>
+      <button class="ghost-btn" type="button" on:click={clearLog} disabled={logs.length === 0}>清空日志</button>
+    </div>
     <div class="log-list">
       {#if logs.length === 0}
-        <div class="empty">暂无日志</div>
+        <div class="empty">尚未执行任务。</div>
       {:else}
         {#each logs as log}
           <div>{log}</div>
@@ -233,71 +461,205 @@
     box-sizing: border-box;
     height: 100vh;
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) 160px;
-    gap: 14px;
-    padding: 24px;
+    grid-template-rows: auto auto minmax(0, 1fr) 220px;
+    gap: 18px;
+    padding: 28px;
     background: var(--color-canvas);
     color: var(--color-text);
     font-family: var(--font-ui);
   }
 
-  .batch-head {
+  .batch-head,
+  .source-panel,
+  .panel-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
   }
 
-  .batch-head h1 {
+  .batch-head h1,
+  .source-copy h2,
+  .panel-head h2 {
     margin: 0;
-    font-size: 20px;
-    line-height: 1.25;
+    color: var(--color-text);
     font-weight: 800;
     letter-spacing: 0;
   }
 
-  .batch-head p {
-    margin: 6px 0 0;
+  .batch-head h1 {
+    font-size: 22px;
+    line-height: 1.25;
+  }
+
+  .source-copy h2,
+  .panel-head h2 {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+
+  .batch-head p,
+  .source-copy p {
+    margin: 8px 0 0;
+    color: var(--color-muted);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .eyebrow {
+    margin-bottom: 6px;
+    color: var(--color-accent-deep);
+    font-size: 12px;
+    line-height: 1.2;
+    font-weight: 800;
+  }
+
+  .source-panel,
+  .panel {
+    box-sizing: border-box;
+    min-width: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .source-panel {
+    align-items: center;
+    padding: 18px 20px;
+  }
+
+  .source-actions,
+  .panel-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  button {
+    box-sizing: border-box;
+    min-height: 36px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 7px 14px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  button:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  .primary-btn,
+  .start-btn {
+    border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border));
+    background: var(--color-accent);
+    color: var(--color-accent-contrast, #fff);
+  }
+
+  .strong-btn {
+    border-color: var(--color-border-strong);
+    background: var(--color-text);
+    color: var(--color-surface);
+  }
+
+  .ghost-btn {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  button:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
+  }
+
+  .workspace {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
+    gap: 18px;
+  }
+
+  .panel {
+    min-height: 0;
+    padding: 18px;
+  }
+
+  .execute-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .field-block {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-canvas);
+  }
+
+  .field-block span {
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .field-block strong {
+    min-width: 0;
+    color: var(--color-text);
+    font-size: 13px;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tool-summary {
+    display: grid;
+    gap: 6px;
+  }
+
+  .tool-summary strong {
+    font-size: 15px;
+    line-height: 1.3;
+  }
+
+  .tool-summary span {
     color: var(--color-muted);
     font-size: 13px;
     line-height: 1.4;
     overflow-wrap: anywhere;
   }
 
-  .batch-head button {
-    min-width: 72px;
-    padding: 7px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    color: var(--color-text);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
+  .start-btn {
+    width: 100%;
+    min-height: 42px;
   }
 
-  .batch-head button:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
+  .progress-area {
+    margin-top: auto;
   }
 
-  .progress-area,
-  .queue-area,
-  .log-area {
-    min-width: 0;
-  }
-
-  .progress-meta,
-  .section-title {
+  .progress-meta {
     display: flex;
-    align-items: center;
     justify-content: space-between;
     margin-bottom: 8px;
     color: var(--color-muted);
     font-size: 12px;
-    line-height: 1.2;
-    font-weight: 700;
+    font-weight: 800;
   }
 
   .progress-meta strong {
@@ -308,7 +670,7 @@
     height: 10px;
     overflow: hidden;
     border-radius: 999px;
-    background: var(--color-surface);
+    background: var(--color-canvas);
     box-shadow: inset 0 0 0 1px var(--color-border);
   }
 
@@ -319,21 +681,38 @@
     transition: width var(--transition-fast);
   }
 
+  .queue-panel,
+  .log-panel {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .count-pill {
+    min-width: 34px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: var(--color-accent-quiet);
+    color: var(--color-accent-deep);
+    font-size: 12px;
+    font-weight: 800;
+    text-align: center;
+  }
+
   .queue-list,
   .log-list {
-    height: 100%;
-    box-sizing: border-box;
+    min-height: 0;
     overflow: auto;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
-    background: var(--color-surface);
+    background: var(--color-canvas);
   }
 
   .queue-row {
-    min-height: 58px;
+    min-height: 64px;
     box-sizing: border-box;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 74px;
+    grid-template-columns: minmax(0, 1fr) 70px;
     gap: 12px;
     align-items: center;
     padding: 10px 12px;
@@ -368,18 +747,22 @@
   .queue-main small {
     color: var(--color-muted);
     font-size: 12px;
-    line-height: 1.3;
+    line-height: 1.35;
   }
 
   .queue-status {
     justify-self: end;
-    padding: 3px 7px;
+    padding: 4px 8px;
     border-radius: 999px;
     background: var(--color-accent-quiet);
     color: var(--color-accent-deep);
     font-size: 11px;
     font-weight: 800;
     line-height: 1.2;
+  }
+
+  .status-running .queue-status {
+    background: color-mix(in srgb, var(--color-accent) 18%, transparent);
   }
 
   .status-error .queue-status {
@@ -401,23 +784,34 @@
   }
 
   .empty {
-    padding: 14px;
+    padding: 16px;
     color: var(--color-muted);
-    font-size: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: center;
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 820px) {
     .batch-app {
-      grid-template-rows: auto auto minmax(0, 1fr) 140px;
+      grid-template-rows: auto auto auto minmax(160px, 1fr);
       padding: 16px;
+      overflow: auto;
     }
 
-    .batch-head {
+    .source-panel,
+    .batch-head,
+    .panel-head {
       flex-direction: column;
+      align-items: stretch;
     }
 
-    .batch-head button {
-      width: 100%;
+    .workspace {
+      grid-template-columns: 1fr;
+    }
+
+    .source-actions,
+    .panel-actions {
+      justify-content: flex-start;
     }
   }
 </style>

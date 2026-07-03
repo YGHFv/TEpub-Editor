@@ -2626,6 +2626,33 @@ Caveats:
 
 - Small utility windows such as search/replace and EPUB metadata remain compact intentionally; only main application workflow windows were normalized to the toolbox size.
 
+### 2026-07-03 12:05 +08:00
+
+Request: make the batch feature buttons and panel layout closer to the provided reference while keeping the UI consistent with TEpub-Editor's own visual style.
+
+Changes:
+
+- Reworked `src/routes/batch-progress/+page.svelte` into a full batch execution panel:
+  - top input-source band with `选择文件`, `扫描目录`, and `清空队列`,
+  - output/execution panel with `选择输出目录`, `重置输出路径`, progress, and `开始执行`,
+  - file queue panel with status chips and output paths,
+  - process log panel with clear-log action.
+- Changed toolbox batch entry behavior in `src/routes/toolbox/+page.svelte`:
+  - clicking a tool's batch button now opens the batch panel directly,
+  - file/folder/output choices now happen inside the batch panel instead of before the window opens.
+- Kept the batch page on the existing app design tokens (`--color-surface`, `--color-border`, `--color-accent`, `--radius-sm`) rather than copying the reference page palette.
+
+Verification:
+
+- `pnpm.cmd check` passed with existing project warnings only.
+- `cargo check` passed.
+- `pnpm.cmd build` passed with existing warnings only.
+- `cargo test` passed: 9 tests passed.
+
+Caveats:
+
+- Drag-and-drop input is not wired yet; the panel currently supports system file selection and directory scanning buttons.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.

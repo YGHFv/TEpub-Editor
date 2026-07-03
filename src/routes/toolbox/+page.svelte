@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { open, message, ask } from "@tauri-apps/plugin-dialog";
+  import { open, message } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
@@ -343,28 +343,6 @@
     busyTool = tool.id;
     statusText = "";
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: "选择 EPUB 文件夹",
-      });
-      if (!selected || Array.isArray(selected)) return;
-
-      let outputDir: string | undefined;
-      const useCustomOutput = await ask("是否选择输出目录？取消则使用默认输出目录。", {
-        title: "输出目录",
-        kind: "info",
-      });
-      if (useCustomOutput) {
-        const selectedOutput = await open({
-          directory: true,
-          multiple: false,
-          title: "选择输出目录",
-        });
-        if (!selectedOutput || Array.isArray(selectedOutput)) return;
-        outputDir = selectedOutput;
-      }
-
       const taskId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       localStorage.setItem(
         `${BATCH_TASK_PREFIX}${taskId}`,
@@ -372,8 +350,7 @@
           taskId,
           tool: tool.id,
           toolTitle: tool.title,
-          inputPaths: [selected],
-          outputDir,
+          inputPaths: [],
           imageFormat: tool.id === "image-convert" ? "auto" : undefined,
         }),
       );
