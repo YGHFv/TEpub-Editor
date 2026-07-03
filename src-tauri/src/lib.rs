@@ -2521,7 +2521,99 @@ fn emit_toolbox_batch_event(app: &tauri::AppHandle, event: ToolboxBatchEvent) {
     let _ = app.emit("toolbox-batch-event", event);
 }
 
-fn collect_epub_sources(input_paths: &[String]) -> Result<Vec<PathBuf>, String> {
+fn is_same_path(left: &Path, right: &Path) -> bool {
+    let left_canon = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
+    let right_canon = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
+    left_canon == right_canon
+}
+
+fn path_is_under(path: &Path, parent: &Path) -> bool {
+    let path_canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let parent_canon = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+    path_canon.starts_with(parent_canon)
+}
+
+fn default_batch_output_dir(input_paths: &[String]) -> PathBuf {
+    let first = input_paths
+        .first()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    if first.is_dir() {
+        first.join("TEpub-batch-output")
+    } else {
+        first
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("TEpub-batch-output")
+    }
+}
+
+fn resolve_batch_output_dir(input_paths: &[String], output_dir: Option<String>) -> PathBuf {
+    output_dir
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_batch_output_dir(input_paths))
+}
+
+fn build_output_path_in_dir(original_output: &Path, output_dir: &Path) -> PathBuf {
+    let file_name = original_output
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("output.epub");
+    let candidate = output_dir.join(file_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let stem = original_output
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("output");
+    let ext = original_output
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("epub");
+    let mut index = 2usize;
+    loop {
+        let candidate = output_dir.join(format!("{}_{}.{}", stem, index, ext));
+        if !candidate.exists() {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
+fn move_toolbox_result_to_dir(
+    mut result: ToolboxEpubToolResult,
+    output_dir: &Path,
+) -> Result<ToolboxEpubToolResult, String> {
+    if !result.changed {
+        return Ok(result);
+    }
+    fs::create_dir_all(output_dir).map_err(|e| format!("创建输出目录失败: {}", e))?;
+    let source_output = PathBuf::from(&result.output_path);
+    if !source_output.exists() || path_is_under(&source_output, output_dir) {
+        return Ok(result);
+    }
+
+    let target = build_output_path_in_dir(&source_output, output_dir);
+    match fs::rename(&source_output, &target) {
+        Ok(_) => {}
+        Err(_) => {
+            fs::copy(&source_output, &target).map_err(|e| format!("复制到输出目录失败: {}", e))?;
+            fs::remove_file(&source_output).map_err(|e| format!("清理临时输出失败: {}", e))?;
+        }
+    }
+    result.output_path = target.to_string_lossy().to_string();
+    Ok(result)
+}
+
+fn collect_epub_sources(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    input_paths: &[String],
+    output_dir: &Path,
+) -> Result<Vec<PathBuf>, String> {
     let mut result = Vec::new();
     let mut seen = HashSet::new();
     for raw in input_paths {
@@ -2535,6 +2627,19 @@ fn collect_epub_sources(input_paths: &[String]) -> Result<Vec<PathBuf>, String> 
             if is_epub {
                 let key = path.to_string_lossy().to_ascii_lowercase();
                 if seen.insert(key) {
+                    emit_toolbox_batch_event(
+                        app,
+                        ToolboxBatchEvent {
+                            task_id: task_id.to_string(),
+                            event: "scan-file".to_string(),
+                            level: "info".to_string(),
+                            index: result.len() + 1,
+                            total: result.len() + 1,
+                            input_path: Some(path.to_string_lossy().to_string()),
+                            output_path: None,
+                            message: format!("扫描到 EPUB: {}", path.to_string_lossy()),
+                        },
+                    );
                     result.push(path);
                 }
             }
@@ -2543,7 +2648,13 @@ fn collect_epub_sources(input_paths: &[String]) -> Result<Vec<PathBuf>, String> 
         if path.is_dir() {
             for entry in WalkDir::new(&path).into_iter().filter_map(Result::ok) {
                 let item = entry.path();
+                if item.is_dir() && is_same_path(item, output_dir) {
+                    continue;
+                }
                 if !item.is_file() {
+                    continue;
+                }
+                if path_is_under(item, output_dir) {
                     continue;
                 }
                 let is_epub = item
@@ -2554,6 +2665,19 @@ fn collect_epub_sources(input_paths: &[String]) -> Result<Vec<PathBuf>, String> 
                 if is_epub {
                     let key = item.to_string_lossy().to_ascii_lowercase();
                     if seen.insert(key) {
+                        emit_toolbox_batch_event(
+                            app,
+                            ToolboxBatchEvent {
+                                task_id: task_id.to_string(),
+                                event: "scan-file".to_string(),
+                                level: "info".to_string(),
+                                index: result.len() + 1,
+                                total: result.len() + 1,
+                                input_path: Some(item.to_string_lossy().to_string()),
+                                output_path: None,
+                                message: format!("扫描到 EPUB: {}", item.to_string_lossy()),
+                            },
+                        );
                         result.push(item.to_path_buf());
                     }
                 }
@@ -2572,8 +2696,23 @@ fn run_toolbox_batch_impl(
     tool: String,
     input_paths: Vec<String>,
     image_format: Option<String>,
+    output_dir: Option<String>,
 ) -> Result<ToolboxBatchSummary, String> {
-    let sources = collect_epub_sources(&input_paths)?;
+    let output_dir = resolve_batch_output_dir(&input_paths, output_dir);
+    emit_toolbox_batch_event(
+        &app,
+        ToolboxBatchEvent {
+            task_id: task_id.clone(),
+            event: "scan-start".to_string(),
+            level: "info".to_string(),
+            index: 0,
+            total: 0,
+            input_path: None,
+            output_path: Some(output_dir.to_string_lossy().to_string()),
+            message: format!("正在扫描 EPUB 文件，输出目录: {}", output_dir.to_string_lossy()),
+        },
+    );
+    let sources = collect_epub_sources(&app, &task_id, &input_paths, &output_dir)?;
     let total = sources.len();
     emit_toolbox_batch_event(
         &app,
@@ -2637,7 +2776,8 @@ fn run_toolbox_batch_impl(
             "epub_reformat" => toolbox_epub_reformat_impl(source),
             "image_convert" => toolbox_image_convert_impl(source, image_format.as_deref()),
             _ => Err(format!("不支持的批量工具: {}", tool)),
-        };
+        }
+        .and_then(|done| move_toolbox_result_to_dir(done, &output_dir));
 
         match result {
             Ok(done) => {
@@ -3670,9 +3810,10 @@ async fn toolbox_run_batch(
     tool: String,
     input_paths: Vec<String>,
     image_format: Option<String>,
+    output_dir: Option<String>,
 ) -> Result<ToolboxBatchSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_toolbox_batch_impl(app, task_id, tool, input_paths, image_format)
+        run_toolbox_batch_impl(app, task_id, tool, input_paths, image_format, output_dir)
     })
     .await
     .map_err(|e| format!("批量任务执行失败: {}", e))?

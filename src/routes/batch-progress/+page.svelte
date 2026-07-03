@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -21,9 +22,27 @@
     message: string;
   };
 
+  type BatchTaskConfig = {
+    taskId: string;
+    tool: string;
+    toolTitle: string;
+    inputPaths: string[];
+    outputDir?: string;
+    imageFormat?: string;
+    started?: boolean;
+  };
+
+  type BatchSummary = {
+    taskId: string;
+    total: number;
+    succeeded: number;
+    failed: number;
+  };
+
   const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
   const taskId = params.get("taskId") ?? "";
   const toolTitle = params.get("tool") ?? "批量处理";
+  const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
 
   let total = 0;
   let current = 0;
@@ -63,7 +82,12 @@
   function applyEvent(event: BatchEvent) {
     if (event.taskId !== taskId) return;
     total = event.total || total;
-    if (event.event === "started") {
+    if (event.event === "scan-start") {
+      summary = event.message;
+    } else if (event.event === "scan-file") {
+      summary = event.message;
+      upsertRow(event, "waiting");
+    } else if (event.event === "started") {
       summary = event.message;
     } else if (event.event === "file-start") {
       current = Math.max(current, event.index - 1);
@@ -85,6 +109,48 @@
     pushLog(event);
   }
 
+  function readTaskConfig() {
+    const raw = localStorage.getItem(`${BATCH_TASK_PREFIX}${taskId}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as BatchTaskConfig;
+    } catch {
+      return null;
+    }
+  }
+
+  async function startBatchFromConfig() {
+    const config = readTaskConfig();
+    if (!config) {
+      done = true;
+      summary = "未找到批量任务配置，请从工具箱重新启动批量处理";
+      logs = [`[${new Date().toLocaleTimeString()}] ${summary}`];
+      return;
+    }
+    if (config.started) {
+      return;
+    }
+    config.started = true;
+    localStorage.setItem(`${BATCH_TASK_PREFIX}${taskId}`, JSON.stringify(config));
+
+    try {
+      const result = await invoke<BatchSummary>("toolbox_run_batch", {
+        taskId: config.taskId,
+        tool: config.tool,
+        inputPaths: config.inputPaths,
+        imageFormat: config.imageFormat,
+        outputDir: config.outputDir,
+      });
+      done = true;
+      total = result.total;
+      current = result.total;
+    } catch (e: any) {
+      done = true;
+      summary = `批量任务失败: ${e}`;
+      logs = [`[${new Date().toLocaleTimeString()}] ${summary}`, ...logs];
+    }
+  }
+
   function closeWindow() {
     getCurrentWindow().close();
   }
@@ -93,6 +159,7 @@
     let unlisten: UnlistenFn | undefined;
     listen<BatchEvent>("toolbox-batch-event", (event) => applyEvent(event.payload)).then((fn) => {
       unlisten = fn;
+      startBatchFromConfig();
     });
     return () => {
       unlisten?.();

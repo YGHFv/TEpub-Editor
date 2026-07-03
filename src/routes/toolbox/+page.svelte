@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { open, message } from "@tauri-apps/plugin-dialog";
+  import { open, message, ask } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
@@ -48,6 +48,9 @@
   };
 
   const LAUNCH_SESSION_KEY = "tepub-editor-launch-files";
+  const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
+  const TOOLBOX_WINDOW_WIDTH = 1200;
+  const TOOLBOX_WINDOW_HEIGHT = 740;
 
   const tools: Tool[] = [
     {
@@ -176,8 +179,8 @@
       new WebviewWindow(windowLabel("editor"), {
         url: `/editor?file=${encoded}&fromLibrary=1`,
         title: "TEpub-Editor-TXT",
-        width: 1200,
-        height: 740,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
@@ -190,8 +193,8 @@
       new WebviewWindow(windowLabel("reader"), {
         url: `/reader?file=${encoded}`,
         title: "TEpub-Editor-Reader",
-        width: 500,
-        height: 800,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: false,
         center: true,
       });
@@ -201,8 +204,8 @@
     new WebviewWindow(windowLabel("epub-editor"), {
       url: `/epub-editor?file=${encoded}`,
       title: "TEpub-Editor-EPUB",
-      width: 1200,
-      height: 740,
+      width: TOOLBOX_WINDOW_WIDTH,
+      height: TOOLBOX_WINDOW_HEIGHT,
       dragDropEnabled: true,
       center: true,
     });
@@ -347,24 +350,42 @@
       });
       if (!selected || Array.isArray(selected)) return;
 
+      let outputDir: string | undefined;
+      const useCustomOutput = await ask("是否选择输出目录？取消则使用默认输出目录。", {
+        title: "输出目录",
+        kind: "info",
+      });
+      if (useCustomOutput) {
+        const selectedOutput = await open({
+          directory: true,
+          multiple: false,
+          title: "选择输出目录",
+        });
+        if (!selectedOutput || Array.isArray(selectedOutput)) return;
+        outputDir = selectedOutput;
+      }
+
       const taskId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const progressWindow = new WebviewWindow(windowLabel("batch-progress"), {
+      localStorage.setItem(
+        `${BATCH_TASK_PREFIX}${taskId}`,
+        JSON.stringify({
+          taskId,
+          tool: tool.id,
+          toolTitle: tool.title,
+          inputPaths: [selected],
+          outputDir,
+          imageFormat: tool.id === "image-convert" ? "auto" : undefined,
+        }),
+      );
+      new WebviewWindow(windowLabel("batch-progress"), {
         url: `/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`,
         title: `${tool.title} 批量处理`,
-        width: 900,
-        height: 640,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: false,
         center: true,
       });
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      const summary = await invoke<{ total: number; succeeded: number; failed: number }>("toolbox_run_batch", {
-        taskId,
-        tool: tool.id,
-        inputPaths: [selected],
-        imageFormat: tool.id === "image-convert" ? "auto" : undefined,
-      });
-      statusText = `${tool.title} 批量完成：${summary.succeeded}/${summary.total}`;
-      await progressWindow.setFocus().catch(() => {});
+      statusText = `${tool.title} 批量窗口已打开`;
     } catch (e: any) {
       console.error("批量处理失败:", e);
       statusText = "批量处理失败";
@@ -380,8 +401,8 @@
       new WebviewWindow(windowLabel("editor"), {
         url: `/editor?file=${encoded}&fromLibrary=1`,
         title: "TEpub-Editor-TXT",
-        width: 1200,
-        height: 740,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
@@ -392,8 +413,8 @@
       new WebviewWindow(windowLabel("epub-editor"), {
         url: `/epub-editor?file=${encoded}`,
         title: "TEpub-Editor-EPUB",
-        width: 1200,
-        height: 740,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
@@ -403,8 +424,8 @@
     new WebviewWindow(windowLabel("reader"), {
       url: `/reader?file=${encoded}`,
       title: "TEpub-Editor-Reader",
-      width: 500,
-      height: 800,
+      width: TOOLBOX_WINDOW_WIDTH,
+      height: TOOLBOX_WINDOW_HEIGHT,
       dragDropEnabled: false,
       center: true,
     });

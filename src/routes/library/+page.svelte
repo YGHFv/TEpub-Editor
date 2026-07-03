@@ -9,6 +9,9 @@
   import LibraryPreview from "$lib/LibraryPreview.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
 
+  const TOOLBOX_WINDOW_WIDTH = 1200;
+  const TOOLBOX_WINDOW_HEIGHT = 740;
+
   interface BookEntry {
     id: string;
     title: string;
@@ -828,8 +831,8 @@
       toolboxWin = new WebviewWindow("toolbox", {
         url: "/toolbox",
         title: "TEpub-Editor 工具箱",
-        width: 1200,
-        height: 740,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         resizable: true,
         dragDropEnabled: false,
         center: true,
@@ -896,8 +899,8 @@
       const win = new WebviewWindow(windowLabel("reader"), {
         url: `/reader?file=${encoded}`,
         title: "TEpub-Editor-Reader",
-        width: 500,
-        height: 800,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: false,
         center: true,
       });
@@ -928,8 +931,8 @@
       const win = new WebviewWindow(`editor-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, {
         url,
         title,
-        width: isEpub ? 1200 : 1200,
-        height: isEpub ? 740 : 740,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
@@ -970,8 +973,8 @@
       const win = new WebviewWindow(windowLabel("editor"), {
         url,
         title,
-        width: isEpub ? 1200 : 1200,
-        height: isEpub ? 740 : 740,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
@@ -1012,8 +1015,8 @@
         // 选 800 是为了在 1366x768 这类老笔记本上仍能完整显示
         // （减去任务栏 + 标题栏后可用高度通常 ≥ 680，800 接近上限），
         // 1080p 屏幕上更是绰绰有余。
-        width: 500,
-        height: 800,
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: false,
         center: true,
       });

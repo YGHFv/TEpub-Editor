@@ -2596,6 +2596,36 @@ Caveats:
 - Batch font decrypt runs without a per-file TXT alignment file; it works for EPUBs that carry the saved font-obfuscation map and otherwise reports the per-file error in the batch log.
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` are intentionally left untracked and are not part of this change.
 
+### 2026-07-03 11:38 +08:00
+
+Request: fix the batch progress window staying at "waiting for backend queue" after choosing a folder, add file scanning feedback, allow choosing the batch output directory with a default output folder under the selected folder, and make opened windows match the toolbox window size.
+
+Changes:
+
+- Moved batch task startup into `src/routes/batch-progress/+page.svelte`:
+  - the toolbox window now writes task config to localStorage and opens the progress window,
+  - the progress window installs the event listener before invoking `toolbox_run_batch`,
+  - this prevents early backend events from being lost before the progress window is ready.
+- Added backend scan progress events in `src-tauri/src/lib.rs`:
+  - emits `scan-start` before recursive folder scanning,
+  - emits `scan-file` for each discovered EPUB so the queue appears during scanning.
+- Added batch output directory support:
+  - toolbox asks whether to choose a custom output directory,
+  - if no output directory is chosen, backend creates `TEpub-batch-output` under the selected folder,
+  - successful generated EPUBs are moved into the batch output directory.
+- Unified opened main app window sizes to the toolbox size (`1200x740`) for toolbox-launched editor/reader/batch windows and library-launched editor/reader/toolbox windows.
+
+Verification:
+
+- `cargo check` passed.
+- `pnpm.cmd check` passed with existing project warnings only.
+- `pnpm.cmd build` passed with existing warnings only.
+- `cargo test` passed: 9 tests passed.
+
+Caveats:
+
+- Small utility windows such as search/replace and EPUB metadata remain compact intentionally; only main application workflow windows were normalized to the toolbox size.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.
