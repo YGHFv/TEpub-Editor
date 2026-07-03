@@ -15,7 +15,8 @@
     | "file-encrypt"
     | "file-decrypt"
     | "epub-reformat"
-    | "image-convert";
+    | "image-convert"
+    | "epub-diagnose";
 
   type Tool = {
     id: ToolId;
@@ -39,6 +40,23 @@
     changed: boolean;
     action: string;
     message: string;
+  };
+
+  type ToolboxDiagnosticIssue = {
+    level: string;
+    kind: string;
+    path?: string | null;
+    message: string;
+  };
+
+  type ToolboxDiagnosticResult = {
+    sourcePath: string;
+    opfPath?: string | null;
+    totalEntries: number;
+    manifestItems: number;
+    errorCount: number;
+    warningCount: number;
+    issues: ToolboxDiagnosticIssue[];
   };
 
   type LaunchInfo = {
@@ -123,6 +141,13 @@
       detail: "转换 EPUB 内 WebP",
       action: "处理",
     },
+    {
+      id: "epub-diagnose",
+      icon: "CHK",
+      title: "EPUB 诊断",
+      detail: "检查 OPF、manifest 和内部引用",
+      action: "诊断",
+    },
   ];
 
   const toolGroups: ToolGroup[] = [
@@ -137,7 +162,7 @@
       id: "process",
       title: "EPUB 处理",
       meta: "生成新文件",
-      tools: tools.filter((tool) => tool.id === "font-encrypt" || tool.id === "font-decrypt" || tool.id === "file-encrypt" || tool.id === "file-decrypt" || tool.id === "epub-reformat" || tool.id === "image-convert"),
+      tools: tools.filter((tool) => tool.id === "font-encrypt" || tool.id === "font-decrypt" || tool.id === "file-encrypt" || tool.id === "file-decrypt" || tool.id === "epub-reformat" || tool.id === "image-convert" || tool.id === "epub-diagnose"),
       gridClass: "process-grid",
     },
   ];
@@ -252,7 +277,16 @@
       });
 
       if (!selected || Array.isArray(selected)) return;
-      if (isProcessingTool(tool.id)) {
+      if (tool.id === "epub-diagnose") {
+        const result = await runEpubDiagnose(selected);
+        statusText = result.issues.length === 0
+          ? "EPUB 诊断未发现明显问题"
+          : `EPUB 诊断完成：${result.errorCount} 错误 / ${result.warningCount} 警告`;
+        await message(formatDiagnosticReport(result), {
+          title: tool.title,
+          kind: result.errorCount > 0 ? "error" : result.warningCount > 0 ? "warning" : "info",
+        });
+      } else if (isProcessingTool(tool.id)) {
         let txtPath: string | undefined;
         if (tool.id === "font-decrypt") {
           const selectedTxt = await open({
@@ -336,6 +370,38 @@
       txtPath,
       imageFormat: tool.id === "image-convert" ? "auto" : undefined,
     });
+  }
+
+  async function runEpubDiagnose(filePath: string) {
+    return await invoke<ToolboxDiagnosticResult>("toolbox_epub_diagnose", {
+      epubPath: filePath,
+    });
+  }
+
+  function formatDiagnosticReport(result: ToolboxDiagnosticResult) {
+    const lines = [
+      `文件：${result.sourcePath}`,
+      `OPF：${result.opfPath || "未发现"}`,
+      `ZIP 条目：${result.totalEntries}`,
+      `manifest 条目：${result.manifestItems}`,
+      `结果：${result.errorCount} 错误 / ${result.warningCount} 警告`,
+    ];
+
+    if (result.issues.length === 0) {
+      lines.push("", "未发现明显结构问题。");
+      return lines.join("\n");
+    }
+
+    lines.push("", "问题列表：");
+    const visibleIssues = result.issues.slice(0, 16);
+    for (const issue of visibleIssues) {
+      const path = issue.path ? ` [${issue.path}]` : "";
+      lines.push(`- ${issue.level}/${issue.kind}${path}: ${issue.message}`);
+    }
+    if (result.issues.length > visibleIssues.length) {
+      lines.push(`... 还有 ${result.issues.length - visibleIssues.length} 条未显示`);
+    }
+    return lines.join("\n");
   }
 
   async function runBatchForFolder(tool: Tool) {

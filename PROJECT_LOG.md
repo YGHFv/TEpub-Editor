@@ -2566,6 +2566,36 @@ Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
 
+### 2026-07-03 15:15 +08:00
+
+Request: continue the staged optimization plan and add the next EPUB tooling improvement.
+
+Changes:
+
+- Added a toolbox EPUB diagnostic backend command `toolbox_epub_diagnose`.
+- The diagnostic checks ZIP/package structure for:
+  - missing `mimetype`, `META-INF/container.xml`, and OPF discovery failures,
+  - OPF manifest items that are missing or only present with different path case,
+  - common EPUB resources present in the ZIP but not registered in the manifest,
+  - missing internal references from XHTML/XML/OPF/NCX/CSS text files,
+  - internal references that only match ZIP entries with different path case.
+- Added an `EPUB 诊断` card to the toolbox EPUB processing area.
+- The toolbox diagnostic action now opens one EPUB file, runs the backend check, and shows a summary dialog with counts plus the first issue details.
+- Added a Rust regression test that builds a problematic EPUB and verifies diagnostic issue types.
+
+Verification:
+
+- `cargo fmt` passed.
+- `cargo check` passed.
+- `cargo test` passed: 11 tests.
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still reports the existing Svelte accessibility/unused CSS and large chunk warnings in unrelated files.
+- This first diagnostic UI is a concise dialog; a richer dedicated diagnostic window can build on the same structured backend result.
+
 ### 2026-07-03 14:15 +08:00
 
 Request: continue the optimization plan step by step, sync GitHub after each completed part, and make long batch EPUB decrypt/rebuild tasks visibly progress instead of looking stuck.

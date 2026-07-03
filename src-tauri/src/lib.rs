@@ -42,6 +42,13 @@ static QUOTED_PATH_REF_RE: Lazy<Regex> =
 static CSS_URL_PATH_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?is)url\(\s*([^'"\)\s][^)]*?)\s*\)"#).expect("valid css url regex")
 });
+static DIAGNOSTIC_ATTR_REF_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)\b(?:href|src|poster|xlink:href|full-path)\s*=\s*(['"])(.*?)\1"#)
+        .expect("valid diagnostic attr ref regex")
+});
+static DIAGNOSTIC_CSS_URL_REF_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)url\(\s*(['"]?)(.*?)\1\s*\)"#).expect("valid diagnostic css url regex")
+});
 
 fn hidden_process_command(program: &str) -> process::Command {
     let mut command = process::Command::new(program);
@@ -1889,6 +1896,27 @@ struct ToolboxEpubToolResult {
     message: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxEpubDiagnosticIssue {
+    level: String,
+    kind: String,
+    path: Option<String>,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxEpubDiagnosticResult {
+    source_path: String,
+    opf_path: Option<String>,
+    total_entries: usize,
+    manifest_items: usize,
+    error_count: usize,
+    warning_count: usize,
+    issues: Vec<ToolboxEpubDiagnosticIssue>,
+}
+
 #[derive(Clone, Debug)]
 struct ToolboxManifestItem {
     id: String,
@@ -1983,6 +2011,112 @@ fn parse_toolbox_manifest_items(
         });
     }
     Ok(items)
+}
+
+fn push_diag_issue(
+    issues: &mut Vec<ToolboxEpubDiagnosticIssue>,
+    level: &str,
+    kind: &str,
+    path: Option<String>,
+    message: impl Into<String>,
+) {
+    issues.push(ToolboxEpubDiagnosticIssue {
+        level: level.to_string(),
+        kind: kind.to_string(),
+        path,
+        message: message.into(),
+    });
+}
+
+fn resolve_epub_ref(current_path: &str, raw_ref: &str) -> Option<String> {
+    let raw_ref = raw_ref.trim();
+    if is_external_or_inline_ref(raw_ref) {
+        return None;
+    }
+    let (main_ref, _) = split_ref_suffix(raw_ref);
+    if is_external_or_inline_ref(main_ref) {
+        return None;
+    }
+    let decoded_ref = percent_decode(main_ref.trim());
+    if decoded_ref.is_empty() {
+        return None;
+    }
+    Some(zip_join(&zip_parent(current_path), &decoded_ref))
+}
+
+fn collect_diagnostic_refs(text: &str) -> Vec<String> {
+    let mut refs = HashSet::new();
+
+    for caps in DIAGNOSTIC_ATTR_REF_RE.captures_iter(text).flatten() {
+        let Some(raw_match) = caps.get(2) else {
+            continue;
+        };
+        let raw_ref = raw_match.as_str().trim();
+        if !raw_ref.is_empty() {
+            refs.insert(raw_ref.to_string());
+        }
+    }
+
+    for caps in DIAGNOSTIC_CSS_URL_REF_RE.captures_iter(text).flatten() {
+        let Some(raw_match) = caps.get(2) else {
+            continue;
+        };
+        let raw_ref = raw_match.as_str().trim().trim_matches(&['"', '\''][..]);
+        if !raw_ref.is_empty() {
+            refs.insert(raw_ref.to_string());
+        }
+    }
+
+    let mut out: Vec<String> = refs.into_iter().collect();
+    out.sort();
+    out
+}
+
+fn is_diagnostic_resource_entry(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with('/') || lower.starts_with("__macosx/") || lower.starts_with("meta-inf/") {
+        return false;
+    }
+    matches!(
+        Path::new(&lower).extension().and_then(|s| s.to_str()),
+        Some(
+            "xhtml"
+                | "html"
+                | "htm"
+                | "css"
+                | "svg"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "webp"
+                | "gif"
+                | "bmp"
+                | "ttf"
+                | "otf"
+                | "woff"
+                | "woff2"
+                | "ncx"
+                | "js"
+                | "mp3"
+                | "mp4"
+                | "m4a"
+                | "ogg"
+                | "opus"
+                | "wav"
+        )
+    )
+}
+
+fn case_mismatch_names<'a>(
+    lower_to_names: &'a HashMap<String, Vec<String>>,
+    expected: &str,
+) -> Option<&'a Vec<String>> {
+    let matches = lower_to_names.get(&expected.to_ascii_lowercase())?;
+    if matches.iter().any(|name| name == expected) {
+        None
+    } else {
+        Some(matches)
+    }
 }
 
 fn toolbox_file_category(item: &ToolboxManifestItem) -> &'static str {
@@ -4110,6 +4244,267 @@ fn toolbox_image_convert(
     image_format: Option<String>,
 ) -> Result<ToolboxEpubToolResult, String> {
     toolbox_image_convert_impl(&PathBuf::from(epub_path), image_format.as_deref())
+}
+
+#[tauri::command]
+fn toolbox_epub_diagnose(epub_path: String) -> Result<ToolboxEpubDiagnosticResult, String> {
+    let source = PathBuf::from(&epub_path);
+    if !source.exists() {
+        return Err(format!("File does not exist: {}", source.to_string_lossy()));
+    }
+
+    let bytes = fs::read(&source).map_err(|e| format!("Read EPUB failed: {}", e))?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone()))
+        .map_err(|e| format!("Read EPUB failed: {}", e))?;
+    let mut issues = Vec::new();
+    let mut entry_names = Vec::new();
+
+    for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| format!("Read ZIP entry failed: {}", e))?;
+        entry_names.push(file.name().replace('\\', "/"));
+    }
+
+    let entry_set: HashSet<String> = entry_names.iter().cloned().collect();
+    let mut lower_to_names: HashMap<String, Vec<String>> = HashMap::new();
+    for name in &entry_names {
+        lower_to_names
+            .entry(name.to_ascii_lowercase())
+            .or_default()
+            .push(name.clone());
+    }
+
+    if !entry_set.contains("mimetype") {
+        push_diag_issue(
+            &mut issues,
+            "warning",
+            "missing-mimetype",
+            Some("mimetype".to_string()),
+            "EPUB has no top-level mimetype entry.",
+        );
+    }
+
+    if !entry_set.contains("META-INF/container.xml") {
+        if let Some(matches) = case_mismatch_names(&lower_to_names, "META-INF/container.xml") {
+            push_diag_issue(
+                &mut issues,
+                "warning",
+                "case-mismatch",
+                Some("META-INF/container.xml".to_string()),
+                format!(
+                    "container.xml exists with different case: {}",
+                    matches.join(", ")
+                ),
+            );
+        } else {
+            push_diag_issue(
+                &mut issues,
+                "error",
+                "missing-container",
+                Some("META-INF/container.xml".to_string()),
+                "EPUB has no META-INF/container.xml entry.",
+            );
+        }
+    }
+
+    let opf_path = match find_opf_path_in_epub_bytes(&bytes) {
+        Ok(path) => path,
+        Err(e) => {
+            push_diag_issue(
+                &mut issues,
+                "error",
+                "missing-opf",
+                None,
+                format!("Cannot locate OPF: {}", e),
+            );
+            let error_count = issues.iter().filter(|issue| issue.level == "error").count();
+            let warning_count = issues
+                .iter()
+                .filter(|issue| issue.level == "warning")
+                .count();
+            return Ok(ToolboxEpubDiagnosticResult {
+                source_path: source.to_string_lossy().to_string(),
+                opf_path: None,
+                total_entries: entry_names.len(),
+                manifest_items: 0,
+                error_count,
+                warning_count,
+                issues,
+            });
+        }
+    };
+
+    if !entry_set.contains(&opf_path) {
+        if let Some(matches) = case_mismatch_names(&lower_to_names, &opf_path) {
+            push_diag_issue(
+                &mut issues,
+                "warning",
+                "case-mismatch",
+                Some(opf_path.clone()),
+                format!("OPF exists with different case: {}", matches.join(", ")),
+            );
+        } else {
+            push_diag_issue(
+                &mut issues,
+                "error",
+                "missing-opf",
+                Some(opf_path.clone()),
+                "container.xml points to an OPF entry that is not in the ZIP.",
+            );
+        }
+    }
+
+    let manifest_items = match parse_toolbox_manifest_items(&bytes, &opf_path) {
+        Ok(items) => items,
+        Err(e) => {
+            push_diag_issue(
+                &mut issues,
+                "error",
+                "manifest-parse",
+                Some(opf_path.clone()),
+                format!("Parse OPF manifest failed: {}", e),
+            );
+            let error_count = issues.iter().filter(|issue| issue.level == "error").count();
+            let warning_count = issues
+                .iter()
+                .filter(|issue| issue.level == "warning")
+                .count();
+            return Ok(ToolboxEpubDiagnosticResult {
+                source_path: source.to_string_lossy().to_string(),
+                opf_path: Some(opf_path),
+                total_entries: entry_names.len(),
+                manifest_items: 0,
+                error_count,
+                warning_count,
+                issues,
+            });
+        }
+    };
+
+    let manifest_set: HashSet<String> = manifest_items
+        .iter()
+        .map(|item| item.abs_path.clone())
+        .collect();
+    let mut required_entries: HashSet<String> = HashSet::new();
+    required_entries.insert("mimetype".to_string());
+    required_entries.insert("META-INF/container.xml".to_string());
+    required_entries.insert(opf_path.clone());
+
+    for item in &manifest_items {
+        if entry_set.contains(&item.abs_path) {
+            continue;
+        }
+        if let Some(matches) = case_mismatch_names(&lower_to_names, &item.abs_path) {
+            push_diag_issue(
+                &mut issues,
+                "warning",
+                "case-mismatch",
+                Some(item.abs_path.clone()),
+                format!(
+                    "Manifest item '{}' exists with different case: {}",
+                    item.id,
+                    matches.join(", ")
+                ),
+            );
+        } else {
+            push_diag_issue(
+                &mut issues,
+                "error",
+                "manifest-missing",
+                Some(item.abs_path.clone()),
+                format!("Manifest item '{}' points to a missing resource.", item.id),
+            );
+        }
+    }
+
+    for name in &entry_names {
+        if manifest_set.contains(name) || required_entries.contains(name) {
+            continue;
+        }
+        if is_diagnostic_resource_entry(name) {
+            push_diag_issue(
+                &mut issues,
+                "warning",
+                "unregistered-resource",
+                Some(name.clone()),
+                "Resource exists in ZIP but is not registered in OPF manifest.",
+            );
+        }
+    }
+
+    let mut seen_refs = HashSet::new();
+    for name in &entry_names {
+        if !is_text_like_entry(name) || name.ends_with('/') {
+            continue;
+        }
+        let data = match read_zip_entry_bytes(&bytes, name) {
+            Ok(data) => data,
+            Err(e) => {
+                push_diag_issue(
+                    &mut issues,
+                    "warning",
+                    "read-entry",
+                    Some(name.clone()),
+                    format!("Cannot read text-like entry: {}", e),
+                );
+                continue;
+            }
+        };
+        let text = String::from_utf8_lossy(&data).to_string();
+        for raw_ref in collect_diagnostic_refs(&text) {
+            let Some(abs_ref) = resolve_epub_ref(name, &raw_ref) else {
+                continue;
+            };
+            if !seen_refs.insert((name.clone(), raw_ref.clone(), abs_ref.clone())) {
+                continue;
+            }
+            if entry_set.contains(&abs_ref) {
+                continue;
+            }
+            if let Some(matches) = case_mismatch_names(&lower_to_names, &abs_ref) {
+                push_diag_issue(
+                    &mut issues,
+                    "warning",
+                    "ref-case-mismatch",
+                    Some(name.clone()),
+                    format!(
+                        "Reference '{}' resolves to '{}' but ZIP contains different case: {}",
+                        raw_ref,
+                        abs_ref,
+                        matches.join(", ")
+                    ),
+                );
+            } else {
+                push_diag_issue(
+                    &mut issues,
+                    "error",
+                    "missing-reference",
+                    Some(name.clone()),
+                    format!(
+                        "Reference '{}' resolves to missing resource '{}'.",
+                        raw_ref, abs_ref
+                    ),
+                );
+            }
+        }
+    }
+
+    let error_count = issues.iter().filter(|issue| issue.level == "error").count();
+    let warning_count = issues
+        .iter()
+        .filter(|issue| issue.level == "warning")
+        .count();
+
+    Ok(ToolboxEpubDiagnosticResult {
+        source_path: source.to_string_lossy().to_string(),
+        opf_path: Some(opf_path),
+        total_entries: entry_names.len(),
+        manifest_items: manifest_items.len(),
+        error_count,
+        warning_count,
+        issues,
+    })
 }
 
 #[tauri::command]
@@ -10830,6 +11225,74 @@ mod toolbox_tests {
         Ok(())
     }
 
+    fn create_diagnostic_problem_epub(epub_path: &Path) -> Result<(), String> {
+        let file = fs::File::create(epub_path).map_err(|e| e.to_string())?;
+        let mut writer = zip::ZipWriter::new(file);
+        write_zip_entry(&mut writer, "mimetype", b"application/epub+zip")?;
+        write_zip_entry(
+            &mut writer,
+            "META-INF/container.xml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/content.opf",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <manifest>
+    <item href="Text/chapter.xhtml" id="chapter" media-type="application/xhtml+xml"/>
+    <item href="Images/Cover.PNG" id="cover" media-type="image/png"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Text/chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body><img src="../Images/missing.png"/></body>
+</html>"#,
+        )?;
+        write_zip_entry(&mut writer, "OPS/Images/cover.png", &[0, 1, 2, 3])?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Styles/unused.css",
+            b"body { color: red; }",
+        )?;
+        writer.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn toolbox_epub_diagnose_reports_common_package_issues() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let source = temp.path().join("problem.epub");
+        create_diagnostic_problem_epub(&source)?;
+
+        let result = toolbox_epub_diagnose(source.to_string_lossy().to_string())?;
+        let kinds: HashSet<String> = result
+            .issues
+            .iter()
+            .map(|issue| issue.kind.clone())
+            .collect();
+
+        assert_eq!(result.opf_path.as_deref(), Some("OPS/content.opf"));
+        assert!(result.error_count >= 1, "{:?}", kinds);
+        assert!(result.warning_count >= 2, "{:?}", kinds);
+        assert!(kinds.contains("missing-reference"), "{:?}", kinds);
+        assert!(kinds.contains("case-mismatch"), "{:?}", kinds);
+        assert!(kinds.contains("unregistered-resource"), "{:?}", kinds);
+        Ok(())
+    }
+
     #[test]
     fn toolbox_file_encrypt_decrypt_round_trip_uses_manifest_ids() -> Result<(), String> {
         let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -11087,6 +11550,7 @@ pub fn run() {
             toolbox_font_decrypt,
             toolbox_epub_reformat,
             toolbox_image_convert,
+            toolbox_epub_diagnose,
             toolbox_scan_batch_inputs,
             toolbox_cancel_batch,
             toolbox_run_batch,
