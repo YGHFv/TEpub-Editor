@@ -2517,6 +2517,13 @@ struct ToolboxBatchSummary {
     failed: usize,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxBatchScanResult {
+    input_paths: Vec<String>,
+    output_dir: String,
+}
+
 fn emit_toolbox_batch_event(app: &tauri::AppHandle, event: ToolboxBatchEvent) {
     let _ = app.emit("toolbox-batch-event", event);
 }
@@ -2608,12 +2615,7 @@ fn move_toolbox_result_to_dir(
     Ok(result)
 }
 
-fn collect_epub_sources(
-    app: &tauri::AppHandle,
-    task_id: &str,
-    input_paths: &[String],
-    output_dir: &Path,
-) -> Result<Vec<PathBuf>, String> {
+fn list_epub_sources(input_paths: &[String], output_dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut result = Vec::new();
     let mut seen = HashSet::new();
     for raw in input_paths {
@@ -2627,19 +2629,6 @@ fn collect_epub_sources(
             if is_epub {
                 let key = path.to_string_lossy().to_ascii_lowercase();
                 if seen.insert(key) {
-                    emit_toolbox_batch_event(
-                        app,
-                        ToolboxBatchEvent {
-                            task_id: task_id.to_string(),
-                            event: "scan-file".to_string(),
-                            level: "info".to_string(),
-                            index: result.len() + 1,
-                            total: result.len() + 1,
-                            input_path: Some(path.to_string_lossy().to_string()),
-                            output_path: None,
-                            message: format!("扫描到 EPUB: {}", path.to_string_lossy()),
-                        },
-                    );
                     result.push(path);
                 }
             }
@@ -2665,19 +2654,6 @@ fn collect_epub_sources(
                 if is_epub {
                     let key = item.to_string_lossy().to_ascii_lowercase();
                     if seen.insert(key) {
-                        emit_toolbox_batch_event(
-                            app,
-                            ToolboxBatchEvent {
-                                task_id: task_id.to_string(),
-                                event: "scan-file".to_string(),
-                                level: "info".to_string(),
-                                index: result.len() + 1,
-                                total: result.len() + 1,
-                                input_path: Some(item.to_string_lossy().to_string()),
-                                output_path: None,
-                                message: format!("扫描到 EPUB: {}", item.to_string_lossy()),
-                            },
-                        );
                         result.push(item.to_path_buf());
                     }
                 }
@@ -2688,6 +2664,31 @@ fn collect_epub_sources(
     }
     result.sort();
     Ok(result)
+}
+
+fn collect_epub_sources(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    input_paths: &[String],
+    output_dir: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    let sources = list_epub_sources(input_paths, output_dir)?;
+    for (index, path) in sources.iter().enumerate() {
+        emit_toolbox_batch_event(
+            app,
+            ToolboxBatchEvent {
+                task_id: task_id.to_string(),
+                event: "scan-file".to_string(),
+                level: "info".to_string(),
+                index: index + 1,
+                total: sources.len(),
+                input_path: Some(path.to_string_lossy().to_string()),
+                output_path: None,
+                message: format!("扫描到 EPUB: {}", path.to_string_lossy()),
+            },
+        );
+    }
+    Ok(sources)
 }
 
 fn run_toolbox_batch_impl(
@@ -3801,6 +3802,26 @@ fn toolbox_image_convert(
     image_format: Option<String>,
 ) -> Result<ToolboxEpubToolResult, String> {
     toolbox_image_convert_impl(&PathBuf::from(epub_path), image_format.as_deref())
+}
+
+#[tauri::command]
+async fn toolbox_scan_batch_inputs(
+    input_paths: Vec<String>,
+    output_dir: Option<String>,
+) -> Result<ToolboxBatchScanResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let resolved_output_dir = resolve_batch_output_dir(&input_paths, output_dir);
+        let sources = list_epub_sources(&input_paths, &resolved_output_dir)?;
+        Ok(ToolboxBatchScanResult {
+            input_paths: sources
+                .into_iter()
+                .map(|path| path.to_string_lossy().to_string())
+                .collect(),
+            output_dir: resolved_output_dir.to_string_lossy().to_string(),
+        })
+    })
+    .await
+    .map_err(|e| format!("批量目录扫描失败: {}", e))?
 }
 
 #[tauri::command]
@@ -10653,6 +10674,7 @@ pub fn run() {
             toolbox_font_decrypt,
             toolbox_epub_reformat,
             toolbox_image_convert,
+            toolbox_scan_batch_inputs,
             toolbox_run_batch,
             exit_app,
             // ===== Library Phase 1 =====

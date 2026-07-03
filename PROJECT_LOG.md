@@ -2676,6 +2676,32 @@ Caveats:
 
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
 
+### 2026-07-03 12:24 +08:00
+
+Request: after choosing a folder in the batch panel, scan the folder into actual EPUB files instead of leaving only the folder row waiting.
+
+Changes:
+
+- Added `toolbox_scan_batch_inputs` in `src-tauri/src/lib.rs` so the frontend can recursively scan selected directories before execution.
+- Refactored batch EPUB collection into a shared `list_epub_sources` helper used by both pre-scan and actual batch execution.
+- Updated `src/routes/batch-progress/+page.svelte`:
+  - `选择目录` now immediately scans the selected directories,
+  - the queue is replaced with concrete EPUB file rows after scanning,
+  - the resolved default output directory is preserved and passed into execution so folder batches still output to `TEpub-batch-output` under the selected folder,
+  - controls are disabled while scanning to avoid duplicate queue mutations.
+
+Verification:
+
+- `pnpm.cmd check` passed with existing project warnings only.
+- `cargo check` passed.
+- `pnpm.cmd build` passed with existing project warnings only.
+- `cargo test` passed: 9 tests passed.
+- Restarted the Tauri dev app so the new scan command is active.
+
+Caveats:
+
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.

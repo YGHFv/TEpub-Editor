@@ -31,6 +31,7 @@
     toolTitle: string;
     inputPaths: string[];
     outputDir?: string;
+    resolvedOutputDir?: string;
     imageFormat?: string;
   };
 
@@ -39,6 +40,11 @@
     total: number;
     succeeded: number;
     failed: number;
+  };
+
+  type BatchScanResult = {
+    inputPaths: string[];
+    outputDir: string;
   };
 
   const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
@@ -63,6 +69,7 @@
   let total = 0;
   let current = 0;
   let running = false;
+  let scanning = false;
   let done = false;
   let summary = "请选择 EPUB 文件或扫描目录";
   let rows: QueueRow[] = [];
@@ -70,7 +77,7 @@
 
   $: currentMeta = TOOL_META[tool] ?? { title: toolTitleParam, detail: "批量执行 EPUB 工具" };
   $: percent = total > 0 ? Math.round((current / total) * 100) : 0;
-  $: canStart = inputPaths.length > 0 && !running;
+  $: canStart = inputPaths.length > 0 && !running && !scanning;
   $: outputLabel = outputDir || resolvedOutputDir || "默认：所选文件夹下 TEpub-batch-output";
 
   function basename(path: string) {
@@ -208,13 +215,14 @@
         toolTitle: currentMeta.title,
         inputPaths,
         outputDir: outputDir || undefined,
+        resolvedOutputDir: resolvedOutputDir || undefined,
         imageFormat,
       }),
     );
   }
 
   async function chooseFiles() {
-    if (running) return;
+    if (running || scanning) return;
     const selected = await open({
       multiple: true,
       filters: [{ name: "EPUB 文件", extensions: ["epub"] }],
@@ -224,18 +232,56 @@
   }
 
   async function scanDirectory() {
-    if (running) return;
+    if (running || scanning) return;
     const selected = await open({
       directory: true,
       multiple: true,
       title: "选择 EPUB 目录",
     });
     if (!selected) return;
-    addInputPaths(Array.isArray(selected) ? selected : [selected], "目录待扫描");
+    const directories = Array.isArray(selected) ? selected : [selected];
+    scanning = true;
+    done = false;
+    total = 0;
+    current = 0;
+    summary = "正在扫描目录中的 EPUB 文件";
+    rows = directories.map((path) => ({
+      inputPath: path,
+      outputPath: "",
+      status: "running",
+      message: "正在扫描目录",
+    }));
+    logLine(`开始扫描 ${directories.length} 个目录`);
+    try {
+      const result = await invoke<BatchScanResult>("toolbox_scan_batch_inputs", {
+        inputPaths: directories,
+        outputDir: outputDir || undefined,
+      });
+      resolvedOutputDir = result.outputDir || "";
+      inputPaths = [];
+      rows = [];
+      addInputPaths(result.inputPaths, "扫描完成，等待执行");
+      total = result.inputPaths.length;
+      current = 0;
+      summary = result.inputPaths.length > 0 ? `扫描到 ${result.inputPaths.length} 个 EPUB 文件` : "目录中未找到 EPUB 文件";
+      logLine(summary);
+      saveTaskConfig();
+    } catch (e: any) {
+      summary = `目录扫描失败: ${e}`;
+      rows = directories.map((path) => ({
+        inputPath: path,
+        outputPath: "",
+        status: "error",
+        message: summary,
+      }));
+      logLine(summary);
+    } finally {
+      scanning = false;
+    }
   }
 
   async function chooseOutputDir() {
-    if (running) return;
+    if (running || scanning) return;
     const selected = await open({
       directory: true,
       multiple: false,
@@ -250,7 +296,7 @@
   }
 
   function resetOutputDir() {
-    if (running) return;
+    if (running || scanning) return;
     outputDir = "";
     resolvedOutputDir = "";
     summary = "已恢复默认输出目录";
@@ -259,7 +305,7 @@
   }
 
   function clearQueue() {
-    if (running) return;
+    if (running || scanning) return;
     inputPaths = [];
     rows = [];
     total = 0;
@@ -296,7 +342,7 @@
         tool,
         inputPaths,
         imageFormat,
-        outputDir: outputDir || undefined,
+        outputDir: outputDir || resolvedOutputDir || undefined,
       });
       running = false;
       done = true;
@@ -323,6 +369,7 @@
       tool = config.tool;
       inputPaths = config.inputPaths ?? [];
       outputDir = config.outputDir ?? "";
+      resolvedOutputDir = config.resolvedOutputDir ?? "";
       imageFormat = config.imageFormat;
       if (inputPaths.length > 0) {
         addInputRows(inputPaths, "等待执行");
@@ -359,9 +406,11 @@
       <p>当前队列 {inputPaths.length} 个输入源。</p>
     </div>
     <div class="source-actions">
-      <button class="primary-btn" type="button" on:click={scanDirectory} disabled={running}>选择目录</button>
-      <button class="strong-btn" type="button" on:click={chooseFiles} disabled={running}>添加 EPUB</button>
-      <button class="ghost-btn" type="button" on:click={clearQueue} disabled={running || inputPaths.length === 0}>清空队列</button>
+      <button class="primary-btn" type="button" on:click={scanDirectory} disabled={running || scanning}>
+        {scanning ? "扫描中" : "选择目录"}
+      </button>
+      <button class="strong-btn" type="button" on:click={chooseFiles} disabled={running || scanning}>添加 EPUB</button>
+      <button class="ghost-btn" type="button" on:click={clearQueue} disabled={running || scanning || inputPaths.length === 0}>清空队列</button>
     </div>
   </section>
 
@@ -373,8 +422,8 @@
           <h2>输出与执行</h2>
         </div>
         <div class="panel-actions">
-          <button class="ghost-btn" type="button" on:click={chooseOutputDir} disabled={running}>选择输出目录</button>
-          <button class="ghost-btn" type="button" on:click={resetOutputDir} disabled={running || !outputDir}>重置输出路径</button>
+          <button class="ghost-btn" type="button" on:click={chooseOutputDir} disabled={running || scanning}>选择输出目录</button>
+          <button class="ghost-btn" type="button" on:click={resetOutputDir} disabled={running || scanning || !outputDir}>重置输出路径</button>
         </div>
       </div>
 
@@ -389,7 +438,7 @@
       </div>
 
       <button class="start-btn" type="button" on:click={startBatch} disabled={!canStart}>
-        {running ? "执行中" : "开始执行"}
+        {running ? "执行中" : scanning ? "扫描中" : "开始执行"}
       </button>
 
       <div class="progress-area" aria-label="批量进度">
