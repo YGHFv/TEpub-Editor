@@ -2721,6 +2721,32 @@ Caveats:
 
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
 
+### 2026-07-03 12:40 +08:00
+
+Request: start implementing the batch UX improvement plan, make the left task area scroll, fix log scrolling, and move a smaller start button beside the current tool summary.
+
+Changes:
+
+- Updated `src/routes/batch-progress/+page.svelte` batch controls:
+  - preserved selected source directories in task config,
+  - added `重新扫描` for folder-based queues,
+  - added per-row `定位` and `移除` actions,
+  - added `打开输出目录` next to output directory controls.
+- Reworked the execution area:
+  - `开始执行` is now a compact button to the right of the current tool name/status,
+  - the left task configuration panel scrolls internally when content overflows,
+  - file queue and log list use explicit internal vertical scrolling.
+- Tightened queue action styling so status, locate, and remove controls stay compact inside each row.
+
+Verification:
+
+- `pnpm.cmd check` passed with existing project warnings only.
+- `pnpm.cmd build` passed with existing project warnings only.
+
+Caveats:
+
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.

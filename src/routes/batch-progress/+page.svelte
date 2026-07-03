@@ -30,6 +30,7 @@
     tool: string;
     toolTitle: string;
     inputPaths: string[];
+    sourceDirectories?: string[];
     outputDir?: string;
     resolvedOutputDir?: string;
     imageFormat?: string;
@@ -63,6 +64,7 @@
 
   let tool = "";
   let inputPaths: string[] = [];
+  let sourceDirectories: string[] = [];
   let outputDir = "";
   let resolvedOutputDir = "";
   let imageFormat: string | undefined;
@@ -214,6 +216,7 @@
         tool,
         toolTitle: currentMeta.title,
         inputPaths,
+        sourceDirectories,
         outputDir: outputDir || undefined,
         resolvedOutputDir: resolvedOutputDir || undefined,
         imageFormat,
@@ -240,6 +243,12 @@
     });
     if (!selected) return;
     const directories = Array.isArray(selected) ? selected : [selected];
+    sourceDirectories = directories;
+    await scanInputDirectories(directories);
+  }
+
+  async function scanInputDirectories(directories: string[]) {
+    if (directories.length === 0 || running || scanning) return;
     scanning = true;
     done = false;
     total = 0;
@@ -280,6 +289,14 @@
     }
   }
 
+  async function rescanDirectories() {
+    if (sourceDirectories.length === 0 || running || scanning) {
+      summary = "没有可重新扫描的目录";
+      return;
+    }
+    await scanInputDirectories(sourceDirectories);
+  }
+
   async function chooseOutputDir() {
     if (running || scanning) return;
     const selected = await open({
@@ -307,6 +324,7 @@
   function clearQueue() {
     if (running || scanning) return;
     inputPaths = [];
+    sourceDirectories = [];
     rows = [];
     total = 0;
     current = 0;
@@ -315,6 +333,37 @@
     summary = "队列已清空";
     logLine("队列已清空");
     saveTaskConfig();
+  }
+
+  function removeInputPath(path: string) {
+    if (running || scanning) return;
+    const key = path.toLowerCase();
+    inputPaths = inputPaths.filter((item) => item.toLowerCase() !== key);
+    rows = rows.filter((row) => row.inputPath.toLowerCase() !== key);
+    total = rows.length;
+    current = Math.min(current, total);
+    summary = inputPaths.length > 0 ? `已加入 ${inputPaths.length} 个输入源` : "队列已清空";
+    logLine(`移除队列项: ${basename(path)}`);
+    saveTaskConfig();
+  }
+
+  async function revealPath(path: string) {
+    if (!path) return;
+    try {
+      await invoke("reveal_in_explorer", { path });
+    } catch (e: any) {
+      summary = `无法打开位置: ${e}`;
+      logLine(summary);
+    }
+  }
+
+  async function openOutputDir() {
+    const path = outputDir || resolvedOutputDir;
+    if (!path) {
+      summary = "还没有可打开的输出目录";
+      return;
+    }
+    await revealPath(path);
   }
 
   function clearLog() {
@@ -368,6 +417,7 @@
     if (config) {
       tool = config.tool;
       inputPaths = config.inputPaths ?? [];
+      sourceDirectories = config.sourceDirectories ?? [];
       outputDir = config.outputDir ?? "";
       resolvedOutputDir = config.resolvedOutputDir ?? "";
       imageFormat = config.imageFormat;
@@ -423,6 +473,7 @@
         </div>
         <div class="panel-actions">
           <button class="ghost-btn" type="button" on:click={chooseOutputDir} disabled={running || scanning}>选择输出目录</button>
+          <button class="ghost-btn" type="button" on:click={openOutputDir} disabled={running || scanning || !(outputDir || resolvedOutputDir)}>打开输出目录</button>
           <button class="ghost-btn" type="button" on:click={resetOutputDir} disabled={running || scanning || !outputDir}>重置输出路径</button>
         </div>
       </div>
@@ -432,14 +483,15 @@
         <strong title={outputLabel}>{outputLabel}</strong>
       </div>
 
-      <div class="tool-summary">
-        <strong>{currentMeta.title}</strong>
-        <span>{summary}</span>
+      <div class="tool-run-row">
+        <div class="tool-summary">
+          <strong>{currentMeta.title}</strong>
+          <span>{summary}</span>
+        </div>
+        <button class="start-btn" type="button" on:click={startBatch} disabled={!canStart}>
+          {running ? "执行中" : scanning ? "扫描中" : "开始执行"}
+        </button>
       </div>
-
-      <button class="start-btn" type="button" on:click={startBatch} disabled={!canStart}>
-        {running ? "执行中" : scanning ? "扫描中" : "开始执行"}
-      </button>
 
       <div class="progress-area" aria-label="批量进度">
         <div class="progress-meta">
@@ -458,7 +510,10 @@
           <div class="eyebrow">文件队列</div>
           <h2>待处理列表</h2>
         </div>
-        <span class="count-pill">{rows.length}</span>
+        <div class="queue-head-actions">
+          <button class="ghost-btn compact-btn" type="button" on:click={rescanDirectories} disabled={running || scanning || sourceDirectories.length === 0}>重新扫描</button>
+          <span class="count-pill">{rows.length}</span>
+        </div>
       </div>
       <div class="queue-list">
         {#if rows.length === 0}
@@ -471,7 +526,11 @@
                 <span>{row.message}</span>
                 <small title={row.outputPath || row.inputPath}>{row.outputPath || row.inputPath}</small>
               </div>
-              <span class="queue-status">{statusLabel(row.status)}</span>
+              <div class="queue-actions">
+                <span class="queue-status">{statusLabel(row.status)}</span>
+                <button class="icon-text-btn" type="button" on:click={() => revealPath(row.outputPath || row.inputPath)} title="打开位置">定位</button>
+                <button class="icon-text-btn danger" type="button" on:click={() => removeInputPath(row.inputPath)} disabled={running || scanning} title="从队列移除">移除</button>
+              </div>
             </div>
           {/each}
         {/if}
@@ -580,7 +639,8 @@
   }
 
   .source-actions,
-  .panel-actions {
+  .panel-actions,
+  .queue-head-actions {
     display: flex;
     align-items: center;
     justify-content: flex-end;
@@ -653,7 +713,8 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
-    overflow: auto;
+    overflow: hidden auto;
+    scrollbar-gutter: stable;
   }
 
   .field-block {
@@ -682,6 +743,7 @@
   }
 
   .tool-summary {
+    min-width: 0;
     display: grid;
     gap: 6px;
   }
@@ -698,9 +760,17 @@
     overflow-wrap: anywhere;
   }
 
+  .tool-run-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+  }
+
   .start-btn {
-    width: 100%;
-    min-height: 42px;
+    min-width: 108px;
+    min-height: 36px;
+    padding-inline: 16px;
     flex: 0 0 auto;
   }
 
@@ -755,11 +825,19 @@
     text-align: center;
   }
 
+  .compact-btn {
+    min-height: 30px;
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
   .queue-list,
   .log-list {
+    box-sizing: border-box;
     min-height: 0;
     height: 100%;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-canvas);
@@ -769,7 +847,7 @@
     min-height: 64px;
     box-sizing: border-box;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 70px;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
     align-items: center;
     padding: 10px 12px;
@@ -808,7 +886,6 @@
   }
 
   .queue-status {
-    justify-self: end;
     padding: 4px 8px;
     border-radius: 999px;
     background: var(--color-accent-quiet);
@@ -816,6 +893,31 @@
     font-size: 11px;
     font-weight: 800;
     line-height: 1.2;
+  }
+
+  .queue-actions {
+    justify-self: end;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .icon-text-btn {
+    min-height: 26px;
+    padding: 4px 8px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--color-muted);
+    font-size: 11px;
+  }
+
+  .icon-text-btn:hover:not(:disabled) {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  .icon-text-btn.danger:hover:not(:disabled) {
+    color: #9b1c1c;
   }
 
   .status-running .queue-status {
@@ -833,6 +935,7 @@
   }
 
   .log-list {
+    max-height: 100%;
     padding: 10px 12px;
     color: var(--color-muted);
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
