@@ -2702,6 +2702,25 @@ Caveats:
 
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
 
+### 2026-07-03 12:27 +08:00
+
+Request: prevent the batch file queue from stretching the whole page when many EPUB files are scanned.
+
+Changes:
+
+- Updated `src/routes/batch-progress/+page.svelte` desktop layout so the batch window uses a fixed `100vh` grid instead of allowing the queue to expand the page height.
+- Constrained the workspace, cards, queue list, and log list with `min-height: 0` / `overflow` rules so long queues scroll inside the file-queue card.
+- Kept narrow/mobile layouts scrollable with explicit minimum heights for queue and log panels.
+
+Verification:
+
+- `pnpm.cmd check` passed with existing project warnings only.
+- `pnpm.cmd build` passed with existing project warnings only.
+
+Caveats:
+
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.

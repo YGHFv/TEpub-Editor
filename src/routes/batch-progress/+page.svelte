@@ -502,17 +502,18 @@
 <style>
   :global(body) {
     margin: 0;
-    overflow: auto;
+    overflow: hidden;
     background: var(--color-canvas);
   }
 
   .batch-app {
     box-sizing: border-box;
-    min-height: 100vh;
+    height: 100vh;
     display: grid;
-    grid-template-rows: auto auto auto minmax(180px, 1fr);
+    grid-template-rows: auto auto minmax(260px, 1fr) minmax(150px, 190px);
     gap: 18px;
     padding: 28px;
+    overflow: hidden;
     background: var(--color-canvas);
     color: var(--color-text);
     font-family: var(--font-ui);
@@ -639,17 +640,20 @@
     grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
     align-items: stretch;
     gap: 18px;
+    overflow: hidden;
   }
 
   .panel {
     min-height: 0;
     padding: 18px;
+    overflow: hidden;
   }
 
   .execute-panel {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    overflow: auto;
   }
 
   .field-block {
@@ -734,6 +738,7 @@
 
   .queue-panel,
   .log-panel {
+    min-height: 0;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 12px;
@@ -753,6 +758,7 @@
   .queue-list,
   .log-list {
     min-height: 0;
+    height: 100%;
     overflow: auto;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
@@ -843,8 +849,14 @@
   }
 
   @media (max-width: 820px) {
+    :global(body) {
+      overflow: auto;
+    }
+
     .batch-app {
       grid-template-rows: auto auto auto minmax(160px, 1fr);
+      height: auto;
+      min-height: 100vh;
       padding: 16px;
       overflow: auto;
     }
@@ -858,6 +870,15 @@
 
     .workspace {
       grid-template-columns: 1fr;
+      overflow: visible;
+    }
+
+    .queue-panel {
+      min-height: 320px;
+    }
+
+    .log-panel {
+      min-height: 220px;
     }
 
     .source-actions,
