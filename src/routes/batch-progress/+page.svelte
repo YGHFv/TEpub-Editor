@@ -91,6 +91,13 @@
   $: canStart = inputPaths.length > 0 && !running && !scanning;
   $: outputLabel = outputDir || resolvedOutputDir || "默认：所选文件夹下 TEpub-batch-output";
   $: filteredLogs = logFilter === "all" ? logs : logs.filter((log) => log.level === logFilter);
+  $: queueStats = rows.reduce<Record<QueueStatus, number>>(
+    (acc, row) => {
+      acc[row.status] += 1;
+      return acc;
+    },
+    { waiting: 0, running: 0, done: 0, warning: 0, error: 0 },
+  );
 
   function basename(path: string) {
     return path.split(/[\\/]/).pop() || path;
@@ -460,20 +467,6 @@
     }
   }
 
-  async function closeWindow() {
-    if (running || scanning) {
-      const ok = await ask("批量任务仍在执行或扫描，确定关闭窗口吗？", {
-        title: "关闭批量窗口",
-        kind: "warning",
-      });
-      if (!ok) return;
-      if (running) {
-        await cancelBatch();
-      }
-    }
-    getCurrentWindow().close();
-  }
-
   onMount(() => {
     const config = readTaskConfig();
     if (config) {
@@ -525,7 +518,6 @@
       <h1>{currentMeta.title}</h1>
       <p>{currentMeta.detail}</p>
     </div>
-    <button class="ghost-btn" type="button" on:click={closeWindow}>关闭</button>
   </header>
 
   <section class="source-panel" aria-label="输入源">
@@ -595,6 +587,14 @@
           <h2>待处理列表</h2>
         </div>
         <div class="queue-head-actions">
+          {#if rows.length > 0}
+            <div class="status-counts" aria-label="队列状态统计">
+              <span>等待 {queueStats.waiting}</span>
+              <span>处理中 {queueStats.running}</span>
+              <span>完成 {queueStats.done}</span>
+              <span>异常 {queueStats.warning + queueStats.error}</span>
+            </div>
+          {/if}
           <button class="ghost-btn compact-btn" type="button" on:click={rescanDirectories} disabled={running || scanning || sourceDirectories.length === 0}>重新扫描</button>
           <span class="count-pill">{rows.length}</span>
         </div>
@@ -961,6 +961,26 @@
     text-align: center;
   }
 
+  .status-counts {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .status-counts span {
+    padding: 4px 7px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-canvas);
+    color: var(--color-muted);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
   .compact-btn {
     min-height: 30px;
     padding: 5px 10px;
@@ -1134,6 +1154,7 @@
 
     .source-actions,
     .panel-actions,
+    .queue-head-actions,
     .log-actions {
       justify-content: flex-start;
     }

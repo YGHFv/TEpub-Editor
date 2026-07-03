@@ -2795,6 +2795,31 @@ Caveats:
 - Batch cancellation is cooperative and takes effect between files, not in the middle of a single EPUB operation, to avoid leaving partially written output in an ambiguous state.
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
 
+### 2026-07-03 13:10 +08:00
+
+Request: remove the top-right close button from the function page because desktop windows already have native close controls, then continue optimizing.
+
+Changes:
+
+- Removed the in-page `关闭` button from the batch progress/function window header while keeping native window close handling active.
+- Kept the running/scanning close guard on the native window close event, so closing during a batch still asks for confirmation and can request cancellation.
+- Added queue status summary chips to the file queue header:
+  - `等待`,
+  - `处理中`,
+  - `完成`,
+  - `异常`.
+- Adjusted queue header wrapping so the status summary, rescan button, and total count stay compact on narrower windows.
+
+Verification:
+
+- `pnpm.cmd check` passed with the existing Svelte warnings.
+- `pnpm.cmd build` passed with the existing warnings/chunk-size warning.
+- No Rust restart was required because this change only touches the Svelte batch progress page; the running dev app picks it up through Vite.
+
+Caveats:
+
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.
