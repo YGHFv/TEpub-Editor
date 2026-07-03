@@ -2596,6 +2596,30 @@ Caveats:
 
 - `pnpm build` still reports existing Svelte accessibility and unused CSS warnings in unrelated pages/components.
 
+### 2026-07-03 14:31 +08:00
+
+Request: continue the step-by-step optimization plan and make single-file EPUB open/edit flows show progress while mixed or obfuscated EPUB files are being prepared.
+
+Changes:
+
+- Added `epub-prepare-stage` events from `prepare_epub_for_open`.
+- Emitted prepare stages while reading EPUB bytes, checking pseudo-encryption, repairing obfuscated ZIP entry names, rewriting entries, and handling XOR deobfuscation.
+- Kept the `prepare_epub_for_open` return payload unchanged for existing callers.
+- Updated the reader page to listen for prepare-stage events and show the current backend preparation step in the loading overlay.
+- Updated the EPUB editor page to show a real `loadingMessage` instead of a fixed loading string, including backend preparation and extraction phases.
+
+Verification:
+
+- `cargo fmt` passed.
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `cargo test` passed: 10 tests.
+- `cargo check` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still reports existing Svelte accessibility and unused CSS warnings in unrelated pages/components.
+
 ### 2026-07-03 11:01 +08:00
 
 Request: port EPUB reformat and image conversion features from `cnwxi/epub_tool`, allow file/font encrypt-decrypt and rebuild tools to select folders for batch conversion, and show batch processing progress in a new window.

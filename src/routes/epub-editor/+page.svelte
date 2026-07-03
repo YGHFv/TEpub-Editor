@@ -2,7 +2,7 @@
     import { onMount, tick } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { getCurrentWindow } from "@tauri-apps/api/window";
-    import { emit } from "@tauri-apps/api/event"; // Added emit
+    import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event"; // Added emit
     import { confirm, open, save } from "@tauri-apps/plugin-dialog";
     import { page } from "$app/stores";
     import TocNode from "$lib/TocNode.svelte";
@@ -143,7 +143,9 @@
     let fileContent = "";
     let previewContent = "";
     let isLoading = true;
+    let loadingMessage = "正在加载 EPUB...";
     let error = "";
+    let unlistenPrepareStage: UnlistenFn | undefined;
     let expandedFolders: Set<string> = new Set();
 
     // Modification Tracking
@@ -280,6 +282,11 @@
         processed_path: string;
         changed: boolean;
         action: string;
+    }
+
+    interface EpubPrepareStageEvent {
+        epubPath: string;
+        message: string;
     }
 
     function showEpubPrepareNotice(prepared: EpubPrepareResult) {
@@ -851,6 +858,8 @@
             routePath && routePath !== sourceEpubPath && routePath !== epubPath;
         const requestedPath = isNewRoutePath ? routePath : epubPath || routePath;
 
+        isLoading = true;
+        loadingMessage = "正在加载 EPUB...";
         fontPreviewText = DEFAULT_FONT_PREVIEW_TEXT;
         if (!requestedPath) {
             error = "No EPUB file path was provided.";
@@ -867,6 +876,7 @@
             previewCache.clear();
             resetFontPreviewState();
             previewSourcePath = "";
+            loadingMessage = "准备 EPUB 文件...";
 
             const prepared = await invoke<EpubPrepareResult>(
                 "prepare_epub_for_open",
@@ -877,9 +887,11 @@
             epubPath = prepared.processed_path || requestedPath;
             sourceEpubPath = prepared.source_path || requestedPath;
 
+            loadingMessage = "正在解压 EPUB 文件树...";
             fileTree = await invoke<EpubFileNode[]>("extract_epub", {
                 epubPath,
             });
+            loadingMessage = "正在整理 EPUB 文件树...";
             showEpubPrepareNotice(prepared);
 
             const ensureStandardFolders = (nodes: EpubFileNode[]) => {
@@ -1166,7 +1178,17 @@
         setupCloseHandler();
 
         // Calling loadEpub (now top-level)
-        loadEpub();
+        listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
+            if (!isLoading) return;
+            const routePath = $page.url.searchParams.get("file") || "";
+            const activePath = sourceEpubPath || epubPath || routePath;
+            if (event.payload.epubPath && activePath && event.payload.epubPath !== activePath) return;
+            loadingMessage = event.payload.message;
+        }).then((fn) => {
+            unlistenPrepareStage = fn;
+        }).finally(() => {
+            loadEpub();
+        });
 
         const blockGlobalSearch = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
@@ -1185,6 +1207,7 @@
             window.removeEventListener("keydown", blockGlobalSearch, true);
             window.removeEventListener("beforeunload", handleBeforeUnload);
             if (unlistenClose) unlistenClose();
+            unlistenPrepareStage?.();
             cleanupBlobUrls();
         };
     });
@@ -4613,7 +4636,7 @@
         </div>
     {/if}
     {#if isLoading}
-        <div class="loading page-loading">&#23569;&#22899;&#31048;&#31095;&#20013;&#183;&#183;&#183;&#183;&#183;&#183;</div>
+        <div class="loading page-loading">{loadingMessage}</div>
     {:else if error}
         <div class="error page-error">{error}</div>
     {:else}

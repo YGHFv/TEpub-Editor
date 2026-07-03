@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { page } from "$app/stores";
   import ReaderTocNode from "$lib/ReaderTocNode.svelte";
@@ -33,6 +34,12 @@
   let loading = true;
   let loadingMsg = "正在解压 EPUB…";
   let errorMsg = "";
+  let unlistenPrepareStage: UnlistenFn | undefined;
+
+  type EpubPrepareStageEvent = {
+    epubPath: string;
+    message: string;
+  };
 
   // 阅读器设置（写入 localStorage）
   type ReadMode = "portrait" | "landscape";
@@ -1888,7 +1895,15 @@
     window.addEventListener("resize", onResize);
     window.addEventListener("wheel", onWheel, { passive: false });
 
-    loadEpub();
+    listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
+      if (!loading) return;
+      if (event.payload.epubPath && event.payload.epubPath !== epubPath) return;
+      loadingMsg = event.payload.message;
+    }).then((fn) => {
+      unlistenPrepareStage = fn;
+    }).finally(() => {
+      loadEpub();
+    });
   });
 
   onDestroy(() => {
@@ -1896,6 +1911,7 @@
     window.removeEventListener("keydown", onKeydown);
     window.removeEventListener("resize", onResize);
     window.removeEventListener("wheel", onWheel as any);
+    unlistenPrepareStage?.();
   });
 
   function noop() {}
