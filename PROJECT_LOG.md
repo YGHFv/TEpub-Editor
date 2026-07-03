@@ -2566,6 +2566,23 @@ Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
 
+### 2026-07-03 09:48 +08:00
+
+Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.
+
+Changes:
+
+- Moved the existing library home implementation from `/` to `/library` by copying the former root route into `src/routes/library/+page.svelte`.
+- Replaced the root route with a thin wrapper that renders the toolbox, so the desktop app opens directly to the toolbox.
+- Added a `书库` entry to the toolbox for returning to the library view.
+- Removed the toolbox page's in-app white header and fixed bottom status bar; the title now sits inside the main canvas and status text appears inline only when needed.
+
+Verification:
+
+- `pnpm exec svelte-check --tsconfig ./tsconfig.json` passed with existing warnings.
+- `pnpm build` passed.
+- `pnpm tauri dev` is running the desktop app with Vite at `http://localhost:1420/` and `target\debug\TEpub-Editor.exe`.
+
 ### 2026-06-19 00:00 +08:00
 
 Request: release v0.6.5 with the toolbox UI cleanup and Windows font subsetting process fix.

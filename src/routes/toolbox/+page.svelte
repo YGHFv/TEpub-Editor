@@ -5,6 +5,7 @@
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
   type ToolId =
+    | "library"
     | "txt-epub"
     | "epub-edit"
     | "epub-read"
@@ -38,6 +39,13 @@
   };
 
   const tools: Tool[] = [
+    {
+      id: "library",
+      icon: "LIB",
+      title: "书库",
+      detail: "管理图书与元数据",
+      action: "进入",
+    },
     {
       id: "txt-epub",
       icon: "TXT",
@@ -92,9 +100,9 @@
   const toolGroups: ToolGroup[] = [
     {
       id: "open",
-      title: "打开工具",
-      meta: "新窗口",
-      tools: tools.filter((tool) => tool.id === "txt-epub" || tool.id === "epub-edit" || tool.id === "epub-read"),
+      title: "常用入口",
+      meta: "书库 / 新窗口",
+      tools: tools.filter((tool) => tool.id === "library" || tool.id === "txt-epub" || tool.id === "epub-edit" || tool.id === "epub-read"),
       gridClass: "open-grid",
     },
     {
@@ -117,6 +125,11 @@
     busyTool = tool.id;
     statusText = "";
     try {
+      if (tool.id === "library") {
+        await openLibrary();
+        return;
+      }
+
       const selected = await open({
         multiple: false,
         filters: [
@@ -155,6 +168,31 @@
     } finally {
       busyTool = "";
     }
+  }
+
+  function isRootToolbox() {
+    return typeof window !== "undefined" && window.location.pathname === "/";
+  }
+
+  async function openLibrary() {
+    if (isRootToolbox()) {
+      window.location.href = "/library";
+      return;
+    }
+
+    try {
+      const mainWin = await WebviewWindow.getByLabel("main");
+      if (mainWin) {
+        await mainWin.show();
+        await mainWin.setFocus();
+        await getCurrentWindow().close();
+        return;
+      }
+    } catch (e) {
+      console.warn("唤起主窗口失败，改为在当前窗口打开书库:", e);
+    }
+
+    window.location.href = "/library";
   }
 
   function isProcessingTool(id: ToolId) {
@@ -219,21 +257,28 @@
   function closeWindow() {
     getCurrentWindow().close();
   }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && !isRootToolbox()) {
+      closeWindow();
+    }
+  }
 </script>
 
-<svelte:window on:keydown={(e) => { if (e.key === "Escape") closeWindow(); }} />
+<svelte:window on:keydown={handleKeydown} />
 
 <main class="toolbox-app">
-  <header class="toolbox-header">
-    <div class="header-inner">
+  <section class="toolbox-content" aria-label="工具列表">
+    <div class="toolbox-title-row">
       <div>
         <h1>工具箱</h1>
         <div class="toolbox-subtitle">常用工具</div>
       </div>
+      {#if statusText}
+        <span class="toolbox-inline-status" aria-live="polite">{statusText}</span>
+      {/if}
     </div>
-  </header>
 
-  <section class="toolbox-content" aria-label="工具列表">
     {#each toolGroups as group}
       <section class="tool-section" aria-labelledby={`toolbox-section-${group.id}`}>
         <div class="section-head">
@@ -261,8 +306,6 @@
       </section>
     {/each}
   </section>
-
-  <footer class="toolbox-status" aria-live="polite"><span>{statusText}</span></footer>
 </main>
 
 <style>
@@ -282,28 +325,18 @@
     font-family: var(--font-ui);
   }
 
-  .toolbox-header {
-    min-height: 64px;
-    box-sizing: border-box;
-    padding: 0 24px;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface);
-    flex-shrink: 0;
-  }
-
-  .header-inner {
-    width: min(1100px, 100%);
-    height: 64px;
-    margin: 0 auto;
+  .toolbox-title-row {
+    min-height: 50px;
     display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 16px;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 28px;
   }
 
-  .toolbox-header h1 {
+  .toolbox-title-row h1 {
     margin: 0;
-    font-size: 18px;
+    font-size: 22px;
     line-height: 1.2;
     font-weight: 800;
     letter-spacing: 0;
@@ -316,13 +349,24 @@
     line-height: 1.2;
   }
 
+  .toolbox-inline-status {
+    flex-shrink: 0;
+    max-width: min(420px, 42vw);
+    margin-top: 4px;
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
   .toolbox-content {
     box-sizing: border-box;
     width: min(1100px, calc(100% - 48px));
     flex: 1;
     min-height: 0;
     margin: 0 auto;
-    padding: 26px 0 30px;
+    padding: 30px 0 34px;
     overflow: auto;
   }
 
@@ -361,7 +405,7 @@
   }
 
   .open-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .process-grid {
@@ -457,26 +501,6 @@
     text-align: center;
   }
 
-  .toolbox-status {
-    min-height: 38px;
-    box-sizing: border-box;
-    padding: 0 24px;
-    display: flex;
-    align-items: center;
-    border-top: 1px solid var(--color-border);
-    background: var(--color-surface);
-    color: var(--color-muted);
-    font-size: 12px;
-    line-height: 1.4;
-    flex-shrink: 0;
-  }
-
-  .toolbox-status span {
-    width: min(1100px, 100%);
-    min-height: 18px;
-    margin: 0 auto;
-  }
-
   @media (max-width: 980px) {
     .open-grid,
     .process-grid {
@@ -485,13 +509,21 @@
   }
 
   @media (max-width: 640px) {
-    .toolbox-header {
-      padding: 0 14px;
-    }
-
     .toolbox-content {
       width: calc(100% - 24px);
       padding: 16px 0 20px;
+    }
+
+    .toolbox-title-row {
+      min-height: 0;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .toolbox-inline-status {
+      max-width: 100%;
+      text-align: left;
     }
 
     .open-grid,
@@ -519,10 +551,6 @@
 
     .tool-copy {
       padding-right: 0;
-    }
-
-    .toolbox-status {
-      padding: 0 14px;
     }
   }
 </style>
