@@ -6307,25 +6307,27 @@ fn get_launch_args() -> Option<String> {
 #[serde(rename_all = "camelCase")]
 struct LaunchInfo {
     file_path: Option<String>,
+    file_paths: Vec<String>,
     action: Option<String>,
 }
 
 #[tauri::command]
 fn get_launch_info() -> LaunchInfo {
     let args: Vec<String> = std::env::args().collect();
-    let mut file: Option<String> = None;
+    let mut files: Vec<String> = Vec::new();
     let mut action: Option<String> = None;
     for a in args.iter().skip(1) {
         if let Some(stripped) = a.strip_prefix("--action=") {
             action = Some(stripped.to_string());
         } else if a.starts_with("--") {
             // ignore unknown flags
-        } else if file.is_none() {
-            file = Some(a.clone());
+        } else {
+            files.push(a.clone());
         }
     }
     LaunchInfo {
-        file_path: file,
+        file_path: files.first().cloned(),
+        file_paths: files,
         action,
     }
 }

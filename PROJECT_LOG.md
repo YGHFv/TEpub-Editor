@@ -2583,6 +2583,23 @@ Verification:
 - `pnpm build` passed.
 - `pnpm tauri dev` is running the desktop app with Vite at `http://localhost:1420/` and `target\debug\TEpub-Editor.exe`.
 
+### 2026-07-03 10:08 +08:00
+
+Request: fix the new toolbox-home flow where closing the library leaves no app window, and fix file-association launches with multiple EPUB files only showing one file correctly.
+
+Changes:
+
+- Added `filePaths` to the Tauri launch info payload while keeping the old `filePath` field for compatibility.
+- Added launch-file handling on the toolbox home so EPUB/TXT file-association startup opens every supported file in its own editor or reader window.
+- Updated the library page launch handling to consume all launch paths, dedupe them, and use unique window labels for editor/reader windows.
+- Intercepted close requests on the main `/library` window so closing the library returns to the toolbox home instead of leaving the app with no visible window.
+
+Verification:
+
+- `pnpm exec svelte-check --tsconfig ./tsconfig.json` passed with existing warnings.
+- `cargo check` passed.
+- `pnpm build` passed.
+
 ### 2026-06-19 00:00 +08:00
 
 Request: release v0.6.5 with the toolbox UI cleanup and Windows font subsetting process fix.

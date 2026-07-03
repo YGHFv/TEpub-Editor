@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { open, message } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -37,6 +38,14 @@
     action: string;
     message: string;
   };
+
+  type LaunchInfo = {
+    filePath?: string | null;
+    filePaths?: string[];
+    action?: string | null;
+  };
+
+  const LAUNCH_SESSION_KEY = "tepub-editor-launch-files";
 
   const tools: Tool[] = [
     {
@@ -119,6 +128,90 @@
 
   function windowLabel(prefix: string) {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  function collectLaunchPaths(launchInfo: LaunchInfo | null | undefined) {
+    const candidates = [...(launchInfo?.filePaths ?? []), launchInfo?.filePath ?? ""];
+    const seen = new Set<string>();
+    return candidates
+      .filter((path): path is string => typeof path === "string" && path.trim().length > 0)
+      .filter((path) => {
+        const key = path.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function launchSessionKey(paths: string[], action: string) {
+    return JSON.stringify({ action, paths });
+  }
+
+  function supportedLaunchPath(path: string) {
+    const ext = path.split(".").pop()?.toLowerCase();
+    return ext === "epub" || ext === "txt";
+  }
+
+  async function openLaunchPath(filePath: string, action: string) {
+    const ext = filePath.split(".").pop()?.toLowerCase();
+    const encoded = encodeURIComponent(filePath);
+
+    if (ext === "txt") {
+      new WebviewWindow(windowLabel("editor"), {
+        url: `/editor?file=${encoded}&fromLibrary=1`,
+        title: "TEpub-Editor-TXT",
+        width: 1200,
+        height: 740,
+        dragDropEnabled: true,
+        center: true,
+      });
+      return;
+    }
+
+    if (ext !== "epub") return;
+
+    if (action === "reader") {
+      new WebviewWindow(windowLabel("reader"), {
+        url: `/reader?file=${encoded}`,
+        title: "TEpub-Editor-Reader",
+        width: 500,
+        height: 800,
+        dragDropEnabled: false,
+        center: true,
+      });
+      return;
+    }
+
+    new WebviewWindow(windowLabel("epub-editor"), {
+      url: `/epub-editor?file=${encoded}`,
+      title: "TEpub-Editor-EPUB",
+      width: 1200,
+      height: 740,
+      dragDropEnabled: true,
+      center: true,
+    });
+  }
+
+  async function openLaunchFiles() {
+    if (!isRootToolbox()) return;
+
+    try {
+      const launchInfo = await invoke<LaunchInfo>("get_launch_info");
+      const action = launchInfo?.action ?? "";
+      const paths = collectLaunchPaths(launchInfo).filter(supportedLaunchPath);
+      if (paths.length === 0) return;
+
+      const key = launchSessionKey(paths, action);
+      if (sessionStorage.getItem(LAUNCH_SESSION_KEY) === key) return;
+      sessionStorage.setItem(LAUNCH_SESSION_KEY, key);
+
+      for (const path of paths) {
+        await openLaunchPath(path, action);
+      }
+      statusText = paths.length > 1 ? `${paths.length} files opened` : "File opened";
+    } catch (e) {
+      console.warn("Failed to process launch files:", e);
+    }
   }
 
   async function pickFile(tool: Tool) {
@@ -263,6 +356,10 @@
       closeWindow();
     }
   }
+
+  onMount(() => {
+    openLaunchFiles();
+  });
 </script>
 
 <svelte:window on:keydown={handleKeydown} />

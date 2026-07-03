@@ -57,6 +57,14 @@
     libraryAiMatch?: LibraryAiMatchConfig;
   }
 
+  interface LaunchInfo {
+    filePath?: string | null;
+    filePaths?: string[];
+    action?: string | null;
+  }
+
+  const LAUNCH_SESSION_KEY = "tepub-editor-launch-files";
+
   interface AiProofingConfig {
     enabled: boolean;
     baseUrl: string;
@@ -843,6 +851,71 @@
   }
 
   // 用一个文件路径打开编辑器；可选地隐藏主窗并在编辑器关闭时还原
+  function windowLabel(prefix: string) {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  function collectLaunchPaths(launchInfo: LaunchInfo | null | undefined) {
+    const candidates = [...(launchInfo?.filePaths ?? []), launchInfo?.filePath ?? ""];
+    const seen = new Set<string>();
+    return candidates
+      .filter((path): path is string => typeof path === "string" && path.trim().length > 0)
+      .filter((path) => {
+        const key = path.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function launchSessionKey(paths: string[], action: string) {
+    return JSON.stringify({ action, paths });
+  }
+
+  function supportedLaunchPath(path: string) {
+    const ext = path.split(".").pop()?.toLowerCase();
+    return ext === "epub" || ext === "txt";
+  }
+
+  async function openLaunchFilePath(filePath: string, action: string, opts: { hideMain: boolean }) {
+    const ext = filePath.split(".").pop()?.toLowerCase();
+    if (ext === "txt") {
+      await openFilePathInEditor(filePath, opts);
+      return;
+    }
+    if (ext !== "epub") return;
+
+    if (action !== "reader") {
+      await openFilePathInEditor(filePath, opts);
+      return;
+    }
+
+    const encoded = encodeURIComponent(filePath);
+    try {
+      const appWindow = getCurrentWindow();
+      const win = new WebviewWindow(windowLabel("reader"), {
+        url: `/reader?file=${encoded}`,
+        title: "TEpub-Editor-Reader",
+        width: 500,
+        height: 800,
+        dragDropEnabled: false,
+        center: true,
+      });
+
+      const shouldHideMain = opts.hideMain && libraryConfig.closeLibraryOnEpubOpen !== false;
+      if (shouldHideMain) {
+        await appWindow.hide();
+        win.once("tauri://destroyed", async () => {
+          await appWindow.show();
+          await appWindow.setFocus();
+        });
+      }
+    } catch (e: any) {
+      console.error("Failed to open reader:", e);
+      await message(`Open failed: ${e}`, { title: "Error", kind: "error" });
+    }
+  }
+
   async function openFilePathInEditor(filePath: string, opts: { hideMain: boolean }) {
     const ext = filePath.split(".").pop()?.toLowerCase();
     const isEpub = ext === "epub";
@@ -894,7 +967,7 @@
 
     try {
       const appWindow = getCurrentWindow();
-      const win = new WebviewWindow(`editor-${Date.now()}`, {
+      const win = new WebviewWindow(windowLabel("editor"), {
         url,
         title,
         width: isEpub ? 1200 : 1200,
@@ -932,7 +1005,7 @@
 
     try {
       const appWindow = getCurrentWindow();
-      const win = new WebviewWindow(`reader-${Date.now()}`, {
+      const win = new WebviewWindow(windowLabel("reader"), {
         url,
         title,
         // 阅读器窗口纵横比 高:宽 = 8:5（严格：500*8/5=800）。
@@ -1505,69 +1578,37 @@
     loadShelfSettings();
     loadAppUiTheme();
     await bootLibrary();
+    const appWindow = getCurrentWindow();
 
     // 主窗口固定标题为 TEpub-Editor（避免被 editor/reader 子流程残留的 TXT/EPUB 标题污染）
     try {
-      await getCurrentWindow().setTitle("TEpub-Editor");
+      await appWindow.setTitle("TEpub-Editor");
     } catch (_) {}
 
-    // 检查启动参数（文件关联，支持 --action= 路由）
+    appWindow.onCloseRequested(async (event) => {
+      if (appWindow.label === "main" && window.location.pathname === "/library") {
+        event.preventDefault();
+        window.location.href = "/";
+      }
+    });
+
     try {
-      const launchInfo = await invoke<{ filePath: string | null; action: string | null }>("get_launch_info");
-      const filePath = launchInfo?.filePath;
-      if (filePath) {
-        const ext = filePath.split(".").pop()?.toLowerCase();
-        const isEpub = ext === "epub";
-        const action = launchInfo?.action || "";
-        const encoded = encodeURIComponent(filePath);
-
-        let url: string;
-        let title: string;
-        let width = 1200;
-        let height = 740;
-        if (isEpub) {
-          if (action === "reader") {
-            url = `/reader?file=${encoded}`;
-            title = "TEpub-Editor-Reader";
-            width = 500;
-            height = 800;
-          } else {
-            // 默认 / --action=epub-editor → 编辑器
-            url = `/epub-editor?file=${encoded}`;
-            title = "TEpub-Editor-EPUB";
+      const launchInfo = await invoke<LaunchInfo>("get_launch_info");
+      const action = launchInfo?.action ?? "";
+      const launchPaths = collectLaunchPaths(launchInfo).filter(supportedLaunchPath);
+      if (launchPaths.length > 0) {
+        const key = launchSessionKey(launchPaths, action);
+        if (sessionStorage.getItem(LAUNCH_SESSION_KEY) !== key) {
+          sessionStorage.setItem(LAUNCH_SESSION_KEY, key);
+          for (const filePath of launchPaths) {
+            await openLaunchFilePath(filePath, action, { hideMain: launchPaths.length === 1 });
           }
-        } else {
-          // .txt 默认或 --action=make-epub 都进 TXT 编辑器（编辑器内部有制作 EPUB 入口）
-          url = `/editor?file=${encoded}&fromLibrary=1`;
-          title = "TEpub-Editor-TXT";
-          width = 1200;
-          height = 740;
-        }
-
-        const appWindow = getCurrentWindow();
-        const win = new WebviewWindow(`editor-${Date.now()}`, {
-          url,
-          title,
-          width,
-          height,
-          dragDropEnabled: true,
-          center: true,
-        });
-
-        const shouldHideMain = isEpub ? libraryConfig.closeLibraryOnEpubOpen !== false : libraryConfig.closeLibraryOnTxtOpen !== false;
-        if (shouldHideMain) {
-          await appWindow.hide();
-
-          win.once("tauri://destroyed", async () => {
-            await appWindow.show();
-            await appWindow.setFocus();
-          });
         }
       }
     } catch {}
 
+
     // 拖放处理 (Tauri)
-    const appWindow = getCurrentWindow();
     appWindow.onDragDropEvent((ev: any) => {
       if (ev.payload?.type === "drop" && ev.payload?.paths) {
         (async () => {
