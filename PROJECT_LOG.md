@@ -2618,6 +2618,27 @@ Caveats:
 
 - Slow-task warning is currently emitted during progress-aware EPUB decrypt/deobfuscation stages; other synchronous tools still report elapsed time when the file finishes.
 
+### 2026-07-03 14:45 +08:00
+
+Request: continue the optimization plan by improving batch completion handling, failed-item retry, and report export.
+
+Changes:
+
+- Added derived completed/skipped/failed queue counts to the batch progress window.
+- Added a completion summary strip after batch execution finishes.
+- Added `重试失败` to rebuild the queue from failed rows only.
+- Added `导出报告` in both the execution area and log area.
+- Report export now includes tool name, output directory, summary, per-file status/input/output/message, and full log history.
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `pnpm build` still reports existing Svelte accessibility and unused CSS warnings in unrelated pages/components.
+
 ### 2026-07-03 14:31 +08:00
 
 Request: continue the step-by-step optimization plan and make single-file EPUB open/edit flows show progress while mixed or obfuscated EPUB files are being prepared.

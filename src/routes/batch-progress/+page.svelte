@@ -111,6 +111,9 @@
     },
     { waiting: 0, running: 0, done: 0, warning: 0, error: 0 },
   );
+  $: failedRows = rows.filter((row) => row.status === "error");
+  $: completedRows = rows.filter((row) => row.status === "done");
+  $: warningRows = rows.filter((row) => row.status === "warning");
 
   function basename(path: string) {
     return path.split(/[\\/]/).pop() || path;
@@ -430,6 +433,73 @@
     }
   }
 
+  function buildBatchReport() {
+    const lines: string[] = [];
+    lines.push(`${currentMeta.title} 批量处理报告`);
+    lines.push(`生成时间: ${new Date().toLocaleString()}`);
+    lines.push(`工具: ${tool || currentMeta.title}`);
+    lines.push(`输出目录: ${outputDir || resolvedOutputDir || "默认输出目录"}`);
+    lines.push(`摘要: ${summary}`);
+    lines.push(`队列: ${rows.length}，完成: ${completedRows.length}，跳过: ${warningRows.length}，失败: ${failedRows.length}`);
+    lines.push("");
+    lines.push("文件队列:");
+    rows.forEach((row, index) => {
+      lines.push(`${index + 1}. [${statusLabel(row.status)}] ${basename(row.inputPath)}`);
+      lines.push(`   输入: ${row.inputPath}`);
+      if (row.outputPath) lines.push(`   输出: ${row.outputPath}`);
+      lines.push(`   信息: ${row.message}`);
+    });
+    lines.push("");
+    lines.push("日志:");
+    if (logs.length === 0) {
+      lines.push("无日志");
+    } else {
+      logs
+        .slice()
+        .reverse()
+        .forEach((log) => lines.push(log.text));
+    }
+    return lines.join("\n");
+  }
+
+  async function exportReport() {
+    if (rows.length === 0) return;
+    const selected = await save({
+      title: "导出批量处理报告",
+      defaultPath: `${currentMeta.title}-批量处理报告.txt`,
+      filters: [{ name: "文本文件", extensions: ["txt"] }],
+    });
+    if (!selected) return;
+    try {
+      await writeTextFile(selected, buildBatchReport());
+      summary = "批量处理报告已导出";
+      logLine(`批量处理报告已导出: ${selected}`);
+    } catch (e: any) {
+      summary = `报告导出失败: ${e}`;
+      logLine(summary, currentMeta.title, "error");
+    }
+  }
+
+  function retryFailedRows() {
+    if (running || scanning || failedRows.length === 0) return;
+    const retryPaths = failedRows.map((row) => row.inputPath);
+    inputPaths = retryPaths;
+    rows = retryPaths.map((path) => ({
+      inputPath: path,
+      outputPath: "",
+      status: "waiting",
+      message: "等待重试",
+    }));
+    total = rows.length;
+    current = 0;
+    done = false;
+    cancelRequested = false;
+    queueFilter = "all";
+    summary = `已准备重试 ${rows.length} 个失败文件`;
+    logLine(summary, currentMeta.title, "warning");
+    saveTaskConfig();
+  }
+
   async function cancelBatch() {
     if (!running || cancelRequested) return;
     cancelRequested = true;
@@ -585,6 +655,12 @@
             {cancelRequested ? "取消中" : "取消任务"}
           </button>
         {/if}
+        {#if done && failedRows.length > 0}
+          <button class="retry-btn" type="button" on:click={retryFailedRows} disabled={running || scanning}>重试失败</button>
+        {/if}
+        {#if done && rows.length > 0}
+          <button class="report-btn" type="button" on:click={exportReport}>导出报告</button>
+        {/if}
       </div>
 
       <div class="progress-area" aria-label="批量进度">
@@ -596,6 +672,13 @@
           <div class="progress-bar" style={`width: ${percent}%`}></div>
         </div>
       </div>
+      {#if done && rows.length > 0}
+        <div class="completion-summary" aria-label="完成摘要">
+          <span>完成 {completedRows.length}</span>
+          <span>跳过 {warningRows.length}</span>
+          <span class:error={failedRows.length > 0}>失败 {failedRows.length}</span>
+        </div>
+      {/if}
     </section>
 
     <section class="panel queue-panel" aria-label="文件队列">
@@ -674,6 +757,7 @@
           <button type="button" class:active={logFilter === "warning"} on:click={() => (logFilter = "warning")}>警告</button>
         </div>
         <button class="ghost-btn compact-btn" type="button" on:click={exportLogs} disabled={logs.length === 0}>导出日志</button>
+        <button class="ghost-btn compact-btn" type="button" on:click={exportReport} disabled={rows.length === 0}>导出报告</button>
         <button class="ghost-btn compact-btn" type="button" on:click={clearLog} disabled={logs.length === 0}>清空日志</button>
       </div>
     </div>
@@ -816,6 +900,18 @@
     color: #9b1c1c;
   }
 
+  .retry-btn {
+    border-color: color-mix(in srgb, #b7791f 32%, var(--color-border));
+    background: color-mix(in srgb, #b7791f 12%, var(--color-surface));
+    color: #8a4b08;
+  }
+
+  .report-btn {
+    border-color: var(--color-border);
+    background: var(--color-canvas);
+    color: var(--color-text);
+  }
+
   .strong-btn {
     border-color: var(--color-border-strong);
     background: var(--color-text);
@@ -904,13 +1000,15 @@
 
   .tool-run-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) repeat(4, auto);
     gap: 12px;
     align-items: center;
   }
 
   .start-btn,
-  .cancel-btn {
+  .cancel-btn,
+  .retry-btn,
+  .report-btn {
     min-width: 108px;
     min-height: 36px;
     padding-inline: 16px;
@@ -947,6 +1045,30 @@
     border-radius: inherit;
     background: var(--color-accent);
     transition: width var(--transition-fast);
+  }
+
+  .completion-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 2px;
+  }
+
+  .completion-summary span {
+    padding: 5px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-canvas);
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.2;
+  }
+
+  .completion-summary span.error {
+    border-color: color-mix(in srgb, #d14343 26%, var(--color-border));
+    background: color-mix(in srgb, #d14343 10%, var(--color-canvas));
+    color: #9b1c1c;
   }
 
   .queue-panel,
