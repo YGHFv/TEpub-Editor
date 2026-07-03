@@ -2596,6 +2596,28 @@ Caveats:
 
 - `pnpm build` still reports existing Svelte accessibility and unused CSS warnings in unrelated pages/components.
 
+### 2026-07-03 14:42 +08:00
+
+Request: continue the optimization plan with better batch task feedback for long-running jobs, cancellation visibility, and timing.
+
+Changes:
+
+- Added human-readable duration formatting for toolbox batch jobs.
+- Added per-file elapsed time to batch success and failure messages.
+- Added total elapsed time to batch finished and cancelled summaries.
+- Added a slow-file warning during progress-aware EPUB decrypt/deobfuscation when a single file runs longer than 30 seconds.
+- Added a backend stage warning when a cancel request is received during a progress-aware file operation, clarifying that the current file will finish before the batch stops.
+
+Verification:
+
+- `cargo fmt` passed.
+- `cargo check` passed.
+- `cargo test` passed: 10 tests.
+
+Caveats:
+
+- Slow-task warning is currently emitted during progress-aware EPUB decrypt/deobfuscation stages; other synchronous tools still report elapsed time when the file finishes.
+
 ### 2026-07-03 14:31 +08:00
 
 Request: continue the step-by-step optimization plan and make single-file EPUB open/edit flows show progress while mixed or obfuscated EPUB files are being prepared.

@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process; // 引入进程控制
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 use tempfile::TempDir;
 use walkdir::WalkDir;
@@ -2672,6 +2672,47 @@ fn emit_toolbox_batch_event(app: &tauri::AppHandle, event: ToolboxBatchEvent) {
     let _ = app.emit("toolbox-batch-event", event);
 }
 
+fn format_toolbox_duration(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    if secs >= 3600 {
+        format!("{}小时{}分{}秒", secs / 3600, (secs % 3600) / 60, secs % 60)
+    } else if secs >= 60 {
+        format!("{}分{}秒", secs / 60, secs % 60)
+    } else if secs >= 1 {
+        format!("{}秒", secs)
+    } else {
+        format!("{}毫秒", duration.as_millis())
+    }
+}
+
+fn append_toolbox_duration(message: String, duration: Duration) -> String {
+    format!("{}（耗时 {}）", message, format_toolbox_duration(duration))
+}
+
+fn emit_toolbox_batch_stage_with_level(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    index: usize,
+    total: usize,
+    input_path: &Path,
+    level: &str,
+    message: impl Into<String>,
+) {
+    emit_toolbox_batch_event(
+        app,
+        ToolboxBatchEvent {
+            task_id: task_id.to_string(),
+            event: "file-stage".to_string(),
+            level: level.to_string(),
+            index,
+            total,
+            input_path: Some(input_path.to_string_lossy().to_string()),
+            output_path: None,
+            message: message.into(),
+        },
+    );
+}
+
 fn emit_toolbox_batch_stage(
     app: &tauri::AppHandle,
     task_id: &str,
@@ -2680,19 +2721,7 @@ fn emit_toolbox_batch_stage(
     input_path: &Path,
     message: impl Into<String>,
 ) {
-    emit_toolbox_batch_event(
-        app,
-        ToolboxBatchEvent {
-            task_id: task_id.to_string(),
-            event: "file-stage".to_string(),
-            level: "info".to_string(),
-            index,
-            total,
-            input_path: Some(input_path.to_string_lossy().to_string()),
-            output_path: None,
-            message: message.into(),
-        },
-    );
+    emit_toolbox_batch_stage_with_level(app, task_id, index, total, input_path, "info", message);
 }
 
 fn reset_toolbox_batch_cancel(task_id: &str) {
@@ -2945,6 +2974,7 @@ fn run_toolbox_batch_impl(
     let normalized_tool = tool.replace('-', "_");
     let mut succeeded = 0usize;
     let mut failed = 0usize;
+    let batch_started_at = Instant::now();
     for (idx, source) in sources.iter().enumerate() {
         let index = idx + 1;
         if is_toolbox_batch_cancelled(&task_id) {
@@ -2960,10 +2990,11 @@ fn run_toolbox_batch_impl(
                     input_path: None,
                     output_path: None,
                     message: format!(
-                        "批量处理已取消：成功 {}，失败 {}，剩余 {}",
+                        "批量处理已取消：成功 {}，失败 {}，剩余 {}，总耗时 {}",
                         succeeded,
                         failed,
-                        total.saturating_sub(idx)
+                        total.saturating_sub(idx),
+                        format_toolbox_duration(batch_started_at.elapsed())
                     ),
                 },
             );
@@ -2974,6 +3005,9 @@ fn run_toolbox_batch_impl(
                 failed,
             });
         }
+        let file_started_at = Instant::now();
+        let mut slow_warned = false;
+        let mut cancel_stage_warned = false;
         emit_toolbox_batch_event(
             &app,
             ToolboxBatchEvent {
@@ -2993,7 +3027,42 @@ fn run_toolbox_batch_impl(
             "file_encrypt" => toolbox_file_encrypt_impl(source),
             "file_decrypt" => {
                 let mut progress = |message: &str| {
-                    emit_toolbox_batch_stage(&app, &task_id, index, total, source, message);
+                    let elapsed = file_started_at.elapsed();
+                    if elapsed >= Duration::from_secs(30) && !slow_warned {
+                        slow_warned = true;
+                        emit_toolbox_batch_stage_with_level(
+                            &app,
+                            &task_id,
+                            index,
+                            total,
+                            source,
+                            "warning",
+                            format!(
+                                "当前文件处理超过 {}，仍在继续",
+                                format_toolbox_duration(elapsed)
+                            ),
+                        );
+                    }
+                    if is_toolbox_batch_cancelled(&task_id) && !cancel_stage_warned {
+                        cancel_stage_warned = true;
+                        emit_toolbox_batch_stage_with_level(
+                            &app,
+                            &task_id,
+                            index,
+                            total,
+                            source,
+                            "warning",
+                            "已收到取消请求，当前文件完成后停止",
+                        );
+                    }
+                    emit_toolbox_batch_stage(
+                        &app,
+                        &task_id,
+                        index,
+                        total,
+                        source,
+                        format!("{}（已用 {}）", message, format_toolbox_duration(elapsed)),
+                    );
                 };
                 toolbox_file_decrypt_impl_with_progress(source, &mut progress)
             }
@@ -3010,6 +3079,7 @@ fn run_toolbox_batch_impl(
 
         match result {
             Ok(done) => {
+                let elapsed = file_started_at.elapsed();
                 succeeded += 1;
                 emit_toolbox_batch_event(
                     &app,
@@ -3021,11 +3091,12 @@ fn run_toolbox_batch_impl(
                         total,
                         input_path: Some(done.source_path),
                         output_path: Some(done.output_path),
-                        message: done.message,
+                        message: append_toolbox_duration(done.message, elapsed),
                     },
                 );
             }
             Err(error) => {
+                let elapsed = file_started_at.elapsed();
                 failed += 1;
                 emit_toolbox_batch_event(
                     &app,
@@ -3037,7 +3108,7 @@ fn run_toolbox_batch_impl(
                         total,
                         input_path: Some(source.to_string_lossy().to_string()),
                         output_path: None,
-                        message: error,
+                        message: append_toolbox_duration(error, elapsed),
                     },
                 );
             }
@@ -3054,7 +3125,12 @@ fn run_toolbox_batch_impl(
             total,
             input_path: None,
             output_path: None,
-            message: format!("批量处理完成：成功 {}，失败 {}", succeeded, failed),
+            message: format!(
+                "批量处理完成：成功 {}，失败 {}，总耗时 {}",
+                succeeded,
+                failed,
+                format_toolbox_duration(batch_started_at.elapsed())
+            ),
         },
     );
     reset_toolbox_batch_cancel(&task_id);
