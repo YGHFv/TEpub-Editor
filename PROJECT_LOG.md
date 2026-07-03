@@ -2618,6 +2618,21 @@ Verification:
 - `pnpm build` passed with existing warnings.
 - `pnpm exec svelte-check --tsconfig ./tsconfig.json` passed with existing warnings.
 
+### 2026-07-03 10:30 +08:00
+
+Request: fix TXT editor search/replace where "replace all" successfully changes text but the search window reports no results.
+
+Changes:
+
+- Count CodeMirror search matches before running `replaceAll`, then emit an explicit operation result after replacement.
+- The search/replace popup now displays status messages such as `已替换 N 处` before falling back to the normal "无结果" state.
+- Prevented delayed highlight refresh events from immediately overwriting a successful replace-all message.
+
+Verification:
+
+- `pnpm exec svelte-check --tsconfig ./tsconfig.json` passed with existing warnings.
+- `pnpm build` passed with existing warnings.
+
 ### 2026-06-19 00:00 +08:00
 
 Request: release v0.6.5 with the toolbox UI cleanup and Windows font subsetting process fix.

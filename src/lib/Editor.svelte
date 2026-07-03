@@ -224,8 +224,28 @@
             });
         }
 
+        function countMatches() {
+          if (!hasQuery || !query.valid) return 0;
+          const cursor = query.getCursor(view.state.doc);
+          let count = 0;
+          for (let next = cursor.next(); !next.done; next = cursor.next()) {
+            count += 1;
+          }
+          return count;
+        }
+
         if (p.type === "replace-all") {
-          replaceAll(view);
+          const replacedCount = countMatches();
+          if (replacedCount > 0) {
+            replaceAll(view);
+          }
+          emit("search-status", {
+            action: p.type,
+            count: replacedCount,
+            current: replacedCount > 0 ? replacedCount : 0,
+            message: replacedCount > 0 ? `已替换 ${replacedCount} 处` : "无结果",
+          });
+          return;
         }
 
         let hasMatch = false;
@@ -235,7 +255,7 @@
              hasMatch = !first.done;
         }
 
-        emit("search-status", { count: hasMatch ? 1 : 0 });
+        emit("search-status", { action: p.type, count: hasMatch ? 1 : 0 });
 
       } catch (e) {
         console.error("Search error:", e);

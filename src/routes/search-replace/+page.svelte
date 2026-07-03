@@ -17,6 +17,7 @@
   let resultCount = 0;
   let currentMatch = 0;
   let hasSearched = false;
+  let statusMessage = "";
 
   let searchHistory: string[] = [];
   let replaceHistory: string[] = [];
@@ -43,6 +44,7 @@
 
   async function syncState() {
     await tick(); // 确保 Svelte bindings (尤其是 radio bind:group) 已更新
+    statusMessage = "";
     await emitSearchEvents("sync-only");
 
     // 防抖发送真正的渲染查询（比如用户停下手 500ms 后才开始高亮背景）
@@ -64,6 +66,7 @@
 
   async function performAction(actionType: string) {
     await tick(); // 确保 Svelte bindings 已更新
+    statusMessage = "";
     saveHistory();
     await emitSearchEvents(actionType);
   }
@@ -124,6 +127,10 @@
     unlistenSync = await listen("search-status", (event: any) => {
       const payload = event.payload;
       if (payload) {
+        if (statusMessage && payload.action === "update-highlight" && !payload.message) {
+          return;
+        }
+        statusMessage = payload.message || "";
         resultCount = payload.count || 0;
         currentMatch = payload.current || 0;
         hasSearched = true;
@@ -241,7 +248,9 @@
     </fieldset>
 
     <div class="status-bar">
-      {#if hasSearched}
+      {#if hasSearched && statusMessage}
+         {statusMessage}
+      {:else if hasSearched}
          {resultCount > 0 ? '' : '无结果'}
       {/if}
     </div>
