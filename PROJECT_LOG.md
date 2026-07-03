@@ -2566,6 +2566,36 @@ Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
 
+### 2026-07-03 11:01 +08:00
+
+Request: port EPUB reformat and image conversion features from `cnwxi/epub_tool`, allow file/font encrypt-decrypt and rebuild tools to select folders for batch conversion, and show batch processing progress in a new window.
+
+Changes:
+
+- Added native Rust toolbox commands in `src-tauri/src/lib.rs`:
+  - `toolbox_epub_reformat` rebuilds EPUBs into a standard `OEBPS/content.opf`, `Text`, `Styles`, `Images`, `Fonts`, `Audio`, `Video`, and `Misc` layout while rewriting internal references.
+  - `toolbox_image_convert` converts `.webp` EPUB image entries to PNG/JPEG-compatible output and rewrites OPF, HTML/XHTML/SVG/CSS references.
+  - `toolbox_run_batch` recursively collects EPUB files from selected folders, runs the selected tool, and emits queue/progress/log events to the frontend.
+- Extended the toolbox page:
+  - added `EPUB 重构` and `图片转换` tools,
+  - kept single-file processing on the main tool button,
+  - added a folder batch button for all processing tools.
+- Added `src/routes/batch-progress/+page.svelte` as a dedicated batch progress window with total progress, queue status, output paths, and logs.
+- Added Rust tests covering EPUB reformat path/reference rewrites and image conversion OPF/HTML/CSS rewrites.
+
+Verification:
+
+- `pnpm.cmd check` passed with existing project warnings only.
+- `pnpm.cmd build` passed with existing warnings only.
+- `cargo check` passed.
+- `cargo test` passed: 9 tests passed.
+- Confirmed the dev app stack is still running (`TEpub-Editor.exe`, Vite on port 1420, and cargo).
+
+Caveats:
+
+- Batch font decrypt runs without a per-file TXT alignment file; it works for EPUBs that carry the saved font-obfuscation map and otherwise reports the per-file error in the batch log.
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` are intentionally left untracked and are not part of this change.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.

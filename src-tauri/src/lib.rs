@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process; // 引入进程控制
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::Emitter;
 use tempfile::TempDir;
 use walkdir::WalkDir;
 use zip::write::FileOptions;
@@ -2103,6 +2104,598 @@ fn toolbox_file_decrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, Str
     }
 }
 
+fn toolbox_reformat_target_path(item: Option<&ToolboxManifestItem>, path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    if lower == "mimetype" || lower.starts_with("meta-inf/") {
+        return path.to_string();
+    }
+    if lower.ends_with(".opf") {
+        return "OEBPS/content.opf".to_string();
+    }
+    if lower.ends_with(".ncx") {
+        return "OEBPS/toc.ncx".to_string();
+    }
+
+    let category = item
+        .map(toolbox_file_category)
+        .unwrap_or_else(|| {
+            if lower.ends_with(".xhtml") || lower.ends_with(".html") || lower.ends_with(".htm") {
+                "text"
+            } else if lower.ends_with(".css") {
+                "css"
+            } else if lower.ends_with(".jpg")
+                || lower.ends_with(".jpeg")
+                || lower.ends_with(".png")
+                || lower.ends_with(".gif")
+                || lower.ends_with(".webp")
+                || lower.ends_with(".bmp")
+                || lower.ends_with(".svg")
+            {
+                "image"
+            } else if lower.ends_with(".ttf")
+                || lower.ends_with(".otf")
+                || lower.ends_with(".woff")
+                || lower.ends_with(".woff2")
+            {
+                "font"
+            } else if lower.ends_with(".mp3") || lower.ends_with(".m4a") || lower.ends_with(".aac") {
+                "audio"
+            } else if lower.ends_with(".mp4") || lower.ends_with(".webm") {
+                "video"
+            } else {
+                "other"
+            }
+        });
+
+    let folder = match category {
+        "text" => "Text",
+        "css" => "Styles",
+        "image" => "Images",
+        "font" => "Fonts",
+        "audio" => "Audio",
+        "video" => "Video",
+        _ => "Misc",
+    };
+    let basename = Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(sanitize_windows_component)
+        .unwrap_or_else(|| friendly_name_for_path(path, 1));
+    format!("OEBPS/{}/{}", folder, basename)
+}
+
+fn toolbox_epub_reformat_impl(source: &Path) -> Result<ToolboxEpubToolResult, String> {
+    if !source.exists() {
+        return Err(format!("文件不存在: {}", source.to_string_lossy()));
+    }
+    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let opf_path = find_opf_path_in_epub_bytes(&bytes)?;
+    let manifest_items = parse_toolbox_manifest_items(&bytes, &opf_path)?;
+    let manifest_by_abs: HashMap<String, ToolboxManifestItem> = manifest_items
+        .into_iter()
+        .map(|item| (item.abs_path.clone(), item))
+        .collect();
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let mut used: HashSet<String> = HashSet::new();
+    let mut path_map: HashMap<String, String> = HashMap::new();
+    let mut changed = false;
+
+    for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        let old_name = file.name().replace('\\', "/");
+        let is_dir = old_name.ends_with('/');
+        let mut target = if is_dir {
+            old_name.clone()
+        } else {
+            toolbox_reformat_target_path(manifest_by_abs.get(&old_name), &old_name)
+        };
+        target = sanitize_zip_entry_name(&target);
+        let unique = ensure_unique_zip_name(&target, &mut used);
+        if unique != old_name {
+            changed = true;
+        }
+        path_map.insert(old_name, unique);
+    }
+
+    if !changed {
+        return Ok(toolbox_epub_tool_result(
+            source,
+            source,
+            false,
+            "epub_reformat",
+            "EPUB 已经是规范结构，无需重构".to_string(),
+        ));
+    }
+
+    let output_path = build_processed_epub_path(source, "_reformat");
+    write_epub_with_path_map(&bytes, &output_path, &path_map)?;
+    Ok(toolbox_epub_tool_result(
+        source,
+        &output_path,
+        true,
+        "epub_reformat",
+        "EPUB 重构完成".to_string(),
+    ))
+}
+
+#[derive(Clone)]
+struct ImageConversionEntry {
+    new_path: String,
+    data: Vec<u8>,
+    media_type: String,
+}
+
+fn has_image_alpha(image: &image::DynamicImage) -> bool {
+    matches!(
+        image.color(),
+        image::ColorType::La8
+            | image::ColorType::La16
+            | image::ColorType::Rgba8
+            | image::ColorType::Rgba16
+    )
+}
+
+fn encode_converted_image(
+    source_name: &str,
+    data: &[u8],
+    requested_format: Option<&str>,
+) -> Result<(Vec<u8>, &'static str, &'static str), String> {
+    let image = image::load_from_memory(data)
+        .map_err(|e| format!("转换图片失败 {}: {}", source_name, e))?;
+    let format = requested_format
+        .unwrap_or("auto")
+        .trim()
+        .to_ascii_lowercase();
+    let use_png = format == "png" || (format != "jpg" && format != "jpeg" && has_image_alpha(&image));
+    let mut out = Vec::new();
+    if use_png {
+        let mut cursor = std::io::Cursor::new(&mut out);
+        image
+            .write_to(&mut cursor, image::ImageOutputFormat::Png)
+            .map_err(|e| format!("写入 PNG 失败 {}: {}", source_name, e))?;
+        Ok((out, "png", "image/png"))
+    } else {
+        let rgb = image::DynamicImage::ImageRgb8(image.to_rgb8());
+        let mut cursor = std::io::Cursor::new(&mut out);
+        rgb.write_to(&mut cursor, image::ImageOutputFormat::Jpeg(90))
+            .map_err(|e| format!("写入 JPEG 失败 {}: {}", source_name, e))?;
+        Ok((out, "jpg", "image/jpeg"))
+    }
+}
+
+fn set_xmlish_attr(tag: &str, attr: &str, value: &str) -> String {
+    let pattern = format!(r#"(?is)\b{}\s*=\s*(['"])(.*?)\1"#, attr);
+    if let Ok(re) = Regex::new(&pattern) {
+        if let Some(caps) = re.captures(tag).ok().flatten() {
+            if let (Some(full), Some(quote)) = (caps.get(0), caps.get(1)) {
+                let mut out = String::new();
+                out.push_str(&tag[..full.start()]);
+                out.push_str(attr);
+                out.push('=');
+                out.push_str(quote.as_str());
+                out.push_str(value);
+                out.push_str(quote.as_str());
+                out.push_str(&tag[full.end()..]);
+                return out;
+            }
+        }
+    }
+
+    if let Some(pos) = tag.rfind("/>") {
+        let mut out = String::new();
+        out.push_str(&tag[..pos]);
+        out.push(' ');
+        out.push_str(attr);
+        out.push_str("=\"");
+        out.push_str(value);
+        out.push('"');
+        out.push_str(&tag[pos..]);
+        out
+    } else if let Some(pos) = tag.rfind('>') {
+        let mut out = String::new();
+        out.push_str(&tag[..pos]);
+        out.push(' ');
+        out.push_str(attr);
+        out.push_str("=\"");
+        out.push_str(value);
+        out.push('"');
+        out.push_str(&tag[pos..]);
+        out
+    } else {
+        tag.to_string()
+    }
+}
+
+fn rewrite_opf_image_media_types(
+    text: String,
+    opf_path: &str,
+    conversions: &HashMap<String, ImageConversionEntry>,
+) -> String {
+    let Ok(item_re) = Regex::new(r#"(?is)<item\b[^>]*>"#) else {
+        return text;
+    };
+    let opf_dir = zip_parent(opf_path);
+    let mut out = String::new();
+    let mut last = 0usize;
+    for caps in item_re.captures_iter(&text).flatten() {
+        let Some(m) = caps.get(0) else {
+            continue;
+        };
+        out.push_str(&text[last..m.start()]);
+        let tag = m.as_str();
+        let attrs = parse_xmlish_attrs(tag);
+        let href = attrs.get("href").cloned().unwrap_or_default();
+        let href_path = percent_decode(
+            href.split(['?', '#'])
+                .next()
+                .unwrap_or("")
+                .trim(),
+        );
+        let abs_path = zip_join(&opf_dir, &href_path);
+        if let Some(entry) = conversions.get(&abs_path) {
+            let new_href = zip_relative_path(opf_path, &entry.new_path);
+            let updated = set_xmlish_attr(
+                &set_xmlish_attr(tag, "href", &new_href),
+                "media-type",
+                &entry.media_type,
+            );
+            out.push_str(&updated);
+        } else {
+            out.push_str(tag);
+        }
+        last = m.end();
+    }
+    out.push_str(&text[last..]);
+    out
+}
+
+fn write_epub_with_image_conversions(
+    bytes: &[u8],
+    output_path: &Path,
+    path_map: &HashMap<String, String>,
+    conversions: &HashMap<String, ImageConversionEntry>,
+    opf_path: &str,
+) -> Result<(), String> {
+    let out_file = fs::File::create(output_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
+    let mut writer = zip::ZipWriter::new(out_file);
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+
+    for i in 0..archive.len() {
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        let old_name = file.name().replace('\\', "/");
+        let options = FileOptions::default().compression_method(file.compression());
+
+        if let Some(converted) = conversions.get(&old_name) {
+            writer
+                .start_file(&converted.new_path, options)
+                .map_err(|e| format!("写入转换图片失败: {}", e))?;
+            writer
+                .write_all(&converted.data)
+                .map_err(|e| format!("写入转换图片内容失败: {}", e))?;
+            continue;
+        }
+
+        let new_name = path_map
+            .get(&old_name)
+            .cloned()
+            .unwrap_or_else(|| old_name.clone());
+        if new_name.ends_with('/') {
+            writer
+                .add_directory(&new_name, options)
+                .map_err(|e| format!("写入目录失败: {}", e))?;
+            continue;
+        }
+
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)
+            .map_err(|e| format!("读取条目数据失败: {}", e))?;
+
+        if is_text_like_entry(&old_name) {
+            let mut text = String::from_utf8_lossy(&data).to_string();
+            if old_name == opf_path {
+                text = rewrite_opf_image_media_types(text, &old_name, conversions);
+            }
+            text = rewrite_text_links(text, &old_name, &new_name, path_map);
+            data = text.into_bytes();
+        }
+
+        writer
+            .start_file(&new_name, options)
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+        writer
+            .write_all(&data)
+            .map_err(|e| format!("写入文件内容失败: {}", e))?;
+    }
+
+    writer.finish().map_err(|e| format!("完成写入失败: {}", e))?;
+    Ok(())
+}
+
+fn toolbox_image_convert_impl(
+    source: &Path,
+    image_format: Option<&str>,
+) -> Result<ToolboxEpubToolResult, String> {
+    if !source.exists() {
+        return Err(format!("文件不存在: {}", source.to_string_lossy()));
+    }
+    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let opf_path = find_opf_path_in_epub_bytes(&bytes).unwrap_or_default();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone()))
+        .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let mut entry_names = Vec::new();
+    for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+        entry_names.push(file.name().replace('\\', "/"));
+    }
+
+    let mut used: HashSet<String> = entry_names
+        .iter()
+        .filter(|name| !name.to_ascii_lowercase().ends_with(".webp"))
+        .cloned()
+        .collect();
+    let mut conversions: HashMap<String, ImageConversionEntry> = HashMap::new();
+    let mut path_map: HashMap<String, String> = HashMap::new();
+
+    for name in &entry_names {
+        if name.ends_with('/') || !name.to_ascii_lowercase().ends_with(".webp") {
+            path_map.insert(name.clone(), name.clone());
+            continue;
+        }
+        let data = read_zip_entry_bytes(&bytes, name)?;
+        let (converted, ext, media_type) = encode_converted_image(name, &data, image_format)?;
+        let parent = zip_parent(name);
+        let stem = Path::new(name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("image");
+        let target = if parent.is_empty() {
+            format!("{}.{}", stem, ext)
+        } else {
+            format!("{}/{}.{}", parent, stem, ext)
+        };
+        let unique = ensure_unique_zip_name(&target, &mut used);
+        path_map.insert(name.clone(), unique.clone());
+        conversions.insert(
+            name.clone(),
+            ImageConversionEntry {
+                new_path: unique,
+                data: converted,
+                media_type: media_type.to_string(),
+            },
+        );
+    }
+
+    if conversions.is_empty() {
+        return Ok(toolbox_epub_tool_result(
+            source,
+            source,
+            false,
+            "image_convert",
+            "未发现需要转换的 WebP 图片".to_string(),
+        ));
+    }
+
+    let output_path = build_processed_epub_path(source, "_transfer");
+    write_epub_with_image_conversions(&bytes, &output_path, &path_map, &conversions, &opf_path)?;
+    Ok(toolbox_epub_tool_result(
+        source,
+        &output_path,
+        true,
+        "image_convert",
+        format!("图片转换完成，转换 {} 张 WebP 图片", conversions.len()),
+    ))
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxBatchEvent {
+    task_id: String,
+    event: String,
+    level: String,
+    index: usize,
+    total: usize,
+    input_path: Option<String>,
+    output_path: Option<String>,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxBatchSummary {
+    task_id: String,
+    total: usize,
+    succeeded: usize,
+    failed: usize,
+}
+
+fn emit_toolbox_batch_event(app: &tauri::AppHandle, event: ToolboxBatchEvent) {
+    let _ = app.emit("toolbox-batch-event", event);
+}
+
+fn collect_epub_sources(input_paths: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut result = Vec::new();
+    let mut seen = HashSet::new();
+    for raw in input_paths {
+        let path = PathBuf::from(raw);
+        if path.is_file() {
+            let is_epub = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.eq_ignore_ascii_case("epub"))
+                .unwrap_or(false);
+            if is_epub {
+                let key = path.to_string_lossy().to_ascii_lowercase();
+                if seen.insert(key) {
+                    result.push(path);
+                }
+            }
+            continue;
+        }
+        if path.is_dir() {
+            for entry in WalkDir::new(&path).into_iter().filter_map(Result::ok) {
+                let item = entry.path();
+                if !item.is_file() {
+                    continue;
+                }
+                let is_epub = item
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(|value| value.eq_ignore_ascii_case("epub"))
+                    .unwrap_or(false);
+                if is_epub {
+                    let key = item.to_string_lossy().to_ascii_lowercase();
+                    if seen.insert(key) {
+                        result.push(item.to_path_buf());
+                    }
+                }
+            }
+            continue;
+        }
+        return Err(format!("路径不存在: {}", raw));
+    }
+    result.sort();
+    Ok(result)
+}
+
+fn run_toolbox_batch_impl(
+    app: tauri::AppHandle,
+    task_id: String,
+    tool: String,
+    input_paths: Vec<String>,
+    image_format: Option<String>,
+) -> Result<ToolboxBatchSummary, String> {
+    let sources = collect_epub_sources(&input_paths)?;
+    let total = sources.len();
+    emit_toolbox_batch_event(
+        &app,
+        ToolboxBatchEvent {
+            task_id: task_id.clone(),
+            event: "started".to_string(),
+            level: "info".to_string(),
+            index: 0,
+            total,
+            input_path: None,
+            output_path: None,
+            message: format!("发现 {} 个 EPUB 文件", total),
+        },
+    );
+    if total == 0 {
+        emit_toolbox_batch_event(
+            &app,
+            ToolboxBatchEvent {
+                task_id: task_id.clone(),
+                event: "finished".to_string(),
+                level: "warning".to_string(),
+                index: 0,
+                total,
+                input_path: None,
+                output_path: None,
+                message: "未找到 EPUB 文件".to_string(),
+            },
+        );
+        return Ok(ToolboxBatchSummary {
+            task_id,
+            total,
+            succeeded: 0,
+            failed: 0,
+        });
+    }
+
+    let normalized_tool = tool.replace('-', "_");
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+    for (idx, source) in sources.iter().enumerate() {
+        let index = idx + 1;
+        emit_toolbox_batch_event(
+            &app,
+            ToolboxBatchEvent {
+                task_id: task_id.clone(),
+                event: "file-start".to_string(),
+                level: "info".to_string(),
+                index,
+                total,
+                input_path: Some(source.to_string_lossy().to_string()),
+                output_path: None,
+                message: format!("开始处理 {}", source.to_string_lossy()),
+            },
+        );
+
+        let result = match normalized_tool.as_str() {
+            "file_encrypt" => toolbox_file_encrypt_impl(source),
+            "file_decrypt" => toolbox_file_decrypt_impl(source),
+            "font_encrypt" => toolbox_font_encrypt_impl(source),
+            "font_decrypt" => toolbox_font_decrypt_impl(source, None),
+            "epub_reformat" => toolbox_epub_reformat_impl(source),
+            "image_convert" => toolbox_image_convert_impl(source, image_format.as_deref()),
+            _ => Err(format!("不支持的批量工具: {}", tool)),
+        };
+
+        match result {
+            Ok(done) => {
+                succeeded += 1;
+                emit_toolbox_batch_event(
+                    &app,
+                    ToolboxBatchEvent {
+                        task_id: task_id.clone(),
+                        event: "file-done".to_string(),
+                        level: if done.changed { "info" } else { "warning" }.to_string(),
+                        index,
+                        total,
+                        input_path: Some(done.source_path),
+                        output_path: Some(done.output_path),
+                        message: done.message,
+                    },
+                );
+            }
+            Err(error) => {
+                failed += 1;
+                emit_toolbox_batch_event(
+                    &app,
+                    ToolboxBatchEvent {
+                        task_id: task_id.clone(),
+                        event: "file-error".to_string(),
+                        level: "error".to_string(),
+                        index,
+                        total,
+                        input_path: Some(source.to_string_lossy().to_string()),
+                        output_path: None,
+                        message: error,
+                    },
+                );
+            }
+        }
+    }
+
+    emit_toolbox_batch_event(
+        &app,
+        ToolboxBatchEvent {
+            task_id: task_id.clone(),
+            event: "finished".to_string(),
+            level: if failed == 0 { "info" } else { "warning" }.to_string(),
+            index: total,
+            total,
+            input_path: None,
+            output_path: None,
+            message: format!("批量处理完成：成功 {}，失败 {}", succeeded, failed),
+        },
+    );
+    Ok(ToolboxBatchSummary {
+        task_id,
+        total,
+        succeeded,
+        failed,
+    })
+}
+
 const TOOLBOX_FONT_OBFUSCATION_SCRIPT: &str = r##"
 import json
 import html as html_lib
@@ -3055,6 +3648,34 @@ fn toolbox_font_decrypt(epub_path: String, txt_path: Option<String>) -> Result<T
         &PathBuf::from(epub_path),
         txt_path_buf.as_deref(),
     )
+}
+
+#[tauri::command]
+fn toolbox_epub_reformat(epub_path: String) -> Result<ToolboxEpubToolResult, String> {
+    toolbox_epub_reformat_impl(&PathBuf::from(epub_path))
+}
+
+#[tauri::command]
+fn toolbox_image_convert(
+    epub_path: String,
+    image_format: Option<String>,
+) -> Result<ToolboxEpubToolResult, String> {
+    toolbox_image_convert_impl(&PathBuf::from(epub_path), image_format.as_deref())
+}
+
+#[tauri::command]
+async fn toolbox_run_batch(
+    app: tauri::AppHandle,
+    task_id: String,
+    tool: String,
+    input_paths: Vec<String>,
+    image_format: Option<String>,
+) -> Result<ToolboxBatchSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_toolbox_batch_impl(app, task_id, tool, input_paths, image_format)
+    })
+    .await
+    .map_err(|e| format!("批量任务执行失败: {}", e))?
 }
 
 // ============================================================
@@ -9637,6 +10258,72 @@ mod toolbox_tests {
         Ok(())
     }
 
+    fn create_image_bytes() -> Result<Vec<u8>, String> {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            1,
+            1,
+            image::Rgb([12, 34, 56]),
+        ));
+        let mut bytes = Vec::new();
+        let mut cursor = std::io::Cursor::new(&mut bytes);
+        image
+            .write_to(&mut cursor, image::ImageOutputFormat::Png)
+            .map_err(|e| e.to_string())?;
+        Ok(bytes)
+    }
+
+    fn create_webp_reference_epub(epub_path: &Path) -> Result<(), String> {
+        let image_bytes = create_image_bytes()?;
+        let file = fs::File::create(epub_path).map_err(|e| e.to_string())?;
+        let mut writer = zip::ZipWriter::new(file);
+        write_zip_entry(&mut writer, "mimetype", b"application/epub+zip")?;
+        write_zip_entry(
+            &mut writer,
+            "META-INF/container.xml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/content.opf",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <manifest>
+    <item href="Text/chapter.xhtml" id="chapter" media-type="application/xhtml+xml"/>
+    <item href="Styles/main.css" id="style" media-type="text/css"/>
+    <item href="Images/cover.webp" id="cover" media-type="image/webp"/>
+  </manifest>
+  <metadata>
+    <meta name="cover" content="cover"/>
+  </metadata>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Text/chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><link rel="stylesheet" href="../Styles/main.css"/></head>
+  <body><img src="../Images/cover.webp?rev=1"/></body>
+</html>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Styles/main.css",
+            b".cover { background-image: url('../Images/cover.webp'); }",
+        )?;
+        write_zip_entry(&mut writer, "OPS/Images/cover.webp", &image_bytes)?;
+        writer.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     #[test]
     fn toolbox_file_encrypt_decrypt_round_trip_uses_manifest_ids() -> Result<(), String> {
         let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -9705,6 +10392,63 @@ mod toolbox_tests {
         Ok(())
     }
 
+    #[test]
+    fn toolbox_epub_reformat_moves_manifest_files_to_standard_dirs() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let source = temp.path().join("sample.epub");
+        create_minimal_epub(&source)?;
+
+        let reformatted = toolbox_epub_reformat_impl(&source)?;
+        assert!(reformatted.changed);
+        let reformatted_path = PathBuf::from(&reformatted.output_path);
+        let names = epub_names(&reformatted_path)?;
+        assert!(names.iter().any(|name| name == "OEBPS/content.opf"), "{:?}", names);
+        assert!(
+            names.iter().any(|name| name == "OEBPS/Text/chapter one.xhtml"),
+            "{:?}",
+            names
+        );
+        assert!(
+            names.iter().any(|name| name == "OEBPS/Styles/main.css"),
+            "{:?}",
+            names
+        );
+
+        let container = read_epub_entry(&reformatted_path, "META-INF/container.xml")?;
+        assert!(container.contains(r#"full-path="OEBPS/content.opf""#));
+        let opf = read_epub_entry(&reformatted_path, "OEBPS/content.opf")?;
+        assert!(opf.contains(r#"href="Text/chapter one.xhtml""#));
+        assert!(opf.contains(r#"href="Styles/main.css""#));
+        let chapter = read_epub_entry(&reformatted_path, "OEBPS/Text/chapter one.xhtml")?;
+        assert!(chapter.contains(r#"href="../Styles/main.css""#));
+        Ok(())
+    }
+
+    #[test]
+    fn toolbox_image_convert_rewrites_opf_html_and_css_refs() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let source = temp.path().join("webp.epub");
+        create_webp_reference_epub(&source)?;
+
+        let converted = toolbox_image_convert_impl(&source, Some("png"))?;
+        assert!(converted.changed);
+        let converted_path = PathBuf::from(&converted.output_path);
+        let names = epub_names(&converted_path)?;
+        assert!(names.iter().any(|name| name == "OPS/Images/cover.png"), "{:?}", names);
+        assert!(!names.iter().any(|name| name == "OPS/Images/cover.webp"), "{:?}", names);
+
+        let opf = read_epub_entry(&converted_path, "OPS/content.opf")?;
+        assert!(opf.contains(r#"href="Images/cover.png""#), "{}", opf);
+        assert!(opf.contains(r#"media-type="image/png""#), "{}", opf);
+        assert!(!opf.contains("image/webp"), "{}", opf);
+
+        let chapter = read_epub_entry(&converted_path, "OPS/Text/chapter.xhtml")?;
+        assert!(chapter.contains(r#"src="../Images/cover.png?rev=1""#), "{}", chapter);
+        let css = read_epub_entry(&converted_path, "OPS/Styles/main.css")?;
+        assert!(css.contains("url('../Images/cover.png')"), "{}", css);
+        Ok(())
+    }
+
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -9766,6 +10510,9 @@ pub fn run() {
             toolbox_file_decrypt,
             toolbox_font_encrypt,
             toolbox_font_decrypt,
+            toolbox_epub_reformat,
+            toolbox_image_convert,
+            toolbox_run_batch,
             exit_app,
             // ===== Library Phase 1 =====
             load_library,

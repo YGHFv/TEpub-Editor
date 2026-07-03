@@ -13,7 +13,9 @@
     | "font-encrypt"
     | "font-decrypt"
     | "file-encrypt"
-    | "file-decrypt";
+    | "file-decrypt"
+    | "epub-reformat"
+    | "image-convert";
 
   type Tool = {
     id: ToolId;
@@ -104,6 +106,20 @@
       detail: "选择 EPUB 文件",
       action: "处理",
     },
+    {
+      id: "epub-reformat",
+      icon: "REFIT",
+      title: "EPUB 重构",
+      detail: "整理目录与引用",
+      action: "处理",
+    },
+    {
+      id: "image-convert",
+      icon: "IMG",
+      title: "图片转换",
+      detail: "转换 EPUB 内 WebP",
+      action: "处理",
+    },
   ];
 
   const toolGroups: ToolGroup[] = [
@@ -118,7 +134,7 @@
       id: "process",
       title: "EPUB 处理",
       meta: "生成新文件",
-      tools: tools.filter((tool) => tool.id === "font-encrypt" || tool.id === "font-decrypt" || tool.id === "file-encrypt" || tool.id === "file-decrypt"),
+      tools: tools.filter((tool) => tool.id === "font-encrypt" || tool.id === "font-decrypt" || tool.id === "file-encrypt" || tool.id === "file-decrypt" || tool.id === "epub-reformat" || tool.id === "image-convert"),
       gridClass: "process-grid",
     },
   ];
@@ -289,7 +305,7 @@
   }
 
   function isProcessingTool(id: ToolId) {
-    return id === "font-encrypt" || id === "font-decrypt" || id === "file-encrypt" || id === "file-decrypt";
+    return id === "font-encrypt" || id === "font-decrypt" || id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert";
   }
 
   function commandForTool(id: ToolId) {
@@ -302,13 +318,60 @@
         return "toolbox_file_encrypt";
       case "file-decrypt":
         return "toolbox_file_decrypt";
+      case "epub-reformat":
+        return "toolbox_epub_reformat";
+      case "image-convert":
+        return "toolbox_image_convert";
       default:
         throw new Error(`不支持的工具: ${id}`);
     }
   }
 
   async function runProcessingTool(tool: Tool, filePath: string, txtPath?: string) {
-    return await invoke<ToolboxResult>(commandForTool(tool.id), { epubPath: filePath, txtPath });
+    return await invoke<ToolboxResult>(commandForTool(tool.id), {
+      epubPath: filePath,
+      txtPath,
+      imageFormat: tool.id === "image-convert" ? "auto" : undefined,
+    });
+  }
+
+  async function runBatchForFolder(tool: Tool) {
+    if (!isProcessingTool(tool.id)) return;
+    busyTool = tool.id;
+    statusText = "";
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "选择 EPUB 文件夹",
+      });
+      if (!selected || Array.isArray(selected)) return;
+
+      const taskId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const progressWindow = new WebviewWindow(windowLabel("batch-progress"), {
+        url: `/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`,
+        title: `${tool.title} 批量处理`,
+        width: 900,
+        height: 640,
+        dragDropEnabled: false,
+        center: true,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const summary = await invoke<{ total: number; succeeded: number; failed: number }>("toolbox_run_batch", {
+        taskId,
+        tool: tool.id,
+        inputPaths: [selected],
+        imageFormat: tool.id === "image-convert" ? "auto" : undefined,
+      });
+      statusText = `${tool.title} 批量完成：${summary.succeeded}/${summary.total}`;
+      await progressWindow.setFocus().catch(() => {});
+    } catch (e: any) {
+      console.error("批量处理失败:", e);
+      statusText = "批量处理失败";
+      await message(`批量处理失败: ${e}`, { title: "错误", kind: "error" });
+    } finally {
+      busyTool = "";
+    }
   }
 
   async function openToolForPath(tool: Tool, filePath: string) {
@@ -384,20 +447,36 @@
         </div>
         <div class={`tool-grid ${group.gridClass}`}>
           {#each group.tools as tool}
-            <button
+            <div
               class="tool-card"
-              type="button"
-              on:click={() => pickFile(tool)}
-              disabled={busyTool !== ""}
+              class:tool-card-disabled={busyTool !== ""}
               aria-label={tool.title}
             >
+              <button
+                class="tool-main"
+                type="button"
+                on:click={() => pickFile(tool)}
+                disabled={busyTool !== ""}
+              >
               <span class="tool-icon">{tool.icon}</span>
               <span class="tool-copy">
                 <span class="tool-title">{tool.title}</span>
                 <span class="tool-detail">{busyTool === tool.id ? "处理中..." : tool.detail}</span>
               </span>
               <span class="tool-action">{tool.action}</span>
-            </button>
+              </button>
+              {#if isProcessingTool(tool.id)}
+                <button
+                  class="tool-batch"
+                  type="button"
+                  on:click={() => runBatchForFolder(tool)}
+                  disabled={busyTool !== ""}
+                  title="选择文件夹批量处理"
+                >
+                  批量
+                </button>
+              {/if}
+            </div>
           {/each}
         </div>
       </section>
@@ -513,35 +592,52 @@
     position: relative;
     min-height: 104px;
     box-sizing: border-box;
-    display: grid;
-    grid-template-columns: 48px minmax(0, 1fr);
-    align-items: center;
-    gap: 12px;
-    padding: 16px 18px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-surface);
     color: var(--color-text);
-    cursor: pointer;
     text-align: left;
     box-shadow: var(--shadow-xs);
+    overflow: hidden;
     transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
   }
 
-  .tool-card:hover:not(:disabled) {
+  .tool-card:hover:not(.tool-card-disabled) {
     border-color: var(--color-border-strong);
     background: var(--color-hover);
     box-shadow: var(--shadow-sm);
   }
 
-  .tool-card:focus-visible {
+  .tool-card-disabled {
+    opacity: 0.68;
+  }
+
+  .tool-main {
+    width: 100%;
+    min-height: 104px;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding: 16px 18px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+  }
+
+  .tool-main:focus-visible,
+  .tool-batch:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
   }
 
-  .tool-card:disabled {
+  .tool-main:disabled,
+  .tool-batch:disabled {
     cursor: wait;
-    opacity: 0.68;
   }
 
   .tool-icon {
@@ -598,6 +694,30 @@
     text-align: center;
   }
 
+  .tool-batch {
+    position: absolute;
+    right: 14px;
+    bottom: 12px;
+    min-width: 40px;
+    box-sizing: border-box;
+    padding: 3px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-surface);
+    color: var(--color-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.25;
+    cursor: pointer;
+  }
+
+  .tool-batch:hover:not(:disabled) {
+    border-color: var(--color-border-strong);
+    color: var(--color-text);
+    background: var(--color-hover);
+  }
+
   @media (max-width: 980px) {
     .open-grid,
     .process-grid {
@@ -629,6 +749,10 @@
     }
 
     .tool-card {
+      min-height: 88px;
+    }
+
+    .tool-main {
       grid-template-columns: 44px minmax(0, 1fr);
       min-height: 88px;
       padding: 14px;
@@ -647,7 +771,12 @@
     }
 
     .tool-copy {
-      padding-right: 0;
+      padding-right: 52px;
+    }
+
+    .tool-batch {
+      right: 14px;
+      bottom: 12px;
     }
   }
 </style>
