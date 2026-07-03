@@ -1615,6 +1615,7 @@ fn rewrite_single_path_ref(
     current_old_path: &str,
     current_new_path: &str,
     path_map: &HashMap<String, String>,
+    lower_path_map: &HashMap<String, String>,
 ) -> Option<String> {
     if is_external_or_inline_ref(raw_ref) {
         return None;
@@ -1625,7 +1626,9 @@ fn rewrite_single_path_ref(
     }
     let decoded_ref = percent_decode(main_ref);
     let old_abs = zip_join(&zip_parent(current_old_path), &decoded_ref);
-    let new_abs = path_map.get(&old_abs)?;
+    let new_abs = path_map
+        .get(&old_abs)
+        .or_else(|| lower_path_map.get(&old_abs.to_ascii_lowercase()))?;
     if old_abs.ends_with('/') || new_abs.ends_with('/') {
         return None;
     }
@@ -1652,6 +1655,27 @@ fn rewrite_single_path_ref(
     }
 }
 
+fn build_lower_path_map(path_map: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut lower_path_map = HashMap::new();
+    let mut ambiguous = HashSet::new();
+
+    for (old, new_path) in path_map {
+        let lower = old.to_ascii_lowercase();
+        if let Some(existing) = lower_path_map.get(&lower) {
+            if existing != new_path {
+                ambiguous.insert(lower);
+            }
+        } else {
+            lower_path_map.insert(lower, new_path.clone());
+        }
+    }
+
+    for lower in ambiguous {
+        lower_path_map.remove(&lower);
+    }
+    lower_path_map
+}
+
 fn collect_text_link_rewrites(
     text: &str,
     current_old_path: &str,
@@ -1659,15 +1683,20 @@ fn collect_text_link_rewrites(
     path_map: &HashMap<String, String>,
 ) -> Vec<(String, String)> {
     let mut pairs: HashMap<String, String> = HashMap::new();
+    let lower_path_map = build_lower_path_map(path_map);
 
     for caps in QUOTED_PATH_REF_RE.captures_iter(text).flatten() {
         let Some(raw_match) = caps.get(2) else {
             continue;
         };
         let raw_ref = raw_match.as_str();
-        if let Some(rewritten) =
-            rewrite_single_path_ref(raw_ref, current_old_path, current_new_path, path_map)
-        {
+        if let Some(rewritten) = rewrite_single_path_ref(
+            raw_ref,
+            current_old_path,
+            current_new_path,
+            path_map,
+            &lower_path_map,
+        ) {
             pairs.insert(raw_ref.to_string(), rewritten);
         }
     }
@@ -1677,9 +1706,13 @@ fn collect_text_link_rewrites(
             continue;
         };
         let raw_ref = raw_match.as_str().trim();
-        if let Some(rewritten) =
-            rewrite_single_path_ref(raw_ref, current_old_path, current_new_path, path_map)
-        {
+        if let Some(rewritten) = rewrite_single_path_ref(
+            raw_ref,
+            current_old_path,
+            current_new_path,
+            path_map,
+            &lower_path_map,
+        ) {
             pairs.insert(raw_ref.to_string(), rewritten);
         }
     }
@@ -11689,6 +11722,52 @@ mod toolbox_tests {
         assert!(rewritten.contains("url(../Images/cover.png?rev=2)"));
         assert!(!rewritten.contains("%7C"));
         assert!(!rewritten.contains("cover.webp"));
+        Ok(())
+    }
+
+    #[test]
+    fn optimized_link_rewrite_corrects_case_mismatched_refs() -> Result<(), String> {
+        let mut path_map = HashMap::new();
+        path_map.insert(
+            "OPS/Images/Cover.PNG".to_string(),
+            "OEBPS/Images/Cover.PNG".to_string(),
+        );
+        path_map.insert(
+            "OPS/Styles/Main.CSS".to_string(),
+            "OEBPS/Styles/Main.CSS".to_string(),
+        );
+
+        let text = r#"
+<html>
+  <head><link href="../styles/main.css"/></head>
+  <body>
+    <img src="../images/cover.png?rev=1"/>
+    <style>.cover { background: url(../images/cover.png); }</style>
+  </body>
+</html>
+"#;
+        let rewritten = rewrite_text_links(
+            text.to_string(),
+            "OPS/Text/chapter.xhtml",
+            "OEBPS/Text/chapter.xhtml",
+            &path_map,
+        );
+
+        assert!(
+            rewritten.contains(r#"href="../Styles/Main.CSS""#),
+            "{}",
+            rewritten
+        );
+        assert!(
+            rewritten.contains(r#"src="../Images/Cover.PNG?rev=1""#),
+            "{}",
+            rewritten
+        );
+        assert!(
+            rewritten.contains("url(../Images/Cover.PNG)"),
+            "{}",
+            rewritten
+        );
         Ok(())
     }
 

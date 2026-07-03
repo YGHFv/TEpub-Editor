@@ -2623,6 +2623,24 @@ Caveats:
 
 - This batch does not yet rebuild spine/guide/nav entries for newly discovered XHTML files; it only manifests valid unregistered resources so linked assets are no longer left outside OPF.
 
+### 2026-07-03 16:05 +08:00
+
+Request: continue EPUB restructure robustness improvements.
+
+Changes:
+
+- Improved the shared EPUB text-link rewrite path lookup.
+- Internal references now first use exact ZIP path matches, then fall back to a unique case-insensitive match from the path map.
+- This lets reformat/decrypt/image-convert style operations correct links such as `../images/cover.png` when the actual ZIP entry is `Images/Cover.PNG`.
+- Ambiguous case-insensitive matches are ignored rather than guessed.
+- Added a Rust regression test covering case-mismatched `href`, `src`, and CSS `url(...)` references.
+
+Verification:
+
+- `cargo fmt` passed.
+- `cargo test` passed: 13 tests.
+- `cargo check` passed.
+
 ### 2026-07-03 14:15 +08:00
 
 Request: continue the optimization plan step by step, sync GitHub after each completed part, and make long batch EPUB decrypt/rebuild tasks visibly progress instead of looking stuck.
