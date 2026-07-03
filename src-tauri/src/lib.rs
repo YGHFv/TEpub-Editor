@@ -1,4 +1,4 @@
-﻿use chardetng::EncodingDetector;
+use chardetng::EncodingDetector;
 use fancy_regex::Regex;
 use md5;
 use once_cell::sync::Lazy;
@@ -35,7 +35,13 @@ impl EpubCache {
 }
 
 static EPUB_CACHE: Lazy<Mutex<Option<EpubCache>>> = Lazy::new(|| Mutex::new(None));
-static TOOLBOX_BATCH_CANCEL: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static TOOLBOX_BATCH_CANCEL: Lazy<Mutex<HashSet<String>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+static QUOTED_PATH_REF_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"(?is)(['"])(.*?)\1"#).expect("valid quoted path regex"));
+static CSS_URL_PATH_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)url\(\s*([^'"\)\s][^)]*?)\s*\)"#).expect("valid css url regex")
+});
 
 fn hidden_process_command(program: &str) -> process::Command {
     let mut command = process::Command::new(program);
@@ -1058,7 +1064,12 @@ fn append_text_body_lines(
             position + 1 < non_empty.len() && is_ellipsis_paragraph(non_empty[position + 1].1);
         let is_last_non_empty = Some(*line_index) == last_non_empty_index;
 
-        if enable_dividers && is_ellipsis && !prev_is_ellipsis && !next_is_ellipsis && !is_last_non_empty {
+        if enable_dividers
+            && is_ellipsis
+            && !prev_is_ellipsis
+            && !next_is_ellipsis
+            && !is_last_non_empty
+        {
             if let Some((role, href)) = divider_image {
                 html_body.push_str(&divider_image_html(role, href));
             } else {
@@ -1152,8 +1163,7 @@ fn clear_zip_encryption_flags(data: &mut [u8]) -> bool {
     let mut i = 0usize;
     while i + 10 < data.len() {
         // Local file header: PK\x03\x04, flag at +6
-        if data[i] == 0x50 && data[i + 1] == 0x4B && data[i + 2] == 0x03 && data[i + 3] == 0x04
-        {
+        if data[i] == 0x50 && data[i + 1] == 0x4B && data[i + 2] == 0x03 && data[i + 3] == 0x04 {
             let flag = u16::from_le_bytes([data[i + 6], data[i + 7]]);
             if flag & 0x0001 != 0 {
                 let new_flag = (flag & !0x0001).to_le_bytes();
@@ -1163,8 +1173,7 @@ fn clear_zip_encryption_flags(data: &mut [u8]) -> bool {
             }
         }
         // Central directory header: PK\x01\x02, flag at +8
-        if data[i] == 0x50 && data[i + 1] == 0x4B && data[i + 2] == 0x01 && data[i + 3] == 0x02
-        {
+        if data[i] == 0x50 && data[i + 1] == 0x4B && data[i + 2] == 0x01 && data[i + 3] == 0x02 {
             let flag = u16::from_le_bytes([data[i + 8], data[i + 9]]);
             if flag & 0x0001 != 0 {
                 let new_flag = (flag & !0x0001).to_le_bytes();
@@ -1188,7 +1197,10 @@ fn build_processed_epub_path(original: &Path, suffix: &str) -> PathBuf {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("book");
-    let ext = original.extension().and_then(|s| s.to_str()).unwrap_or("epub");
+    let ext = original
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("epub");
 
     let mut candidate = parent.join(format!("{}{}.{}", stem, suffix, ext));
     if !candidate.exists() {
@@ -1243,9 +1255,8 @@ fn sanitize_windows_component(part: &str) -> String {
     }
     let upper = out.to_ascii_uppercase();
     let reserved = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
-        "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if reserved.contains(&upper.as_str()) {
         out.push('_');
@@ -1381,7 +1392,8 @@ fn build_name_from_id(item_id: &str, href: &str) -> String {
     };
 
     let mut image_slim = String::new();
-    if id_stem.to_ascii_lowercase().contains("slim") || href_name.to_ascii_lowercase().contains("slim")
+    if id_stem.to_ascii_lowercase().contains("slim")
+        || href_name.to_ascii_lowercase().contains("slim")
     {
         let lower = id_stem.to_ascii_lowercase();
         let mut cut = None;
@@ -1553,14 +1565,9 @@ fn percent_encode_path_ref(path: &str, upper_hex: bool) -> String {
     let mut out = String::new();
     for b in path.as_bytes() {
         match *b {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'_'
-            | b'.'
-            | b'~'
-            | b'/' => out.push(*b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(*b as char)
+            }
             _ if upper_hex => out.push_str(&format!("%{:02X}", b)),
             _ => out.push_str(&format!("%{:02x}", b)),
         }
@@ -1568,21 +1575,111 @@ fn percent_encode_path_ref(path: &str, upper_hex: bool) -> String {
     out
 }
 
-fn push_path_rewrite_variants(pairs: &mut Vec<(String, String)>, old_ref: &str, new_ref: &str) {
-    pairs.push((old_ref.to_string(), new_ref.to_string()));
-    pairs.push((
-        old_ref.replace(' ', "%20"),
-        new_ref.replace(' ', "%20"),
-    ));
-
-    let old_encoded = percent_encode_path_ref(old_ref, true);
-    let new_encoded = percent_encode_path_ref(new_ref, true);
-    pairs.push((old_encoded.clone(), new_encoded.clone()));
-
-    let old_encoded_lower = percent_encode_path_ref(old_ref, false);
-    if old_encoded_lower != old_encoded {
-        pairs.push((old_encoded_lower, new_encoded));
+fn split_ref_suffix(raw_ref: &str) -> (&str, &str) {
+    let query_pos = raw_ref.find('?');
+    let fragment_pos = raw_ref.find('#');
+    let cut = match (query_pos, fragment_pos) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    };
+    if let Some(idx) = cut {
+        (&raw_ref[..idx], &raw_ref[idx..])
+    } else {
+        (raw_ref, "")
     }
+}
+
+fn is_external_or_inline_ref(raw_ref: &str) -> bool {
+    let lower = raw_ref.trim().to_ascii_lowercase();
+    lower.is_empty()
+        || lower.starts_with('#')
+        || lower.starts_with("data:")
+        || lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("mailto:")
+        || lower.starts_with("javascript:")
+        || lower.starts_with("urn:")
+}
+
+fn rewrite_single_path_ref(
+    raw_ref: &str,
+    current_old_path: &str,
+    current_new_path: &str,
+    path_map: &HashMap<String, String>,
+) -> Option<String> {
+    if is_external_or_inline_ref(raw_ref) {
+        return None;
+    }
+    let (main_ref, suffix) = split_ref_suffix(raw_ref);
+    if is_external_or_inline_ref(main_ref) {
+        return None;
+    }
+    let decoded_ref = percent_decode(main_ref);
+    let old_abs = zip_join(&zip_parent(current_old_path), &decoded_ref);
+    let new_abs = path_map.get(&old_abs)?;
+    if old_abs.ends_with('/') || new_abs.ends_with('/') {
+        return None;
+    }
+
+    let new_rel = zip_relative_path(current_new_path, new_abs);
+    if new_rel == "." {
+        return None;
+    }
+
+    let mut rewritten = if main_ref.contains('%') {
+        percent_encode_path_ref(&new_rel, true)
+    } else {
+        new_rel
+    };
+    if main_ref.starts_with("./") && !rewritten.starts_with("./") && !rewritten.starts_with("../") {
+        rewritten = format!("./{}", rewritten);
+    }
+    rewritten.push_str(suffix);
+
+    if rewritten == raw_ref {
+        None
+    } else {
+        Some(rewritten)
+    }
+}
+
+fn collect_text_link_rewrites(
+    text: &str,
+    current_old_path: &str,
+    current_new_path: &str,
+    path_map: &HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut pairs: HashMap<String, String> = HashMap::new();
+
+    for caps in QUOTED_PATH_REF_RE.captures_iter(text).flatten() {
+        let Some(raw_match) = caps.get(2) else {
+            continue;
+        };
+        let raw_ref = raw_match.as_str();
+        if let Some(rewritten) =
+            rewrite_single_path_ref(raw_ref, current_old_path, current_new_path, path_map)
+        {
+            pairs.insert(raw_ref.to_string(), rewritten);
+        }
+    }
+
+    for caps in CSS_URL_PATH_RE.captures_iter(text).flatten() {
+        let Some(raw_match) = caps.get(1) else {
+            continue;
+        };
+        let raw_ref = raw_match.as_str().trim();
+        if let Some(rewritten) =
+            rewrite_single_path_ref(raw_ref, current_old_path, current_new_path, path_map)
+        {
+            pairs.insert(raw_ref.to_string(), rewritten);
+        }
+    }
+
+    let mut out: Vec<(String, String)> = pairs.into_iter().collect();
+    out.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    out
 }
 
 fn rewrite_text_links(
@@ -1591,32 +1688,13 @@ fn rewrite_text_links(
     current_new_path: &str,
     path_map: &HashMap<String, String>,
 ) -> String {
-    let mut pairs: Vec<(String, String)> = Vec::new();
-    for (old_abs, new_abs) in path_map {
-        if old_abs.ends_with('/') || new_abs.ends_with('/') {
-            continue;
-        }
-        let old_rel = zip_relative_path(current_old_path, old_abs);
-        let new_rel = zip_relative_path(current_new_path, new_abs);
-        if old_rel == "." || new_rel == "." {
-            continue;
-        }
-        push_path_rewrite_variants(&mut pairs, &old_rel, &new_rel);
-        if !old_rel.starts_with("./") {
-            push_path_rewrite_variants(
-                &mut pairs,
-                &format!("./{}", old_rel),
-                &format!("./{}", new_rel),
-            );
-        }
+    let pairs = collect_text_link_rewrites(&text, current_old_path, current_new_path, path_map);
+    if pairs.is_empty() {
+        return text;
     }
-
-    pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
     let mut out = text;
     for (from, to) in pairs {
-        if from != to {
-            out = out.replace(&from, &to);
-        }
+        out = out.replace(&from, &to);
     }
     out
 }
@@ -1746,7 +1824,9 @@ fn rebuild_epub_with_sanitized_names_from_bytes(
             .map_err(|e| format!("写入文件内容失败: {}", e))?;
     }
 
-    writer.finish().map_err(|e| format!("完成写入失败: {}", e))?;
+    writer
+        .finish()
+        .map_err(|e| format!("完成写入失败: {}", e))?;
     Ok(Some(out_path))
 }
 
@@ -1801,8 +1881,7 @@ fn find_opf_path_in_epub_bytes(bytes: &[u8]) -> Result<String, String> {
             .read_to_end(&mut data)
             .map_err(|e| format!("读取 container.xml 失败: {}", e))?;
         let text = String::from_utf8_lossy(&data).to_string();
-        if let Ok(re) = Regex::new(r#"<rootfile[^>]*full-path\s*=\s*(['"])(?i:(.*?\.opf))\1"#)
-        {
+        if let Ok(re) = Regex::new(r#"<rootfile[^>]*full-path\s*=\s*(['"])(?i:(.*?\.opf))\1"#) {
             if let Some(caps) = re.captures(&text).ok().flatten() {
                 if let Some(path_match) = caps.get(2) {
                     return Ok(path_match.as_str().replace('\\', "/"));
@@ -1836,7 +1915,10 @@ fn read_zip_entry_bytes(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> {
     Ok(data)
 }
 
-fn parse_toolbox_manifest_items(bytes: &[u8], opf_path: &str) -> Result<Vec<ToolboxManifestItem>, String> {
+fn parse_toolbox_manifest_items(
+    bytes: &[u8],
+    opf_path: &str,
+) -> Result<Vec<ToolboxManifestItem>, String> {
     let opf_data = read_zip_entry_bytes(bytes, opf_path)?;
     let opf_text = String::from_utf8_lossy(&opf_data).to_string();
     let item_re = Regex::new(r#"(?is)<item\b([^>]*)>"#).map_err(|e| e.to_string())?;
@@ -1871,7 +1953,12 @@ fn toolbox_file_category(item: &ToolboxManifestItem) -> &'static str {
         "css"
     } else if media.starts_with("image/") {
         "image"
-    } else if media.starts_with("font/") || href.ends_with(".ttf") || href.ends_with(".otf") || href.ends_with(".woff") || href.ends_with(".woff2") {
+    } else if media.starts_with("font/")
+        || href.ends_with(".ttf")
+        || href.ends_with(".otf")
+        || href.ends_with(".woff")
+        || href.ends_with(".woff2")
+    {
         "font"
     } else if media.starts_with("audio/") {
         "audio"
@@ -1941,14 +2028,16 @@ fn write_epub_with_path_map(
     output_path: &Path,
     path_map: &HashMap<String, String>,
 ) -> Result<(), String> {
-    let out_file = fs::File::create(output_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
+    let out_file =
+        fs::File::create(output_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
     let mut writer = zip::ZipWriter::new(out_file);
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
         .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
 
     let mut opf_old_to_new: HashMap<String, String> = HashMap::new();
     for (old, newp) in path_map {
-        if old.to_ascii_lowercase().ends_with(".opf") && newp.to_ascii_lowercase().ends_with(".opf") {
+        if old.to_ascii_lowercase().ends_with(".opf") && newp.to_ascii_lowercase().ends_with(".opf")
+        {
             opf_old_to_new.insert(old.clone(), newp.clone());
         }
     }
@@ -1995,7 +2084,9 @@ fn write_epub_with_path_map(
             .map_err(|e| format!("写入文件内容失败: {}", e))?;
     }
 
-    writer.finish().map_err(|e| format!("完成写入失败: {}", e))?;
+    writer
+        .finish()
+        .map_err(|e| format!("完成写入失败: {}", e))?;
     Ok(())
 }
 
@@ -2117,36 +2208,34 @@ fn toolbox_reformat_target_path(item: Option<&ToolboxManifestItem>, path: &str) 
         return "OEBPS/toc.ncx".to_string();
     }
 
-    let category = item
-        .map(toolbox_file_category)
-        .unwrap_or_else(|| {
-            if lower.ends_with(".xhtml") || lower.ends_with(".html") || lower.ends_with(".htm") {
-                "text"
-            } else if lower.ends_with(".css") {
-                "css"
-            } else if lower.ends_with(".jpg")
-                || lower.ends_with(".jpeg")
-                || lower.ends_with(".png")
-                || lower.ends_with(".gif")
-                || lower.ends_with(".webp")
-                || lower.ends_with(".bmp")
-                || lower.ends_with(".svg")
-            {
-                "image"
-            } else if lower.ends_with(".ttf")
-                || lower.ends_with(".otf")
-                || lower.ends_with(".woff")
-                || lower.ends_with(".woff2")
-            {
-                "font"
-            } else if lower.ends_with(".mp3") || lower.ends_with(".m4a") || lower.ends_with(".aac") {
-                "audio"
-            } else if lower.ends_with(".mp4") || lower.ends_with(".webm") {
-                "video"
-            } else {
-                "other"
-            }
-        });
+    let category = item.map(toolbox_file_category).unwrap_or_else(|| {
+        if lower.ends_with(".xhtml") || lower.ends_with(".html") || lower.ends_with(".htm") {
+            "text"
+        } else if lower.ends_with(".css") {
+            "css"
+        } else if lower.ends_with(".jpg")
+            || lower.ends_with(".jpeg")
+            || lower.ends_with(".png")
+            || lower.ends_with(".gif")
+            || lower.ends_with(".webp")
+            || lower.ends_with(".bmp")
+            || lower.ends_with(".svg")
+        {
+            "image"
+        } else if lower.ends_with(".ttf")
+            || lower.ends_with(".otf")
+            || lower.ends_with(".woff")
+            || lower.ends_with(".woff2")
+        {
+            "font"
+        } else if lower.ends_with(".mp3") || lower.ends_with(".m4a") || lower.ends_with(".aac") {
+            "audio"
+        } else if lower.ends_with(".mp4") || lower.ends_with(".webm") {
+            "video"
+        } else {
+            "other"
+        }
+    });
 
     let folder = match category {
         "text" => "Text",
@@ -2251,7 +2340,8 @@ fn encode_converted_image(
         .unwrap_or("auto")
         .trim()
         .to_ascii_lowercase();
-    let use_png = format == "png" || (format != "jpg" && format != "jpeg" && has_image_alpha(&image));
+    let use_png =
+        format == "png" || (format != "jpg" && format != "jpeg" && has_image_alpha(&image));
     let mut out = Vec::new();
     if use_png {
         let mut cursor = std::io::Cursor::new(&mut out);
@@ -2330,12 +2420,7 @@ fn rewrite_opf_image_media_types(
         let tag = m.as_str();
         let attrs = parse_xmlish_attrs(tag);
         let href = attrs.get("href").cloned().unwrap_or_default();
-        let href_path = percent_decode(
-            href.split(['?', '#'])
-                .next()
-                .unwrap_or("")
-                .trim(),
-        );
+        let href_path = percent_decode(href.split(['?', '#']).next().unwrap_or("").trim());
         let abs_path = zip_join(&opf_dir, &href_path);
         if let Some(entry) = conversions.get(&abs_path) {
             let new_href = zip_relative_path(opf_path, &entry.new_path);
@@ -2361,7 +2446,8 @@ fn write_epub_with_image_conversions(
     conversions: &HashMap<String, ImageConversionEntry>,
     opf_path: &str,
 ) -> Result<(), String> {
-    let out_file = fs::File::create(output_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
+    let out_file =
+        fs::File::create(output_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
     let mut writer = zip::ZipWriter::new(out_file);
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))
         .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
@@ -2415,7 +2501,9 @@ fn write_epub_with_image_conversions(
             .map_err(|e| format!("写入文件内容失败: {}", e))?;
     }
 
-    writer.finish().map_err(|e| format!("完成写入失败: {}", e))?;
+    writer
+        .finish()
+        .map_err(|e| format!("完成写入失败: {}", e))?;
     Ok(())
 }
 
@@ -2556,7 +2644,9 @@ fn is_same_path(left: &Path, right: &Path) -> bool {
 
 fn path_is_under(path: &Path, parent: &Path) -> bool {
     let path_canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let parent_canon = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+    let parent_canon = parent
+        .canonicalize()
+        .unwrap_or_else(|_| parent.to_path_buf());
     path_canon.starts_with(parent_canon)
 }
 
@@ -2731,7 +2821,10 @@ fn run_toolbox_batch_impl(
             total: 0,
             input_path: None,
             output_path: Some(output_dir.to_string_lossy().to_string()),
-            message: format!("正在扫描 EPUB 文件，输出目录: {}", output_dir.to_string_lossy()),
+            message: format!(
+                "正在扫描 EPUB 文件，输出目录: {}",
+                output_dir.to_string_lossy()
+            ),
         },
     );
     let sources = collect_epub_sources(&app, &task_id, &input_paths, &output_dir)?;
@@ -2788,7 +2881,12 @@ fn run_toolbox_batch_impl(
                     total,
                     input_path: None,
                     output_path: None,
-                    message: format!("批量处理已取消：成功 {}，失败 {}，剩余 {}", succeeded, failed, total.saturating_sub(idx)),
+                    message: format!(
+                        "批量处理已取消：成功 {}，失败 {}，剩余 {}",
+                        succeeded,
+                        failed,
+                        total.saturating_sub(idx)
+                    ),
                 },
             );
             return Ok(ToolboxBatchSummary {
@@ -3787,7 +3885,10 @@ fn toolbox_font_encrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, Str
     ))
 }
 
-fn toolbox_font_decrypt_impl(source: &Path, txt_path: Option<&Path>) -> Result<ToolboxEpubToolResult, String> {
+fn toolbox_font_decrypt_impl(
+    source: &Path,
+    txt_path: Option<&Path>,
+) -> Result<ToolboxEpubToolResult, String> {
     if !source.exists() {
         return Err(format!("文件不存在: {}", source.to_string_lossy()));
     }
@@ -3827,12 +3928,12 @@ fn toolbox_font_encrypt(epub_path: String) -> Result<ToolboxEpubToolResult, Stri
 }
 
 #[tauri::command]
-fn toolbox_font_decrypt(epub_path: String, txt_path: Option<String>) -> Result<ToolboxEpubToolResult, String> {
+fn toolbox_font_decrypt(
+    epub_path: String,
+    txt_path: Option<String>,
+) -> Result<ToolboxEpubToolResult, String> {
     let txt_path_buf = txt_path.map(PathBuf::from);
-    toolbox_font_decrypt_impl(
-        &PathBuf::from(epub_path),
-        txt_path_buf.as_deref(),
-    )
+    toolbox_font_decrypt_impl(&PathBuf::from(epub_path), txt_path_buf.as_deref())
 }
 
 #[tauri::command]
@@ -3911,9 +4012,7 @@ fn portable_marker_path() -> Option<PathBuf> {
 }
 
 fn is_portable() -> bool {
-    portable_marker_path()
-        .map(|p| p.exists())
-        .unwrap_or(false)
+    portable_marker_path().map(|p| p.exists()).unwrap_or(false)
 }
 
 fn portable_data_root() -> Option<PathBuf> {
@@ -3978,7 +4077,8 @@ fn write_library_font_aliases(
     let dir = library_data_dir(app)?;
     ensure_dir(&dir)?;
     let path = library_font_aliases_path(app)?;
-    let bytes = serde_json::to_vec_pretty(aliases).map_err(|e| format!("序列化字体别名失败: {}", e))?;
+    let bytes =
+        serde_json::to_vec_pretty(aliases).map_err(|e| format!("序列化字体别名失败: {}", e))?;
     fs::write(&path, bytes).map_err(|e| format!("保存字体别名失败: {}", e))
 }
 
@@ -4019,8 +4119,7 @@ fn build_style_template_info(path: &Path, is_builtin: bool) -> Result<StyleTempl
 
 fn github_owner_repo(url: &str) -> Result<(String, String), String> {
     let trimmed = url.trim().trim_end_matches('/');
-    let parsed = reqwest::Url::parse(trimmed)
-        .map_err(|e| format!("模板仓库 URL 无效: {}", e))?;
+    let parsed = reqwest::Url::parse(trimmed).map_err(|e| format!("模板仓库 URL 无效: {}", e))?;
     let host = parsed.host_str().unwrap_or_default().to_lowercase();
     if host != "github.com" {
         return Err("当前模板仓库仅支持 github.com".to_string());
@@ -4058,7 +4157,9 @@ fn github_tree_url(repo: &EpubTemplateRepository, dir: &str) -> Result<String, S
     ))
 }
 
-fn read_template_repositories(app: &tauri::AppHandle) -> Result<Vec<EpubTemplateRepository>, String> {
+fn read_template_repositories(
+    app: &tauri::AppHandle,
+) -> Result<Vec<EpubTemplateRepository>, String> {
     let path = epub_template_repositories_path(app)?;
     if !path.exists() {
         return Ok(Vec::new());
@@ -4074,7 +4175,8 @@ fn write_template_repositories(
     let root = epub_templates_root(app)?;
     ensure_dir(&root)?;
     let path = epub_template_repositories_path(app)?;
-    let bytes = serde_json::to_vec_pretty(repos).map_err(|e| format!("序列化模板仓库配置失败: {}", e))?;
+    let bytes =
+        serde_json::to_vec_pretty(repos).map_err(|e| format!("序列化模板仓库配置失败: {}", e))?;
     fs::write(path, bytes).map_err(|e| format!("保存模板仓库配置失败: {}", e))
 }
 
@@ -4174,7 +4276,10 @@ fn pick_preferred_font_name(names: Vec<String>) -> Option<String> {
         .max_by_key(|name| font_name_preference_score(name))
 }
 
-fn build_library_font_info(app: &tauri::AppHandle, font_path: &Path) -> Result<LibraryFontInfo, String> {
+fn build_library_font_info(
+    app: &tauri::AppHandle,
+    font_path: &Path,
+) -> Result<LibraryFontInfo, String> {
     let font_data = fs::read(font_path).map_err(|e| format!("读取字体失败: {}", e))?;
     let file_name = font_path
         .file_name()
@@ -4536,7 +4641,10 @@ fn try_prepare_epub_for_ingest(source: &Path) -> Result<Option<(PathBuf, String)
     // 在系统临时目录构造一个"虚拟 source"，使 build_processed_epub_path /
     // rebuild_epub_with_sanitized_names_from_bytes 把输出落在临时目录而非源目录。
     let temp_dir = std::env::temp_dir();
-    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("book");
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("book");
     let virtual_source = temp_dir.join(format!(
         "tepub_ingest_{}_{}.epub",
         uuid::Uuid::new_v4(),
@@ -4561,8 +4669,7 @@ fn try_prepare_epub_for_ingest(source: &Path) -> Result<Option<(PathBuf, String)
 
         if fixed_encryption_flag {
             let out_path = build_processed_epub_path(&virtual_source, "");
-            fs::write(&out_path, &bytes_mut)
-                .map_err(|e| format!("写入修复文件失败: {}", e))?;
+            fs::write(&out_path, &bytes_mut).map_err(|e| format!("写入修复文件失败: {}", e))?;
             return Ok(Some((out_path, "已自动解除伪加密".to_string())));
         }
         return Ok(None);
@@ -4588,8 +4695,7 @@ fn try_prepare_epub_for_ingest(source: &Path) -> Result<Option<(PathBuf, String)
                 return Ok(Some((out_path, "已自动解混淆并修复可读格式".to_string())));
             }
             let out_path = build_processed_epub_path(&virtual_source, "");
-            fs::write(&out_path, &decoded)
-                .map_err(|e| format!("写入解混淆文件失败: {}", e))?;
+            fs::write(&out_path, &decoded).map_err(|e| format!("写入解混淆文件失败: {}", e))?;
             return Ok(Some((out_path, "已自动解混淆并修复可读格式".to_string())));
         }
     }
@@ -4727,7 +4833,10 @@ fn json_num(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
 }
 
 #[tauri::command]
-async fn search_book_covers(title: String, author: String) -> Result<Vec<CoverSearchResult>, String> {
+async fn search_book_covers(
+    title: String,
+    author: String,
+) -> Result<Vec<CoverSearchResult>, String> {
     let clean_title = title.trim();
     let clean_author = author.trim();
     if clean_title.is_empty() || clean_title == "书名" || clean_title == "涔﹀悕" {
@@ -4738,8 +4847,8 @@ async fn search_book_covers(title: String, author: String) -> Result<Vec<CoverSe
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) TEpub-Editor/0.5")
         .build()
         .map_err(|e| format!("初始化封面搜索失败: {}", e))?;
-    let image_meta_re = Regex::new(r#"m="([^"]+)""#)
-        .map_err(|e| format!("封面结果解析失败: {}", e))?;
+    let image_meta_re =
+        Regex::new(r#"m="([^"]+)""#).map_err(|e| format!("封面结果解析失败: {}", e))?;
     let mut results: Vec<(i32, CoverSearchResult)> = Vec::new();
     let mut seen = HashSet::new();
     let title_key = compact_match_key(clean_title);
@@ -4824,7 +4933,10 @@ async fn search_book_covers(title: String, author: String) -> Result<Vec<CoverSe
             let page_key = compact_match_key(&page_url);
             let source_key = compact_match_key(&source);
             let image_key = compact_match_key(&image_url);
-            let combined_key = format!("{}{}{}{}", result_title_key, page_key, source_key, image_key);
+            let combined_key = format!(
+                "{}{}{}{}",
+                result_title_key, page_key, source_key, image_key
+            );
             let has_title_match = !title_key.is_empty() && combined_key.contains(&title_key);
 
             let mut score = if preferred { 180 } else { 0 };
@@ -4885,7 +4997,11 @@ async fn search_book_covers(title: String, author: String) -> Result<Vec<CoverSe
     }
 
     results.sort_by(|a, b| b.0.cmp(&a.0));
-    Ok(results.into_iter().take(12).map(|(_, result)| result).collect())
+    Ok(results
+        .into_iter()
+        .take(12)
+        .map(|(_, result)| result)
+        .collect())
 }
 #[tauri::command]
 async fn download_cover_to_temp(image_url: String, title: String) -> Result<String, String> {
@@ -4916,7 +5032,11 @@ async fn download_cover_to_temp(image_url: String, title: String) -> Result<Stri
 
     let ext = detect_image_ext(&bytes);
     let base = sanitize_filename_part(&title);
-    let stem = if base.is_empty() { "cover".to_string() } else { base };
+    let stem = if base.is_empty() {
+        "cover".to_string()
+    } else {
+        base
+    };
     let dir = std::env::temp_dir().join("TEpub-Editor").join("covers");
     fs::create_dir_all(&dir).map_err(|e| format!("创建封面缓存目录失败: {}", e))?;
     let now = SystemTime::now()
@@ -4979,10 +5099,7 @@ async fn save_history(
 }
 
 #[tauri::command]
-async fn get_history_list(
-    app: tauri::AppHandle,
-    original_path: String,
-) -> Vec<HistoryMeta> {
+async fn get_history_list(app: tauri::AppHandle, original_path: String) -> Vec<HistoryMeta> {
     let path = Path::new(&original_path);
     let file_stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let history_dir = get_history_base_dir(Some(&app));
@@ -4991,8 +5108,7 @@ async fn get_history_list(
     if let Ok(entries) = fs::read_dir(history_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let fname = entry.file_name().to_string_lossy().to_string();
-            if (fname.starts_with(&file_prefix)
-                || fname.starts_with(&format!("{}.", file_stem)))
+            if (fname.starts_with(&file_prefix) || fname.starts_with(&format!("{}.", file_stem)))
                 && fname.ends_with(".bak")
             {
                 if let Ok(meta) = entry.metadata() {
@@ -5165,10 +5281,7 @@ fn list_style_templates(app: tauri::AppHandle) -> Result<Vec<StyleTemplateInfo>,
 }
 
 #[tauri::command]
-fn read_style_template(
-    app: tauri::AppHandle,
-    id: String,
-) -> Result<StyleTemplateContent, String> {
+fn read_style_template(app: tauri::AppHandle, id: String) -> Result<StyleTemplateContent, String> {
     let is_builtin = id == "builtin";
     let path = if is_builtin {
         builtin_style_template_path(&app)?
@@ -5187,7 +5300,11 @@ fn read_style_template(
         String::new()
     };
     Ok(StyleTemplateContent {
-        id: if is_builtin { "builtin".to_string() } else { id },
+        id: if is_builtin {
+            "builtin".to_string()
+        } else {
+            id
+        },
         name: if is_builtin {
             "内置模板".to_string()
         } else {
@@ -5279,8 +5396,7 @@ fn is_stale_builtin_style_template_css(css: &str) -> bool {
         return false;
     }
 
-    normalized.contains("TEpub template schema: 1")
-        && !normalized.contains(".te-volume-subtitle")
+    normalized.contains("TEpub template schema: 1") && !normalized.contains(".te-volume-subtitle")
 }
 
 #[derive(serde::Deserialize, Clone)]
@@ -5299,10 +5415,7 @@ pub struct ChapterInfo {
 }
 
 #[tauri::command]
-async fn scan_chapters(
-    content: String,
-    rules: Vec<RegexRule>,
-) -> Vec<ChapterInfo> {
+async fn scan_chapters(content: String, rules: Vec<RegexRule>) -> Vec<ChapterInfo> {
     // Normalize line endings to ensure consistency with CodeMirror's line counting
     // CodeMirror treats \r, \n, and \r\n all as line separators
     // Rust's .lines() only recognizes \n and \r\n
@@ -5313,7 +5426,7 @@ async fn scan_chapters(
         .replace('\u{2029}', "\n");
 
     let mut chapters = Vec::new();
-    
+
     // Compile regex rules safely
     let compiled_rules: Vec<(u8, Regex)> = rules
         .into_iter()
@@ -5325,7 +5438,7 @@ async fn scan_chapters(
         let line_trim = line.trim();
         let char_count = line_trim.chars().count();
         let is_empty = line_trim.is_empty();
-        
+
         let mut match_level = None;
         if !is_empty {
             for (level, re) in &compiled_rules {
@@ -5348,7 +5461,7 @@ async fn scan_chapters(
             let is_meta = !is_vol_keyword
                 && mobile_is_meta_title(line_trim)
                 && (lvl == 1 || is_first_heading);
-            
+
             current_chapter = Some(ChapterInfo {
                 title: line_trim.to_string(),
                 line_number: index + 1,
@@ -5624,8 +5737,7 @@ async fn export_epub(
             }
             html_body.push_str(&format!(
                 "  <h1 class=\"te-intro-title\" title=\"{}\"><span><b>{}</b></span></h1>\n",
-                safe_display_title,
-                safe_display_title
+                safe_display_title, safe_display_title
             ));
             append_text_body_lines(
                 &mut html_body,
@@ -5644,26 +5756,27 @@ async fn export_epub(
                     class_attr = "te-book-body te-volume-page";
                     let safe_vol_num = escape_xml(&chap_num_raw);
                     let safe_vol_name = escape_xml(&chap_name_raw);
-                    
+
                     // We only use the vertical number styling if there's actually a volume number parsed
                     let vertical_num = if !safe_vol_num.is_empty() {
                         format_vertical_volume(&safe_vol_num)
                     } else {
                         String::new()
                     };
-                    
+
                     let formatted_name = if !safe_vol_name.is_empty() {
                         safe_vol_name
                     } else {
                         safe_display_title.clone()
                     };
 
-                    let inserted_volume_head = if let Some((role, href)) = first_image_slot_for_placement(
-                        &image_slot_hrefs,
-                        &asset_slot_placements,
-                        "volume-before-title",
-                        "volumeHead",
-                    ) {
+                    let inserted_volume_head = if let Some((role, href)) =
+                        first_image_slot_for_placement(
+                            &image_slot_hrefs,
+                            &asset_slot_placements,
+                            "volume-before-title",
+                            "volumeHead",
+                        ) {
                         html_body.push_str(&image_slot_html(role, href));
                         true
                     } else {
@@ -5695,13 +5808,14 @@ async fn export_epub(
                 3 => {
                     let safe_chap_num = escape_xml(&chap_num_raw);
                     let safe_chap_name = escape_xml(&chap_name_raw);
-                    
-                    let inserted_chapter_head = if let Some((role, href)) = first_image_slot_for_placement(
-                        &image_slot_hrefs,
-                        &asset_slot_placements,
-                        "chapter-before-title",
-                        "chapterHead",
-                    ) {
+
+                    let inserted_chapter_head = if let Some((role, href)) =
+                        first_image_slot_for_placement(
+                            &image_slot_hrefs,
+                            &asset_slot_placements,
+                            "chapter-before-title",
+                            "chapterHead",
+                        ) {
                         html_body.push_str(&image_slot_html(role, href));
                         true
                     } else {
@@ -5723,7 +5837,7 @@ async fn export_epub(
                             safe_display_title
                         ));
                     }
-                    
+
                     append_text_body_lines(
                         &mut html_body,
                         body_lines,
@@ -5793,7 +5907,11 @@ async fn export_epub(
         let current_level = chapter.level;
         let (chap_num_raw, chap_name_raw) = split_title(&chapter.title);
         let safe_display_title = if !chap_num_raw.is_empty() && !chap_name_raw.is_empty() {
-            format!("{} {}", escape_xml(&chap_num_raw), escape_xml(&chap_name_raw))
+            format!(
+                "{} {}",
+                escape_xml(&chap_num_raw),
+                escape_xml(&chap_name_raw)
+            )
         } else {
             escape_xml(&chapter.title)
         };
@@ -7218,12 +7336,7 @@ fn current_exe_quoted() -> Result<String, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn install_verb(
-    ext: &str,
-    verb: &str,
-    display: &str,
-    action_flag: &str,
-) -> Result<(), String> {
+fn install_verb(ext: &str, verb: &str, display: &str, action_flag: &str) -> Result<(), String> {
     let exe = current_exe_quoted()?;
     // 走 SystemFileAssociations：不依赖文件类型默认 ProgID，
     // 用户即便把 .epub 默认设给 Calibre/SumatraPDF，我们的右键菜单依然会出现。
@@ -7249,10 +7362,7 @@ fn uninstall_verb(ext: &str, verb: &str, legacy_progid: &str) -> Result<(), Stri
     );
     let _ = run_reg_command(&["DELETE", &verb_key_new, "/f"]);
     // 兼容旧版本：如果 0.4.6 之前曾把 verb 挂在自定义 ProgID 下，一并清掉
-    let verb_key_old = format!(
-        r"HKCU\Software\Classes\{}\shell\{}",
-        legacy_progid, verb
-    );
+    let verb_key_old = format!(r"HKCU\Software\Classes\{}\shell\{}", legacy_progid, verb);
     let _ = run_reg_command(&["DELETE", &verb_key_old, "/f"]);
     Ok(())
 }
@@ -7476,7 +7586,11 @@ async fn rebuild_book_filenames(
         } else {
             stem
         };
-        let stem = if stem.is_empty() { "未命名".to_string() } else { stem };
+        let stem = if stem.is_empty() {
+            "未命名".to_string()
+        } else {
+            stem
+        };
         let mut target = format!("{}.{}", stem, ext);
         // 如果目标 == 当前名，不需要改
         if let Some(cur_name) = cur_path.file_name().and_then(|s| s.to_str()) {
@@ -7510,20 +7624,14 @@ async fn rebuild_book_filenames(
     // 为避免 A→B 同时 B→C 时 A→B 先执行覆盖了 B，先把所有被改动的文件改成临时名，再改成最终名
     let mut staged: Vec<(usize, PathBuf, PathBuf)> = Vec::new(); // (idx, tmp_path, final_path)
     for (idx, from, target_name) in plan {
-        let tmp_name = format!(
-            ".__rename_tmp_{}_{}",
-            idx,
-            uuid::Uuid::new_v4().simple()
-        );
+        let tmp_name = format!(".__rename_tmp_{}_{}", idx, uuid::Uuid::new_v4().simple());
         let tmp_path = books_dir.join(&tmp_name);
         let final_path = books_dir.join(&target_name);
         if let Err(e) = fs::rename(&from, &tmp_path) {
             summary.failed += 1;
             summary.failures.push(format!(
                 "{}: {}",
-                from.file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(""),
+                from.file_name().and_then(|s| s.to_str()).unwrap_or(""),
                 e
             ));
             continue;
@@ -7545,10 +7653,7 @@ async fn rebuild_book_filenames(
                 summary.failed += 1;
                 summary.failures.push(format!(
                     "{} → {}: {}",
-                    tmp_path
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(""),
+                    tmp_path.file_name().and_then(|s| s.to_str()).unwrap_or(""),
                     final_path
                         .file_name()
                         .and_then(|s| s.to_str())
@@ -7964,7 +8069,6 @@ fn pick_book_filename(
     format!("{}.{}", stem, file_type)
 }
 
-
 fn ensure_dir(p: &Path) -> Result<(), String> {
     if !p.exists() {
         fs::create_dir_all(p).map_err(|e| format!("创建目录失败 {}: {}", p.display(), e))?;
@@ -8002,8 +8106,7 @@ fn migrate_legacy_library_layout(app: &tauri::AppHandle) -> Result<(), String> {
     }
 
     // 读旧 library.json
-    let bytes = fs::read(&old_json)
-        .map_err(|e| format!("迁移：读旧 library.json 失败: {}", e))?;
+    let bytes = fs::read(&old_json).map_err(|e| format!("迁移：读旧 library.json 失败: {}", e))?;
     let mut data: LibraryData = serde_json::from_slice(&bytes)
         .map_err(|e| format!("迁移：解析旧 library.json 失败: {}", e))?;
 
@@ -8105,8 +8208,7 @@ fn write_library_data_atomic(app: &tauri::AppHandle, data: &LibraryData) -> Resu
     let json =
         serde_json::to_vec_pretty(data).map_err(|e| format!("序列化 library.json 失败: {}", e))?;
     {
-        let mut f =
-            fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {}", e))?;
+        let mut f = fs::File::create(&tmp).map_err(|e| format!("创建临时文件失败: {}", e))?;
         f.write_all(&json)
             .map_err(|e| format!("写入临时文件失败: {}", e))?;
         f.sync_all().ok();
@@ -8226,7 +8328,12 @@ fn preview_ai_response_body(text: &str) -> String {
 
 #[tauri::command]
 async fn run_ai_proofing(request: AiProofingRequest) -> Result<AiProofingResponse, String> {
-    let base_url = request.config.base_url.trim().trim_end_matches('/').to_string();
+    let base_url = request
+        .config
+        .base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
     if base_url.is_empty() {
         return Err("请先填写 API 地址".to_string());
     }
@@ -8342,14 +8449,13 @@ async fn run_ai_proofing(request: AiProofingRequest) -> Result<AiProofingRespons
         ));
     }
 
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| {
-            format!(
-                "解析智能校对响应失败: {}；响应片段: {}",
-                e,
-                preview_ai_response_body(&text)
-            )
-        })?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "解析智能校对响应失败: {}；响应片段: {}",
+            e,
+            preview_ai_response_body(&text)
+        )
+    })?;
     let content = value
         .get("choices")
         .and_then(|v| v.as_array())
@@ -8392,11 +8498,19 @@ async fn save_ai_proofing_log(
         .unwrap_or("未命名");
     let stem = {
         let safe = sanitize_filename_part(txt_stem);
-        if safe.is_empty() { "未命名".to_string() } else { safe }
+        if safe.is_empty() {
+            "未命名".to_string()
+        } else {
+            safe
+        }
     };
     let model_name = {
         let safe = sanitize_filename_part(model.trim());
-        if safe.is_empty() { "unknown-model".to_string() } else { safe }
+        if safe.is_empty() {
+            "unknown-model".to_string()
+        } else {
+            safe
+        }
     };
     let time_text = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
     let mut file_name = format!("{}-{}-{}.log", stem, time_text, model_name);
@@ -8462,14 +8576,14 @@ struct EpubParsedMeta {
     description: Option<String>,
     epub_uuid: String,
     cover_bytes: Option<Vec<u8>>,
-    cover_ext: String, // "jpg" / "png"
+    cover_ext: String,          // "jpg" / "png"
     pub_date: Option<u64>,      // <dc:date> 解析后的 unix 秒
     modified_date: Option<u64>, // <meta property="dcterms:modified"> 解析后的 unix 秒
     // 我们写入 OPF 时用的扩展字段，导入时也要读回来
-    subtitle: Option<String>,   // <meta name="calibre:subtitle" content="..."/>
-    series: Option<String>,     // <meta name="calibre:series" content="..."/>
-    maker: Option<String>,      // <meta name="maker" content="..."/>
-    tags: Vec<String>,          // 所有 <dc:subject>
+    subtitle: Option<String>, // <meta name="calibre:subtitle" content="..."/>
+    series: Option<String>,   // <meta name="calibre:series" content="..."/>
+    maker: Option<String>,    // <meta name="maker" content="..."/>
+    tags: Vec<String>,        // 所有 <dc:subject>
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -8553,10 +8667,7 @@ fn normalize_zip_path(p: &str) -> String {
 
 // 从 OPF XML 里抽出第一个 <{tag}>...</{tag}> 的内容（容忍属性、容忍换行）
 fn extract_first_tag(xml: &str, tag: &str) -> Option<String> {
-    let pat = format!(
-        r#"<{0}(?:\s[^>]*)?>([\s\S]*?)</{0}>"#,
-        re_escape(tag)
-    );
+    let pat = format!(r#"<{0}(?:\s[^>]*)?>([\s\S]*?)</{0}>"#, re_escape(tag));
     let re = Regex::new(&pat).ok()?;
     match re.captures(xml) {
         Ok(Some(c)) => c.get(1).map(|m| xml_unescape(m.as_str().trim())),
@@ -8566,10 +8677,7 @@ fn extract_first_tag(xml: &str, tag: &str) -> Option<String> {
 
 // 抽取所有 <{tag}>...</{tag}> 的内容，返回 Vec（用于多个 dc:subject 这类）
 fn extract_all_tags(xml: &str, tag: &str) -> Vec<String> {
-    let pat = format!(
-        r#"<{0}(?:\s[^>]*)?>([\s\S]*?)</{0}>"#,
-        re_escape(tag)
-    );
+    let pat = format!(r#"<{0}(?:\s[^>]*)?>([\s\S]*?)</{0}>"#, re_escape(tag));
     let re = match Regex::new(&pat) {
         Ok(r) => r,
         Err(_) => return Vec::new(),
@@ -8588,10 +8696,7 @@ fn extract_all_tags(xml: &str, tag: &str) -> Vec<String> {
 
 // 抽取 <meta name="X" content="Y"/> 里的 Y（属性顺序无关，先定位 tag 再抽 content）
 fn extract_meta_by_name(xml: &str, name: &str) -> Option<String> {
-    let outer_pat = format!(
-        r#"<meta\s+[^>]*name="{}"[^>]*/?>"#,
-        re_escape(name)
-    );
+    let outer_pat = format!(r#"<meta\s+[^>]*name="{}"[^>]*/?>"#, re_escape(name));
     let outer_re = Regex::new(&outer_pat).ok()?;
     let m = match outer_re.find(xml) {
         Ok(Some(m)) => m,
@@ -8687,10 +8792,7 @@ fn find_cover_href(opf_xml: &str) -> Option<String> {
 }
 
 // 从 zip 里读一个 entry 的字节；找不到精确名时尝试 percent-decode 与忽略大小写
-fn try_read_zip_entry(
-    archive: &mut zip::ZipArchive<fs::File>,
-    name: &str,
-) -> Option<Vec<u8>> {
+fn try_read_zip_entry(archive: &mut zip::ZipArchive<fs::File>, name: &str) -> Option<Vec<u8>> {
     fn try_one(a: &mut zip::ZipArchive<fs::File>, n: &str) -> Option<Vec<u8>> {
         let mut zf = a.by_name(n).ok()?;
         let mut buf = Vec::new();
@@ -8811,19 +8913,17 @@ fn parse_epub_metadata(epub_path: &Path) -> Result<EpubParsedMeta, String> {
     let tags = extract_all_tags(&opf_xml, "dc:subject");
 
     // dc:date 作为"制作时间"（出版/创建日期）
-    let pub_date =
-        extract_first_tag(&opf_xml, "dc:date").and_then(|s| parse_epub_date(&s));
+    let pub_date = extract_first_tag(&opf_xml, "dc:date").and_then(|s| parse_epub_date(&s));
 
     // EPUB 3：<meta property="dcterms:modified">YYYY-MM-DDTHH:MM:SSZ</meta>
-    let modified_date = match Regex::new(
-        r#"<meta\s+[^>]*property="dcterms:modified"[^>]*>([\s\S]*?)</meta>"#,
-    ) {
-        Ok(re) => match re.captures(&opf_xml) {
-            Ok(Some(c)) => c.get(1).and_then(|m| parse_epub_date(m.as_str().trim())),
-            _ => None,
-        },
-        Err(_) => None,
-    };
+    let modified_date =
+        match Regex::new(r#"<meta\s+[^>]*property="dcterms:modified"[^>]*>([\s\S]*?)</meta>"#) {
+            Ok(re) => match re.captures(&opf_xml) {
+                Ok(Some(c)) => c.get(1).and_then(|m| parse_epub_date(m.as_str().trim())),
+                _ => None,
+            },
+            Err(_) => None,
+        };
 
     // 3. 找封面 href（多层兜底）
     let cover_href = find_cover_href(&opf_xml);
@@ -8872,8 +8972,8 @@ fn parse_epub_metadata(epub_path: &Path) -> Result<EpubParsedMeta, String> {
 
 fn read_opf_from_dir(root: &Path) -> Result<(String, String), String> {
     let container_path = root.join("META-INF").join("container.xml");
-    let container_xml =
-        fs::read_to_string(&container_path).map_err(|e| format!("读取 container.xml 失败: {}", e))?;
+    let container_xml = fs::read_to_string(&container_path)
+        .map_err(|e| format!("读取 container.xml 失败: {}", e))?;
     let opf_re = Regex::new(r#"full-path="([^"]+)""#).map_err(|e| e.to_string())?;
     let opf_path = match opf_re.captures(&container_xml) {
         Ok(Some(c)) => c.get(1).map(|m| m.as_str().to_string()),
@@ -8901,15 +9001,14 @@ fn parse_epub_metadata_from_parts(
     let maker = extract_meta_by_name(opf_xml, "maker");
     let tags = extract_all_tags(opf_xml, "dc:subject");
     let pub_date = extract_first_tag(opf_xml, "dc:date").and_then(|s| parse_epub_date(&s));
-    let modified_date = match Regex::new(
-        r#"<meta\s+[^>]*property="dcterms:modified"[^>]*>([\s\S]*?)</meta>"#,
-    ) {
-        Ok(re) => match re.captures(opf_xml) {
-            Ok(Some(c)) => c.get(1).and_then(|m| parse_epub_date(m.as_str().trim())),
-            _ => None,
-        },
-        Err(_) => None,
-    };
+    let modified_date =
+        match Regex::new(r#"<meta\s+[^>]*property="dcterms:modified"[^>]*>([\s\S]*?)</meta>"#) {
+            Ok(re) => match re.captures(opf_xml) {
+                Ok(Some(c)) => c.get(1).and_then(|m| parse_epub_date(m.as_str().trim())),
+                _ => None,
+            },
+            Err(_) => None,
+        };
 
     let normalized_cover_ext = if cover_ext.is_empty() {
         find_cover_href(opf_xml)
@@ -8952,7 +9051,10 @@ fn parse_epub_metadata_live(epub_path: &Path) -> Result<EpubParsedMeta, String> 
         let cache_guard = EPUB_CACHE.lock().unwrap();
         if let Some(ref cache) = *cache_guard {
             if cache.epub_path == epub_path.to_string_lossy() {
-                cache.temp_dir.as_ref().map(|temp| temp.path().to_path_buf())
+                cache
+                    .temp_dir
+                    .as_ref()
+                    .map(|temp| temp.path().to_path_buf())
             } else {
                 None
             }
@@ -8976,7 +9078,9 @@ fn parse_epub_metadata_live(epub_path: &Path) -> Result<EpubParsedMeta, String> 
                 format!("{}/{}", opf_dir, href)
             };
             let normalized = normalize_zip_path(&cover_full);
-            let disk_path = normalized.split('/').fold(root.clone(), |acc, part| acc.join(part));
+            let disk_path = normalized
+                .split('/')
+                .fold(root.clone(), |acc, part| acc.join(part));
             if let Ok(buf) = fs::read(&disk_path) {
                 cover_ext = match ext_from_path(&normalized) {
                     "jpg" => detect_image_ext(&buf).to_string(),
@@ -9071,8 +9175,7 @@ async fn add_book_to_library(
     if let Some((_, action)) = &epub_prep_result {
         eprintln!("[library] EPUB 入库自动处理: {} ({})", action, file_path);
     }
-    let _epub_cleanup_guard =
-        IngestTempFile(epub_prep_result.as_ref().map(|(p, _)| p.clone()));
+    let _epub_cleanup_guard = IngestTempFile(epub_prep_result.as_ref().map(|(p, _)| p.clone()));
     let effective_src: PathBuf = epub_prep_result
         .as_ref()
         .map(|(p, _)| p.clone())
@@ -9191,8 +9294,7 @@ async fn add_book_to_library(
                     let covers_dir = library_covers_dir(&app)?;
                     ensure_dir(&covers_dir)?;
                     let cover_path = covers_dir.join(format!("{}.{}", id, meta.cover_ext));
-                    fs::write(&cover_path, &bytes)
-                        .map_err(|e| format!("写入封面失败: {}", e))?;
+                    fs::write(&cover_path, &bytes).map_err(|e| format!("写入封面失败: {}", e))?;
                     entry.cover_path = cover_path.to_string_lossy().to_string();
                 }
             }
@@ -9216,10 +9318,7 @@ async fn add_book_to_library(
 }
 
 #[tauri::command]
-async fn remove_book_from_library(
-    app: tauri::AppHandle,
-    book_id: String,
-) -> Result<(), String> {
+async fn remove_book_from_library(app: tauri::AppHandle, book_id: String) -> Result<(), String> {
     let mut data = read_library_data(&app)?;
     let idx = data
         .books
@@ -9234,8 +9333,8 @@ async fn remove_book_from_library(
     let legacy_files_dir = legacy_library_files_dir(&app)?;
     if !book.file_path.is_empty() {
         let book_path = PathBuf::from(&book.file_path);
-        let inside_managed = book_path.starts_with(&books_dir)
-            || book_path.starts_with(&legacy_files_dir);
+        let inside_managed =
+            book_path.starts_with(&books_dir) || book_path.starts_with(&legacy_files_dir);
         if inside_managed && book_path.exists() {
             let _ = fs::remove_file(&book_path);
         }
@@ -9350,10 +9449,8 @@ async fn refresh_book_metadata(
                     }
                     let covers_dir = library_covers_dir(&app)?;
                     ensure_dir(&covers_dir)?;
-                    let cover_path =
-                        covers_dir.join(format!("{}.{}", entry.id, meta.cover_ext));
-                    fs::write(&cover_path, &bytes)
-                        .map_err(|e| format!("写入封面失败: {}", e))?;
+                    let cover_path = covers_dir.join(format!("{}.{}", entry.id, meta.cover_ext));
+                    fs::write(&cover_path, &bytes).map_err(|e| format!("写入封面失败: {}", e))?;
                     entry.cover_path = cover_path.to_string_lossy().to_string();
                 }
             }
@@ -9399,14 +9496,9 @@ fn detect_image_ext(bytes: &[u8]) -> &'static str {
         && bytes[3] == 0x47
     {
         "png"
-    } else if bytes.len() >= 12
-        && &bytes[0..4] == b"RIFF"
-        && &bytes[8..12] == b"WEBP"
-    {
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
         "webp"
-    } else if bytes.len() >= 6
-        && (&bytes[0..6] == b"GIF87a" || &bytes[0..6] == b"GIF89a")
-    {
+    } else if bytes.len() >= 6 && (&bytes[0..6] == b"GIF87a" || &bytes[0..6] == b"GIF89a") {
         "gif"
     } else {
         "jpg"
@@ -9528,10 +9620,7 @@ fn write_opf_metadata(
     }
 
     // tags → 多个 dc:subject（EPUB 标准）。先删后插，**所有 tag 拼到同一行**。
-    s = remove_all_matches(
-        &s,
-        r#"\s*<dc:subject(?:\s[^>]*)?>[\s\S]*?</dc:subject>"#,
-    );
+    s = remove_all_matches(&s, r#"\s*<dc:subject(?:\s[^>]*)?>[\s\S]*?</dc:subject>"#);
     if !tags.is_empty() {
         let mut chunks: Vec<String> = Vec::new();
         for t in tags {
@@ -9646,17 +9735,13 @@ fn rewrite_epub(epub_path: &Path, changes: &EpubRewrite) -> Result<(), String> {
     };
 
     let src = fs::File::open(epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
-    let mut archive =
-        zip::ZipArchive::new(src).map_err(|e| format!("无效 EPUB: {}", e))?;
+    let mut archive = zip::ZipArchive::new(src).map_err(|e| format!("无效 EPUB: {}", e))?;
 
     let tmp_path = format!("{}.tmp", epub_path.to_string_lossy());
-    let tmp_file =
-        fs::File::create(&tmp_path).map_err(|e| format!("创建临时 zip 失败: {}", e))?;
+    let tmp_file = fs::File::create(&tmp_path).map_err(|e| format!("创建临时 zip 失败: {}", e))?;
     let mut zw = zip::ZipWriter::new(tmp_file);
-    let opts_deflated =
-        FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    let opts_stored =
-        FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let opts_deflated = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let opts_stored = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
     let count = archive.len();
     for i in 0..count {
@@ -9684,10 +9769,9 @@ fn rewrite_epub(epub_path: &Path, changes: &EpubRewrite) -> Result<(), String> {
             }
         }
         if !handled {
-            if let (Some(ci), Some(bytes)) = (
-                cover_internal.as_ref(),
-                changes.cover_replacement.as_ref(),
-            ) {
+            if let (Some(ci), Some(bytes)) =
+                (cover_internal.as_ref(), changes.cover_replacement.as_ref())
+            {
                 if &name == ci {
                     zw.write_all(bytes).map_err(|e| e.to_string())?;
                     handled = true;
@@ -9704,8 +9788,7 @@ fn rewrite_epub(epub_path: &Path, changes: &EpubRewrite) -> Result<(), String> {
     zw.finish().map_err(|e| format!("完成 zip 失败: {}", e))?;
     drop(archive); // Windows 上必须释放原 zip 句柄再 rename
 
-    fs::rename(&tmp_path, epub_path)
-        .map_err(|e| format!("替换 EPUB 失败: {}", e))?;
+    fs::rename(&tmp_path, epub_path).map_err(|e| format!("替换 EPUB 失败: {}", e))?;
     Ok(())
 }
 
@@ -9784,8 +9867,7 @@ fn mobile_is_likely_toc_title(title: &str, level: u8) -> bool {
         }
     }
 
-    if let Ok(prose_sequence) =
-        Regex::new(r"^序列\s*[0-9零〇一二两三四五六七八九十百千万]+\p{Han}")
+    if let Ok(prose_sequence) = Regex::new(r"^序列\s*[0-9零〇一二两三四五六七八九十百千万]+\p{Han}")
     {
         if prose_sequence.is_match(trimmed).unwrap_or(false) {
             if let Ok(heading_sequence) =
@@ -9798,7 +9880,8 @@ fn mobile_is_likely_toc_title(title: &str, level: u8) -> bool {
         }
     }
 
-    if let Ok(re) = Regex::new(r"^第\s*[0-9零〇一二两三四五六七八九十百千万]+\s*(章|节|回)(\S?)") {
+    if let Ok(re) = Regex::new(r"^第\s*[0-9零〇一二两三四五六七八九十百千万]+\s*(章|节|回)(\S?)")
+    {
         if let Ok(Some(caps)) = re.captures(trimmed) {
             let keyword = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let next_char = caps.get(2).map(|m| m.as_str()).unwrap_or("");
@@ -9809,8 +9892,7 @@ fn mobile_is_likely_toc_title(title: &str, level: u8) -> bool {
                     }
                 }
             }
-            if !next_char.is_empty()
-                && !["：", ":", "、", ".", "．", "-", "—"].contains(&next_char)
+            if !next_char.is_empty() && !["：", ":", "、", ".", "．", "-", "—"].contains(&next_char)
             {
                 if "的了时侯候后前中里内外上下来去得地着过将把被与和及都也才只能已会在是有为对从用以课程数次目期"
                     .contains(next_char)
@@ -9882,7 +9964,10 @@ async fn mobile_make_epub(
 
     let out_dir = app_data_root(&app)?.join("mobile-exports");
     ensure_dir(&out_dir)?;
-    let out_path = build_processed_epub_path(&out_dir.join(format!("{}.epub", sanitize_filename_part(&book_title))), "");
+    let out_path = build_processed_epub_path(
+        &out_dir.join(format!("{}.epub", sanitize_filename_part(&book_title))),
+        "",
+    );
     let word_count = content.chars().filter(|c| !c.is_whitespace()).count();
     let chapter_count = chapters.len();
     let epub_uuid = if uuid.trim().is_empty() {
@@ -9992,7 +10077,10 @@ async fn mobile_update_epub_metadata(
             let cache_guard = EPUB_CACHE.lock().unwrap();
             if let Some(ref cache) = *cache_guard {
                 if cache.epub_path == epub_path {
-                    cache.temp_dir.as_ref().map(|temp| temp.path().to_path_buf())
+                    cache
+                        .temp_dir
+                        .as_ref()
+                        .map(|temp| temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -10009,7 +10097,8 @@ async fn mobile_update_epub_metadata(
             if let Some(parent) = temp_opf_disk_path.parent() {
                 fs::create_dir_all(parent).map_err(|e| format!("创建 OPF 目录失败: {}", e))?;
             }
-            fs::write(&temp_opf_disk_path, &new_opf).map_err(|e| format!("写入缓存 OPF 失败: {}", e))?;
+            fs::write(&temp_opf_disk_path, &new_opf)
+                .map_err(|e| format!("写入缓存 OPF 失败: {}", e))?;
         }
 
         rewrite_epub(
@@ -10044,7 +10133,10 @@ async fn mobile_update_epub_cover(
             let cache_guard = EPUB_CACHE.lock().unwrap();
             if let Some(ref cache) = *cache_guard {
                 if cache.epub_path == epub_path {
-                    cache.temp_dir.as_ref().map(|temp| temp.path().to_path_buf())
+                    cache
+                        .temp_dir
+                        .as_ref()
+                        .map(|temp| temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -10311,8 +10403,7 @@ async fn update_book_cover(
     let covers_dir = library_covers_dir(&app)?;
     ensure_dir(&covers_dir)?;
     let cover_path = covers_dir.join(format!("{}.{}", entry.id, ext));
-    fs::write(&cover_path, &cover_data)
-        .map_err(|e| format!("写入封面失败: {}", e))?;
+    fs::write(&cover_path, &cover_data).map_err(|e| format!("写入封面失败: {}", e))?;
     let cover_path_str = cover_path.to_string_lossy().to_string();
     entry.cover_path = cover_path_str.clone();
 
@@ -10468,7 +10559,11 @@ mod toolbox_tests {
   <body><p>Hello</p></body>
 </html>"#,
         )?;
-        write_zip_entry(&mut writer, "OPS/Styles/|_*main.css", b"body { color: #111; }")?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Styles/|_*main.css",
+            b"body { color: #111; }",
+        )?;
         writer.finish().map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -10549,14 +10644,20 @@ mod toolbox_tests {
         assert!(encrypted.changed);
         let encrypted_path = PathBuf::from(&encrypted.output_path);
         let encrypted_names = epub_names(&encrypted_path)?;
-        assert!(encrypted_names.iter().any(|name| name.contains('*') || name.contains(':')));
+        assert!(encrypted_names
+            .iter()
+            .any(|name| name.contains('*') || name.contains(':')));
 
         let decrypted = toolbox_file_decrypt_impl(&encrypted_path)?;
         assert!(decrypted.changed);
         let decrypted_path = PathBuf::from(&decrypted.output_path);
         let decrypted_names = epub_names(&decrypted_path)?;
-        assert!(decrypted_names.iter().any(|name| name == "OPS/Text/chapter.xhtml"));
-        assert!(decrypted_names.iter().any(|name| name == "OPS/Styles/style.css"));
+        assert!(decrypted_names
+            .iter()
+            .any(|name| name == "OPS/Text/chapter.xhtml"));
+        assert!(decrypted_names
+            .iter()
+            .any(|name| name == "OPS/Styles/style.css"));
 
         let opf = read_epub_entry(&decrypted_path, "OPS/content.opf")?;
         assert!(opf.contains(r#"href="Text/chapter.xhtml""#));
@@ -10585,12 +10686,16 @@ mod toolbox_tests {
         let decrypted_path = PathBuf::from(&decrypted.output_path);
         let decrypted_names = epub_names(&decrypted_path)?;
         assert!(
-            decrypted_names.iter().any(|name| name == "OPS/Text/gyzw0001.xhtml"),
+            decrypted_names
+                .iter()
+                .any(|name| name == "OPS/Text/gyzw0001.xhtml"),
             "{:?}",
             decrypted_names
         );
         assert!(
-            decrypted_names.iter().any(|name| name == "OPS/Styles/main.css"),
+            decrypted_names
+                .iter()
+                .any(|name| name == "OPS/Styles/main.css"),
             "{:?}",
             decrypted_names
         );
@@ -10608,6 +10713,48 @@ mod toolbox_tests {
     }
 
     #[test]
+    fn optimized_link_rewrite_preserves_suffixes_and_css_urls() -> Result<(), String> {
+        let mut path_map = HashMap::new();
+        path_map.insert(
+            "OPS/Styles/|_*main.css".to_string(),
+            "OPS/Styles/main.css".to_string(),
+        );
+        path_map.insert(
+            "OPS/Images/cover.webp".to_string(),
+            "OPS/Images/cover.png".to_string(),
+        );
+        path_map.insert(
+            "OPS/Text/next.xhtml".to_string(),
+            "OPS/Text/next.xhtml".to_string(),
+        );
+
+        let text = r#"
+<html>
+  <head><link href="../Styles/%7C_%2Amain.css?v=1#sheet"/></head>
+  <body>
+    <a href="next.xhtml#p1">next</a>
+    <img src="../Images/cover.webp?rev=1"/>
+    <style>.cover { background: url(../Images/cover.webp?rev=2); }</style>
+  </body>
+</html>"#
+            .to_string();
+
+        let rewritten = rewrite_text_links(
+            text,
+            "OPS/Text/chapter.xhtml",
+            "OPS/Text/chapter.xhtml",
+            &path_map,
+        );
+        assert!(rewritten.contains(r#"href="../Styles/main.css?v=1#sheet""#));
+        assert!(rewritten.contains(r#"href="next.xhtml#p1""#));
+        assert!(rewritten.contains(r#"src="../Images/cover.png?rev=1""#));
+        assert!(rewritten.contains("url(../Images/cover.png?rev=2)"));
+        assert!(!rewritten.contains("%7C"));
+        assert!(!rewritten.contains("cover.webp"));
+        Ok(())
+    }
+
+    #[test]
     fn toolbox_epub_reformat_moves_manifest_files_to_standard_dirs() -> Result<(), String> {
         let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
         let source = temp.path().join("sample.epub");
@@ -10617,9 +10764,15 @@ mod toolbox_tests {
         assert!(reformatted.changed);
         let reformatted_path = PathBuf::from(&reformatted.output_path);
         let names = epub_names(&reformatted_path)?;
-        assert!(names.iter().any(|name| name == "OEBPS/content.opf"), "{:?}", names);
         assert!(
-            names.iter().any(|name| name == "OEBPS/Text/chapter one.xhtml"),
+            names.iter().any(|name| name == "OEBPS/content.opf"),
+            "{:?}",
+            names
+        );
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "OEBPS/Text/chapter one.xhtml"),
             "{:?}",
             names
         );
@@ -10649,8 +10802,16 @@ mod toolbox_tests {
         assert!(converted.changed);
         let converted_path = PathBuf::from(&converted.output_path);
         let names = epub_names(&converted_path)?;
-        assert!(names.iter().any(|name| name == "OPS/Images/cover.png"), "{:?}", names);
-        assert!(!names.iter().any(|name| name == "OPS/Images/cover.webp"), "{:?}", names);
+        assert!(
+            names.iter().any(|name| name == "OPS/Images/cover.png"),
+            "{:?}",
+            names
+        );
+        assert!(
+            !names.iter().any(|name| name == "OPS/Images/cover.webp"),
+            "{:?}",
+            names
+        );
 
         let opf = read_epub_entry(&converted_path, "OPS/content.opf")?;
         assert!(opf.contains(r#"href="Images/cover.png""#), "{}", opf);
@@ -10658,12 +10819,15 @@ mod toolbox_tests {
         assert!(!opf.contains("image/webp"), "{}", opf);
 
         let chapter = read_epub_entry(&converted_path, "OPS/Text/chapter.xhtml")?;
-        assert!(chapter.contains(r#"src="../Images/cover.png?rev=1""#), "{}", chapter);
+        assert!(
+            chapter.contains(r#"src="../Images/cover.png?rev=1""#),
+            "{}",
+            chapter
+        );
         let css = read_epub_entry(&converted_path, "OPS/Styles/main.css")?;
         assert!(css.contains("url('../Images/cover.png')"), "{}", css);
         Ok(())
     }
-
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

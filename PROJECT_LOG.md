@@ -2848,6 +2848,36 @@ Caveats:
 
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
 
+### 2026-07-03 13:50 +08:00
+
+Request: investigate whether opening or batch-deobfuscating obfuscated EPUB files hangs because of dev mode, compare with `cnwxi/epub_tool`, and start optimizing step by step.
+
+Changes:
+
+- Reviewed `cnwxi/epub_tool`'s reformat/decrypt flow:
+  - it parses OPF `manifest`/`spine`,
+  - classifies resources before rewriting,
+  - rewrites only actual link attributes and CSS `url(...)` references,
+  - avoids scanning every ZIP entry for every text file.
+- Optimized TEpub-Editor's shared EPUB path-rewrite routine in `src-tauri/src/lib.rs`:
+  - replaced full path-map brute-force replacement with per-text reference extraction,
+  - handles quoted XHTML/XML references and CSS `url(...)` references,
+  - preserves query strings and fragments such as `?rev=1#id`,
+  - skips external/inline references such as `http:`, `https:`, `data:`, `mailto:`, `urn:`, and fragment-only links.
+- Added a focused Rust test covering optimized link rewriting for percent-encoded paths, fragments, query strings, and CSS URLs.
+- Ran `cargo fmt`, which also normalized formatting in nearby Rust code.
+
+Verification:
+
+- `cargo test` passed: 10 tests passed.
+- `cargo check` passed.
+- Restarted the Tauri dev app so the optimized Rust backend is active in `target\debug\TEpub-Editor.exe`.
+
+Caveats:
+
+- This addresses a likely algorithmic bottleneck rather than only dev-mode overhead; final performance still depends on testing the user's problematic obfuscated EPUB sample.
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.
