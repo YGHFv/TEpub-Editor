@@ -705,25 +705,30 @@
 
   .panel {
     min-height: 0;
-    padding: 18px;
+    padding: 16px;
     overflow: hidden;
   }
 
   .execute-panel {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    overflow: hidden auto;
-    scrollbar-gutter: stable;
+    gap: 12px;
+    overflow: hidden;
   }
 
   .field-block {
     display: grid;
-    gap: 8px;
-    padding: 14px;
+    gap: 6px;
+    padding: 12px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-canvas);
+  }
+
+  .execute-panel .panel-actions button {
+    min-height: 32px;
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   .field-block span {

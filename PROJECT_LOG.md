@@ -2747,6 +2747,24 @@ Caveats:
 
 - Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
 
+### 2026-07-03 12:44 +08:00
+
+Request: remove the left task panel scrollbar from the batch window.
+
+Changes:
+
+- Updated `src/routes/batch-progress/+page.svelte` so the left execution panel uses `overflow: hidden` instead of an internal scroll area.
+- Reduced task panel padding, gaps, output block padding, and output-control button height so the fixed-height layout fits without showing a left scrollbar.
+
+Verification:
+
+- `pnpm.cmd check` passed with existing project warnings only.
+- `pnpm.cmd build` passed with existing project warnings only.
+
+Caveats:
+
+- Existing untracked `.codex-ref/`, `AGENTS.md`, and `pnpm-workspace.yaml` remain intentionally untracked.
+
 ### 2026-07-03 09:48 +08:00
 
 Request: make the desktop app home page a toolbox, keep the library accessible, remove the white header/footer bars from the toolbox home view, and sync changes to GitHub after edits.
