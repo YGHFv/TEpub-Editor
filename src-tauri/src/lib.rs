@@ -2119,6 +2119,13 @@ fn case_mismatch_names<'a>(
     }
 }
 
+#[derive(Clone)]
+struct ToolboxManifestAddition {
+    id: String,
+    href: String,
+    media_type: String,
+}
+
 fn toolbox_file_category(item: &ToolboxManifestItem) -> &'static str {
     let media = item.media_type.to_ascii_lowercase();
     let href = item.href.to_ascii_lowercase();
@@ -2203,6 +2210,43 @@ fn write_epub_with_path_map(
     output_path: &Path,
     path_map: &HashMap<String, String>,
 ) -> Result<(), String> {
+    write_epub_with_path_map_and_manifest_additions(bytes, output_path, path_map, &HashMap::new())
+}
+
+fn inject_manifest_additions(text: String, additions: &[ToolboxManifestAddition]) -> String {
+    if additions.is_empty() {
+        return text;
+    }
+
+    let mut block = String::new();
+    for item in additions {
+        block.push_str(&format!(
+            "\n    <item id=\"{}\" href=\"{}\" media-type=\"{}\"/>",
+            escape_xml(&item.id),
+            escape_xml(&item.href),
+            escape_xml(&item.media_type)
+        ));
+    }
+
+    let Ok(re) = Regex::new(r"(?i)</manifest>") else {
+        return text;
+    };
+    if let Ok(Some(mat)) = re.find(&text) {
+        let insert_at = mat.start();
+        let mut out = text;
+        out.insert_str(insert_at, &block);
+        out
+    } else {
+        text
+    }
+}
+
+fn write_epub_with_path_map_and_manifest_additions(
+    bytes: &[u8],
+    output_path: &Path,
+    path_map: &HashMap<String, String>,
+    manifest_additions_by_opf: &HashMap<String, Vec<ToolboxManifestAddition>>,
+) -> Result<(), String> {
     let out_file =
         fs::File::create(output_path).map_err(|e| format!("创建输出 EPUB 失败: {}", e))?;
     let mut writer = zip::ZipWriter::new(out_file);
@@ -2248,7 +2292,11 @@ fn write_epub_with_path_map(
             data = text.into_bytes();
         } else if is_text_like_entry(&old_name) {
             let text = String::from_utf8_lossy(&data).to_string();
-            data = rewrite_text_links(text, &old_name, &new_name, path_map).into_bytes();
+            let mut text = rewrite_text_links(text, &old_name, &new_name, path_map);
+            if let Some(additions) = manifest_additions_by_opf.get(&new_name) {
+                text = inject_manifest_additions(text, additions);
+            }
+            data = text.into_bytes();
         }
 
         writer
@@ -2443,6 +2491,114 @@ fn toolbox_reformat_target_path(item: Option<&ToolboxManifestItem>, path: &str) 
     format!("OEBPS/{}/{}", folder, basename)
 }
 
+fn toolbox_manifest_media_type_for_path(path: &str) -> Option<&'static str> {
+    let lower = path.to_ascii_lowercase();
+    match Path::new(&lower).extension().and_then(|s| s.to_str()) {
+        Some("xhtml") => Some("application/xhtml+xml"),
+        Some("html") | Some("htm") => Some("text/html"),
+        Some("css") => Some("text/css"),
+        Some("svg") => Some("image/svg+xml"),
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("webp") => Some("image/webp"),
+        Some("gif") => Some("image/gif"),
+        Some("bmp") => Some("image/bmp"),
+        Some("ttf") => Some("font/ttf"),
+        Some("otf") => Some("font/otf"),
+        Some("woff") => Some("font/woff"),
+        Some("woff2") => Some("font/woff2"),
+        Some("ncx") => Some("application/x-dtbncx+xml"),
+        Some("js") => Some("text/javascript"),
+        Some("mp3") => Some("audio/mpeg"),
+        Some("m4a") => Some("audio/mp4"),
+        Some("aac") => Some("audio/aac"),
+        Some("ogg") | Some("opus") => Some("audio/ogg"),
+        Some("wav") => Some("audio/wav"),
+        Some("mp4") => Some("video/mp4"),
+        Some("webm") => Some("video/webm"),
+        _ => None,
+    }
+}
+
+fn unique_manifest_addition_id(path: &str, index: usize, used_ids: &mut HashSet<String>) -> String {
+    let stem = Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("resource");
+    let mut cleaned: String = stem
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    cleaned = cleaned.trim_matches(&['.', '_', '-'][..]).to_string();
+    if cleaned.is_empty() {
+        cleaned = "resource".to_string();
+    }
+    let mut candidate = format!("te-extra-{}", cleaned);
+    if !candidate
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        .unwrap_or(false)
+    {
+        candidate = format!("te-extra-{:03}", index + 1);
+    }
+    let base = candidate.clone();
+    let mut suffix = 2usize;
+    while used_ids.contains(&candidate) {
+        candidate = format!("{}-{}", base, suffix);
+        suffix += 1;
+    }
+    used_ids.insert(candidate.clone());
+    candidate
+}
+
+fn build_reformat_manifest_additions(
+    entry_names: &[String],
+    manifest_paths: &HashSet<String>,
+    manifest_ids: &HashSet<String>,
+    path_map: &HashMap<String, String>,
+    opf_new_path: &str,
+) -> Vec<ToolboxManifestAddition> {
+    let mut additions = Vec::new();
+    let mut used_ids = manifest_ids.clone();
+
+    for old_name in entry_names {
+        if old_name.ends_with('/')
+            || manifest_paths.contains(old_name)
+            || old_name.eq_ignore_ascii_case("mimetype")
+            || old_name.to_ascii_lowercase().starts_with("meta-inf/")
+            || old_name.to_ascii_lowercase().ends_with(".opf")
+        {
+            continue;
+        }
+        let Some(media_type) = toolbox_manifest_media_type_for_path(old_name) else {
+            continue;
+        };
+        let new_path = path_map
+            .get(old_name)
+            .cloned()
+            .unwrap_or_else(|| old_name.clone());
+        let href = zip_relative_path(opf_new_path, &new_path);
+        if href == "." {
+            continue;
+        }
+        let id = unique_manifest_addition_id(&new_path, additions.len(), &mut used_ids);
+        additions.push(ToolboxManifestAddition {
+            id,
+            href,
+            media_type: media_type.to_string(),
+        });
+    }
+
+    additions
+}
+
 fn toolbox_epub_reformat_impl(source: &Path) -> Result<ToolboxEpubToolResult, String> {
     if !source.exists() {
         return Err(format!("文件不存在: {}", source.to_string_lossy()));
@@ -2450,6 +2606,11 @@ fn toolbox_epub_reformat_impl(source: &Path) -> Result<ToolboxEpubToolResult, St
     let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
     let opf_path = find_opf_path_in_epub_bytes(&bytes)?;
     let manifest_items = parse_toolbox_manifest_items(&bytes, &opf_path)?;
+    let manifest_paths: HashSet<String> = manifest_items
+        .iter()
+        .map(|item| item.abs_path.clone())
+        .collect();
+    let manifest_ids: HashSet<String> = manifest_items.iter().map(|item| item.id.clone()).collect();
     let manifest_by_abs: HashMap<String, ToolboxManifestItem> = manifest_items
         .into_iter()
         .map(|item| (item.abs_path.clone(), item))
@@ -2459,6 +2620,7 @@ fn toolbox_epub_reformat_impl(source: &Path) -> Result<ToolboxEpubToolResult, St
         .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
     let mut used: HashSet<String> = HashSet::new();
     let mut path_map: HashMap<String, String> = HashMap::new();
+    let mut entry_names: Vec<String> = Vec::new();
     let mut changed = false;
 
     for i in 0..archive.len() {
@@ -2466,6 +2628,7 @@ fn toolbox_epub_reformat_impl(source: &Path) -> Result<ToolboxEpubToolResult, St
             .by_index(i)
             .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
         let old_name = file.name().replace('\\', "/");
+        entry_names.push(old_name.clone());
         let is_dir = old_name.ends_with('/');
         let mut target = if is_dir {
             old_name.clone()
@@ -2480,7 +2643,19 @@ fn toolbox_epub_reformat_impl(source: &Path) -> Result<ToolboxEpubToolResult, St
         path_map.insert(old_name, unique);
     }
 
-    if !changed {
+    let opf_new_path = path_map
+        .get(&opf_path)
+        .cloned()
+        .unwrap_or_else(|| opf_path.clone());
+    let additions = build_reformat_manifest_additions(
+        &entry_names,
+        &manifest_paths,
+        &manifest_ids,
+        &path_map,
+        &opf_new_path,
+    );
+
+    if !changed && additions.is_empty() {
         return Ok(toolbox_epub_tool_result(
             source,
             source,
@@ -2491,7 +2666,17 @@ fn toolbox_epub_reformat_impl(source: &Path) -> Result<ToolboxEpubToolResult, St
     }
 
     let output_path = build_processed_epub_path(source, "_reformat");
-    write_epub_with_path_map(&bytes, &output_path, &path_map)?;
+    let mut manifest_additions_by_opf: HashMap<String, Vec<ToolboxManifestAddition>> =
+        HashMap::new();
+    if !additions.is_empty() {
+        manifest_additions_by_opf.insert(opf_new_path, additions);
+    }
+    write_epub_with_path_map_and_manifest_additions(
+        &bytes,
+        &output_path,
+        &path_map,
+        &manifest_additions_by_opf,
+    )?;
     Ok(toolbox_epub_tool_result(
         source,
         &output_path,
@@ -11271,6 +11456,53 @@ mod toolbox_tests {
         Ok(())
     }
 
+    fn create_unregistered_resource_epub(epub_path: &Path) -> Result<(), String> {
+        let image_bytes = create_image_bytes()?;
+        let file = fs::File::create(epub_path).map_err(|e| e.to_string())?;
+        let mut writer = zip::ZipWriter::new(file);
+        write_zip_entry(&mut writer, "mimetype", b"application/epub+zip")?;
+        write_zip_entry(
+            &mut writer,
+            "META-INF/container.xml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/content.opf",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+  <manifest>
+    <item href="Text/chapter.xhtml" id="chapter" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Text/chapter.xhtml",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><link rel="stylesheet" href="../Extra/unlisted.css"/></head>
+  <body><img src="../Extra/pic.png"/></body>
+</html>"#,
+        )?;
+        write_zip_entry(
+            &mut writer,
+            "OPS/Extra/unlisted.css",
+            b"body { color: red; }",
+        )?;
+        write_zip_entry(&mut writer, "OPS/Extra/pic.png", &image_bytes)?;
+        writer.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     #[test]
     fn toolbox_epub_diagnose_reports_common_package_issues() -> Result<(), String> {
         let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -11290,6 +11522,53 @@ mod toolbox_tests {
         assert!(kinds.contains("missing-reference"), "{:?}", kinds);
         assert!(kinds.contains("case-mismatch"), "{:?}", kinds);
         assert!(kinds.contains("unregistered-resource"), "{:?}", kinds);
+        Ok(())
+    }
+
+    #[test]
+    fn toolbox_epub_reformat_adds_unregistered_resources_to_manifest() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let source = temp.path().join("unregistered.epub");
+        create_unregistered_resource_epub(&source)?;
+
+        let reformatted = toolbox_epub_reformat_impl(&source)?;
+        assert!(reformatted.changed);
+        let reformatted_path = PathBuf::from(&reformatted.output_path);
+        let names = epub_names(&reformatted_path)?;
+        assert!(
+            names.iter().any(|name| name == "OEBPS/Styles/unlisted.css"),
+            "{:?}",
+            names
+        );
+        assert!(
+            names.iter().any(|name| name == "OEBPS/Images/pic.png"),
+            "{:?}",
+            names
+        );
+
+        let opf = read_epub_entry(&reformatted_path, "OEBPS/content.opf")?;
+        assert!(
+            opf.contains(r#"href="Styles/unlisted.css" media-type="text/css""#),
+            "{}",
+            opf
+        );
+        assert!(
+            opf.contains(r#"href="Images/pic.png" media-type="image/png""#),
+            "{}",
+            opf
+        );
+
+        let chapter = read_epub_entry(&reformatted_path, "OEBPS/Text/chapter.xhtml")?;
+        assert!(
+            chapter.contains(r#"href="../Styles/unlisted.css""#),
+            "{}",
+            chapter
+        );
+        assert!(
+            chapter.contains(r#"src="../Images/pic.png""#),
+            "{}",
+            chapter
+        );
         Ok(())
     }
 

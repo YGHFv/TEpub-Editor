@@ -2596,6 +2596,33 @@ Caveats:
 - `pnpm build` still reports the existing Svelte accessibility/unused CSS and large chunk warnings in unrelated files.
 - This first diagnostic UI is a concise dialog; a richer dedicated diagnostic window can build on the same structured backend result.
 
+### 2026-07-03 15:45 +08:00
+
+Request: continue the staged EPUB optimization work, using the `epub_tool` restructure behavior as reference.
+
+Changes:
+
+- Improved toolbox EPUB reformat output so unregistered but valid EPUB resources can be added back into the OPF manifest.
+- Added manifest injection support to the shared EPUB path-map writer, while keeping existing encrypt/decrypt/image conversion callers on the unchanged no-addition path.
+- During reformat, the backend now:
+  - collects original manifest paths and IDs,
+  - keeps moving resources through the existing path map,
+  - detects common unregistered resources such as XHTML/CSS/images/fonts/audio/video/NCX,
+  - generates unique `te-extra-*` manifest IDs,
+  - writes new OPF `href` values relative to the rewritten OPF path,
+  - only returns "no reformat needed" when neither paths nor manifest additions changed.
+- Added a Rust regression test for EPUBs whose chapters reference CSS/images missing from OPF manifest.
+
+Verification:
+
+- `cargo fmt` passed.
+- `cargo test` passed: 12 tests.
+- `cargo check` passed.
+
+Caveats:
+
+- This batch does not yet rebuild spine/guide/nav entries for newly discovered XHTML files; it only manifests valid unregistered resources so linked assets are no longer left outside OPF.
+
 ### 2026-07-03 14:15 +08:00
 
 Request: continue the optimization plan step by step, sync GitHub after each completed part, and make long batch EPUB decrypt/rebuild tasks visibly progress instead of looking stuck.
