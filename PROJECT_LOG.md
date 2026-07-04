@@ -2631,6 +2631,31 @@ Caveats:
 - The `EPUB_CACHE` mutex still uses `std::sync::Mutex`; switching to `parking_lot::Mutex` was deferred to avoid adding a dependency in this pass, but the `lock_epub_cache()` helper already neutralizes the poisoning cascade.
 - The remaining `unwrap()` calls outside EPUB_CACHE (regex compilation, path stems) are in startup-only or guarded paths and were left for a later cleanup pass.
 
+### 2026-07-04 16:05 +08:00
+
+Request: EPUB editor page takes a long time to open; defer HTML title and image resolution extraction so the file tree renders first and metadata loads in the background.
+
+Changes:
+
+- Split `extract_epub` in `src-tauri/src/lib.rs` into a thin `#[tauri::command]` wrapper that calls `extract_epub_impl` inside `tauri::async_runtime::spawn_blocking`, so the unzip + directory walk no longer runs on the async IPC thread pool.
+- Removed the synchronous `fs::read_to_string` (HTML title via `extract_html_heading_title`) and `image::image_dimensions` calls from the file-tree walk; the tree now returns immediately with `title`/`resolution` set to `None`.
+- Added a new `load_epub_file_meta` Tauri command that takes a list of file paths and returns `EpubFileMeta { path, title, resolution }` by reading only the requested HTML/image files; it runs on `spawn_blocking` and is registered in `invoke_handler`.
+- Updated `src/routes/epub-editor/+page.svelte`:
+  - added `EpubFileMeta` interface and `loadFileMetaInBackground()` helper that flattens the tree, asks the backend for HTML/image metadata, and writes results back via an immutable `applyMeta` recursive update so Svelte reactivity triggers,
+  - the file tree renders as soon as `extract_epub` returns, then `loadFileMetaInBackground` runs without blocking the first paint or the subsequent CSS pre-cache/preview selection,
+- Applied the same lazy-load pattern to `src/routes/mobile/edit/+page.svelte` (both the initial `loadEpub` call and `reloadTree` after file operations).
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `cargo check` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `load_epub_file_meta` still reads every HTML/image file in a single batch on first open; for very large EPUBs the background pass itself can take a moment, but it no longer blocks the file tree from rendering.
+- Metadata is re-fetched after every `reloadTree` on mobile, which is acceptable because the tree was already being rebuilt there.
+
 ### 2026-07-03 15:15 +08:00
 
 Request: continue the staged optimization plan and add the next EPUB tooling improvement.

@@ -129,6 +129,47 @@
         children?: EpubFileNode[];
     }
 
+    interface EpubFileMeta {
+        path: string;
+        title?: string;
+        resolution?: string;
+    }
+
+    // 后台按需补全文件 title / resolution，不阻塞文件树首屏渲染
+    async function loadFileMetaInBackground(epubPath: string, nodes: EpubFileNode[]) {
+        const flat = flattenFiles(nodes);
+        const needMeta = flat.filter(
+            (n) =>
+                n.file_type === "html" || n.file_type === "image",
+        );
+        if (needMeta.length === 0) return;
+        try {
+            const metas = await invoke<EpubFileMeta[]>("load_epub_file_meta", {
+                epubPath,
+                filePaths: needMeta.map((n) => n.path),
+            });
+            const metaMap = new Map<string, EpubFileMeta>();
+            for (const m of metas) metaMap.set(m.path, m);
+            // 把补全到的 title/resolution 回写到 fileTree（浅拷贝触发响应式更新）
+            fileTree = fileTree.map((node) => applyMeta(node, metaMap));
+        } catch (e) {
+            console.warn("文件元信息补全失败:", e);
+        }
+    }
+
+    function applyMeta(node: EpubFileNode, metaMap: Map<string, EpubFileMeta>): EpubFileNode {
+        const meta = metaMap.get(node.path);
+        const updated = { ...node };
+        if (meta) {
+            if (meta.title) updated.title = meta.title;
+            if (meta.resolution) updated.resolution = meta.resolution;
+        }
+        if (node.children) {
+            updated.children = node.children.map((c) => applyMeta(c, metaMap));
+        }
+        return updated;
+    }
+
     // Validation Error Interface
     interface ValidationError {
         type: "tag" | "img";
@@ -944,6 +985,9 @@
             expandedFolders = expandedFolders;
 
             isLoading = false;
+
+            // 后台补全 HTML 标题与图片分辨率，不阻塞首屏
+            loadFileMetaInBackground(epubPath, fileTree);
 
             precacheCssAssets(fileTree).then(() => {
                 console.log("CSS pre-caching completed");

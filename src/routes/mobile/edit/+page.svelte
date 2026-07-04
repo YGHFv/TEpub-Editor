@@ -16,6 +16,41 @@
         children?: EpubFileNode[];
     }
 
+    interface EpubFileMeta {
+        path: string;
+        title?: string;
+        resolution?: string;
+    }
+
+    async function loadFileMetaInBackground(epubPath: string) {
+        const needMeta = flatFiles.filter(
+            (n) => n.file_type === "html" || n.file_type === "image",
+        );
+        if (needMeta.length === 0) return;
+        try {
+            const metas = await invoke<EpubFileMeta[]>("load_epub_file_meta", {
+                epubPath,
+                filePaths: needMeta.map((n) => n.path),
+            });
+            const metaMap = new Map<string, EpubFileMeta>();
+            for (const m of metas) metaMap.set(m.path, m);
+            const apply = (node: EpubFileNode): EpubFileNode => {
+                const meta = metaMap.get(node.path);
+                const updated = { ...node };
+                if (meta) {
+                    if (meta.title) updated.title = meta.title;
+                    if (meta.resolution) updated.resolution = meta.resolution;
+                }
+                if (node.children) updated.children = node.children.map(apply);
+                return updated;
+            };
+            fileTree = fileTree.map(apply);
+            refreshFlatFiles(fileTree);
+        } catch (e) {
+            console.warn("文件元信息补全失败:", e);
+        }
+    }
+
     interface MobileEpubMetadata {
         title: string;
         author: string;
@@ -137,6 +172,8 @@
             fileTree = await invoke<EpubFileNode[]>("extract_epub", { epubPath });
             refreshFlatFiles(fileTree);
             status = `已解包 ${flatFiles.length} 个文件。`;
+            // 后台补全 HTML 标题与图片分辨率，不阻塞首屏
+            loadFileMetaInBackground(epubPath);
         } catch (err) {
             status = "EPUB 解包失败";
             await message(`EPUB 解包失败：${err}`, { title: "编辑 EPUB", kind: "error" });
@@ -360,6 +397,7 @@
         if (focusGroup) preserve.add(focusGroup);
         fileTree = await invoke<EpubFileNode[]>("extract_epub", { epubPath: selectedPath });
         refreshFlatFiles(fileTree, preserve);
+        loadFileMetaInBackground(selectedPath);
     }
 
     function hasFileLayerState(state?: unknown) {

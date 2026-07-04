@@ -6975,6 +6975,17 @@ async fn extract_epub(
     app: tauri::AppHandle,
     epub_path: String,
 ) -> Result<Vec<EpubFileNode>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        extract_epub_impl(app, epub_path)
+    })
+    .await
+    .map_err(|e| format!("解压 EPUB 任务失败: {}", e))?
+}
+
+fn extract_epub_impl(
+    app: tauri::AppHandle,
+    epub_path: String,
+) -> Result<Vec<EpubFileNode>, String> {
     // 1. 检查是否已经有缓存且临时内容未关闭
     let existing_temp_path = {
         let cache_guard = lock_epub_cache()?;
@@ -7082,21 +7093,13 @@ async fn extract_epub(
         }
         .to_string();
 
-        // 提取标题 (如果是 HTML)
-        let mut title = None;
+        // 提取标题 (如果是 HTML) - 延迟到 load_epub_file_meta 按需补全
+        let title = None;
         let mut resolution = None;
 
-        if file_type == "html" {
-            if let Ok(content) = fs::read_to_string(full_path) {
-                title = extract_html_heading_title(&content);
-            }
-        }
-
         if file_type == "image" {
-            // 尝试获取图片分辨率
-            if let Ok((width, height)) = image::image_dimensions(full_path) {
-                resolution = Some(format!("{}x{}", width, height));
-            }
+            // 仅从文件大小预估，不读取图片头（image_dimensions 会全量解码图片头，大图很慢）
+            resolution = None;
         }
 
         all_files.push((path_str, file_name, file_type, size, title, resolution));
@@ -7221,6 +7224,77 @@ async fn extract_epub(
     }
 
     Ok(build_tree(&all_files))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EpubFileMeta {
+    path: String,
+    title: Option<String>,
+    resolution: Option<String>,
+}
+
+#[tauri::command]
+async fn load_epub_file_meta(
+    epub_path: String,
+    file_paths: Vec<String>,
+) -> Result<Vec<EpubFileMeta>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let temp_path: PathBuf = {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        .ok_or("EPUB 未加载或缓存失效".to_string())?;
+
+        let mut results = Vec::with_capacity(file_paths.len());
+        for rel_path in file_paths {
+            let full_path = temp_path.join(&rel_path);
+            let lower = rel_path.to_ascii_lowercase();
+            let mut title = None;
+            let mut resolution = None;
+
+            if lower.ends_with(".html")
+                || lower.ends_with(".htm")
+                || lower.ends_with(".xhtml")
+            {
+                if let Ok(content) = fs::read_to_string(&full_path) {
+                    title = extract_html_heading_title(&content);
+                }
+            } else if lower.ends_with(".jpg")
+                || lower.ends_with(".jpeg")
+                || lower.ends_with(".png")
+                || lower.ends_with(".gif")
+                || lower.ends_with(".webp")
+                || lower.ends_with(".bmp")
+                || lower.ends_with(".svg")
+            {
+                if let Ok((width, height)) = image::image_dimensions(&full_path) {
+                    resolution = Some(format!("{}x{}", width, height));
+                }
+            }
+
+            results.push(EpubFileMeta {
+                path: rel_path,
+                title,
+                resolution,
+            });
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(|e| format!("加载文件元信息失败: {}", e))?
 }
 
 #[tauri::command]
@@ -12038,6 +12112,7 @@ pub fn run() {
             advanced_replace,
             export_epub,
             extract_epub,
+            load_epub_file_meta,
             read_epub_file_content,
             read_epub_file_binary,
             get_epub_temp_dir_path,
