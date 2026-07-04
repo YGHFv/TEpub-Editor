@@ -50,6 +50,18 @@ static DIAGNOSTIC_CSS_URL_REF_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?is)url\(\s*(['"]?)(.*?)\1\s*\)"#).expect("valid diagnostic css url regex")
 });
 
+/// 安全获取 EPUB_CACHE 锁，避免 Mutex 中毒后连锁 panic。
+fn lock_epub_cache() -> Result<std::sync::MutexGuard<'static, Option<EpubCache>>, String> {
+    EPUB_CACHE
+        .lock()
+        .map_err(|_| "EPUB 缓存已被中毒，无法访问".to_string())
+}
+
+/// 读取 EPUB 文件字节，统一错误消息。
+fn read_epub_bytes(source: &Path) -> Result<Vec<u8>, String> {
+    fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))
+}
+
 fn hidden_process_command(program: &str) -> process::Command {
     let mut command = process::Command::new(program);
     #[cfg(windows)]
@@ -2350,7 +2362,7 @@ fn toolbox_file_encrypt_impl(source: &Path) -> Result<ToolboxEpubToolResult, Str
     if !source.exists() {
         return Err(format!("文件不存在: {}", source.to_string_lossy()));
     }
-    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let bytes = read_epub_bytes(source)?;
     let opf_path = find_opf_path_in_epub_bytes(&bytes)?;
     let manifest_items = parse_toolbox_manifest_items(&bytes, &opf_path)?;
     if manifest_items.is_empty() {
@@ -2443,7 +2455,7 @@ where
         return Err(format!("文件不存在: {}", source.to_string_lossy()));
     }
     progress("读取 EPUB 文件");
-    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let bytes = read_epub_bytes(source)?;
     let processed = rebuild_epub_with_sanitized_names_from_bytes_with_progress(
         source, &bytes, "_decrypt", progress,
     )?;
@@ -2636,7 +2648,7 @@ fn toolbox_epub_reformat_impl(source: &Path) -> Result<ToolboxEpubToolResult, St
     if !source.exists() {
         return Err(format!("文件不存在: {}", source.to_string_lossy()));
     }
-    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let bytes = read_epub_bytes(source)?;
     let opf_path = find_opf_path_in_epub_bytes(&bytes)?;
     let manifest_items = parse_toolbox_manifest_items(&bytes, &opf_path)?;
     let manifest_paths: HashSet<String> = manifest_items
@@ -2921,7 +2933,7 @@ fn toolbox_image_convert_impl(
     if !source.exists() {
         return Err(format!("文件不存在: {}", source.to_string_lossy()));
     }
-    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let bytes = read_epub_bytes(source)?;
     let opf_path = find_opf_path_in_epub_bytes(&bytes).unwrap_or_default();
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone()))
         .map_err(|e| format!("读取 EPUB 失败: {}", e))?;
@@ -5438,7 +5450,7 @@ fn prepare_epub_for_open(
     // Case 1: valid ZIP/EPUB, only repair pseudo-encryption bit if needed.
     if is_zip_archive_path(&source) {
         emit_epub_prepare_stage(&app, &source, "读取 EPUB 文件");
-        let mut bytes = fs::read(&source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+        let mut bytes = read_epub_bytes(&source)?;
         emit_epub_prepare_stage(&app, &source, "检查伪加密标记");
         let fixed_encryption_flag = clear_zip_encryption_flags(&mut bytes);
 
@@ -5489,7 +5501,7 @@ fn prepare_epub_for_open(
 
     // Case 2: try simple XOR obfuscation recovery.
     emit_epub_prepare_stage(&app, &source, "检测非标准混淆格式");
-    let bytes = fs::read(&source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let bytes = read_epub_bytes(&source)?;
     let mut candidate_keys: Vec<u8> = vec![0xFF, 0xA5, 0x5A];
     if bytes.len() >= 4 {
         let k0 = bytes[0] ^ 0x50;
@@ -5555,7 +5567,7 @@ fn prepare_epub_for_open(
 //   Ok(Some)  ：(临时清洗文件 path, 动作描述)
 //   Err       ：检测到非 ZIP 且无法用通用密钥解混淆
 fn try_prepare_epub_for_ingest(source: &Path) -> Result<Option<(PathBuf, String)>, String> {
-    let bytes = fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?;
+    let bytes = read_epub_bytes(source)?;
 
     // 在系统临时目录构造一个"虚拟 source"，使 build_processed_epub_path /
     // rebuild_epub_with_sanitized_names_from_bytes 把输出落在临时目录而非源目录。
@@ -6965,7 +6977,7 @@ async fn extract_epub(
 ) -> Result<Vec<EpubFileNode>, String> {
     // 1. 检查是否已经有缓存且临时内容未关闭
     let existing_temp_path = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
+        let cache_guard = lock_epub_cache()?;
         if let Some(ref cache) = *cache_guard {
             if cache.epub_path == epub_path {
                 if let Some(ref temp) = cache.temp_dir {
@@ -7202,7 +7214,7 @@ async fn extract_epub(
 
     // 初始化全局缓存 (仅在新建时)
     if _temp_dir_keep.is_some() {
-        let mut cache_guard = EPUB_CACHE.lock().unwrap();
+        let mut cache_guard = lock_epub_cache()?;
         let mut cache = EpubCache::new(epub_path);
         cache.temp_dir = _temp_dir_keep;
         *cache_guard = Some(cache);
@@ -7213,7 +7225,7 @@ async fn extract_epub(
 
 #[tauri::command]
 async fn get_epub_temp_dir_path(epub_path: String) -> Result<String, String> {
-    let cache_guard = EPUB_CACHE.lock().unwrap();
+    let cache_guard = lock_epub_cache()?;
     if let Some(ref cache) = *cache_guard {
         if cache.epub_path == epub_path {
             if let Some(ref temp) = cache.temp_dir {
@@ -7226,54 +7238,62 @@ async fn get_epub_temp_dir_path(epub_path: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn read_epub_file_content(epub_path: String, file_path: String) -> Result<String, String> {
-    // 1. 获取临时目录路径
-    let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. 获取临时目录路径
+        let temp_path: PathBuf = {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
-    }
-    .ok_or("EPUB 未加载或缓存失效".to_string())?;
+        .ok_or("EPUB 未加载或缓存失效".to_string())?;
 
-    // 2. 从临时文件读取
-    let target_path = temp_path.join(&file_path);
-    std::fs::read_to_string(target_path).map_err(|e| format!("读取文件失败: {}", e))
+        // 2. 从临时文件读取
+        let target_path = temp_path.join(&file_path);
+        std::fs::read_to_string(target_path).map_err(|e| format!("读取文件失败: {}", e))
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 #[tauri::command]
 async fn read_epub_file_binary(epub_path: String, file_path: String) -> Result<Vec<u8>, String> {
-    // 1. 获取临时目录路径
-    let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. 获取临时目录路径
+        let temp_path: PathBuf = {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
-    }
-    .ok_or("EPUB 未加载或缓存失效".to_string())?;
+        .ok_or("EPUB 未加载或缓存失效".to_string())?;
 
-    // 2. 从临时文件读取
-    let target_path = temp_path.join(&file_path);
-    std::fs::read(target_path).map_err(|e| format!("读取文件失败: {}", e))
+        // 2. 从临时文件读取
+        let target_path = temp_path.join(&file_path);
+        std::fs::read(target_path).map_err(|e| format!("读取文件失败: {}", e))
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 // --- 批量读取 API ---
@@ -7283,63 +7303,67 @@ async fn read_epub_files_batch(
     epub_path: String,
     file_paths: Vec<String>,
 ) -> Result<HashMap<String, String>, String> {
-    use std::io::Read;
-    use zip::ZipArchive;
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+        use zip::ZipArchive;
 
-    let mut results: HashMap<String, String> = HashMap::new();
-    let mut to_read: Vec<String> = Vec::new();
+        let mut results: HashMap<String, String> = HashMap::new();
+        let mut to_read: Vec<String> = Vec::new();
 
-    // 1. 检查缓存，收集需要读取的文件
-    {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                for path in &file_paths {
-                    if let Some(content) = cache.text_cache.get(path) {
-                        results.insert(path.clone(), content.clone());
-                    } else {
-                        to_read.push(path.clone());
+        // 1. 检查缓存，收集需要读取的文件
+        {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    for path in &file_paths {
+                        if let Some(content) = cache.text_cache.get(path) {
+                            results.insert(path.clone(), content.clone());
+                        } else {
+                            to_read.push(path.clone());
+                        }
                     }
+                } else {
+                    to_read = file_paths.clone();
                 }
             } else {
                 to_read = file_paths.clone();
             }
-        } else {
-            to_read = file_paths.clone();
         }
-    }
 
-    // 2. 批量读取未缓存的文件
-    if !to_read.is_empty() {
-        let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
-        let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+        // 2. 批量读取未缓存的文件
+        if !to_read.is_empty() {
+            let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+            let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
 
-        let mut new_contents: Vec<(String, String)> = Vec::new();
+            let mut new_contents: Vec<(String, String)> = Vec::new();
 
-        for path in to_read {
-            if let Ok(mut zip_file) = archive.by_name(&path) {
-                let mut content = String::new();
-                if zip_file.read_to_string(&mut content).is_ok() {
-                    results.insert(path.clone(), content.clone());
-                    new_contents.push((path, content));
+            for path in to_read {
+                if let Ok(mut zip_file) = archive.by_name(&path) {
+                    let mut content = String::new();
+                    if zip_file.read_to_string(&mut content).is_ok() {
+                        results.insert(path.clone(), content.clone());
+                        new_contents.push((path, content));
+                    }
                 }
             }
-        }
 
-        // 3. 存入缓存
-        {
-            let mut cache_guard = EPUB_CACHE.lock().unwrap();
-            if let Some(ref mut cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    for (path, content) in new_contents {
-                        cache.text_cache.insert(path, content);
+            // 3. 存入缓存
+            {
+                let mut cache_guard = lock_epub_cache()?;
+                if let Some(ref mut cache) = *cache_guard {
+                    if cache.epub_path == epub_path {
+                        for (path, content) in new_contents {
+                            cache.text_cache.insert(path, content);
+                        }
                     }
                 }
             }
         }
-    }
 
-    Ok(results)
+        Ok(results)
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -7347,63 +7371,67 @@ async fn read_epub_binary_batch(
     epub_path: String,
     file_paths: Vec<String>,
 ) -> Result<HashMap<String, Vec<u8>>, String> {
-    use std::io::Read;
-    use zip::ZipArchive;
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+        use zip::ZipArchive;
 
-    let mut results: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut to_read: Vec<String> = Vec::new();
+        let mut results: HashMap<String, Vec<u8>> = HashMap::new();
+        let mut to_read: Vec<String> = Vec::new();
 
-    // 1. 检查缓存
-    {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                for path in &file_paths {
-                    if let Some(data) = cache.binary_cache.get(path) {
-                        results.insert(path.clone(), data.clone());
-                    } else {
-                        to_read.push(path.clone());
+        // 1. 检查缓存
+        {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    for path in &file_paths {
+                        if let Some(data) = cache.binary_cache.get(path) {
+                            results.insert(path.clone(), data.clone());
+                        } else {
+                            to_read.push(path.clone());
+                        }
                     }
+                } else {
+                    to_read = file_paths.clone();
                 }
             } else {
                 to_read = file_paths.clone();
             }
-        } else {
-            to_read = file_paths.clone();
         }
-    }
 
-    // 2. 批量读取
-    if !to_read.is_empty() {
-        let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
-        let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+        // 2. 批量读取
+        if !to_read.is_empty() {
+            let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+            let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
 
-        let mut new_data: Vec<(String, Vec<u8>)> = Vec::new();
+            let mut new_data: Vec<(String, Vec<u8>)> = Vec::new();
 
-        for path in to_read {
-            if let Ok(mut zip_file) = archive.by_name(&path) {
-                let mut buffer = Vec::new();
-                if zip_file.read_to_end(&mut buffer).is_ok() {
-                    results.insert(path.clone(), buffer.clone());
-                    new_data.push((path, buffer));
+            for path in to_read {
+                if let Ok(mut zip_file) = archive.by_name(&path) {
+                    let mut buffer = Vec::new();
+                    if zip_file.read_to_end(&mut buffer).is_ok() {
+                        results.insert(path.clone(), buffer.clone());
+                        new_data.push((path, buffer));
+                    }
                 }
             }
-        }
 
-        // 3. 存入缓存
-        {
-            let mut cache_guard = EPUB_CACHE.lock().unwrap();
-            if let Some(ref mut cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    for (path, data) in new_data {
-                        cache.binary_cache.insert(path, data);
+            // 3. 存入缓存
+            {
+                let mut cache_guard = lock_epub_cache()?;
+                if let Some(ref mut cache) = *cache_guard {
+                    if cache.epub_path == epub_path {
+                        for (path, data) in new_data {
+                            cache.binary_cache.insert(path, data);
+                        }
                     }
                 }
             }
         }
-    }
 
-    Ok(results)
+        Ok(results)
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 // --- EPUB 文件保存命令 ---
@@ -7414,40 +7442,44 @@ async fn save_epub_file_content(
     file_path: String,
     content: String,
 ) -> Result<(), String> {
-    // 1. 获取临时目录路径
-    let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. 获取临时目录路径
+        let temp_path: PathBuf = {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
-    }
-    .ok_or_else(|| "EPUB 未加载或缓存失效".to_string())?;
+        .ok_or_else(|| "EPUB 未加载或缓存失效".to_string())?;
 
-    // 2. 写入临时文件
-    let target_path = temp_path.join(&file_path);
-    std::fs::write(target_path, &content).map_err(|e| format!("写入文件失败: {}", e))?;
+        // 2. 写入临时文件
+        let target_path = temp_path.join(&file_path);
+        std::fs::write(target_path, &content).map_err(|e| format!("写入文件失败: {}", e))?;
 
-    // 3. 更新缓存 (Text Cache)
-    {
-        let mut cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref mut cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                cache.text_cache.insert(file_path, content);
+        // 3. 更新缓存 (Text Cache)
+        {
+            let mut cache_guard = lock_epub_cache()?;
+            if let Some(ref mut cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    cache.text_cache.insert(file_path, content);
+                }
             }
         }
-    }
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -7456,43 +7488,47 @@ async fn save_epub_file_binary(
     file_path: String,
     content: Vec<u8>,
 ) -> Result<(), String> {
-    // 1. 获取临时目录路径
-    let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. 获取临时目录路径
+        let temp_path: PathBuf = {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
-    }
-    .ok_or_else(|| "EPUB 未加载或缓存失效".to_string())?;
+        .ok_or_else(|| "EPUB 未加载或缓存失效".to_string())?;
 
-    // 2. 写入二进制文件
-    let target_path = temp_path.join(&file_path);
-    if let Some(parent) = target_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("无法创建目录: {}", e))?;
-    }
-    std::fs::write(target_path, content).map_err(|e| format!("写入文件失败: {}", e))?;
+        // 2. 写入二进制文件
+        let target_path = temp_path.join(&file_path);
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("无法创建目录: {}", e))?;
+        }
+        std::fs::write(target_path, content).map_err(|e| format!("写入文件失败: {}", e))?;
 
-    // 3. 更新二进制缓存 (Binary Cache)
-    {
-        let mut cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref mut cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                cache.binary_cache.insert(file_path, Default::default());
+        // 3. 更新二进制缓存 (Binary Cache)
+        {
+            let mut cache_guard = lock_epub_cache()?;
+            if let Some(ref mut cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    cache.binary_cache.insert(file_path, Default::default());
+                }
             }
         }
-    }
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -7500,53 +7536,57 @@ async fn save_epub_files_batch(
     epub_path: String,
     files: HashMap<String, Vec<u8>>,
 ) -> Result<(), String> {
-    // 1. Get Temp Path
-    let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. Get Temp Path
+        let temp_path: PathBuf = {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
-    }
-    .ok_or_else(|| "EPUB 未加载或缓存失效".to_string())?;
+        .ok_or_else(|| "EPUB 未加载或缓存失效".to_string())?;
 
-    // 2. Iterate and Write
-    for (file_path, content) in files {
-        let target_path = temp_path.join(&file_path);
-        if let Some(parent) = target_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("无法创建目录: {}", e))?;
-        }
-        std::fs::write(target_path, &content)
-            .map_err(|e| format!("写入文件失败 {}: {}", file_path, e))?;
+        // 2. Iterate and Write
+        for (file_path, content) in files {
+            let target_path = temp_path.join(&file_path);
+            if let Some(parent) = target_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("无法创建目录: {}", e))?;
+            }
+            std::fs::write(target_path, &content)
+                .map_err(|e| format!("写入文件失败 {}: {}", file_path, e))?;
 
-        // Update Cache (Binary or Text doesn't matter for storage, but for cache structure)
-        // Since we don't know if it's text, we might clear both entries or just skip cache update for now?
-        // Actually, we should probably update cache if it exists.
-        // For simplicity and speed in batch mode, let's just invalidate the specific cache entries if they exist.
-        {
-            let mut cache_guard = EPUB_CACHE.lock().unwrap();
-            if let Some(ref mut cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    // If it was text, update with valid utf8?
-                    // Risk of decoding binary as text.
-                    // Safer to remove from text_cache and let it re-read from disk on next access.
-                    cache.text_cache.remove(&file_path);
-                    cache.binary_cache.remove(&file_path);
+            // Update Cache (Binary or Text doesn't matter for storage, but for cache structure)
+            // Since we don't know if it's text, we might clear both entries or just skip cache update for now?
+            // Actually, we should probably update cache if it exists.
+            // For simplicity and speed in batch mode, let's just invalidate the specific cache entries if they exist.
+            {
+                let mut cache_guard = lock_epub_cache()?;
+                if let Some(ref mut cache) = *cache_guard {
+                    if cache.epub_path == epub_path {
+                        // If it was text, update with valid utf8?
+                        // Risk of decoding binary as text.
+                        // Safer to remove from text_cache and let it re-read from disk on next access.
+                        cache.text_cache.remove(&file_path);
+                        cache.binary_cache.remove(&file_path);
+                    }
                 }
             }
         }
-    }
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -7555,7 +7595,7 @@ async fn save_epub_to_disk(epub_path: String) -> Result<(), String> {
         use zip::write::FileOptions;
 
         let temp_path: PathBuf = {
-            let cache_guard = EPUB_CACHE.lock().unwrap();
+            let cache_guard = lock_epub_cache()?;
             if let Some(ref cache) = *cache_guard {
                 if cache.epub_path == epub_path {
                     if let Some(ref temp) = cache.temp_dir {
@@ -7651,50 +7691,54 @@ async fn search_in_files(
     pattern: String,
     is_regex: bool,
 ) -> Result<usize, String> {
-    // 1. 获取临时目录
-    let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. 获取临时目录
+        let temp_path: PathBuf = {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
+        }
+        .ok_or("EPUB 未加载或缓存失效".to_string())?;
+
+        if files.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0;
+
+        // Pre-compile regex
+        let re = if is_regex {
+            Some(Regex::new(&pattern).map_err(|e| format!("正则表达式错误: {}", e))?)
         } else {
             None
-        }
-    }
-    .ok_or("EPUB 未加载或缓存失效".to_string())?;
+        };
 
-    if files.is_empty() {
-        return Ok(0);
-    }
-
-    let mut count = 0;
-
-    // Pre-compile regex
-    let re = if is_regex {
-        Some(Regex::new(&pattern).map_err(|e| format!("正则表达式错误: {}", e))?)
-    } else {
-        None
-    };
-
-    for path in files {
-        let target_path = temp_path.join(path);
-        if let Ok(content) = fs::read_to_string(target_path) {
-            if let Some(ref regex) = re {
-                count += regex.find_iter(&content).count();
-            } else {
-                count += content.matches(&pattern).count();
+        for path in files {
+            let target_path = temp_path.join(path);
+            if let Ok(content) = fs::read_to_string(target_path) {
+                if let Some(ref regex) = re {
+                    count += regex.find_iter(&content).count();
+                } else {
+                    count += content.matches(&pattern).count();
+                }
             }
         }
-    }
 
-    Ok(count)
+        Ok(count)
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 #[tauri::command]
@@ -7712,41 +7756,45 @@ async fn add_epub_file_binary(
     file_path: String,
     content: Vec<u8>,
 ) -> Result<(), String> {
-    // 1. 获取临时目录
-    let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. 获取临时目录
+        let temp_path: PathBuf = {
+            let cache_guard = lock_epub_cache()?;
+            if let Some(ref cache) = *cache_guard {
+                if cache.epub_path == epub_path {
+                    if let Some(ref temp) = cache.temp_dir {
+                        Some(temp.path().to_path_buf())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             }
-        } else {
-            None
         }
-    }
-    .ok_or("EPUB 未加载或缓存失效".to_string())?;
+        .ok_or("EPUB 未加载或缓存失效".to_string())?;
 
-    // 2. 写入文件
-    let target_path = temp_path.join(&file_path);
-    // 确保父目录存在
-    if let Some(parent) = target_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
-    }
-    std::fs::write(target_path, content).map_err(|e| format!("写入文件失败: {}", e))?;
+        // 2. 写入文件
+        let target_path = temp_path.join(&file_path);
+        // 确保父目录存在
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+        }
+        std::fs::write(target_path, content).map_err(|e| format!("写入文件失败: {}", e))?;
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
 }
 
 #[tauri::command]
 async fn delete_epub_file(epub_path: String, file_path: String) -> Result<(), String> {
     // 1. 获取临时目录
     let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
+        let cache_guard = lock_epub_cache()?;
         if let Some(ref cache) = *cache_guard {
             if cache.epub_path == epub_path {
                 if let Some(ref temp) = cache.temp_dir {
@@ -7784,7 +7832,7 @@ async fn rename_epub_file(
 ) -> Result<(), String> {
     // 1. 获取临时目录
     let temp_path: PathBuf = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
+        let cache_guard = lock_epub_cache()?;
         if let Some(ref cache) = *cache_guard {
             if cache.epub_path == epub_path {
                 if let Some(ref temp) = cache.temp_dir {
@@ -8080,7 +8128,7 @@ fn font_has_glyph(font_data: &[u8], codepoint: u32) -> Result<bool, String> {
 
 fn read_epub_binary_cached(epub_path: &str, file_path: &str) -> Result<Vec<u8>, String> {
     {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
+        let cache_guard = lock_epub_cache()?;
         if let Some(cache) = cache_guard.as_ref() {
             if cache.epub_path == epub_path {
                 if let Some(data) = cache.binary_cache.get(file_path) {
@@ -8102,7 +8150,7 @@ fn read_epub_binary_cached(epub_path: &str, file_path: &str) -> Result<Vec<u8>, 
         .map_err(|e| format!("读取字体文件失败: {}", e))?;
 
     {
-        let mut cache_guard = EPUB_CACHE.lock().unwrap();
+        let mut cache_guard = lock_epub_cache()?;
         if let Some(cache) = cache_guard.as_mut() {
             if cache.epub_path == epub_path {
                 cache
@@ -9967,7 +10015,7 @@ fn parse_epub_metadata_from_parts(
 
 fn parse_epub_metadata_live(epub_path: &Path) -> Result<EpubParsedMeta, String> {
     let temp_path = {
-        let cache_guard = EPUB_CACHE.lock().unwrap();
+        let cache_guard = lock_epub_cache()?;
         if let Some(ref cache) = *cache_guard {
             if cache.epub_path == epub_path.to_string_lossy() {
                 cache
@@ -10993,7 +11041,7 @@ async fn mobile_update_epub_metadata(
         );
 
         let temp_root = {
-            let cache_guard = EPUB_CACHE.lock().unwrap();
+            let cache_guard = lock_epub_cache()?;
             if let Some(ref cache) = *cache_guard {
                 if cache.epub_path == epub_path {
                     cache
@@ -11049,7 +11097,7 @@ async fn mobile_update_epub_cover(
         }
 
         let temp_root = {
-            let cache_guard = EPUB_CACHE.lock().unwrap();
+            let cache_guard = lock_epub_cache()?;
             if let Some(ref cache) = *cache_guard {
                 if cache.epub_path == epub_path {
                     cache

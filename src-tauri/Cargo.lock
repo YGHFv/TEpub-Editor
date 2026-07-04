@@ -4235,7 +4235,6 @@ dependencies = [
  "md5",
  "once_cell",
  "quick-xml 0.36.2",
- "rayon",
  "reqwest",
  "serde",
  "serde_json",

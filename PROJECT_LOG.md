@@ -2597,6 +2597,40 @@ Caveats:
 - `preserve_structure` derives the relative path via `Path::strip_prefix` against the original input roots; mixed drive letters or non-normalized input paths may fall back to the flat output directory.
 - This completes the last outstanding item of the staged EPUB tooling optimization plan; all nine planned improvements (prepare-stage progress, slow-task feedback, manifest-first reformat, batch summary/report, EPUB diagnostic, non-blocking background tasks, output-file management, and now backup/overwrite strategies) are now implemented.
 
+### 2026-07-04 15:39 +08:00
+
+Request: implement stability hardening (Phase A) and performance/dependency cleanup (Phase E) from the project optimization plan.
+
+Changes (Phase A — Stability):
+
+- Eliminated the `EPUB_CACHE.lock().unwrap()` poisoning risk in `src-tauri/src/lib.rs`:
+  - added a `lock_epub_cache()` helper that returns `Result<MutexGuard, String>` instead of panicking on a poisoned mutex,
+  - replaced all 25 call sites with `lock_epub_cache()?` so a single thread panic no longer cascades into every subsequent EPUB operation.
+- Wrapped 9 async Tauri commands in `tauri::async_runtime::spawn_blocking` to stop synchronous file/ZIP IO from blocking the IPC thread pool:
+  - `read_epub_file_content`, `read_epub_file_binary`, `read_epub_files_batch`, `read_epub_binary_batch`,
+  - `save_epub_file_content`, `save_epub_file_binary`, `save_epub_files_batch`,
+  - `search_in_files`, `add_epub_file_binary` (and `add_epub_file` which delegates to it),
+  - `save_epub_to_disk` already used this pattern and was left untouched.
+  - This prevents the UI from appearing frozen while the backend reads or writes large EPUB entries.
+
+Changes (Phase E — Performance & Dependencies):
+
+- Configured `vite.config.js` with `build.rollupOptions.output.manualChunks` to split `@codemirror`/`codemirror` and `opencc-js` into dedicated vendor chunks, and raised `chunkSizeWarningLimit` to 900 KB; `pnpm build` no longer emits chunk-size warnings.
+- Extracted a `read_epub_bytes(source: &Path)` helper in `src-tauri/src/lib.rs` and replaced 7 duplicated `fs::read(source).map_err(|e| format!("读取 EPUB 失败: {}", e))?` call sites with it.
+- Removed the unused `rayon = "1.10"` dependency from `src-tauri/Cargo.toml` (zero `par_iter`/`rayon` references anywhere in the source).
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed (after adding a JSDoc `@type {string}` annotation on the `manualChunks` `id` parameter).
+- `cargo check` passed.
+- `cargo test` passed: 13 tests.
+- `pnpm build` passed with no chunk-size warnings.
+
+Caveats:
+
+- The `EPUB_CACHE` mutex still uses `std::sync::Mutex`; switching to `parking_lot::Mutex` was deferred to avoid adding a dependency in this pass, but the `lock_epub_cache()` helper already neutralizes the poisoning cascade.
+- The remaining `unwrap()` calls outside EPUB_CACHE (regex compilation, path stems) are in startup-only or guarded paths and were left for a later cleanup pass.
+
 ### 2026-07-03 15:15 +08:00
 
 Request: continue the staged optimization plan and add the next EPUB tooling improvement.

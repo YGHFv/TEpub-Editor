@@ -29,4 +29,20 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks(/** @type {string} */ id) {
+          if (typeof id !== "string" || !id.includes("node_modules")) return;
+          if (id.includes("@codemirror") || id.includes("codemirror")) {
+            return "codemirror";
+          }
+          if (id.includes("opencc-js")) {
+            return "opencc";
+          }
+        },
+      },
+    },
+  },
 }));
