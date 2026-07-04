@@ -3159,24 +3159,106 @@ fn build_output_path_in_dir(original_output: &Path, output_dir: &Path) -> PathBu
     }
 }
 
-fn move_toolbox_result_to_dir(
+fn finalize_toolbox_output(
     mut result: ToolboxEpubToolResult,
-    output_dir: &Path,
+    source: &Path,
+    output_root: &Path,
+    output_mode: &str,
+    conflict_mode: &str,
+    input_roots: &[String],
 ) -> Result<ToolboxEpubToolResult, String> {
     if !result.changed {
         return Ok(result);
     }
-    fs::create_dir_all(output_dir).map_err(|e| format!("创建输出目录失败: {}", e))?;
+
+    // 决定最终目标目录：
+    // - batch_dir（默认）：统一放到输出根目录
+    // - same_dir：放到源文件所在目录（与原文件并列）
+    // - preserve_structure：在输出根目录下按源文件相对输入根目录的子路径重建目录结构
+    let target_dir: PathBuf = match output_mode {
+        "same_dir" => source
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| output_root.to_path_buf()),
+        "preserve_structure" => {
+            let rel = input_roots
+                .iter()
+                .filter_map(|root| {
+                    let root_path = Path::new(root);
+                    source.strip_prefix(root_path).ok().map(|rel| rel.to_path_buf())
+                })
+                .next();
+            match rel {
+                Some(rel) => {
+                    let parent = rel.parent().unwrap_or_else(|| Path::new(""));
+                    if parent.as_os_str().is_empty() {
+                        output_root.to_path_buf()
+                    } else {
+                        output_root.join(parent)
+                    }
+                }
+                None => output_root.to_path_buf(),
+            }
+        }
+        _ => output_root.to_path_buf(),
+    };
+
+    fs::create_dir_all(&target_dir).map_err(|e| format!("创建输出目录失败: {}", e))?;
+
     let source_output = PathBuf::from(&result.output_path);
-    if !source_output.exists() || path_is_under(&source_output, output_dir) {
+    if !source_output.exists() {
         return Ok(result);
     }
 
-    let target = build_output_path_in_dir(&source_output, output_dir);
+    let file_name = source_output
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("output.epub");
+    let target = target_dir.join(file_name);
+
+    // 已经在目标位置（例如 same_dir 模式下工具输出就在目标目录）
+    if is_same_path(&source_output, &target) {
+        return Ok(result);
+    }
+
+    // 冲突处理
+    if target.exists() {
+        match conflict_mode {
+            "skip" => {
+                // 目标已存在，跳过：删除刚生成的临时输出，标记未变更
+                let _ = fs::remove_file(&source_output);
+                result.changed = false;
+                result.message = format!("跳过（目标已存在）: {}", target.to_string_lossy());
+                result.output_path = target.to_string_lossy().to_string();
+                return Ok(result);
+            }
+            "overwrite" => {
+                fs::remove_file(&target).map_err(|e| format!("覆盖目标失败: {}", e))?;
+            }
+            _ => {
+                // auto_number（默认）：自动编号避免冲突
+                let alt = build_output_path_in_dir(&source_output, &target_dir);
+                match fs::rename(&source_output, &alt) {
+                    Ok(_) => {}
+                    Err(_) => {
+                        fs::copy(&source_output, &alt)
+                            .map_err(|e| format!("复制到输出目录失败: {}", e))?;
+                        fs::remove_file(&source_output)
+                            .map_err(|e| format!("清理临时输出失败: {}", e))?;
+                    }
+                }
+                result.output_path = alt.to_string_lossy().to_string();
+                return Ok(result);
+            }
+        }
+    }
+
+    // 移动到目标
     match fs::rename(&source_output, &target) {
         Ok(_) => {}
         Err(_) => {
-            fs::copy(&source_output, &target).map_err(|e| format!("复制到输出目录失败: {}", e))?;
+            fs::copy(&source_output, &target)
+                .map_err(|e| format!("复制到输出目录失败: {}", e))?;
             fs::remove_file(&source_output).map_err(|e| format!("清理临时输出失败: {}", e))?;
         }
     }
@@ -3267,9 +3349,19 @@ fn run_toolbox_batch_impl(
     input_paths: Vec<String>,
     image_format: Option<String>,
     output_dir: Option<String>,
+    output_mode: Option<String>,
+    conflict_mode: Option<String>,
 ) -> Result<ToolboxBatchSummary, String> {
     reset_toolbox_batch_cancel(&task_id);
     let output_dir = resolve_batch_output_dir(&input_paths, output_dir);
+    let output_mode = output_mode
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "batch_dir".to_string());
+    let conflict_mode = conflict_mode
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "auto_number".to_string());
     emit_toolbox_batch_event(
         &app,
         ToolboxBatchEvent {
@@ -3426,7 +3518,14 @@ fn run_toolbox_batch_impl(
         }
         .and_then(|done| {
             emit_toolbox_batch_stage(&app, &task_id, index, total, source, "整理输出文件");
-            move_toolbox_result_to_dir(done, &output_dir)
+            finalize_toolbox_output(
+                done,
+                source,
+                &output_dir,
+                &output_mode,
+                &conflict_mode,
+                &input_paths,
+            )
         });
 
         match result {
@@ -4762,9 +4861,20 @@ async fn toolbox_run_batch(
     input_paths: Vec<String>,
     image_format: Option<String>,
     output_dir: Option<String>,
+    output_mode: Option<String>,
+    conflict_mode: Option<String>,
 ) -> Result<ToolboxBatchSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_toolbox_batch_impl(app, task_id, tool, input_paths, image_format, output_dir)
+        run_toolbox_batch_impl(
+            app,
+            task_id,
+            tool,
+            input_paths,
+            image_format,
+            output_dir,
+            output_mode,
+            conflict_mode,
+        )
     })
     .await
     .map_err(|e| format!("批量任务执行失败: {}", e))?

@@ -2566,6 +2566,37 @@ Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
 
+### 2026-07-04 14:56 +08:00
+
+Request: complete the final item of the staged EPUB tooling optimization plan — add configurable backup/overwrite strategies for batch output (output location and conflict handling), then sync to GitHub with a detailed log entry.
+
+Changes:
+
+- Replaced `move_toolbox_result_to_dir` with `finalize_toolbox_output` in `src-tauri/src/lib.rs`:
+  - accepts `output_mode` (`batch_dir` | `same_dir` | `preserve_structure`) and `conflict_mode` (`auto_number` | `skip` | `overwrite`),
+  - `same_dir` places each result next to its source EPUB,
+  - `preserve_structure` rebuilds the source file's relative subpath under the output root based on the original input roots,
+  - `skip` deletes the freshly generated temp output when a target already exists and marks the file unchanged with a clear message,
+  - `overwrite` removes the existing target before moving the new file,
+  - `auto_number` (default) keeps the previous `_2/_3` collision-avoidance behavior,
+  - same-dir outputs that already sit in the target location are left in place to avoid self-overwrite.
+- Threaded `output_mode` and `conflict_mode` through `run_toolbox_batch_impl` and the `toolbox_run_batch` Tauri command, defaulting to `batch_dir` / `auto_number` when unset.
+- Added output-location and conflict-handling dropdowns to the batch progress panel in `src/routes/batch-progress/+page.svelte`:
+  - both selections persist into the per-task `localStorage` config and reload on reopen,
+  - the exported batch report now records the chosen output location and conflict-handling mode,
+  - added responsive `.field-row` / `.field-select` styling that collapses to a single column under 720px.
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `cargo check` passed.
+- `pnpm build` passed.
+
+Caveats:
+
+- `preserve_structure` derives the relative path via `Path::strip_prefix` against the original input roots; mixed drive letters or non-normalized input paths may fall back to the flat output directory.
+- This completes the last outstanding item of the staged EPUB tooling optimization plan; all nine planned improvements (prepare-stage progress, slow-task feedback, manifest-first reformat, batch summary/report, EPUB diagnostic, non-blocking background tasks, output-file management, and now backup/overwrite strategies) are now implemented.
+
 ### 2026-07-03 15:15 +08:00
 
 Request: continue the staged optimization plan and add the next EPUB tooling improvement.

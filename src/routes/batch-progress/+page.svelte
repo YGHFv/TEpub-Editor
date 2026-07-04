@@ -42,7 +42,21 @@
     outputDir?: string;
     resolvedOutputDir?: string;
     imageFormat?: string;
+    outputMode?: string;
+    conflictMode?: string;
   };
+
+  const OUTPUT_MODES: { value: string; label: string; hint: string }[] = [
+    { value: "batch_dir", label: "输出到批量目录", hint: "统一放到所选输出目录（默认）" },
+    { value: "same_dir", label: "输出到源文件同目录", hint: "与原 EPUB 并列存放" },
+    { value: "preserve_structure", label: "保留目录结构", hint: "在输出目录下重建源文件相对子路径" },
+  ];
+
+  const CONFLICT_MODES: { value: string; label: string; hint: string }[] = [
+    { value: "auto_number", label: "自动编号", hint: "重名时追加 _2/_3 等后缀（默认）" },
+    { value: "skip", label: "跳过已存在", hint: "目标已存在则跳过该文件" },
+    { value: "overwrite", label: "覆盖", hint: "直接覆盖同名目标文件" },
+  ];
 
   type BatchSummary = {
     taskId: string;
@@ -76,6 +90,8 @@
   let outputDir = "";
   let resolvedOutputDir = "";
   let imageFormat: string | undefined;
+  let outputMode = "batch_dir";
+  let conflictMode = "auto_number";
   let total = 0;
   let current = 0;
   let running = false;
@@ -260,6 +276,8 @@
         outputDir: outputDir || undefined,
         resolvedOutputDir: resolvedOutputDir || undefined,
         imageFormat,
+        outputMode,
+        conflictMode,
       }),
     );
   }
@@ -439,6 +457,8 @@
     lines.push(`生成时间: ${new Date().toLocaleString()}`);
     lines.push(`工具: ${tool || currentMeta.title}`);
     lines.push(`输出目录: ${outputDir || resolvedOutputDir || "默认输出目录"}`);
+    lines.push(`输出位置: ${OUTPUT_MODES.find((m) => m.value === outputMode)?.label ?? outputMode}`);
+    lines.push(`冲突处理: ${CONFLICT_MODES.find((m) => m.value === conflictMode)?.label ?? conflictMode}`);
     lines.push(`摘要: ${summary}`);
     lines.push(`队列: ${rows.length}，完成: ${completedRows.length}，跳过: ${warningRows.length}，失败: ${failedRows.length}`);
     lines.push("");
@@ -537,6 +557,8 @@
         inputPaths,
         imageFormat,
         outputDir: outputDir || resolvedOutputDir || undefined,
+        outputMode,
+        conflictMode,
       });
       running = false;
       cancelRequested = false;
@@ -564,6 +586,8 @@
       outputDir = config.outputDir ?? "";
       resolvedOutputDir = config.resolvedOutputDir ?? "";
       imageFormat = config.imageFormat;
+      outputMode = config.outputMode ?? "batch_dir";
+      conflictMode = config.conflictMode ?? "auto_number";
       if (inputPaths.length > 0) {
         addInputRows(inputPaths, "等待执行");
         summary = `已加入 ${inputPaths.length} 个输入源`;
@@ -640,6 +664,25 @@
       <div class="field-block">
         <span>输出目录</span>
         <strong title={outputLabel}>{outputLabel}</strong>
+      </div>
+
+      <div class="field-row">
+        <label class="field-select" for="outputMode">
+          <span>输出位置</span>
+          <select id="outputMode" bind:value={outputMode} disabled={running || scanning} on:change={saveTaskConfig} title={OUTPUT_MODES.find((m) => m.value === outputMode)?.hint}>
+            {#each OUTPUT_MODES as mode}
+              <option value={mode.value}>{mode.label}</option>
+            {/each}
+          </select>
+        </label>
+        <label class="field-select" for="conflictMode">
+          <span>冲突处理</span>
+          <select id="conflictMode" bind:value={conflictMode} disabled={running || scanning} on:change={saveTaskConfig} title={CONFLICT_MODES.find((m) => m.value === conflictMode)?.hint}>
+            {#each CONFLICT_MODES as mode}
+              <option value={mode.value}>{mode.label}</option>
+            {/each}
+          </select>
+        </label>
       </div>
 
       <div class="tool-run-row">
@@ -978,6 +1021,50 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .field-select {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-canvas);
+    min-width: 0;
+  }
+
+  .field-select span {
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .field-select select {
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface, var(--color-canvas));
+    color: var(--color-text);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .field-select select:focus {
+    outline: none;
+    border-color: var(--color-accent, var(--color-border));
+  }
+
+  @media (max-width: 720px) {
+    .field-row {
+      grid-template-columns: 1fr;
+    }
   }
 
   .tool-summary {
