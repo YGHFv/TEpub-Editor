@@ -1136,13 +1136,14 @@
 <style>
   :global(body) {
     margin: 0;
-    overflow: hidden;
+    overflow: auto;
     background: var(--color-canvas);
   }
 
   .toolbox-app {
     box-sizing: border-box;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     background: var(--color-canvas);
