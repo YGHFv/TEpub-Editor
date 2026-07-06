@@ -1,11 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
-  import type { UnlistenFn } from "@tauri-apps/api/event";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { save, message } from "@tauri-apps/plugin-dialog";
-  import { writeFile } from "@tauri-apps/plugin-fs";
+  import { platform, type PlatformUnlisten } from "$lib/platform";
   import { loadAppSettings, type AiProviderConfig, type GlobalAppSettings } from "$lib/appSettings";
 
   type AiTarget = "duokan" | "standard" | "banner";
@@ -153,7 +148,7 @@
     if (loadAppSettings().closeToolboxOnToolOpen === false) return;
     for (const label of ["toolbox", "main"]) {
       try {
-        const win = await WebviewWindow.getByLabel(label);
+        const win = await platform.getWindowByLabel(label);
         if (!win) continue;
         await win.show();
         await win.setFocus();
@@ -168,7 +163,7 @@
     if (closingByCode) return;
     closingByCode = true;
     await restoreToolboxHome();
-    await getCurrentWindow().destroy();
+    await platform.getCurrentWindow().destroy();
   }
 
   function setMode(mode: ToolMode) {
@@ -291,7 +286,7 @@
 
   async function loadImageFile(file: File, purpose: ImagePurpose = fileInputPurpose) {
     if (!file.type.startsWith("image/")) {
-      await message("请选择图片文件。", { title: "图片处理", kind: "warning" });
+      await platform.message("请选择图片文件。", { title: "图片处理", kind: "warning" });
       return;
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -328,7 +323,7 @@
 
   async function loadHeaderSampleFile(file: File) {
     if (!file.type.startsWith("image/")) {
-      await message("请选择图片文件。", { title: "图片处理", kind: "warning" });
+      await platform.message("请选择图片文件。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (headerSampleObjectUrl) URL.revokeObjectURL(headerSampleObjectUrl);
@@ -347,7 +342,7 @@
     if (file) {
       loadImageFile(file, fileInputPurpose).catch((err) => {
         status = "图片载入失败";
-        message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
+        platform.message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
       });
     }
     input.value = "";
@@ -359,7 +354,7 @@
     if (file) {
       loadHeaderSampleFile(file).catch((err) => {
         status = "头图样图载入失败";
-        message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
+        platform.message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
       });
     }
     input.value = "";
@@ -372,14 +367,14 @@
       if (activeMode === "header" && !headerSampleImage) {
         loadHeaderSampleFile(file).catch((err) => {
           status = "头图样图载入失败";
-          message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
+          platform.message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
         });
         return;
       }
       const purpose: ImagePurpose = activeMode === "header" ? "headerSource" : activeMode === "ai" ? "ai" : "cover";
       loadImageFile(file, purpose).catch((err) => {
         status = "图片载入失败";
-        message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
+        platform.message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
       });
     }
   }
@@ -638,12 +633,12 @@
   }
 
   async function saveBytes(bytes: Uint8Array, defaultName: string, extension: string) {
-    const selected = await save({
+    const selected = await platform.saveDialog({
       defaultPath: defaultName,
       filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
     });
     if (!selected) return;
-    await writeFile(selected, bytes);
+    await platform.writeFile(selected, bytes);
     status = `已保存 ${selected}`;
   }
 
@@ -683,19 +678,19 @@
 
   async function generateAiImage() {
     if (!aiReferenceBytes) {
-      await message("请先选择参考封面。", { title: "图片处理", kind: "warning" });
+      await platform.message("请先选择参考封面。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (!selectedImageProvider) {
-      await message("请先在工具箱设置的 API 配置中新增生图模型。", { title: "图片处理", kind: "warning" });
+      await platform.message("请先在工具箱设置的 API 配置中新增生图模型。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (!selectedImageProvider.baseUrl.trim() || !selectedImageProvider.apiKey.trim() || !selectedImageProvider.model.trim()) {
-      await message("选中的生图模型缺少 API 地址、Key 或模型名。", { title: "图片处理", kind: "warning" });
+      await platform.message("选中的生图模型缺少 API 地址、Key 或模型名。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (!title.trim()) {
-      await message("请填写书名。", { title: "图片处理", kind: "warning" });
+      await platform.message("请填写书名。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (!canGenerate) return;
@@ -703,7 +698,7 @@
     generating = true;
     status = `正在生成${targetLabel(aiTarget)}...`;
     try {
-      const result = await invoke<AiImageResult>("toolbox_generate_ai_image", {
+      const result = await platform.invoke<AiImageResult>("toolbox_generate_ai_image", {
         request: {
           baseUrl: selectedImageProvider.baseUrl,
           apiKey: selectedImageProvider.apiKey,
@@ -722,7 +717,7 @@
       status = `生成完成：${result.size || "auto"}`;
     } catch (err) {
       status = "AI 生成失败";
-      await message(String(err), { title: "图片处理", kind: "error" });
+      await platform.message(String(err), { title: "图片处理", kind: "error" });
     } finally {
       generating = false;
     }
@@ -762,8 +757,8 @@
     imageProviderId = appSettings.aiProviders.find((provider) => provider.kind === "image")?.id || "";
     loadConfig();
     drawLocalPreview();
-    let unlistenClose: UnlistenFn | undefined;
-    getCurrentWindow().onCloseRequested(async (event) => {
+    let unlistenClose: PlatformUnlisten | undefined;
+    platform.onCurrentWindowCloseRequested(async (event) => {
       if (closingByCode) return;
       event.preventDefault();
       await closeWindow();

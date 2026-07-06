@@ -1,9 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
-  import { open, message } from "@tauri-apps/plugin-dialog";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import { platform, type PlatformWindowHandle } from "$lib/platform";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
   import {
@@ -215,6 +212,11 @@
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   }
 
+  async function createToolWindow(label: string, options: Record<string, any> & { url: string }) {
+    const { url, ...windowOptions } = options;
+    return platform.createWebviewWindow(label, url, windowOptions);
+  }
+
   function collectLaunchPaths(launchInfo: LaunchInfo | null | undefined) {
     const candidates = [...(launchInfo?.filePaths ?? []), launchInfo?.filePath ?? ""];
     const seen = new Set<string>();
@@ -242,7 +244,7 @@
     const encoded = encodeURIComponent(filePath);
 
     if (ext === "txt") {
-      new WebviewWindow(windowLabel("editor"), {
+      await createToolWindow(windowLabel("editor"), {
         url: `/editor?file=${encoded}&fromLibrary=1`,
         title: "TEpub-Editor-TXT",
         width: TOOLBOX_WINDOW_WIDTH,
@@ -258,7 +260,7 @@
     if (ext !== "epub") return;
 
     if (action === "reader") {
-      new WebviewWindow(windowLabel("reader"), {
+      await createToolWindow(windowLabel("reader"), {
         url: `/reader?file=${encoded}`,
         title: "TEpub-Editor-Reader",
         width: TOOLBOX_WINDOW_WIDTH,
@@ -271,7 +273,7 @@
       return;
     }
 
-    new WebviewWindow(windowLabel("epub-editor"), {
+    await createToolWindow(windowLabel("epub-editor"), {
       url: `/epub-editor?file=${encoded}`,
       title: "TEpub-Editor-EPUB",
       width: TOOLBOX_WINDOW_WIDTH,
@@ -287,7 +289,7 @@
     if (!isRootToolbox()) return;
 
     try {
-      const launchInfo = await invoke<LaunchInfo>("get_launch_info");
+      const launchInfo = await platform.invoke<LaunchInfo>("get_launch_info");
       const action = launchInfo?.action ?? "";
       const paths = collectLaunchPaths(launchInfo).filter(supportedLaunchPath);
       if (paths.length === 0) return;
@@ -324,7 +326,7 @@
         return;
       }
 
-      const selected = await open({
+      const selected = await platform.openDialog<string | string[] | null>({
         multiple: false,
         filters: [
           tool.id === "txt-epub"
@@ -342,14 +344,14 @@
         statusText = result.issues.length === 0
           ? "EPUB 诊断未发现明显问题"
           : `EPUB 诊断完成：${result.errorCount} 错误 / ${result.warningCount} 警告`;
-        await message(formatDiagnosticReport(result), {
+        await platform.message(formatDiagnosticReport(result), {
           title: tool.title,
           kind: result.errorCount > 0 ? "error" : result.warningCount > 0 ? "warning" : "info",
         });
       } else if (isProcessingTool(tool.id)) {
         let txtPath: string | undefined;
         if (tool.id === "font-decrypt") {
-          const selectedTxt = await open({
+          const selectedTxt = await platform.openDialog<string | string[] | null>({
             multiple: false,
             filters: [{ name: "TXT 文件", extensions: ["txt"] }],
             title: "选择与 EPUB 对应的明文 TXT",
@@ -359,7 +361,7 @@
         }
         const result = await runProcessingTool(tool, selected, txtPath);
         statusText = result.changed ? `${tool.title} 已完成` : result.message;
-        await message(`${result.message}\n\n${result.outputPath}`, {
+        await platform.message(`${result.message}\n\n${result.outputPath}`, {
           title: tool.title,
           kind: result.changed ? "info" : "warning",
         });
@@ -370,7 +372,7 @@
     } catch (e: any) {
       console.error("工具箱打开失败:", e);
       statusText = "打开失败";
-      await message(`打开失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`打开失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       busyTool = "";
     }
@@ -387,11 +389,11 @@
     }
 
     try {
-      const mainWin = await WebviewWindow.getByLabel("main");
+      const mainWin = await platform.getWindowByLabel("main");
       if (mainWin) {
         await mainWin.show();
         await mainWin.setFocus();
-        await getCurrentWindow().close();
+        await platform.closeCurrentWindow();
         return;
       }
     } catch (e) {
@@ -401,9 +403,9 @@
     window.location.href = "/library";
   }
 
-  async function hideToolboxHomeWhileOpen(childWindow: WebviewWindow) {
+  async function hideToolboxHomeWhileOpen(childWindow: PlatformWindowHandle) {
     if (appSettings.closeToolboxOnToolOpen === false) return;
-    const toolboxWindow = getCurrentWindow();
+    const toolboxWindow = platform.getCurrentWindow();
     try {
       childWindow.once("tauri://destroyed", async () => {
         try {
@@ -420,7 +422,7 @@
   }
 
   async function openImageTools() {
-    const win = new WebviewWindow(windowLabel("image-tools"), {
+    const win = await createToolWindow(windowLabel("image-tools"), {
       url: "/toolbox/image-tools",
       title: "TEpub-Editor-图片处理",
       width: TOOLBOX_WINDOW_WIDTH,
@@ -461,7 +463,7 @@
   }
 
   async function runProcessingTool(tool: Tool, filePath: string, txtPath?: string) {
-    return await invoke<ToolboxResult>(commandForTool(tool.id), {
+    return await platform.invoke<ToolboxResult>(commandForTool(tool.id), {
       epubPath: filePath,
       txtPath,
       imageFormat: tool.id === "image-convert" ? "auto" : undefined,
@@ -469,7 +471,7 @@
   }
 
   async function runEpubDiagnose(filePath: string) {
-    return await invoke<ToolboxDiagnosticResult>("toolbox_epub_diagnose", {
+    return await platform.invoke<ToolboxDiagnosticResult>("toolbox_epub_diagnose", {
       epubPath: filePath,
     });
   }
@@ -516,7 +518,7 @@
           imageFormat: tool.id === "image-convert" ? "auto" : undefined,
         }),
       );
-      const win = new WebviewWindow(windowLabel("batch-progress"), {
+      const win = await createToolWindow(windowLabel("batch-progress"), {
         url: `/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`,
         title: `${tool.title} 批量处理`,
         width: TOOLBOX_WINDOW_WIDTH,
@@ -531,7 +533,7 @@
     } catch (e: any) {
       console.error("批量处理失败:", e);
       statusText = "批量处理失败";
-      await message(`批量处理失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`批量处理失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       busyTool = "";
     }
@@ -544,7 +546,7 @@
   async function openToolForPath(tool: Tool, filePath: string) {
     const encoded = encodeURIComponent(filePath);
     if (tool.id === "txt-epub") {
-      const win = new WebviewWindow(windowLabel("editor"), {
+      const win = await createToolWindow(windowLabel("editor"), {
         url: `/editor?file=${encoded}&fromLibrary=1`,
         title: "TEpub-Editor-TXT",
         width: TOOLBOX_WINDOW_WIDTH,
@@ -559,7 +561,7 @@
     }
 
     if (tool.id === "epub-edit") {
-      const win = new WebviewWindow(windowLabel("epub-editor"), {
+      const win = await createToolWindow(windowLabel("epub-editor"), {
         url: `/epub-editor?file=${encoded}`,
         title: "TEpub-Editor-EPUB",
         width: TOOLBOX_WINDOW_WIDTH,
@@ -573,7 +575,7 @@
       return;
     }
 
-    const win = new WebviewWindow(windowLabel("reader"), {
+    const win = await createToolWindow(windowLabel("reader"), {
       url: `/reader?file=${encoded}`,
       title: "TEpub-Editor-Reader",
       width: TOOLBOX_WINDOW_WIDTH,
@@ -587,7 +589,7 @@
   }
 
   function closeWindow() {
-    getCurrentWindow().close();
+    platform.closeCurrentWindow();
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -598,7 +600,7 @@
 
   async function loadGlobalSettingsWithLegacy() {
     try {
-      const data = await invoke<LegacyLibraryData>("load_library");
+      const data = await platform.invoke<LegacyLibraryData>("load_library");
       appSettings = saveAppSettings(loadAppSettings(data?.config || {}));
     } catch {
       appSettings = loadAppSettings();
@@ -703,13 +705,13 @@
 
   async function toggleFileAssoc(verb: "epub-read" | "epub-edit" | "txt-make-epub", enabled: boolean) {
     try {
-      await invoke("set_file_assoc", { verb, enabled });
+      await platform.invoke("set_file_assoc", { verb, enabled });
       saveGlobalSettings();
     } catch (e: any) {
       if (verb === "epub-read") appSettings.assocEpubRead = !enabled;
       else if (verb === "epub-edit") appSettings.assocEpubEdit = !enabled;
       else appSettings.assocTxtMakeEpub = !enabled;
-      await message(`设置失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`设置失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 

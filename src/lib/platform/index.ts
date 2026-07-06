@@ -21,5 +21,5 @@ function resolvePlatformKind(): PlatformKind {
 export const platform: PlatformAdapter =
   resolvePlatformKind() === "web" ? createWebPlatform() : createTauriPlatform();
 
-export type { PlatformAdapter, PlatformKind } from "./types";
+export type { PlatformAdapter, PlatformKind, PlatformUnlisten, PlatformWindowHandle } from "./types";
 export { PlatformUnsupportedError } from "./types";

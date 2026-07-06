@@ -63,8 +63,9 @@ export function createWebPlatform(): PlatformAdapter {
       throw new PlatformUnsupportedError("Native file picker", "web");
     },
 
-    async saveDialog() {
-      throw new PlatformUnsupportedError("Native save dialog", "web");
+    async saveDialog(options = {}) {
+      const { defaultPath } = options as { defaultPath?: string };
+      return defaultPath || "download";
     },
 
     async message(text) {
@@ -76,8 +77,18 @@ export function createWebPlatform(): PlatformAdapter {
       return window.confirm(text);
     },
 
-    async writeFile() {
-      throw new PlatformUnsupportedError("Direct filesystem write", "web");
+    async writeFile(path, data) {
+      if (typeof window === "undefined" || typeof document === "undefined") return;
+      const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+      const blob = new Blob([bytes], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = path.split(/[\\/]/).pop() || "download";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     },
 
     async revealPath() {
