@@ -1997,16 +1997,13 @@
             max-width: none;
             display: grid;
             grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
-            grid-template-rows: auto auto minmax(0, 1fr) auto;
+            grid-template-rows: auto auto auto auto;
             align-items: start;
             gap: 12px;
-            height: calc(100vh - 42px);
-            min-height: 620px;
             padding: 14px 0 28px;
         }
 
-        .desktop-page .empty-panel,
-        .desktop-page .bottom-actions {
+        .desktop-page .empty-panel {
             grid-column: 1 / -1;
         }
 
@@ -2121,15 +2118,15 @@
         .desktop-page .reorder-panel {
             grid-column: 2;
             grid-row: 3;
-            align-self: end;
+            align-self: start;
             min-height: 0;
             grid-template-rows: auto;
         }
 
         .desktop-page .reorder-panel.expanded {
             grid-row: 3;
-            align-self: stretch;
-            grid-template-rows: auto auto auto minmax(0, 1fr);
+            align-self: start;
+            grid-template-rows: auto auto auto auto;
         }
 
         .desktop-page .check-panel.collapsed + .reorder-panel.expanded {
@@ -2137,7 +2134,7 @@
         }
 
         .desktop-page .bottom-actions {
-            grid-column: 1 / -1;
+            grid-column: 1;
             grid-row: 4;
             grid-template-columns: auto auto minmax(0, 1fr);
             align-items: center;
@@ -2149,7 +2146,7 @@
         }
 
         .desktop-page .toc-list {
-            max-height: calc(100vh - 330px);
+            max-height: clamp(300px, calc(100vh - 390px), 560px);
             overflow: auto;
         }
 
@@ -2199,7 +2196,7 @@
 
         .desktop-page .reorder-preview {
             min-height: 0;
-            max-height: none;
+            max-height: clamp(180px, calc(100vh - 560px), 360px);
             overflow: auto;
         }
 
@@ -2211,7 +2208,7 @@
 
         .desktop-page .check-list {
             min-height: 0;
-            max-height: min(260px, calc(100vh - 430px));
+            max-height: clamp(180px, calc(100vh - 520px), 360px);
             overflow: auto;
         }
 
