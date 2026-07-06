@@ -4,6 +4,7 @@
     import {
         cacheBrowserFileStable,
         exportEpubPath,
+        offerSystemExport,
         readMobileSelection,
         safeFileName,
         selectionName,
@@ -111,6 +112,7 @@
     let chapters: RawChapter[] = [];
     let expandedIds = new Set<string>();
     let makeResult: MobileMakeEpubResult | null = null;
+    let webEpubBytes: Uint8Array | null = null;
     let exportPath = "";
     let sequenceErrors: CheckItem[] = [];
     let titleErrors: CheckItem[] = [];
@@ -150,6 +152,7 @@
 
     function resetResult() {
         makeResult = null;
+        webEpubBytes = null;
         exportPath = "";
     }
 
@@ -167,7 +170,9 @@
             resetResult();
             selectedName = name || selectionName(sourcePath);
             selectedPath = sourcePath;
-            content = await platform.invoke<string>("read_text_file", { path: selectedPath });
+            if (!platform.isWeb) {
+                content = await platform.invoke<string>("read_text_file", { path: selectedPath });
+            }
             title = selectionName(selectedName).replace(/\.[^.]+$/, "");
             if (uuidAuto) uuid = crypto.randomUUID?.() ?? uuid;
             status = `已导入 ${selectedName}，正在扫描目录。`;
@@ -187,11 +192,25 @@
         if (!file) return;
 
         try {
+            if (platform.isWeb) {
+                busy = true;
+                resetResult();
+                selectedName = file.name;
+                selectedPath = `web-local:${file.name}`;
+                content = await withFileText(file);
+                title = selectionName(file.name).replace(/\.[^.]+$/, "");
+                if (uuidAuto) uuid = crypto.randomUUID?.() ?? uuid;
+                status = `已导入 ${selectedName}，正在扫描目录。`;
+                await previewToc();
+                return;
+            }
             const cachedPath = await cacheBrowserFileStable(file, "txt");
             await loadSource(cachedPath, file.name);
         } catch (err) {
             status = "导入文本失败";
             await platform.message(`导入文本失败：${err}`, { title: "制作 EPUB", kind: "error" });
+        } finally {
+            if (platform.isWeb) busy = false;
         }
     }
 
@@ -202,7 +221,7 @@
         if (!file) return;
 
         try {
-            coverPath = await cacheBrowserFileStable(file, "cover");
+            coverPath = platform.isWeb ? `web-local:${file.name}` : await cacheBrowserFileStable(file, "cover");
             coverName = file.name;
             if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
             coverPreviewUrl = URL.createObjectURL(file);
@@ -217,7 +236,9 @@
         resetResult();
         try {
             busy = true;
-            chapters = await platform.invoke<RawChapter[]>("mobile_scan_chapters", { content, rules });
+            chapters = platform.isWeb
+                ? scanChaptersInBrowser(content, rules)
+                : await platform.invoke<RawChapter[]>("mobile_scan_chapters", { content, rules });
             expandedIds = new Set(
                 buildToc(chapters)
                     .filter((item) => itemKind(item.title, item.level, item.is_meta) === "volume" && item.hasChildren)
@@ -240,6 +261,18 @@
         if (!selectedPath || !content.trim()) return;
         try {
             busy = true;
+            if (platform.isWeb) {
+                const outputTitle = title.trim() || selectedName.replace(/\.[^.]+$/, "") || "book";
+                webEpubBytes = buildSimpleEpubBytes(outputTitle, author.trim(), content, chapters);
+                makeResult = {
+                    output_path: `web-local:${safeFileName(outputTitle, "epub")}`,
+                    title: outputTitle,
+                    chapter_count: Math.max(1, chapters.length),
+                    word_count: countWords(content),
+                };
+                status = `已生成《${makeResult.title}》，${makeResult.chapter_count} 个目录项，约 ${makeResult.word_count} 字。`;
+                return;
+            }
             makeResult = await platform.invoke<MobileMakeEpubResult>("mobile_make_epub", {
                 sourcePath: selectedPath,
                 title: title.trim() || selectedName.replace(/\.[^.]+$/, ""),
@@ -261,6 +294,12 @@
         if (!makeResult) return;
         try {
             busy = true;
+            if (platform.isWeb && webEpubBytes) {
+                const fileName = safeFileName(makeResult.title, "epub");
+                status = await offerSystemExport("", fileName, webEpubBytes);
+                exportPath = fileName;
+                return;
+            }
             const result = await exportEpubPath(makeResult.output_path, safeFileName(makeResult.title, "epub"));
             exportPath = result.output_path;
             status = result.message;
@@ -332,6 +371,11 @@
         return content.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
     }
 
+    async function saveCurrentText() {
+        if (!selectedPath || platform.isWeb) return;
+        await platform.invoke("save_text_file", { path: selectedPath, content });
+    }
+
     function openTocActions(item: TocItem, event: Event) {
         event.stopPropagation();
         tocActionTarget = item;
@@ -370,7 +414,7 @@
         const indent = lines[lineIndex].match(/^[\s　]*/)?.[0] ?? "";
         lines[lineIndex] = `${indent}${nextTitle}`;
         content = lines.join("\n");
-        await platform.invoke("save_text_file", { path: selectedPath, content });
+        await saveCurrentText();
         closeRenameTitle();
         await previewToc();
         status = `已重命名目录标题：${nextTitle}`;
@@ -417,7 +461,7 @@
             ...lines.slice(chapterEditSheet.endLine),
         ];
         content = nextLines.join("\n");
-        await platform.invoke("save_text_file", { path: selectedPath, content });
+        await saveCurrentText();
         const titleText = chapterEditSheet.item.title;
         closeChapterEditor();
         await previewToc();
@@ -435,7 +479,7 @@
         lines[lineIndex] = `${indent}原章节标题：${item.title}`;
         content = lines.join("\n");
         tocActionTarget = null;
-        await platform.invoke("save_text_file", { path: selectedPath, content });
+        await saveCurrentText();
         await previewToc();
         status = `已取消本章标题：${item.title}`;
     }
@@ -654,7 +698,7 @@
         }
 
         content = lines.join("\n");
-        await platform.invoke("save_text_file", { path: selectedPath, content });
+        await saveCurrentText();
         await previewToc();
         status = changed ? `已重排 ${changed} 个目录标题。` : "目录标题已是当前顺序。";
     }
@@ -667,6 +711,202 @@
     function isCompactDevice() {
         if (typeof navigator === "undefined") return false;
         return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+    }
+
+    function withFileText(file: File) {
+        return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+            reader.readAsText(file);
+        });
+    }
+
+    function countWords(text: string) {
+        return (text.match(/[\u4e00-\u9fff]|[A-Za-z0-9]+/g) || []).length;
+    }
+
+    function scanChaptersInBrowser(text: string, scanRules: RegexRule[]): RawChapter[] {
+        const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
+        const compiled = scanRules
+            .map((rule) => {
+                try {
+                    return { level: rule.level, regex: new RegExp(rule.pattern) };
+                } catch {
+                    return null;
+                }
+            })
+            .filter((rule): rule is { level: number; regex: RegExp } => Boolean(rule));
+        const found: RawChapter[] = [];
+
+        lines.forEach((line, index) => {
+            const titleText = line.trim();
+            if (!titleText) return;
+            const matched = compiled.find((rule) => rule.regex.test(titleText));
+            if (!matched) return;
+            found.push({
+                title: titleText,
+                line_number: index + 1,
+                level: matched.level,
+                is_meta: isMetaTitle(titleText),
+                word_count: 0,
+            });
+        });
+
+        found.forEach((chapter, index) => {
+            const start = chapter.line_number - 1;
+            const end = index + 1 < found.length ? found[index + 1].line_number - 1 : lines.length;
+            chapter.word_count = countWords(lines.slice(start, end).join("\n"));
+        });
+
+        return found;
+    }
+
+    function escapeXml(value: string) {
+        return value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+    }
+
+    function chapterSections(text: string, list: RawChapter[]) {
+        const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
+        const headings = list.filter((item) => itemKind(item.title, item.level, item.is_meta) !== "meta");
+        if (headings.length === 0) {
+            return [{ title: title.trim() || selectedName.replace(/\.[^.]+$/, "") || "正文", lines }];
+        }
+        return headings.map((heading, index) => {
+            const start = Math.max(0, heading.line_number - 1);
+            const end = index + 1 < headings.length ? Math.max(start + 1, headings[index + 1].line_number - 1) : lines.length;
+            return {
+                title: heading.title,
+                lines: lines.slice(start + 1, end),
+            };
+        });
+    }
+
+    function buildChapterXhtml(chapterTitle: string, bodyLines: string[]) {
+        const blocks = bodyLines
+            .join("\n")
+            .split(/\n\s*\n/)
+            .map((part) => part.trim())
+            .filter(Boolean);
+        const body = blocks.length
+            ? blocks.map((block) => `<p>${escapeXml(block).replace(/\n/g, "<br/>")}</p>`).join("\n")
+            : "<p></p>";
+        return `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-CN">
+<head><title>${escapeXml(chapterTitle)}</title><link rel="stylesheet" href="../Styles/style.css"/></head>
+<body><h1>${escapeXml(chapterTitle)}</h1>${body}</body>
+</html>`;
+    }
+
+    function buildSimpleEpubBytes(bookTitle: string, bookAuthor: string, text: string, list: RawChapter[]) {
+        const sections = chapterSections(text, list);
+        const files: { name: string; data: Uint8Array }[] = [];
+        const encoder = new TextEncoder();
+        const addText = (name: string, value: string) => files.push({ name, data: encoder.encode(value) });
+        files.push({ name: "mimetype", data: encoder.encode("application/epub+zip") });
+        addText(
+            "META-INF/container.xml",
+            `<?xml version="1.0" encoding="utf-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`,
+        );
+        addText("OEBPS/Styles/style.css", "body{font-family:serif;line-height:1.75;}h1{text-align:center;}p{text-indent:2em;margin:0 0 .8em;}");
+        sections.forEach((section, index) => {
+            addText(`OEBPS/Text/chapter${String(index + 1).padStart(3, "0")}.xhtml`, buildChapterXhtml(section.title, section.lines));
+        });
+        const navItems = sections
+            .map((section, index) => `<li><a href="Text/chapter${String(index + 1).padStart(3, "0")}.xhtml">${escapeXml(section.title)}</a></li>`)
+            .join("");
+        addText(
+            "OEBPS/nav.xhtml",
+            `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh-CN"><head><title>目录</title></head><body><nav epub:type="toc" id="toc"><h1>目录</h1><ol>${navItems}</ol></nav></body></html>`,
+        );
+        const manifestItems = sections
+            .map((_, index) => `<item id="chapter${index + 1}" href="Text/chapter${String(index + 1).padStart(3, "0")}.xhtml" media-type="application/xhtml+xml"/>`)
+            .join("");
+        const spineItems = sections.map((_, index) => `<itemref idref="chapter${index + 1}"/>`).join("");
+        addText(
+            "OEBPS/content.opf",
+            `<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">urn:uuid:${escapeXml(uuid || crypto.randomUUID?.() || Date.now().toString())}</dc:identifier><dc:title>${escapeXml(bookTitle)}</dc:title><dc:creator>${escapeXml(bookAuthor || "未知作者")}</dc:creator><dc:language>zh-CN</dc:language></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="style" href="Styles/style.css" media-type="text/css"/>${manifestItems}</manifest><spine>${spineItems}</spine></package>`,
+        );
+        return createStoredZip(files);
+    }
+
+    function crc32(data: Uint8Array) {
+        let crc = -1;
+        for (const byte of data) {
+            crc ^= byte;
+            for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+        }
+        return (crc ^ -1) >>> 0;
+    }
+
+    function write16(out: number[], value: number) {
+        out.push(value & 255, (value >>> 8) & 255);
+    }
+
+    function write32(out: number[], value: number) {
+        out.push(value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255);
+    }
+
+    function pushBytes(out: number[], data: Uint8Array) {
+        for (const byte of data) out.push(byte);
+    }
+
+    function createStoredZip(files: { name: string; data: Uint8Array }[]) {
+        const encoder = new TextEncoder();
+        const out: number[] = [];
+        const central: number[] = [];
+        for (const file of files) {
+            const nameBytes = encoder.encode(file.name);
+            const offset = out.length;
+            const crc = crc32(file.data);
+            write32(out, 0x04034b50);
+            write16(out, 20);
+            write16(out, 0);
+            write16(out, 0);
+            write16(out, 0);
+            write16(out, 0);
+            write32(out, crc);
+            write32(out, file.data.length);
+            write32(out, file.data.length);
+            write16(out, nameBytes.length);
+            write16(out, 0);
+            pushBytes(out, nameBytes);
+            pushBytes(out, file.data);
+
+            write32(central, 0x02014b50);
+            write16(central, 20);
+            write16(central, 20);
+            write16(central, 0);
+            write16(central, 0);
+            write16(central, 0);
+            write16(central, 0);
+            write32(central, crc);
+            write32(central, file.data.length);
+            write32(central, file.data.length);
+            write16(central, nameBytes.length);
+            write16(central, 0);
+            write16(central, 0);
+            write16(central, 0);
+            write16(central, 0);
+            write32(central, 0);
+            write32(central, offset);
+            pushBytes(central, nameBytes);
+        }
+        const centralOffset = out.length;
+        out.push(...central);
+        write32(out, 0x06054b50);
+        write16(out, 0);
+        write16(out, 0);
+        write16(out, files.length);
+        write16(out, files.length);
+        write32(out, central.length);
+        write32(out, centralOffset);
+        write16(out, 0);
+        return new Uint8Array(out);
     }
 
     onMount(() => {
@@ -1658,11 +1898,11 @@
             display: grid;
             grid-template-columns: minmax(0, 1fr) 360px;
             grid-auto-rows: auto;
+            align-items: start;
             gap: 14px;
-            padding: 24px 0 32px;
+            padding: 18px 0 32px;
         }
 
-        .desktop-page .topbar,
         .desktop-page .empty-panel,
         .desktop-page .meta,
         .desktop-page .bottom-actions {
@@ -1670,18 +1910,7 @@
         }
 
         .desktop-page .topbar {
-            min-height: 58px;
-            margin: 0;
-            padding: 0 14px;
-            border: 1px solid rgba(23, 27, 36, 0.08);
-            border-radius: 8px;
-            background: #fff;
-        }
-
-        .desktop-page .topbar a {
-            border-radius: 8px;
-            background: #eef3f7;
-            color: #4e5968;
+            display: none;
         }
 
         .desktop-page .meta,
