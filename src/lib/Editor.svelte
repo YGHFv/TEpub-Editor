@@ -588,6 +588,8 @@
         title: "查找与替换",
         width: 550,
         height: 250,
+        minWidth: 550,
+        minHeight: 250,
         alwaysOnTop: true,
         resizable: true,
         minimizable: false,

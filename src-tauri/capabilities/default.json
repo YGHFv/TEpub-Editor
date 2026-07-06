@@ -10,6 +10,7 @@
     "reader-*",
     "search-replace",
     "toolbox",
+    "image-tools-*",
     "batch-progress-*"
   ],
   "permissions": [

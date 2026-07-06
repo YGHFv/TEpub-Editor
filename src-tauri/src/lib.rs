@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose, Engine as _};
 use chardetng::EncodingDetector;
 use fancy_regex::Regex;
 use md5;
@@ -10,7 +11,12 @@ use std::path::{Path, PathBuf};
 use std::process; // 引入进程控制
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::Emitter;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    utils::config::Color,
+    Emitter, Manager, WindowEvent,
+};
 use tempfile::TempDir;
 use walkdir::WalkDir;
 use zip::write::FileOptions;
@@ -3525,6 +3531,7 @@ fn run_toolbox_batch_impl(
             "font_encrypt" => toolbox_font_encrypt_impl(source),
             "font_decrypt" => toolbox_font_decrypt_impl(source, None),
             "epub_reformat" => toolbox_epub_reformat_impl(source),
+            "epub_diagnose" => toolbox_epub_diagnose_tool_result(source),
             "image_convert" => toolbox_image_convert_impl(source, image_format.as_deref()),
             _ => Err(format!("不支持的批量工具: {}", tool)),
         }
@@ -3549,7 +3556,12 @@ fn run_toolbox_batch_impl(
                     ToolboxBatchEvent {
                         task_id: task_id.clone(),
                         event: "file-done".to_string(),
-                        level: if done.changed { "info" } else { "warning" }.to_string(),
+                        level: if done.action == "epub_diagnose_clean" || done.changed {
+                            "info"
+                        } else {
+                            "warning"
+                        }
+                        .to_string(),
                         index,
                         total,
                         input_path: Some(done.source_path),
@@ -4575,6 +4587,621 @@ fn toolbox_image_convert(
     toolbox_image_convert_impl(&PathBuf::from(epub_path), image_format.as_deref())
 }
 
+const AI_IMAGE_MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
+const AI_IMAGE_MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+const AI_IMAGE_USER_AGENT: &str = "TEpub-Editor/image-tools";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxAiImageRequest {
+    base_url: String,
+    api_key: String,
+    model: String,
+    target: String,
+    title: Option<String>,
+    author: Option<String>,
+    prompt: String,
+    size: String,
+    reference_data: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolboxAiImageResult {
+    bytes: Vec<u8>,
+    mime: String,
+    extension: String,
+    file_name: String,
+    prompt: String,
+    size: String,
+}
+
+fn normalize_ai_base_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_string()
+}
+
+fn remove_suffix_ignore_case(value: &str, suffix: &str) -> String {
+    if value
+        .to_ascii_lowercase()
+        .ends_with(&suffix.to_ascii_lowercase())
+    {
+        value[..value.len() - suffix.len()].to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn is_versioned_ai_base_url(base_url: &str) -> bool {
+    let lower = base_url.to_ascii_lowercase();
+    let Some((prefix, tail)) = lower.rsplit_once("/api/v") else {
+        return false;
+    };
+    !prefix.is_empty() && !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit())
+}
+
+fn ai_image_generation_url(base_url: &str) -> Result<String, String> {
+    let base = normalize_ai_base_url(base_url);
+    if base.is_empty() {
+        return Err("Base URL 不能为空".to_string());
+    }
+    let lower = base.to_ascii_lowercase();
+    Ok(if lower.ends_with("/images/generations") {
+        base
+    } else if lower.ends_with("/chat/completions") {
+        remove_suffix_ignore_case(&base, "/chat/completions") + "/images/generations"
+    } else if lower.ends_with("/v1") || is_versioned_ai_base_url(&base) {
+        format!("{}/images/generations", base)
+    } else {
+        format!("{}/v1/images/generations", base)
+    })
+}
+
+fn ai_image_edits_url(base_url: &str) -> Result<String, String> {
+    let base = normalize_ai_base_url(base_url);
+    if base.is_empty() {
+        return Err("Base URL 不能为空".to_string());
+    }
+    let lower = base.to_ascii_lowercase();
+    Ok(if lower.ends_with("/images/edits") {
+        base
+    } else if lower.ends_with("/images/generations") {
+        remove_suffix_ignore_case(&base, "/images/generations") + "/images/edits"
+    } else if lower.ends_with("/chat/completions") {
+        remove_suffix_ignore_case(&base, "/chat/completions") + "/images/edits"
+    } else if lower.ends_with("/v1") || is_versioned_ai_base_url(&base) {
+        format!("{}/images/edits", base)
+    } else {
+        format!("{}/v1/images/edits", base)
+    })
+}
+
+fn ai_image_mime_from_bytes(bytes: &[u8]) -> (&'static str, &'static str) {
+    match detect_image_ext(bytes) {
+        "png" => ("png", "image/png"),
+        "webp" => ("webp", "image/webp"),
+        "gif" => ("gif", "image/gif"),
+        "jpg" | "jpeg" => ("jpg", "image/jpeg"),
+        _ => ("jpg", "image/jpeg"),
+    }
+}
+
+fn validate_ai_image_bytes(bytes: &[u8], label: &str) -> Result<(), String> {
+    if bytes.is_empty() {
+        return Err(format!("{}为空", label));
+    }
+    if bytes.len() > AI_IMAGE_MAX_RESPONSE_BYTES {
+        return Err(format!("{}过大", label));
+    }
+    image::load_from_memory(bytes)
+        .map(|_| ())
+        .map_err(|_| format!("无法识别{}的图片内容", label))
+}
+
+fn decode_ai_base64_image(value: &str) -> Option<Vec<u8>> {
+    let trimmed = value.trim();
+    let encoded = if trimmed.to_ascii_lowercase().starts_with("data:image/") {
+        trimmed.split_once(',')?.1.trim()
+    } else {
+        trimmed
+    };
+    if encoded.len() < 80 || encoded.contains(char::is_whitespace) {
+        return None;
+    }
+    let bytes = general_purpose::STANDARD.decode(encoded).ok()?;
+    validate_ai_image_bytes(&bytes, "返回图片").ok()?;
+    Some(bytes)
+}
+
+fn decode_ai_data_url(value: &str) -> Option<Vec<u8>> {
+    if !value.trim().to_ascii_lowercase().starts_with("data:image/") {
+        return None;
+    }
+    decode_ai_base64_image(value)
+}
+
+fn is_remote_ai_url(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://")
+}
+
+fn ai_json_error_preview(text: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message").or(Some(error)))
+                .and_then(|message| message.as_str().map(|s| s.to_string()))
+        })
+        .unwrap_or_else(|| text.chars().take(240).collect())
+}
+
+fn image_size_candidates(requested: &str, target: &str) -> Vec<String> {
+    let fallback = match target {
+        "banner" => "1536x768",
+        "standard" => "1200x1600",
+        _ => "1024x1792",
+    };
+    let secondary_fallback = match target {
+        "banner" => "1280x640",
+        "standard" => "1024x1365",
+        _ => "1400x2400",
+    };
+    let mut values = vec![
+        requested.trim().to_string(),
+        fallback.to_string(),
+        secondary_fallback.to_string(),
+        String::new(),
+    ];
+    values.dedup();
+    values
+}
+
+fn render_ai_image_prompt(template: &str, title: Option<&str>, author: Option<&str>) -> String {
+    let title = title.unwrap_or("").trim();
+    let title = if title.is_empty() {
+        "当前书籍"
+    } else {
+        title
+    };
+    let raw_author = author.unwrap_or("").trim();
+    let mut prompt = template.trim().to_string();
+    if raw_author.is_empty() {
+        for marker in [
+            "作者{author}的",
+            "作者{{author}}的",
+            "作者 {author} 的",
+            "作者 {{author}} 的",
+        ] {
+            prompt = prompt.replace(marker, "");
+        }
+    }
+    let author = if raw_author.is_empty() {
+        ""
+    } else {
+        raw_author
+    };
+    let replaced = prompt
+        .replace("{title}", title)
+        .replace("{{title}}", title)
+        .replace("{{text}}", title)
+        .replace("{author}", author)
+        .replace("{{author}}", author);
+    if prompt.contains("{title}")
+        || prompt.contains("{{title}}")
+        || prompt.contains("{{text}}")
+        || prompt.contains("{author}")
+        || prompt.contains("{{author}}")
+    {
+        replaced
+    } else {
+        let book_info = if author.is_empty() {
+            title.to_string()
+        } else {
+            format!("{} / {}", title, author)
+        };
+        format!("{}\n\n书籍信息：{}", replaced, book_info)
+    }
+}
+
+fn build_ai_image_request_bodies(
+    model: &str,
+    prompt: &str,
+    size: &str,
+    reference_data_url: Option<&str>,
+) -> Vec<serde_json::Value> {
+    fn base_body(
+        model: &str,
+        prompt: &str,
+        size: &str,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "model".to_string(),
+            serde_json::Value::String(model.to_string()),
+        );
+        map.insert(
+            "prompt".to_string(),
+            serde_json::Value::String(prompt.to_string()),
+        );
+        map.insert("n".to_string(), serde_json::Value::Number(1.into()));
+        if !size.trim().is_empty() {
+            map.insert(
+                "size".to_string(),
+                serde_json::Value::String(size.trim().to_string()),
+            );
+        }
+        map
+    }
+
+    let mut bodies = Vec::new();
+    if let Some(reference) = reference_data_url.filter(|value| !value.trim().is_empty()) {
+        for variant in [
+            "image_array",
+            "image_string",
+            "image_urls_array",
+            "image_array_no_format",
+            "image_string_no_format",
+            "image_urls_array_no_format",
+        ] {
+            let mut map = base_body(model, prompt, size);
+            match variant {
+                "image_array" | "image_array_no_format" => {
+                    map.insert("image".to_string(), serde_json::json!([reference]));
+                }
+                "image_string" | "image_string_no_format" => {
+                    map.insert(
+                        "image".to_string(),
+                        serde_json::Value::String(reference.to_string()),
+                    );
+                }
+                _ => {
+                    map.insert("image_urls".to_string(), serde_json::json!([reference]));
+                }
+            }
+            if !variant.ends_with("_no_format") {
+                map.insert(
+                    "response_format".to_string(),
+                    serde_json::Value::String("b64_json".to_string()),
+                );
+            }
+            bodies.push(serde_json::Value::Object(map));
+        }
+    }
+
+    let mut with_format = base_body(model, prompt, size);
+    with_format.insert(
+        "response_format".to_string(),
+        serde_json::Value::String("b64_json".to_string()),
+    );
+    bodies.push(serde_json::Value::Object(with_format));
+    bodies.push(serde_json::Value::Object(base_body(model, prompt, size)));
+
+    let mut seen = HashSet::new();
+    bodies
+        .into_iter()
+        .filter(|body| seen.insert(body.to_string()))
+        .collect()
+}
+
+async fn download_ai_image_url(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
+    let response = client
+        .get(url.trim())
+        .header("Accept", "image/*,*/*;q=0.8")
+        .send()
+        .await
+        .map_err(|e| format!("下载生成图片失败: {}", e))?;
+    let status = response.status();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("读取生成图片失败: {}", e))?;
+    if !status.is_success() {
+        return Err(format!("下载生成图片返回 {}", status));
+    }
+    let bytes = bytes.to_vec();
+    validate_ai_image_bytes(&bytes, "生成图片")?;
+    Ok(bytes)
+}
+
+async fn extract_ai_image_bytes(
+    client: &reqwest::Client,
+    value: &serde_json::Value,
+    key_hint: Option<&str>,
+) -> Option<Vec<u8>> {
+    match value {
+        serde_json::Value::String(text) => {
+            if let Some(bytes) = decode_ai_data_url(text).or_else(|| decode_ai_base64_image(text)) {
+                return Some(bytes);
+            }
+            let key = key_hint.unwrap_or("").to_ascii_lowercase();
+            if (key.contains("url") || key == "uri" || key == "href") && is_remote_ai_url(text) {
+                return download_ai_image_url(client, text).await.ok();
+            }
+            None
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                if let Some(bytes) = Box::pin(extract_ai_image_bytes(client, item, key_hint)).await
+                {
+                    return Some(bytes);
+                }
+            }
+            None
+        }
+        serde_json::Value::Object(map) => {
+            for key in [
+                "b64_json",
+                "base64",
+                "image_base64",
+                "data",
+                "content",
+                "url",
+                "image_url",
+                "uri",
+                "href",
+            ] {
+                if let Some(item) = map.get(key) {
+                    if let Some(bytes) =
+                        Box::pin(extract_ai_image_bytes(client, item, Some(key))).await
+                    {
+                        return Some(bytes);
+                    }
+                }
+            }
+            for (key, item) in map {
+                if let Some(bytes) = Box::pin(extract_ai_image_bytes(client, item, Some(key))).await
+                {
+                    return Some(bytes);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+async fn request_ai_image_generation(
+    client: &reqwest::Client,
+    request: &ToolboxAiImageRequest,
+    body: &serde_json::Value,
+) -> Result<Vec<u8>, String> {
+    let url = ai_image_generation_url(&request.base_url)?;
+    let response = client
+        .post(url)
+        .bearer_auth(request.api_key.trim())
+        .header("Accept", "application/json,image/*")
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| format!("请求生图接口失败: {}", e))?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("读取生图响应失败: {}", e))?;
+    if bytes.len() > AI_IMAGE_MAX_RESPONSE_BYTES {
+        return Err("生图响应过大".to_string());
+    }
+    if !status.is_success() {
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        return Err(format!(
+            "生图接口返回 {}: {}",
+            status,
+            ai_json_error_preview(&text)
+        ));
+    }
+    if content_type.starts_with("image/") {
+        let out = bytes.to_vec();
+        validate_ai_image_bytes(&out, "生成图片")?;
+        return Ok(out);
+    }
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "生图接口未返回有效 JSON: {}; {}",
+            e,
+            text.chars().take(180).collect::<String>()
+        )
+    })?;
+    extract_ai_image_bytes(client, &value, None)
+        .await
+        .ok_or_else(|| "生图接口返回中没有图片数据".to_string())
+}
+
+async fn request_ai_image_edit(
+    client: &reqwest::Client,
+    request: &ToolboxAiImageRequest,
+    prompt: &str,
+    size: &str,
+    reference_bytes: &[u8],
+) -> Result<Vec<u8>, String> {
+    let url = ai_image_edits_url(&request.base_url)?;
+    let (ext, mime) = ai_image_mime_from_bytes(reference_bytes);
+    let mut form = reqwest::multipart::Form::new()
+        .text("model", request.model.trim().to_string())
+        .text("prompt", prompt.to_string())
+        .text("n", "1")
+        .text("response_format", "b64_json");
+    if !size.trim().is_empty() {
+        form = form.text("size", size.trim().to_string());
+    }
+    form = form.part(
+        "image",
+        reqwest::multipart::Part::bytes(reference_bytes.to_vec())
+            .file_name(format!("reference.{}", ext))
+            .mime_str(mime)
+            .map_err(|e| format!("构造参考图失败: {}", e))?,
+    );
+
+    let response = client
+        .post(url)
+        .bearer_auth(request.api_key.trim())
+        .header("Accept", "application/json,image/*")
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("请求图片编辑接口失败: {}", e))?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("读取图片编辑响应失败: {}", e))?;
+    if bytes.len() > AI_IMAGE_MAX_RESPONSE_BYTES {
+        return Err("图片编辑响应过大".to_string());
+    }
+    if !status.is_success() {
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        return Err(format!(
+            "图片编辑接口返回 {}: {}",
+            status,
+            ai_json_error_preview(&text)
+        ));
+    }
+    if content_type.starts_with("image/") {
+        let out = bytes.to_vec();
+        validate_ai_image_bytes(&out, "生成图片")?;
+        return Ok(out);
+    }
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "图片编辑接口未返回有效 JSON: {}; {}",
+            e,
+            text.chars().take(180).collect::<String>()
+        )
+    })?;
+    extract_ai_image_bytes(client, &value, None)
+        .await
+        .ok_or_else(|| "图片编辑接口返回中没有图片数据".to_string())
+}
+
+#[tauri::command]
+async fn toolbox_generate_ai_image(
+    request: ToolboxAiImageRequest,
+) -> Result<ToolboxAiImageResult, String> {
+    if request.base_url.trim().is_empty()
+        || request.api_key.trim().is_empty()
+        || request.model.trim().is_empty()
+    {
+        return Err("请先填写 Base URL、API Key 和模型".to_string());
+    }
+    if request.prompt.trim().is_empty() {
+        return Err("提示词不能为空".to_string());
+    }
+    let target = match request.target.trim() {
+        "duokan" | "cover" => "duokan",
+        "standard" => "standard",
+        "banner" => "banner",
+        _ => "duokan",
+    };
+    let reference_data = request.reference_data.as_deref();
+    if let Some(bytes) = reference_data {
+        if bytes.len() > AI_IMAGE_MAX_INPUT_BYTES {
+            return Err("参考封面图片过大".to_string());
+        }
+        validate_ai_image_bytes(bytes, "参考封面")?;
+    }
+
+    let prompt = render_ai_image_prompt(
+        &request.prompt,
+        request.title.as_deref(),
+        request.author.as_deref(),
+    );
+    let client = reqwest::Client::builder()
+        .user_agent(AI_IMAGE_USER_AGENT)
+        .connect_timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("初始化生图客户端失败: {}", e))?;
+
+    let reference_data_url = reference_data.map(|bytes| {
+        let (_, mime) = ai_image_mime_from_bytes(bytes);
+        format!(
+            "data:{};base64,{}",
+            mime,
+            general_purpose::STANDARD.encode(bytes)
+        )
+    });
+    let sizes = image_size_candidates(&request.size, target);
+    let is_gpt_image = request.model.to_ascii_lowercase().contains("gpt-image");
+    let mut last_error = None;
+
+    if is_gpt_image {
+        if let Some(bytes) = reference_data {
+            for size in &sizes {
+                match request_ai_image_edit(&client, &request, &prompt, size, bytes).await {
+                    Ok(out) => {
+                        let (ext, mime) = ai_image_mime_from_bytes(&out);
+                        let stem =
+                            sanitize_filename_part(request.title.as_deref().unwrap_or(target));
+                        let stem = if stem.is_empty() {
+                            target.to_string()
+                        } else {
+                            stem
+                        };
+                        let file_name = format!("{}-{}.{}", stem, target, ext);
+                        return Ok(ToolboxAiImageResult {
+                            bytes: out,
+                            mime: mime.to_string(),
+                            extension: ext.to_string(),
+                            file_name,
+                            prompt,
+                            size: size.clone(),
+                        });
+                    }
+                    Err(e) => last_error = Some(e),
+                }
+            }
+        }
+    }
+
+    for size in &sizes {
+        for body in build_ai_image_request_bodies(
+            &request.model,
+            &prompt,
+            size,
+            reference_data_url.as_deref(),
+        ) {
+            match request_ai_image_generation(&client, &request, &body).await {
+                Ok(out) => {
+                    let (ext, mime) = ai_image_mime_from_bytes(&out);
+                    let stem = sanitize_filename_part(request.title.as_deref().unwrap_or(target));
+                    let stem = if stem.is_empty() {
+                        target.to_string()
+                    } else {
+                        stem
+                    };
+                    let file_name = format!("{}-{}.{}", stem, target, ext);
+                    return Ok(ToolboxAiImageResult {
+                        bytes: out,
+                        mime: mime.to_string(),
+                        extension: ext.to_string(),
+                        file_name,
+                        prompt,
+                        size: size.clone(),
+                    });
+                }
+                Err(e) => last_error = Some(e),
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| "未获取到生图结果".to_string()))
+}
+
 #[tauri::command]
 fn toolbox_epub_diagnose(epub_path: String) -> Result<ToolboxEpubDiagnosticResult, String> {
     let source = PathBuf::from(&epub_path);
@@ -4834,6 +5461,50 @@ fn toolbox_epub_diagnose(epub_path: String) -> Result<ToolboxEpubDiagnosticResul
         warning_count,
         issues,
     })
+}
+
+fn toolbox_epub_diagnose_tool_result(source: &Path) -> Result<ToolboxEpubToolResult, String> {
+    let result = toolbox_epub_diagnose(source.to_string_lossy().to_string())?;
+    let action = if result.error_count > 0 || result.warning_count > 0 {
+        "epub_diagnose_issue"
+    } else {
+        "epub_diagnose_clean"
+    };
+    let message = if result.error_count == 0 && result.warning_count == 0 {
+        format!(
+            "EPUB diagnosis completed: no structural issues found; {} ZIP entries, {} manifest items",
+            result.total_entries, result.manifest_items
+        )
+    } else {
+        let mut lines = vec![format!(
+            "EPUB diagnosis completed: {} errors, {} warnings; {} ZIP entries, {} manifest items",
+            result.error_count, result.warning_count, result.total_entries, result.manifest_items
+        )];
+        for issue in result.issues.iter().take(6) {
+            let path = issue
+                .path
+                .as_deref()
+                .filter(|value| !value.is_empty())
+                .map(|value| format!(" [{}]", value))
+                .unwrap_or_default();
+            lines.push(format!(
+                "{} {}{}: {}",
+                issue.level, issue.kind, path, issue.message
+            ));
+        }
+        if result.issues.len() > 6 {
+            lines.push(format!("... and {} more issues", result.issues.len() - 6));
+        }
+        lines.join("\n")
+    };
+
+    Ok(toolbox_epub_tool_result(
+        source,
+        source,
+        false,
+        action,
+        message,
+    ))
 }
 
 #[tauri::command]
@@ -6975,11 +7646,9 @@ async fn extract_epub(
     app: tauri::AppHandle,
     epub_path: String,
 ) -> Result<Vec<EpubFileNode>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        extract_epub_impl(app, epub_path)
-    })
-    .await
-    .map_err(|e| format!("解压 EPUB 任务失败: {}", e))?
+    tauri::async_runtime::spawn_blocking(move || extract_epub_impl(app, epub_path))
+        .await
+        .map_err(|e| format!("解压 EPUB 任务失败: {}", e))?
 }
 
 fn extract_epub_impl(
@@ -7265,10 +7934,7 @@ async fn load_epub_file_meta(
             let mut title = None;
             let mut resolution = None;
 
-            if lower.ends_with(".html")
-                || lower.ends_with(".htm")
-                || lower.ends_with(".xhtml")
-            {
+            if lower.ends_with(".html") || lower.ends_with(".htm") || lower.ends_with(".xhtml") {
                 if let Ok(content) = fs::read_to_string(&full_path) {
                     title = extract_html_heading_title(&content);
                 }
@@ -7407,7 +8073,8 @@ async fn read_epub_files_batch(
         // 2. 批量读取未缓存的文件
         if !to_read.is_empty() {
             let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
-            let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+            let mut archive =
+                ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
 
             let mut new_contents: Vec<(String, String)> = Vec::new();
 
@@ -7475,7 +8142,8 @@ async fn read_epub_binary_batch(
         // 2. 批量读取
         if !to_read.is_empty() {
             let file = fs::File::open(&epub_path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
-            let mut archive = ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
+            let mut archive =
+                ZipArchive::new(file).map_err(|e| format!("无效的 EPUB 文件: {}", e))?;
 
             let mut new_data: Vec<(String, Vec<u8>)> = Vec::new();
 
@@ -12079,12 +12747,85 @@ mod toolbox_tests {
     }
 }
 
+fn restore_primary_window(app: &tauri::AppHandle) {
+    for label in ["toolbox", "main"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+            return;
+        }
+    }
+
+    if let Ok(window) = tauri::WebviewWindowBuilder::new(
+        app,
+        "main",
+        tauri::WebviewUrl::App("/".into()),
+    )
+    .title("TEpub Editor")
+    .inner_size(1200.0, 740.0)
+    .min_inner_size(1200.0, 740.0)
+    .center()
+    .build()
+    {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            let app_bg = Some(Color(238, 244, 248, 255));
+            for window in app.webview_windows().values() {
+                let _ = window.set_background_color(app_bg);
+            }
+            let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let icon = app
+                .default_window_icon()
+                .cloned()
+                .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
+            TrayIconBuilder::new()
+                .tooltip("TEpub-Editor")
+                .icon(icon)
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        restore_primary_window(app);
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        restore_primary_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if matches!(window.label(), "main" | "toolbox") {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             save_text_file,
@@ -12141,6 +12882,7 @@ pub fn run() {
             toolbox_font_decrypt,
             toolbox_epub_reformat,
             toolbox_image_convert,
+            toolbox_generate_ai_image,
             toolbox_epub_diagnose,
             toolbox_scan_batch_inputs,
             toolbox_cancel_batch,

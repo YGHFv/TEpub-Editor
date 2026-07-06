@@ -5,6 +5,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { ask, open, save } from "@tauri-apps/plugin-dialog";
   import { writeTextFile } from "@tauri-apps/plugin-fs";
+  import CustomSelect from "$lib/CustomSelect.svelte";
 
   type BatchEvent = {
     taskId: string;
@@ -58,6 +59,17 @@
     { value: "overwrite", label: "覆盖", hint: "直接覆盖同名目标文件" },
   ];
 
+  const OUTPUT_MODE_OPTIONS = OUTPUT_MODES.map((mode) => ({
+    value: mode.value,
+    label: mode.label,
+    meta: mode.hint,
+  }));
+  const CONFLICT_MODE_OPTIONS = CONFLICT_MODES.map((mode) => ({
+    value: mode.value,
+    label: mode.label,
+    meta: mode.hint,
+  }));
+
   type BatchSummary = {
     taskId: string;
     total: number;
@@ -76,6 +88,7 @@
   const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
 
   const TOOL_META: Record<string, { title: string; detail: string }> = {
+    "epub-diagnose": { title: "EPUB Diagnose", detail: "Batch check EPUB structure, references, and manifest issues" },
     "file-encrypt": { title: "文件加密", detail: "混淆 EPUB 内部文件名并同步引用" },
     "file-decrypt": { title: "文件解密", detail: "还原混淆文件名，支持单本、多本和目录扫描" },
     "font-encrypt": { title: "字体加密", detail: "对 EPUB 正文字形进行不可逆混淆处理" },
@@ -648,7 +661,8 @@
   </section>
 
   <section class="workspace">
-    <section class="panel execute-panel" aria-label="任务配置">
+    <div class="left-column">
+      <section class="panel execute-panel" aria-label="任务配置">
       <div class="panel-head">
         <div>
           <div class="eyebrow">任务配置</div>
@@ -667,22 +681,32 @@
       </div>
 
       <div class="field-row">
-        <label class="field-select" for="outputMode">
+        <div class="field-select" title={OUTPUT_MODES.find((m) => m.value === outputMode)?.hint}>
           <span>输出位置</span>
-          <select id="outputMode" bind:value={outputMode} disabled={running || scanning} on:change={saveTaskConfig} title={OUTPUT_MODES.find((m) => m.value === outputMode)?.hint}>
-            {#each OUTPUT_MODES as mode}
-              <option value={mode.value}>{mode.label}</option>
-            {/each}
-          </select>
-        </label>
-        <label class="field-select" for="conflictMode">
+          <CustomSelect
+            className="batch-select"
+            value={outputMode}
+            options={OUTPUT_MODE_OPTIONS}
+            disabled={running || scanning}
+            on:change={(e) => {
+              outputMode = e.detail;
+              saveTaskConfig();
+            }}
+          />
+        </div>
+        <div class="field-select" title={CONFLICT_MODES.find((m) => m.value === conflictMode)?.hint}>
           <span>冲突处理</span>
-          <select id="conflictMode" bind:value={conflictMode} disabled={running || scanning} on:change={saveTaskConfig} title={CONFLICT_MODES.find((m) => m.value === conflictMode)?.hint}>
-            {#each CONFLICT_MODES as mode}
-              <option value={mode.value}>{mode.label}</option>
-            {/each}
-          </select>
-        </label>
+          <CustomSelect
+            className="batch-select"
+            value={conflictMode}
+            options={CONFLICT_MODE_OPTIONS}
+            disabled={running || scanning}
+            on:change={(e) => {
+              conflictMode = e.detail;
+              saveTaskConfig();
+            }}
+          />
+        </div>
       </div>
 
       <div class="tool-run-row">
@@ -722,7 +746,36 @@
           <span class:error={failedRows.length > 0}>失败 {failedRows.length}</span>
         </div>
       {/if}
-    </section>
+      </section>
+
+      <section class="panel log-panel" aria-label="处理日志">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">过程</div>
+            <h2>处理日志</h2>
+          </div>
+          <div class="log-actions">
+            <div class="segmented" aria-label="日志筛选">
+              <button type="button" class:active={logFilter === "all"} on:click={() => (logFilter = "all")}>全部</button>
+              <button type="button" class:active={logFilter === "error"} on:click={() => (logFilter = "error")}>错误</button>
+              <button type="button" class:active={logFilter === "warning"} on:click={() => (logFilter = "warning")}>警告</button>
+            </div>
+            <button class="ghost-btn compact-btn" type="button" on:click={exportLogs} disabled={logs.length === 0}>导出日志</button>
+            <button class="ghost-btn compact-btn" type="button" on:click={exportReport} disabled={rows.length === 0}>导出报告</button>
+            <button class="ghost-btn compact-btn" type="button" on:click={clearLog} disabled={logs.length === 0}>清空日志</button>
+          </div>
+        </div>
+        <div class="log-list">
+          {#if filteredLogs.length === 0}
+            <div class="empty">尚未执行任务。</div>
+          {:else}
+            {#each filteredLogs as log}
+              <div class={`log-line level-${log.level}`}>{log.text}</div>
+            {/each}
+          {/if}
+        </div>
+      </section>
+    </div>
 
     <section class="panel queue-panel" aria-label="文件队列">
       <div class="panel-head">
@@ -786,34 +839,6 @@
       </div>
     </section>
   </section>
-
-  <section class="panel log-panel" aria-label="处理日志">
-    <div class="panel-head">
-      <div>
-        <div class="eyebrow">过程</div>
-        <h2>处理日志</h2>
-      </div>
-      <div class="log-actions">
-        <div class="segmented" aria-label="日志筛选">
-          <button type="button" class:active={logFilter === "all"} on:click={() => (logFilter = "all")}>全部</button>
-          <button type="button" class:active={logFilter === "error"} on:click={() => (logFilter = "error")}>错误</button>
-          <button type="button" class:active={logFilter === "warning"} on:click={() => (logFilter = "warning")}>警告</button>
-        </div>
-        <button class="ghost-btn compact-btn" type="button" on:click={exportLogs} disabled={logs.length === 0}>导出日志</button>
-        <button class="ghost-btn compact-btn" type="button" on:click={exportReport} disabled={rows.length === 0}>导出报告</button>
-        <button class="ghost-btn compact-btn" type="button" on:click={clearLog} disabled={logs.length === 0}>清空日志</button>
-      </div>
-    </div>
-    <div class="log-list">
-      {#if filteredLogs.length === 0}
-        <div class="empty">尚未执行任务。</div>
-      {:else}
-        {#each filteredLogs as log}
-          <div class={`log-line level-${log.level}`}>{log.text}</div>
-        {/each}
-      {/if}
-    </div>
-  </section>
 </main>
 
 <style>
@@ -827,9 +852,13 @@
     box-sizing: border-box;
     height: 100vh;
     display: grid;
-    grid-template-rows: auto auto minmax(260px, 1fr) minmax(150px, 190px);
-    gap: 18px;
-    padding: 28px;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "source"
+      "workspace";
+    gap: 14px;
+    padding: 20px 24px 22px;
     overflow: hidden;
     background: var(--color-canvas);
     color: var(--color-text);
@@ -857,6 +886,14 @@
   .batch-head h1 {
     font-size: 22px;
     line-height: 1.25;
+  }
+
+  .batch-head {
+    display: none;
+  }
+
+  .batch-head .eyebrow {
+    display: none;
   }
 
   .source-copy h2,
@@ -892,8 +929,9 @@
   }
 
   .source-panel {
+    grid-area: source;
     align-items: center;
-    padding: 18px 20px;
+    padding: 14px 18px;
   }
 
   .source-actions,
@@ -971,31 +1009,41 @@
   }
 
   .workspace {
+    grid-area: workspace;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
-    align-items: stretch;
-    gap: 18px;
+    grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr);
+    gap: 14px;
+    overflow: hidden;
+  }
+
+  .left-column {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: max-content minmax(0, 1fr);
+    gap: 14px;
     overflow: hidden;
   }
 
   .panel {
     min-height: 0;
-    padding: 16px;
+    padding: 14px;
     overflow: hidden;
   }
 
   .execute-panel {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    overflow: hidden;
+    gap: 10px;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
   }
 
   .field-block {
     display: grid;
     gap: 6px;
-    padding: 12px;
+    padding: 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-canvas);
@@ -1032,7 +1080,7 @@
   .field-select {
     display: grid;
     gap: 6px;
-    padding: 12px;
+    padding: 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     background: var(--color-canvas);
@@ -1045,20 +1093,8 @@
     font-weight: 700;
   }
 
-  .field-select select {
-    min-width: 0;
-    padding: 6px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface, var(--color-canvas));
-    color: var(--color-text);
-    font-size: 13px;
-    line-height: 1.4;
-  }
-
-  .field-select select:focus {
-    outline: none;
-    border-color: var(--color-accent, var(--color-border));
+  .field-select :global(.batch-select) {
+    --control-height: 44px;
   }
 
   @media (max-width: 720px) {
@@ -1088,7 +1124,7 @@
   .tool-run-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) repeat(4, auto);
-    gap: 12px;
+    gap: 8px;
     align-items: center;
   }
 
@@ -1418,7 +1454,11 @@
     }
 
     .batch-app {
-      grid-template-rows: auto auto auto minmax(160px, 1fr);
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto;
+      grid-template-areas:
+        "source"
+        "workspace";
       height: auto;
       min-height: 100vh;
       padding: 16px;
@@ -1434,6 +1474,11 @@
 
     .workspace {
       grid-template-columns: 1fr;
+      gap: 14px;
+      overflow: visible;
+    }
+
+    .left-column {
       overflow: visible;
     }
 

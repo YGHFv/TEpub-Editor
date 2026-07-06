@@ -11,6 +11,10 @@
     import SettingsShell from "$lib/SettingsShell.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
     import {
+        loadAppSettings as loadGlobalAppSettings,
+        saveAppSettings as saveGlobalAppSettings,
+    } from "$lib/appSettings";
+    import {
         applyTitleRewrite,
         applyBuiltinRegexPreview,
         applyChineseConvertPreview,
@@ -139,6 +143,7 @@
     interface AiProviderConfig {
         id: string;
         name: string;
+        kind?: "text" | "image";
         baseUrl: string;
         apiKey: string;
         model: string;
@@ -372,6 +377,7 @@
         return {
             id: newAiProviderId(),
             name: config.model || "默认 API",
+            kind: "text",
             baseUrl: config.baseUrl,
             apiKey: config.apiKey,
             model: config.model,
@@ -385,6 +391,7 @@
         return {
             id,
             name: String(provider?.name || model || `API ${index + 1}`).trim(),
+            kind: provider?.kind === "image" ? "image" : "text",
             baseUrl: String(provider?.baseUrl || DEFAULT_AI_PROOFING.baseUrl).trim(),
             apiKey: String(provider?.apiKey || ""),
             model,
@@ -393,12 +400,15 @@
     }
 
     function normalizeAiProviders(config: LibraryConfig | undefined, fallback: AiProofingConfig) {
-        const providers = (config?.aiProviders || []).map(normalizeAiProvider).filter((item) => item.id);
+        const providers = (config?.aiProviders || [])
+            .filter((item) => item?.kind !== "image")
+            .map(normalizeAiProvider)
+            .filter((item) => item.id);
         if (providers.length > 0) return providers;
-        if (fallback.apiKey || fallback.baseUrl || fallback.model) {
+        if (fallback.apiKey) {
             return [createAiProviderFromProofing(fallback)];
         }
-        return [createAiProviderFromProofing(DEFAULT_AI_PROOFING)];
+        return [];
     }
 
     function providerToProofingConfig(provider: AiProviderConfig | undefined, base: AiProofingConfig) {
@@ -429,6 +439,7 @@
             {
                 id: seed.id || newAiProviderId(),
                 name: seed.name || "新 API",
+                kind: "text",
                 baseUrl: seed.baseUrl || DEFAULT_AI_PROOFING.baseUrl,
                 apiKey: seed.apiKey || "",
                 model: seed.model || DEFAULT_AI_PROOFING.model,
@@ -436,6 +447,17 @@
             },
             aiProviders.length,
         );
+    }
+
+    function getUrlFileParam() {
+        try {
+            const sp = new URLSearchParams(window.location.search);
+            const f = sp.get("file");
+            return f || null;
+        } catch (e) {
+            console.warn("解析 URL ?file= 失败:", e);
+            return null;
+        }
     }
 
     function isLegacyLooseMetaRegex(pattern: string | undefined) {
@@ -1494,12 +1516,12 @@
     async function loadSharedLibrarySettings() {
         try {
             libraryData = await invoke<LibraryData>("load_library");
-            aiProofingConfig = normalizeAiProofingConfig(libraryData?.config?.aiProofing);
-            aiProviders = normalizeAiProviders(libraryData?.config, aiProofingConfig);
-            txtAiProofingConfig = {
-                ...DEFAULT_TXT_AI_PROOFING,
-                ...(libraryData?.config?.txtAiProofing || {}),
-            };
+            const appSettings = saveGlobalAppSettings(loadGlobalAppSettings(libraryData?.config || {}));
+            aiProofingConfig = normalizeAiProofingConfig(appSettings.aiProofing);
+            aiProviders = appSettings.aiProviders
+                .filter((provider) => provider.kind !== "image")
+                .map((provider, index) => normalizeAiProvider(provider, index));
+            txtAiProofingConfig = { ...DEFAULT_TXT_AI_PROOFING, ...appSettings.txtAiProofing };
             if (!txtAiProofingConfig.providerId || !findAiProvider(txtAiProofingConfig.providerId)) {
                 txtAiProofingConfig.providerId = aiProviders[0]?.id || "";
             }
@@ -1508,7 +1530,7 @@
             }
             aiProviderDraftId = txtAiProofingConfig.providerId || aiProviders[0]?.id || "";
             aiProofingConfig = providerToProofingConfig(findAiProvider(txtAiProofingConfig.providerId), aiProofingConfig);
-            const action = libraryData?.config?.txtEditorCloseAction;
+            const action = appSettings.txtEditorCloseAction;
             if (action === "exit" || action === "library") {
                 txtEditorCloseAction = action;
             }
@@ -1527,9 +1549,6 @@
     async function saveSharedAiProofingSettings() {
         aiProofingConfig = normalizeAiProofingConfig(aiProofingConfig);
         aiProviders = aiProviders.map(normalizeAiProvider);
-        if (aiProviders.length === 0) {
-            aiProviders = [createBlankAiProvider({ name: "默认 API" })];
-        }
         if (!txtAiProofingConfig.providerId || !findAiProvider(txtAiProofingConfig.providerId)) {
             txtAiProofingConfig.providerId = aiProviders[0]?.id || "";
         }
@@ -1542,18 +1561,15 @@
         }
         aiSettingsMessage = "正在保存...";
         try {
-            const data = await invoke<LibraryData>("load_library");
-            libraryData = {
-                ...data,
-                config: {
-                    ...(data.config || {}),
-                    aiProofing: aiProofingConfig,
-                    aiProviders,
-                    txtAiProofing: txtAiProofingConfig,
-                },
-            };
-            await invoke("save_library", { data: libraryData });
-            aiSettingsMessage = "已保存，书库设置与 TXT 编辑器设置已同步";
+            const currentGlobalSettings = loadGlobalAppSettings(libraryData?.config || {});
+            const imageProviders = currentGlobalSettings.aiProviders.filter((provider) => provider.kind === "image");
+            saveGlobalAppSettings({
+                ...currentGlobalSettings,
+                aiProofing: aiProofingConfig,
+                aiProviders: [...aiProviders.map((provider) => ({ ...provider, kind: "text" as const })), ...imageProviders],
+                txtAiProofing: txtAiProofingConfig,
+            });
+            aiSettingsMessage = "已保存，工具箱设置与 TXT 编辑器设置已同步";
         } catch (error) {
             console.error("保存智能校对设置失败:", error);
             aiSettingsMessage = `保存失败：${error}`;
@@ -1563,6 +1579,8 @@
     function openSettingsApiTab() {
         settingsActiveTab = "api";
         aiSettingsMessage = "";
+        apiEditorOpen = false;
+        apiEditorDraft = null;
         loadSharedLibrarySettings();
     }
 
@@ -1577,36 +1595,72 @@
     }
 
     function updateSelectedTxtAiProvider(field: keyof AiProviderConfig, value: string | number) {
-        const providerId = aiProviderDraftId || aiProviders[0]?.id || "";
-        if (!providerId) return;
-        aiProviders = aiProviders.map((provider) =>
-            provider.id === providerId ? normalizeAiProvider({ ...provider, [field]: value }, 0) : provider,
-        );
-        if (txtAiProofingConfig.providerId === providerId) {
-            aiProofingConfig = providerToProofingConfig(findAiProvider(providerId), aiProofingConfig);
-        }
+        if (!apiEditorDraft) return;
+        apiEditorDraft = normalizeAiProvider({ ...apiEditorDraft, [field]: value }, 0);
     }
 
-    async function addTxtAiProvider() {
-        const provider = createBlankAiProvider({ name: `API ${aiProviders.length + 1}` });
-        aiProviders = [...aiProviders, provider];
+    function addTxtAiProvider() {
+        apiEditorMode = "new";
+        aiProviderDraftId = "";
+        apiEditorDraft = createBlankAiProvider({ name: "" });
+        aiSettingsMessage = "";
+        apiEditorOpen = true;
+    }
+
+    function editTxtAiProvider(provider: AiProviderConfig) {
+        apiEditorMode = "edit";
+        aiProviderDraftId = provider.id;
+        apiEditorDraft = { ...provider };
+        aiSettingsMessage = "";
+        apiEditorOpen = true;
+    }
+
+    function cancelTxtAiProviderEditor() {
+        apiEditorOpen = false;
+        apiEditorDraft = null;
+        aiSettingsMessage = "";
+    }
+
+    function saveTxtAiProviderEditor() {
+        if (!apiEditorDraft) return;
+        const provider = normalizeAiProvider({
+            ...apiEditorDraft,
+            id: apiEditorMode === "edit" ? aiProviderDraftId : apiEditorDraft.id,
+            name: apiEditorDraft.name.trim() || "文字 API",
+            baseUrl: apiEditorDraft.baseUrl.trim(),
+            model: apiEditorDraft.model.trim(),
+        });
+        if (!provider.name.trim() || !provider.baseUrl.trim() || !provider.model.trim()) {
+            aiSettingsMessage = "请填写名称、API 地址和模型。";
+            return;
+        }
+        if (apiEditorMode === "edit") {
+            aiProviders = aiProviders.map((item) => (item.id === aiProviderDraftId ? provider : item));
+        } else {
+            aiProviders = [...aiProviders, provider];
+        }
         aiProviderDraftId = provider.id;
         if (!txtAiProofingConfig.providerId) txtAiProofingConfig.providerId = provider.id;
         if (!txtAiProofingConfig.approvalProviderId) txtAiProofingConfig.approvalProviderId = provider.id;
-        await saveSharedAiProofingSettings();
+        if (txtAiProofingConfig.providerId === provider.id) {
+            aiProofingConfig = providerToProofingConfig(provider, aiProofingConfig);
+        }
+        apiEditorOpen = false;
+        apiEditorDraft = null;
+        aiSettingsMessage = "API 配置已保存，点击完成后写入设置。";
     }
 
     async function removeTxtAiProvider(providerId: string) {
-        if (aiProviders.length <= 1) {
-            await message("至少保留一个 API 配置", { kind: "warning" });
-            return;
-        }
+        const wasEditing = apiEditorOpen && aiProviderDraftId === providerId;
         aiProviders = aiProviders.filter((provider) => provider.id !== providerId);
         const fallbackId = aiProviders[0]?.id || "";
         if (txtAiProofingConfig.providerId === providerId) txtAiProofingConfig.providerId = fallbackId;
         if (txtAiProofingConfig.approvalProviderId === providerId) txtAiProofingConfig.approvalProviderId = txtAiProofingConfig.providerId || fallbackId;
         aiProviderDraftId = fallbackId;
-        await saveSharedAiProofingSettings();
+        if (wasEditing) {
+            cancelTxtAiProviderEditor();
+        }
+        aiSettingsMessage = "API 配置已删除，点击完成后写入设置。";
     }
 
     async function openSettingsHistoryTab() {
@@ -2892,6 +2946,9 @@
     let aiProofingConfig: AiProofingConfig = { ...DEFAULT_AI_PROOFING };
     let aiProviders: AiProviderConfig[] = [];
     let aiProviderDraftId = "";
+    let apiEditorOpen = false;
+    let apiEditorMode: "new" | "edit" = "new";
+    let apiEditorDraft: AiProviderConfig | null = null;
     let txtAiProofingConfig: TxtAiProofingConfig = { ...DEFAULT_TXT_AI_PROOFING };
     let aiSettingsMessage = "";
     let isClosingEditorWindow = false;
@@ -2978,6 +3035,10 @@
             const { getCurrentWindow, LogicalPosition } = await import("@tauri-apps/api/window");
             const appWindow = getCurrentWindow();
             const label = appWindow.label;
+            const initialFilePath = getUrlFileParam() || await invoke<string | null>("get_launch_args");
+            if (initialFilePath) {
+                localStorage.removeItem("app-crash-recovery");
+            }
 
             // 1. 窗口位置恢复
             const savedPos = localStorage.getItem("window_pos_" + label);
@@ -3086,7 +3147,7 @@
 
             // 4. 崩溃恢复逻辑
             const savedState = localStorage.getItem("app-crash-recovery");
-            if (savedState) {
+            if (savedState && !initialFilePath) {
                 try {
                     const state = JSON.parse(savedState);
                     if (state.filePath && state.filePath !== "请打开一本小说...") {
@@ -3129,23 +3190,11 @@
 
             // 5. 文件关联启动 / 由书库子窗口传入的 ?file= 参数
             setTimeout(async () => {
-                // 优先 URL 查询参数（书库 openFilePathInEditor / openBook 用 /editor?file=... 创建子窗口）
-                let urlFile: string | null = null;
-                try {
-                    const sp = new URLSearchParams(window.location.search);
-                    const f = sp.get("file");
-                    if (f) urlFile = decodeURIComponent(f);
-                } catch (e) {
-                    console.warn("解析 URL ?file= 失败:", e);
-                }
-                if (urlFile) {
-                    openLocalFile(urlFile, true);
-                } else {
-                    const launchArg = await invoke<string | null>("get_launch_args");
-                    if (launchArg) openLocalFile(launchArg, true);
+                if (initialFilePath) {
+                    await openLocalFile(initialFilePath, true);
                 }
                 hasInitialized = true;
-            }, 500);
+            }, initialFilePath ? 0 : 500);
 
             // 6. 关闭拦截
             await appWindow.setTitle("TEpub-Editor-TXT");
@@ -3153,7 +3202,7 @@
                 const sp = new URLSearchParams(window.location.search);
                 openedFromLibrary = sp.get("fromLibrary") === "1";
                 if (!libraryData) await loadSharedLibrarySettings();
-                const action = libraryData?.config?.txtEditorCloseAction;
+                const action = loadGlobalAppSettings(libraryData?.config || {}).txtEditorCloseAction;
                 if (action === "exit" || action === "library") {
                     txtEditorCloseAction = action;
                 }
@@ -3411,6 +3460,8 @@
                 title: "高级选项",
                 width: 540,
                 height: 620,
+                minWidth: 540,
+                minHeight: 620,
                 resizable: true,
                 decorations: true,
                 center: true,
@@ -3492,6 +3543,8 @@
                                 title: "TEpub-Editor-EPUB",
                                 width: 1200,
                                 height: 740,
+                                minWidth: 1200,
+                                minHeight: 740,
                                 dragDropEnabled: true,
                                 center: true, // Center the window
                             },
@@ -3546,6 +3599,12 @@
                 isLoading = true;
                 isLoadingFile = true;
                 filePath = path;
+                fileContent = "";
+                tocTree = [];
+                flatToc = [];
+                activeChapterId = "";
+                await tick();
+                editorComponent?.resetDoc("");
 
                 // 读取原生文本并施加终极降维打击：强力规范化换行符！
                 let rawContent = await invoke<string>("read_text_file", {
@@ -5709,40 +5768,65 @@
                                 </div>
                                 <div class="style-settings-actions">
                                     <button class="mini-action" type="button" on:click={addTxtAiProvider}>新增</button>
-                                    <button class="mini-action danger" type="button" on:click={() => removeTxtAiProvider(aiProviderDraftId)}>删除</button>
                                 </div>
                             </div>
-                            <div class="set-row">
-                                <label for="aiProviderDraft">当前 API:</label>
-                                <select id="aiProviderDraft" bind:value={aiProviderDraftId}>
+
+                            {#if aiProviders.length === 0 && !apiEditorOpen}
+                                <div class="api-empty">暂无 API 配置，点击“新增”添加文字模型。</div>
+                            {:else}
+                                <div class="api-list">
                                     {#each aiProviders as provider}
-                                        <option value={provider.id}>{provider.name || provider.model}</option>
+                                        <div class="api-item">
+                                            <div class="api-item-main">
+                                                <div class="api-item-title">
+                                                    <strong>{provider.name || provider.model}</strong>
+                                                    <span>文字模型</span>
+                                                </div>
+                                                <div class="api-item-meta">
+                                                    <span>{provider.model || "未填写模型"}</span>
+                                                    <span>{provider.baseUrl || "未填写 API 地址"}</span>
+                                                    <span>{provider.apiKey ? "已保存 Key" : "未填写 Key"}</span>
+                                                </div>
+                                            </div>
+                                            <div class="api-item-actions">
+                                                <button class="mini-action" type="button" on:click={() => editTxtAiProvider(provider)}>编辑</button>
+                                                <button class="mini-action danger" type="button" on:click={() => removeTxtAiProvider(provider.id)}>删除</button>
+                                            </div>
+                                        </div>
                                     {/each}
-                                </select>
-                            </div>
-                            {#if selectedTxtAiProvider()}
-                                {#key aiProviderDraftId}
+                                </div>
+                            {/if}
+
+                            {#if apiEditorOpen && apiEditorDraft}
+                            <div class="api-editor">
+                                <div class="api-editor-head">
+                                    <strong>{apiEditorMode === "new" ? "新增 API" : "编辑 API"}</strong>
+                                    <div class="api-editor-actions">
+                                        <button class="mini-action primary" type="button" on:click={saveTxtAiProviderEditor}>保存</button>
+                                        <button class="mini-action" type="button" on:click={cancelTxtAiProviderEditor}>取消</button>
+                                    </div>
+                                </div>
                                 <div class="set-row">
                                     <label for="aiProviderName">名称:</label>
-                                    <input id="aiProviderName" type="text" value={selectedTxtAiProvider()?.name || ""} on:input={(e) => updateSelectedTxtAiProvider("name", e.currentTarget.value)} />
+                                    <input id="aiProviderName" type="text" value={apiEditorDraft.name || ""} on:input={(e) => updateSelectedTxtAiProvider("name", e.currentTarget.value)} />
                                 </div>
                                 <div class="set-row">
                                     <label for="aiProviderBaseUrl">API 地址:</label>
-                                    <input id="aiProviderBaseUrl" type="text" value={selectedTxtAiProvider()?.baseUrl || ""} on:input={(e) => updateSelectedTxtAiProvider("baseUrl", e.currentTarget.value)} placeholder="https://api.openai.com/v1" />
+                                    <input id="aiProviderBaseUrl" type="text" value={apiEditorDraft.baseUrl || ""} on:input={(e) => updateSelectedTxtAiProvider("baseUrl", e.currentTarget.value)} placeholder="https://api.openai.com/v1" />
                                 </div>
                                 <div class="set-row">
                                     <label for="aiProviderKey">API Key:</label>
-                                    <input id="aiProviderKey" type="password" value={selectedTxtAiProvider()?.apiKey || ""} on:input={(e) => updateSelectedTxtAiProvider("apiKey", e.currentTarget.value)} placeholder="sk-..." />
+                                    <input id="aiProviderKey" type="password" value={apiEditorDraft.apiKey || ""} on:input={(e) => updateSelectedTxtAiProvider("apiKey", e.currentTarget.value)} placeholder="sk-..." />
                                 </div>
                                 <div class="set-row">
                                     <label for="aiProviderModel">模型:</label>
-                                    <input id="aiProviderModel" type="text" value={selectedTxtAiProvider()?.model || ""} on:input={(e) => updateSelectedTxtAiProvider("model", e.currentTarget.value)} placeholder="deepseek-chat / gpt-4o-mini" />
+                                    <input id="aiProviderModel" type="text" value={apiEditorDraft.model || ""} on:input={(e) => updateSelectedTxtAiProvider("model", e.currentTarget.value)} placeholder="deepseek-chat / gpt-4o-mini" />
                                 </div>
                                 <div class="set-row">
                                     <label for="aiProviderTemperature">温度:</label>
-                                    <input id="aiProviderTemperature" type="number" min="0" max="1" step="0.1" value={selectedTxtAiProvider()?.temperature ?? 0.1} on:input={(e) => updateSelectedTxtAiProvider("temperature", Number(e.currentTarget.value))} />
+                                    <input id="aiProviderTemperature" type="number" min="0" max="1" step="0.1" value={apiEditorDraft.temperature ?? 0.1} on:input={(e) => updateSelectedTxtAiProvider("temperature", Number(e.currentTarget.value))} />
                                 </div>
-                                {/key}
+                            </div>
                             {/if}
                         </div>
                     {:else if settingsActiveTab === 'ai'}
@@ -6818,6 +6902,101 @@
 
     .ai-provider-head {
         margin-bottom: 4px;
+    }
+
+    .api-empty,
+    .api-item,
+    .api-editor {
+        border: 1px solid #e1e6ee;
+        border-radius: 8px;
+        background: #fff;
+    }
+
+    .api-empty {
+        padding: 10px 12px;
+        color: #667085;
+        font-size: 13px;
+        line-height: 1.5;
+    }
+
+    .api-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .api-item {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px;
+    }
+
+    .api-item-main {
+        min-width: 0;
+        display: grid;
+        gap: 6px;
+    }
+
+    .api-item-title,
+    .api-item-actions,
+    .api-editor-head,
+    .api-editor-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .api-item-title strong {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 14px;
+        color: #253547;
+    }
+
+    .api-item-title span {
+        flex: 0 0 auto;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: #eaf5fc;
+        color: #176b94;
+        font-size: 11px;
+        font-weight: 800;
+    }
+
+    .api-item-meta {
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        color: #708093;
+        font-size: 12px;
+        line-height: 1.4;
+    }
+
+    .api-item-meta span {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+
+    .api-editor {
+        margin-top: 2px;
+        padding: 12px;
+        display: grid;
+        gap: 12px;
+        background: #f9fbfd;
+    }
+
+    .api-editor-head {
+        justify-content: space-between;
+    }
+
+    .api-editor-head strong {
+        color: #253547;
+        font-size: 14px;
     }
 
     .ai-settings-form .set-row label {

@@ -7,7 +7,15 @@
   import LibraryGrid from "$lib/LibraryGrid.svelte";
   import LibraryListSimple from "$lib/LibraryListSimple.svelte";
   import LibraryPreview from "$lib/LibraryPreview.svelte";
+  import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
+  import {
+    applyTheme as applyGlobalTheme,
+    loadAppSettings,
+    providerToProofingConfig as globalProviderToProofingConfig,
+    saveAppSettings,
+    type GlobalAppSettings,
+  } from "$lib/appSettings";
 
   const TOOLBOX_WINDOW_WIDTH = 1200;
   const TOOLBOX_WINDOW_HEIGHT = 740;
@@ -67,6 +75,24 @@
   }
 
   const LAUNCH_SESSION_KEY = "tepub-editor-launch-files";
+  const NAMING_MODE_OPTIONS = [
+    { value: "template", label: "按模板重命名" },
+    { value: "source", label: "使用源文件名" },
+  ];
+  const SHELF_PREVIEW_OPTIONS = [
+    { value: "always", label: "始终显示" },
+    { value: "auto", label: "点击显示" },
+    { value: "never", label: "始终隐藏" },
+  ];
+  const DBL_CLICK_OPTIONS = [
+    { value: "read", label: "阅读" },
+    { value: "edit", label: "编辑" },
+    { value: "metadata", label: "编辑元数据" },
+  ];
+  const NEW_BOOK_ORDER_OPTIONS = [
+    { value: "first", label: "新加入的在前" },
+    { value: "last", label: "新加入的在后" },
+  ];
 
   interface AiProofingConfig {
     enabled: boolean;
@@ -128,6 +154,17 @@
     txtAiProofing: { providerId: "", approvalProviderId: "" },
     libraryAiMatch: { providerId: "", extraPrompt: "" },
   };
+  let appSettings: GlobalAppSettings = loadAppSettings();
+  $: textAiProviders = appSettings.aiProviders.filter((provider) => provider.kind !== "image");
+  $: storageModeOptions = [
+    ...(appMode?.isPortable ? [{ value: "copy_portable", label: "复制到 books/ 文件夹" }] : []),
+    { value: "index", label: "仅索引文件位置（不复制）" },
+    { value: "copy_custom", label: "复制到指定工作目录" },
+  ];
+  $: libraryAiProviderOptions =
+    textAiProviders.length === 0
+      ? [{ value: "", label: "未配置文字模型", disabled: true }]
+      : textAiProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.model, meta: provider.model }));
   let selectedBook: BookEntry | null = null;
   let viewMode: "grid" | "list-cover" | "list-simple" = "grid";
   let searchQuery = "";
@@ -135,16 +172,12 @@
   let sortAsc = false;
   let isLoading = true;
   let showSettings = false;
-  let librarySettingsActiveTab: "storage" | "assoc" | "editor" | "api" | "ai" | "shelf" = "storage";
+  let librarySettingsActiveTab: "storage" | "ai" | "shelf" = "storage";
   const librarySettingsTabs = [
     { id: "storage", label: "文件存储" },
-    { id: "assoc", label: "文件关联" },
-    { id: "editor", label: "应用窗口" },
-    { id: "api", label: "API 配置" },
     { id: "ai", label: "智能匹配" },
     { id: "shelf", label: "书架显示" },
   ];
-  let aiProviderDraftId = "";
   let aiMatchRunning = false;
   let aiMatchMessage = "";
   let aiMatchResult: { description: string; tags: string[]; reason: string } | null = null;
@@ -259,55 +292,19 @@
     if (!libraryConfig.aiProviders.some(p => p.id === libraryConfig.libraryAiMatch!.providerId)) {
       libraryConfig.libraryAiMatch.providerId = firstId;
     }
-    if (!aiProviderDraftId || !libraryConfig.aiProviders.some(p => p.id === aiProviderDraftId)) {
-      aiProviderDraftId = firstId;
+  }
+
+  function syncGlobalAppSettingsFromLibrary() {
+    appSettings = saveAppSettings(loadAppSettings(libraryConfig as unknown as Record<string, any>));
+    const textProviders = appSettings.aiProviders.filter((provider) => provider.kind !== "image");
+    const firstId = textProviders[0]?.id || "";
+    libraryConfig.libraryAiMatch = {
+      providerId: libraryConfig.libraryAiMatch?.providerId || firstId,
+      extraPrompt: String(libraryConfig.libraryAiMatch?.extraPrompt || ""),
+    };
+    if (!textProviders.some((provider) => provider.id === libraryConfig.libraryAiMatch!.providerId)) {
+      libraryConfig.libraryAiMatch.providerId = firstId;
     }
-  }
-
-  function selectedAiProvider() {
-    ensureAiProviderSelections();
-    return libraryConfig.aiProviders?.find(p => p.id === aiProviderDraftId) || libraryConfig.aiProviders?.[0];
-  }
-
-  function updateSelectedAiProvider(field: keyof AiProviderConfig, value: string | number) {
-    ensureAiProviderSelections();
-    libraryConfig.aiProviders = (libraryConfig.aiProviders || []).map(provider =>
-      provider.id === aiProviderDraftId ? { ...provider, [field]: value } : provider,
-    );
-  }
-
-  function providerToProofingConfig(provider: AiProviderConfig | undefined, base = libraryConfig.aiProofing) {
-    const fallback = normalizeAiProofingConfig(base);
-    if (!provider) return fallback;
-    return normalizeAiProofingConfig({
-      ...fallback,
-      baseUrl: provider.baseUrl,
-      apiKey: provider.apiKey,
-      model: provider.model,
-      temperature: provider.temperature,
-    });
-  }
-
-  function addAiProvider() {
-    ensureAiProviderSelections();
-    const provider = newAiProvider({ name: `API ${(libraryConfig.aiProviders?.length || 0) + 1}` });
-    libraryConfig.aiProviders = [...(libraryConfig.aiProviders || []), provider];
-    aiProviderDraftId = provider.id;
-    saveLibraryConfig();
-  }
-
-  async function removeAiProvider(providerId: string) {
-    ensureAiProviderSelections();
-    if ((libraryConfig.aiProviders || []).length <= 1) {
-      await message("至少保留一个 API 配置", { kind: "warning" });
-      return;
-    }
-    libraryConfig.aiProviders = (libraryConfig.aiProviders || []).filter(p => p.id !== providerId);
-    if (libraryConfig.txtAiProofing?.providerId === providerId) libraryConfig.txtAiProofing.providerId = "";
-    if (libraryConfig.txtAiProofing?.approvalProviderId === providerId) libraryConfig.txtAiProofing.approvalProviderId = "";
-    if (libraryConfig.libraryAiMatch?.providerId === providerId) libraryConfig.libraryAiMatch.providerId = "";
-    ensureAiProviderSelections();
-    await saveLibraryConfig();
   }
 
   // 标签分类体系 —— 前三级有固定枚举，之后可自由多选
@@ -474,7 +471,6 @@
   type PreviewMode = "auto" | "always" | "never";
   // 双击图书时的默认动作
   type DblClickAction = "read" | "edit" | "metadata";
-  type UiTheme = "modern" | "classic" | "dark";
   interface ShelfSettings {
     gridShowTitle: boolean;
     gridShowAuthor: boolean;
@@ -489,7 +485,6 @@
     previewMode: "auto",
     dblClickAction: "edit",
   };
-  let appUiTheme: UiTheme = "modern";
   const VIEW_ICONS: Record<string, string> = { "grid": "▦", "list-cover": "☷", "list-simple": "☰" };
 
   // 预览区可见性：三态
@@ -520,40 +515,6 @@
 
   function saveShelfSettings() {
     localStorage.setItem("shelf-settings", JSON.stringify({ ...shelfSettings, viewMode }));
-  }
-
-  function applyTheme(theme: UiTheme) {
-    document.documentElement.setAttribute("data-theme", theme);
-    const meta = document.querySelector('meta[name="theme-color"]');
-    const colors: Record<UiTheme, string> = {
-      modern: "#eef4f8",
-      classic: "#f3f3f3",
-      dark: "#151b23",
-    };
-    if (meta) meta.setAttribute("content", colors[theme]);
-  }
-
-  function loadAppUiTheme() {
-    try {
-      const stored = localStorage.getItem("app-settings");
-      if (!stored) return;
-      const parsed = JSON.parse(stored);
-      if (parsed.uiTheme === "modern" || parsed.uiTheme === "classic" || parsed.uiTheme === "dark") {
-        appUiTheme = parsed.uiTheme;
-      }
-    } catch {}
-    applyTheme(appUiTheme);
-  }
-
-  function saveAppUiTheme() {
-    let settings: Record<string, any> = {};
-    try {
-      const stored = localStorage.getItem("app-settings");
-      if (stored) settings = JSON.parse(stored);
-    } catch {}
-    settings.uiTheme = appUiTheme;
-    localStorage.setItem("app-settings", JSON.stringify(settings));
-    applyTheme(appUiTheme);
   }
 
   function cycleViewMode() {
@@ -667,6 +628,7 @@
         libraryAiMatch: libraryConfig.libraryAiMatch || { providerId: "", extraPrompt: "" },
       };
       ensureAiProviderSelections();
+      syncGlobalAppSettingsFromLibrary();
       // 写一份空 library.json 到该目录，建立 pointer
       await invoke("save_library", { data: { config: libraryConfig, books: [] } });
       firstLaunchOpen = false;
@@ -706,6 +668,7 @@
       }
       libraryConfig.aiProofing = normalizeAiProofingConfig(libraryConfig.aiProofing);
       ensureAiProviderSelections();
+      syncGlobalAppSettingsFromLibrary();
       syncNamingPresetFromConfig();
       // 安装版没有 copy_portable 选项，旧配置或异常状态下自动迁移到 copy_custom
       if (appMode && !appMode.isPortable && libraryConfig.storageMode === "copy_portable") {
@@ -812,12 +775,13 @@
   }
 
   async function openToolbox() {
+    appSettings = loadAppSettings();
     try {
       let toolboxWin = await WebviewWindow.getByLabel("toolbox");
       if (toolboxWin) {
         await toolboxWin.show();
         await toolboxWin.setFocus();
-        if (libraryConfig.closeLibraryOnToolboxOpen !== false) {
+        if (appSettings.closeLibraryOnToolboxOpen !== false) {
           const appWindow = getCurrentWindow();
           await appWindow.hide();
           toolboxWin.once("tauri://destroyed", async () => {
@@ -833,13 +797,15 @@
         title: "TEpub-Editor 工具箱",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         resizable: true,
         dragDropEnabled: false,
         center: true,
         focus: true,
       });
 
-      if (libraryConfig.closeLibraryOnToolboxOpen !== false) {
+      if (appSettings.closeLibraryOnToolboxOpen !== false) {
         const appWindow = getCurrentWindow();
         await appWindow.hide();
         toolboxWin.once("tauri://destroyed", async () => {
@@ -881,6 +847,7 @@
   }
 
   async function openLaunchFilePath(filePath: string, action: string, opts: { hideMain: boolean }) {
+    appSettings = loadAppSettings();
     const ext = filePath.split(".").pop()?.toLowerCase();
     if (ext === "txt") {
       await openFilePathInEditor(filePath, opts);
@@ -901,11 +868,13 @@
         title: "TEpub-Editor-Reader",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: false,
         center: true,
       });
 
-      const shouldHideMain = opts.hideMain && libraryConfig.closeLibraryOnEpubOpen !== false;
+      const shouldHideMain = opts.hideMain && appSettings.closeLibraryOnEpubOpen !== false;
       if (shouldHideMain) {
         await appWindow.hide();
         win.once("tauri://destroyed", async () => {
@@ -920,6 +889,7 @@
   }
 
   async function openFilePathInEditor(filePath: string, opts: { hideMain: boolean }) {
+    appSettings = loadAppSettings();
     const ext = filePath.split(".").pop()?.toLowerCase();
     const isEpub = ext === "epub";
     const encoded = encodeURIComponent(filePath);
@@ -933,11 +903,13 @@
         title,
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
 
-      const shouldHideMain = opts.hideMain && (isEpub ? libraryConfig.closeLibraryOnEpubOpen !== false : libraryConfig.closeLibraryOnTxtOpen !== false);
+      const shouldHideMain = opts.hideMain && (isEpub ? appSettings.closeLibraryOnEpubOpen !== false : appSettings.closeLibraryOnTxtOpen !== false);
       if (shouldHideMain) {
         await appWindow.hide();
         win.once("tauri://destroyed", async () => {
@@ -963,6 +935,7 @@
   }
 
   async function openBook(book: BookEntry) {
+    appSettings = loadAppSettings();
     const encoded = encodeURIComponent(book.filePath);
     const isEpub = book.fileType === "epub";
     const url = isEpub ? `/epub-editor?file=${encoded}` : `/editor?file=${encoded}&fromLibrary=1`;
@@ -975,11 +948,13 @@
         title,
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
 
-      const shouldHideMain = isEpub ? libraryConfig.closeLibraryOnEpubOpen !== false : libraryConfig.closeLibraryOnTxtOpen !== false;
+      const shouldHideMain = isEpub ? appSettings.closeLibraryOnEpubOpen !== false : appSettings.closeLibraryOnTxtOpen !== false;
       if (shouldHideMain) {
         await appWindow.hide();
 
@@ -996,6 +971,7 @@
 
   // 阅读（EPUB 走自定义阅读器；TXT 暂时回退到 TXT 编辑器）
   async function openReader(book: BookEntry) {
+    appSettings = loadAppSettings();
     const isEpub = book.fileType === "epub";
     if (!isEpub) {
       // TXT 阅读器尚未实现，直接走编辑器
@@ -1017,16 +993,20 @@
         // 1080p 屏幕上更是绰绰有余。
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: false,
         center: true,
       });
 
-      await appWindow.hide();
+      if (appSettings.closeLibraryOnEpubOpen !== false) {
+        await appWindow.hide();
 
-      win.once("tauri://destroyed", async () => {
-        await appWindow.show();
-        await appWindow.setFocus();
-      });
+        win.once("tauri://destroyed", async () => {
+          await appWindow.show();
+          await appWindow.setFocus();
+        });
+      }
     } catch (e: any) {
       console.error("打开阅读器失败:", e);
       await message(`打开失败: ${e}`, { title: "错误", kind: "error" });
@@ -1076,15 +1056,15 @@
 
   async function runLibraryAutoMatch() {
     if (!selectedBook) return;
-    ensureAiProviderSelections();
-    const provider = (libraryConfig.aiProviders || []).find(p => p.id === libraryConfig.libraryAiMatch?.providerId);
-    const config = providerToProofingConfig(provider);
+    syncGlobalAppSettingsFromLibrary();
+    const provider = appSettings.aiProviders.find(p => p.id === libraryConfig.libraryAiMatch?.providerId && p.kind !== "image");
+    const config = globalProviderToProofingConfig(provider, appSettings.aiProofing);
     if (!config.apiKey.trim() || !config.baseUrl.trim() || !config.model.trim()) {
-      aiMatchMessage = "??????????? API";
+      aiMatchMessage = "请先补全匹配 API";
       return;
     }
     aiMatchRunning = true;
-    aiMatchMessage = "??????...";
+    aiMatchMessage = "智能匹配中...";
     aiMatchResult = null;
     try {
       const response = await invoke<{ content: string }>("run_ai_proofing", {
@@ -1092,23 +1072,23 @@
           config,
           systemPrompt: LIBRARY_MATCH_SYSTEM_PROMPT,
           userPrompt: [
-            `???${selectedBook.title}`,
-            `???${selectedBook.author || "??"}`,
-            `????${selectedBook.subtitle || ""}`,
-            `?????${selectedBook.description || ""}`,
-            `?????${(selectedBook.tags || []).join("?") || "?"}`,
-            `?????${Array.from(TAXONOMY_SET).join("?")}`,
-            libraryConfig.libraryAiMatch?.extraPrompt ? `?????${libraryConfig.libraryAiMatch.extraPrompt}` : "",
+            `书名：${selectedBook.title}`,
+            `作者：${selectedBook.author || "未知"}`,
+            `副标题：${selectedBook.subtitle || ""}`,
+            `当前简介：${selectedBook.description || ""}`,
+            `当前标签：${(selectedBook.tags || []).join("、") || "无"}`,
+            `可用分类：${Array.from(TAXONOMY_SET).join("、")}`,
+            libraryConfig.libraryAiMatch?.extraPrompt ? `额外要求：${libraryConfig.libraryAiMatch.extraPrompt}` : "",
           ].filter(Boolean).join("\n"),
         },
       });
       aiMatchResult = parseLibraryMatch(response.content);
       metaForm.description = descToForm(aiMatchResult.description || descFromForm(metaForm.description));
       metaForm.tags = Array.from(new Set([...(aiMatchResult.tags || [])]));
-      aiMatchMessage = `??????${aiMatchResult.reason ? `?${aiMatchResult.reason}` : ""}`;
+      aiMatchMessage = `智能匹配完成${aiMatchResult.reason ? `：${aiMatchResult.reason}` : ""}`;
     } catch (error) {
-      console.error("??????:", error);
-      aiMatchMessage = `???????${error}`;
+      console.error("智能匹配失败:", error);
+      aiMatchMessage = `智能匹配失败：${error}`;
     } finally {
       aiMatchRunning = false;
     }
@@ -1456,11 +1436,7 @@
 
   async function saveLibraryConfig() {
     try {
-      ensureAiProviderSelections();
-      libraryConfig.aiProofing = providerToProofingConfig(
-        (libraryConfig.aiProviders || []).find(p => p.id === libraryConfig.txtAiProofing?.providerId),
-        libraryConfig.aiProofing,
-      );
+      syncGlobalAppSettingsFromLibrary();
       const data = await invoke<LibraryData>("load_library");
       await invoke("save_library", {
         data: { ...data, config: libraryConfig }
@@ -1468,6 +1444,41 @@
     } catch (e) {
       console.error("保存设置失败:", e);
     }
+  }
+
+  async function setStorageMode(value: string) {
+    libraryConfig.storageMode = value;
+    await onStorageModeChange();
+  }
+
+  async function setNamingMode(value: string) {
+    libraryConfig.namingMode = value;
+    await onNamingChanged();
+  }
+
+  function setLibraryAiProvider(value: string) {
+    if (!libraryConfig.libraryAiMatch) {
+      libraryConfig.libraryAiMatch = { providerId: "", extraPrompt: "" };
+    }
+    libraryConfig.libraryAiMatch.providerId = value;
+    saveLibraryConfig();
+  }
+
+  function setShelfPreviewMode(value: string) {
+    if (value !== "always" && value !== "auto" && value !== "never") return;
+    shelfSettings.previewMode = value;
+    saveShelfSettings();
+  }
+
+  function setShelfDblClickAction(value: string) {
+    if (value !== "read" && value !== "edit" && value !== "metadata") return;
+    shelfSettings.dblClickAction = value;
+    saveShelfSettings();
+  }
+
+  function setNewBookOrder(value: string) {
+    shelfSettings.newBookFirst = value === "first";
+    saveShelfSettings();
   }
 
   // ---- 入库命名模板 ----
@@ -1478,6 +1489,7 @@
     { label: "{series}-{title}[{author}]", value: "{series}-{title}[{author}]" },
     { label: "{series}-{title}[{author}][{maker}]{tags}", value: "{series}-{title}[{author}][{maker}]{tags}" },
   ];
+  $: namingPresetOptions = [...NAMING_PRESETS, { value: "custom", label: "自定义…" }];
   // 当前下拉选中的预设；若库里存的模板不在预设里就显示 "custom"
   let namingPresetSel: string = "{title}-{author}";
   // 同步：libraryConfig 变 → 调整预设下拉
@@ -1561,25 +1573,10 @@
     await saveLibraryConfig();
   }
 
-  // 文件关联：写注册表 + 持久化到 libraryConfig
-  async function toggleFileAssoc(verb: "epub-read" | "epub-edit" | "txt-make-epub", enabled: boolean) {
-    try {
-      await invoke("set_file_assoc", { verb, enabled });
-    } catch (e: any) {
-      console.error("设置文件关联失败:", e);
-      await message(`设置失败: ${e}`, { title: "错误", kind: "error" });
-      // 写注册表失败：把 toggle 状态回滚
-      if (verb === "epub-read") libraryConfig.assocEpubRead = !enabled;
-      else if (verb === "epub-edit") libraryConfig.assocEpubEdit = !enabled;
-      else if (verb === "txt-make-epub") libraryConfig.assocTxtMakeEpub = !enabled;
-      return;
-    }
-    await saveLibraryConfig();
-  }
-
   onMount(async () => {
     loadShelfSettings();
-    loadAppUiTheme();
+    appSettings = loadAppSettings();
+    applyGlobalTheme(appSettings.uiTheme);
     await bootLibrary();
     const appWindow = getCurrentWindow();
 
@@ -1665,7 +1662,7 @@
       <button class="tb-btn icon-btn" on:click={openToolbox} title="工具箱" aria-label="工具箱">
         <span class="toolbox-entry-icon" aria-hidden="true"></span>
       </button>
-      <button class="tb-btn" on:click={() => showSettings = !showSettings} title="书库设置">⚙</button>
+      <button class="tb-btn" on:click={() => { appSettings = loadAppSettings(); showSettings = !showSettings; }} title="书库设置">⚙</button>
     </div>
   </div>
 
@@ -1811,13 +1808,7 @@
             <div class="section-title">文件存储</div>
             <div class="set-row">
               <label class="set-label">存储方式</label>
-              <select class="set-control" bind:value={libraryConfig.storageMode} on:change={onStorageModeChange}>
-                {#if appMode?.isPortable}
-                  <option value="copy_portable">复制到 books/ 文件夹</option>
-                {/if}
-                <option value="index">仅索引文件位置（不复制）</option>
-                <option value="copy_custom">复制到指定工作目录</option>
-              </select>
+              <CustomSelect className="set-control" value={libraryConfig.storageMode} options={storageModeOptions} on:change={(e) => setStorageMode(e.detail)} />
             </div>
             {#if libraryConfig.storageMode === "copy_custom"}
               <div class="set-row">
@@ -1832,28 +1823,12 @@
             </label>
             <div class="set-row">
               <label class="set-label">入库命名方式</label>
-              <select
-                class="set-control"
-                bind:value={libraryConfig.namingMode}
-                on:change={onNamingChanged}
-              >
-                <option value="template">按模板重命名</option>
-                <option value="source">使用源文件名</option>
-              </select>
+              <CustomSelect className="set-control" value={libraryConfig.namingMode || "template"} options={NAMING_MODE_OPTIONS} on:change={(e) => setNamingMode(e.detail)} />
             </div>
             {#if libraryConfig.namingMode === "template"}
               <div class="set-row">
                 <label class="set-label">命名模板</label>
-                <select
-                  class="set-control"
-                  value={namingPresetSel}
-                  on:change={(e) => onNamingPresetChange((e.currentTarget as HTMLSelectElement).value)}
-                >
-                  {#each NAMING_PRESETS as p}
-                    <option value={p.value}>{p.label}</option>
-                  {/each}
-                  <option value="custom">自定义…</option>
-                </select>
+                <CustomSelect className="set-control" value={namingPresetSel} options={namingPresetOptions} on:change={(e) => onNamingPresetChange(e.detail)} />
               </div>
               {#if namingPresetSel === "custom"}
                 <div class="set-row">
@@ -1874,126 +1849,19 @@
             {/if}
           </section>
 
-          {:else if librarySettingsActiveTab === 'assoc'}
-          <section class="settings-section">
-            <div class="section-title">注册文件打开方式</div>
-            <p class="section-hint">右键 .epub / .txt 文件时显示的菜单项。</p>
-            <label class="set-row toggle-row">
-              <span class="set-label">EPUB 阅读 <small>(.epub)</small></span>
-              <input
-                type="checkbox"
-                bind:checked={libraryConfig.assocEpubRead}
-                on:change={(e) => toggleFileAssoc("epub-read", (e.currentTarget as HTMLInputElement).checked)}
-              />
-            </label>
-            <label class="set-row toggle-row">
-              <span class="set-label">EPUB 编辑 <small>(.epub)</small></span>
-              <input
-                type="checkbox"
-                bind:checked={libraryConfig.assocEpubEdit}
-                on:change={(e) => toggleFileAssoc("epub-edit", (e.currentTarget as HTMLInputElement).checked)}
-              />
-            </label>
-            <label class="set-row toggle-row">
-              <span class="set-label">制作 EPUB <small>(.txt)</small></span>
-              <input
-                type="checkbox"
-                bind:checked={libraryConfig.assocTxtMakeEpub}
-                on:change={(e) => toggleFileAssoc("txt-make-epub", (e.currentTarget as HTMLInputElement).checked)}
-              />
-            </label>
-          </section>
-
-          {:else if librarySettingsActiveTab === 'editor'}
-          <section class="settings-section">
-            <div class="section-title">应用窗口</div>
-            <label class="set-row toggle-row">
-              <span class="set-label">打开 TXT 编辑器时隐藏书库</span>
-              <input
-                type="checkbox"
-                bind:checked={libraryConfig.closeLibraryOnTxtOpen}
-                on:change={saveLibraryConfig}
-              />
-            </label>
-            <label class="set-row toggle-row">
-              <span class="set-label">打开 EPUB 编辑器时隐藏书库</span>
-              <input
-                type="checkbox"
-                bind:checked={libraryConfig.closeLibraryOnEpubOpen}
-                on:change={saveLibraryConfig}
-              />
-            </label>
-            <label class="set-row toggle-row">
-              <span class="set-label">打开工具箱时隐藏书库</span>
-              <input
-                type="checkbox"
-                bind:checked={libraryConfig.closeLibraryOnToolboxOpen}
-                on:change={saveLibraryConfig}
-              />
-            </label>
-            <div class="set-row">
-              <label class="set-label">关闭 TXT 编辑器</label>
-              <select
-                class="set-control"
-                bind:value={libraryConfig.txtEditorCloseAction}
-                on:change={saveLibraryConfig}
-              >
-                <option value="library">返回书库</option>
-                <option value="exit">直接退出应用</option>
-              </select>
-            </div>
-          </section>
-
-          {:else if librarySettingsActiveTab === 'api'}
-          <section class="settings-section">
-            <div class="section-title">AI 接口</div>
-            <p class="section-hint">可添加多个 OpenAI 兼容 API，分别供 TXT 校对、自动审批、书库自动匹配使用。</p>
-            <div class="set-row">
-              <label class="set-label">当前 API</label>
-              <select class="set-control" bind:value={aiProviderDraftId}>
-                {#each (libraryConfig.aiProviders || []) as provider}
-                  <option value={provider.id}>{provider.name || provider.model}</option>
-                {/each}
-              </select>
-              <button class="tb-btn" type="button" on:click={addAiProvider}>新增</button>
-              <button class="tb-btn danger" type="button" on:click={() => removeAiProvider(aiProviderDraftId)}>删除</button>
-            </div>
-            {#if selectedAiProvider()}
-              {#key aiProviderDraftId}
-              <div class="set-row">
-                <label class="set-label">名称</label>
-                <input class="set-control" type="text" value={selectedAiProvider()!.name} on:input={(e) => updateSelectedAiProvider("name", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="例如 DeepSeek / 本地模型" />
-              </div>
-              <div class="set-row">
-                <label class="set-label">API 地址</label>
-                <input class="set-control" type="text" value={selectedAiProvider()!.baseUrl} on:input={(e) => updateSelectedAiProvider("baseUrl", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="https://api.openai.com/v1" />
-              </div>
-              <div class="set-row">
-                <label class="set-label">API Key</label>
-                <input class="set-control" type="password" value={selectedAiProvider()!.apiKey} on:input={(e) => updateSelectedAiProvider("apiKey", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="sk-..." />
-              </div>
-              <div class="set-row">
-                <label class="set-label">模型</label>
-                <input class="set-control" type="text" value={selectedAiProvider()!.model} on:input={(e) => updateSelectedAiProvider("model", e.currentTarget.value)} on:change={saveLibraryConfig} placeholder="gpt-4o-mini / deepseek-chat" />
-              </div>
-              <div class="set-row">
-                <label class="set-label">温度</label>
-                <input class="set-control" type="number" min="0" max="1" step="0.1" value={selectedAiProvider()!.temperature} on:input={(e) => updateSelectedAiProvider("temperature", Number(e.currentTarget.value))} on:change={saveLibraryConfig} />
-              </div>
-              {/key}
-            {/if}
-          </section>
           {:else if librarySettingsActiveTab === 'ai'}
           <section class="settings-section legacy-ai-proofing-settings">
             <div class="section-title">智能匹配</div>
             <p class="section-hint">用于自动匹配书库图书的标签和简介，不再和 TXT 编辑器智能校对共用用途设置。</p>
             <div class="set-row" style="align-items: flex-start;">
               <label class="set-label">匹配 API</label>
-              <select class="set-control" bind:value={libraryConfig.libraryAiMatch!.providerId} on:change={saveLibraryConfig}>
-                {#each (libraryConfig.aiProviders || []) as provider}
-                  <option value={provider.id}>{provider.name || provider.model}</option>
-                {/each}
-              </select>
+              <CustomSelect
+                className="set-control"
+                value={libraryConfig.libraryAiMatch?.providerId || ""}
+                options={libraryAiProviderOptions}
+                disabled={textAiProviders.length === 0}
+                on:change={(e) => setLibraryAiProvider(e.detail)}
+              />
             </div>
             <div class="set-row" style="align-items: flex-start;">
               <label class="set-label">额外要求</label>
@@ -2010,18 +1878,6 @@
           {:else}
           <section class="settings-section">
             <div class="section-title">书架显示</div>
-            <div class="set-row">
-              <label class="set-label">界面主题</label>
-              <select
-                class="set-control"
-                bind:value={appUiTheme}
-                on:change={saveAppUiTheme}
-              >
-                <option value="modern">现代</option>
-                <option value="classic">经典</option>
-                <option value="dark">深色</option>
-              </select>
-            </div>
             <label class="set-row toggle-row">
               <span class="set-label">九宫格显示书名</span>
               <input type="checkbox" bind:checked={shelfSettings.gridShowTitle} on:change={saveShelfSettings} />
@@ -2032,41 +1888,15 @@
             </label>
             <div class="set-row">
               <label class="set-label">预览区显示</label>
-              <select
-                class="set-control"
-                bind:value={shelfSettings.previewMode}
-                on:change={saveShelfSettings}
-              >
-                <option value="always">始终显示</option>
-                <option value="auto">点击显示</option>
-                <option value="never">始终隐藏</option>
-              </select>
+              <CustomSelect className="set-control" value={shelfSettings.previewMode} options={SHELF_PREVIEW_OPTIONS} on:change={(e) => setShelfPreviewMode(e.detail)} />
             </div>
             <div class="set-row">
               <label class="set-label">双击图书时</label>
-              <select
-                class="set-control"
-                bind:value={shelfSettings.dblClickAction}
-                on:change={saveShelfSettings}
-              >
-                <option value="read">阅读</option>
-                <option value="edit">编辑</option>
-                <option value="metadata">编辑元数据</option>
-              </select>
+              <CustomSelect className="set-control" value={shelfSettings.dblClickAction} options={DBL_CLICK_OPTIONS} on:change={(e) => setShelfDblClickAction(e.detail)} />
             </div>
             <div class="set-row">
               <label class="set-label">新书排序</label>
-              <select
-                class="set-control"
-                value={shelfSettings.newBookFirst ? "first" : "last"}
-                on:change={(e) => {
-                  shelfSettings.newBookFirst = (e.target as HTMLSelectElement).value === "first";
-                  saveShelfSettings();
-                }}
-              >
-                <option value="first">新加入的在前</option>
-                <option value="last">新加入的在后</option>
-              </select>
+              <CustomSelect className="set-control" value={shelfSettings.newBookFirst ? "first" : "last"} options={NEW_BOOK_ORDER_OPTIONS} on:change={(e) => setNewBookOrder(e.detail)} />
             </div>
           </section>
           {/if}
@@ -3406,7 +3236,6 @@
      content-box + flex:1 + padding 会让右侧轻微越界，与设了
      box-sizing: border-box 的 textarea 不同宽 */
   .meta-edit-body .set-row input,
-  .meta-edit-body .set-row select,
   .meta-edit-body .set-row textarea {
     box-sizing: border-box;
   }

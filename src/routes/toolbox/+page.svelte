@@ -4,6 +4,17 @@
   import { open, message } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import CustomSelect from "$lib/CustomSelect.svelte";
+  import SettingsShell from "$lib/SettingsShell.svelte";
+  import {
+    applyTheme,
+    loadAppSettings,
+    newAiProvider,
+    providerToProofingConfig,
+    saveAppSettings,
+    type AiProviderConfig,
+    type GlobalAppSettings,
+  } from "$lib/appSettings";
 
   type ToolId =
     | "library"
@@ -16,6 +27,7 @@
     | "file-decrypt"
     | "epub-reformat"
     | "image-convert"
+    | "image-tools"
     | "epub-diagnose";
 
   type Tool = {
@@ -65,10 +77,19 @@
     action?: string | null;
   };
 
+  type LegacyLibraryData = {
+    config?: Record<string, any>;
+  };
+
   const LAUNCH_SESSION_KEY = "tepub-editor-launch-files";
   const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
   const TOOLBOX_WINDOW_WIDTH = 1200;
   const TOOLBOX_WINDOW_HEIGHT = 740;
+  const THEME_OPTIONS = [
+    { value: "modern", label: "现代" },
+    { value: "classic", label: "经典" },
+    { value: "dark", label: "深色" },
+  ];
 
   const tools: Tool[] = [
     {
@@ -142,6 +163,13 @@
       action: "处理",
     },
     {
+      id: "image-tools",
+      icon: "COVER",
+      title: "图片处理",
+      detail: "制作全屏封面与阅微横幅",
+      action: "打开",
+    },
+    {
       id: "epub-diagnose",
       icon: "CHK",
       title: "EPUB 诊断",
@@ -162,13 +190,26 @@
       id: "process",
       title: "EPUB 处理",
       meta: "生成新文件",
-      tools: tools.filter((tool) => tool.id === "font-encrypt" || tool.id === "font-decrypt" || tool.id === "file-encrypt" || tool.id === "file-decrypt" || tool.id === "epub-reformat" || tool.id === "image-convert" || tool.id === "epub-diagnose"),
+      tools: tools.filter((tool) => tool.id === "font-encrypt" || tool.id === "font-decrypt" || tool.id === "file-encrypt" || tool.id === "file-decrypt" || tool.id === "epub-reformat" || tool.id === "image-convert" || tool.id === "image-tools" || tool.id === "epub-diagnose"),
       gridClass: "process-grid",
     },
   ];
 
   let busyTool: ToolId | "" = "";
   let statusText = "";
+  let showSettings = false;
+  let toolboxSettingsActiveTab: "general" | "assoc" | "api" = "general";
+  const toolboxSettingsTabs = [
+    { id: "general", label: "通用" },
+    { id: "assoc", label: "文件关联" },
+    { id: "api", label: "API 配置" },
+  ];
+  let appSettings: GlobalAppSettings = loadAppSettings();
+  let apiEditorOpen = false;
+  let apiEditorMode: "new" | "edit" = "new";
+  let apiEditorId = "";
+  let apiDraft: AiProviderConfig = newAiProvider({ kind: "text" });
+  let apiSettingsMessage = "";
 
   function windowLabel(prefix: string) {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -206,6 +247,8 @@
         title: "TEpub-Editor-TXT",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
@@ -220,6 +263,8 @@
         title: "TEpub-Editor-Reader",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: false,
         center: true,
       });
@@ -231,6 +276,8 @@
       title: "TEpub-Editor-EPUB",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
+      minWidth: TOOLBOX_WINDOW_WIDTH,
+      minHeight: TOOLBOX_WINDOW_HEIGHT,
       dragDropEnabled: true,
       center: true,
     });
@@ -266,6 +313,16 @@
         await openLibrary();
         return;
       }
+      if (tool.id === "image-tools") {
+        await openImageTools();
+        statusText = "图片处理窗口已打开";
+        return;
+      }
+
+      if (isBatchTool(tool.id)) {
+        await openBatchWindow(tool);
+        return;
+      }
 
       const selected = await open({
         multiple: false,
@@ -277,7 +334,10 @@
       });
 
       if (!selected || Array.isArray(selected)) return;
-      if (tool.id === "epub-diagnose") {
+      if (isBatchTool(tool.id)) {
+        await openBatchWindow(tool, [selected]);
+        statusText = `${tool.title} 鎵归噺绐楀彛宸叉墦寮€`;
+      } else if ((tool.id as ToolId) === "epub-diagnose") {
         const result = await runEpubDiagnose(selected);
         statusText = result.issues.length === 0
           ? "EPUB 诊断未发现明显问题"
@@ -341,8 +401,44 @@
     window.location.href = "/library";
   }
 
+  async function hideToolboxHomeWhileOpen(childWindow: WebviewWindow) {
+    if (appSettings.closeToolboxOnToolOpen === false) return;
+    const toolboxWindow = getCurrentWindow();
+    try {
+      childWindow.once("tauri://destroyed", async () => {
+        try {
+          await toolboxWindow.show();
+          await toolboxWindow.setFocus();
+        } catch (e) {
+          console.warn("恢复工具箱主页失败:", e);
+        }
+      });
+      await toolboxWindow.hide();
+    } catch (e) {
+      console.warn("隐藏工具箱主页失败:", e);
+    }
+  }
+
+  async function openImageTools() {
+    const win = new WebviewWindow(windowLabel("image-tools"), {
+      url: "/toolbox/image-tools",
+      title: "TEpub-Editor-图片处理",
+      width: TOOLBOX_WINDOW_WIDTH,
+      height: TOOLBOX_WINDOW_HEIGHT,
+      minWidth: TOOLBOX_WINDOW_WIDTH,
+      minHeight: TOOLBOX_WINDOW_HEIGHT,
+      dragDropEnabled: true,
+      center: true,
+    });
+    await hideToolboxHomeWhileOpen(win);
+  }
+
   function isProcessingTool(id: ToolId) {
     return id === "font-encrypt" || id === "font-decrypt" || id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert";
+  }
+
+  function isBatchTool(id: ToolId) {
+    return isProcessingTool(id) || id === "epub-diagnose";
   }
 
   function commandForTool(id: ToolId) {
@@ -404,8 +500,8 @@
     return lines.join("\n");
   }
 
-  async function runBatchForFolder(tool: Tool) {
-    if (!isProcessingTool(tool.id)) return;
+  async function openBatchWindow(tool: Tool, inputPaths: string[] = []) {
+    if (!isBatchTool(tool.id)) return;
     busyTool = tool.id;
     statusText = "";
     try {
@@ -416,18 +512,21 @@
           taskId,
           tool: tool.id,
           toolTitle: tool.title,
-          inputPaths: [],
+          inputPaths,
           imageFormat: tool.id === "image-convert" ? "auto" : undefined,
         }),
       );
-      new WebviewWindow(windowLabel("batch-progress"), {
+      const win = new WebviewWindow(windowLabel("batch-progress"), {
         url: `/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`,
         title: `${tool.title} 批量处理`,
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: false,
         center: true,
       });
+      await hideToolboxHomeWhileOpen(win);
       statusText = `${tool.title} 批量窗口已打开`;
     } catch (e: any) {
       console.error("批量处理失败:", e);
@@ -438,40 +537,53 @@
     }
   }
 
+  async function runBatchForFolder(tool: Tool) {
+    await openBatchWindow(tool);
+  }
+
   async function openToolForPath(tool: Tool, filePath: string) {
     const encoded = encodeURIComponent(filePath);
     if (tool.id === "txt-epub") {
-      new WebviewWindow(windowLabel("editor"), {
+      const win = new WebviewWindow(windowLabel("editor"), {
         url: `/editor?file=${encoded}&fromLibrary=1`,
         title: "TEpub-Editor-TXT",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
+      await hideToolboxHomeWhileOpen(win);
       return;
     }
 
     if (tool.id === "epub-edit") {
-      new WebviewWindow(windowLabel("epub-editor"), {
+      const win = new WebviewWindow(windowLabel("epub-editor"), {
         url: `/epub-editor?file=${encoded}`,
         title: "TEpub-Editor-EPUB",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: TOOLBOX_WINDOW_WIDTH,
+        minHeight: TOOLBOX_WINDOW_HEIGHT,
         dragDropEnabled: true,
         center: true,
       });
+      await hideToolboxHomeWhileOpen(win);
       return;
     }
 
-    new WebviewWindow(windowLabel("reader"), {
+    const win = new WebviewWindow(windowLabel("reader"), {
       url: `/reader?file=${encoded}`,
       title: "TEpub-Editor-Reader",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
+      minWidth: TOOLBOX_WINDOW_WIDTH,
+      minHeight: TOOLBOX_WINDOW_HEIGHT,
       dragDropEnabled: false,
       center: true,
     });
+    await hideToolboxHomeWhileOpen(win);
   }
 
   function closeWindow() {
@@ -484,7 +596,141 @@
     }
   }
 
+  async function loadGlobalSettingsWithLegacy() {
+    try {
+      const data = await invoke<LegacyLibraryData>("load_library");
+      appSettings = saveAppSettings(loadAppSettings(data?.config || {}));
+    } catch {
+      appSettings = loadAppSettings();
+      applyTheme(appSettings.uiTheme);
+    }
+  }
+
+  function saveGlobalSettings() {
+    const selectedTextProvider =
+      appSettings.aiProviders.find((provider) => provider.id === appSettings.txtAiProofing.providerId && provider.kind !== "image")
+      || appSettings.aiProviders.find((provider) => provider.kind !== "image");
+    if (selectedTextProvider) {
+      if (!appSettings.txtAiProofing.providerId) appSettings.txtAiProofing.providerId = selectedTextProvider.id;
+      if (!appSettings.txtAiProofing.approvalProviderId) appSettings.txtAiProofing.approvalProviderId = selectedTextProvider.id;
+      appSettings.aiProofing = providerToProofingConfig(selectedTextProvider, appSettings.aiProofing);
+    }
+    appSettings = saveAppSettings(appSettings);
+  }
+
+  function setUiTheme(value: string) {
+    if (value !== "modern" && value !== "classic" && value !== "dark") return;
+    appSettings.uiTheme = value;
+    saveGlobalSettings();
+  }
+
+  function providerKindLabel(kind: AiProviderConfig["kind"]) {
+    return kind === "image" ? "生图模型" : "文字模型";
+  }
+
+  function openNewApiEditor() {
+    apiEditorMode = "new";
+    apiEditorId = "";
+    apiDraft = newAiProvider({ kind: "text", name: "" });
+    apiSettingsMessage = "";
+    apiEditorOpen = true;
+  }
+
+  function openEditApiEditor(provider: AiProviderConfig) {
+    apiEditorMode = "edit";
+    apiEditorId = provider.id;
+    apiDraft = { ...provider };
+    apiSettingsMessage = "";
+    apiEditorOpen = true;
+  }
+
+  function cancelApiEditor() {
+    apiEditorOpen = false;
+    apiSettingsMessage = "";
+  }
+
+  function setApiDraftKind(kind: AiProviderConfig["kind"]) {
+    const currentDefault = apiDraft.kind === "image" ? "gpt-image-1" : "gpt-4o-mini";
+    const nextDefault = kind === "image" ? "gpt-image-1" : "gpt-4o-mini";
+    apiDraft = {
+      ...apiDraft,
+      kind,
+      model: !apiDraft.model.trim() || apiDraft.model === currentDefault ? nextDefault : apiDraft.model,
+      temperature: kind === "image" ? 0.1 : apiDraft.temperature,
+    };
+  }
+
+  function normalizedApiDraft() {
+    return newAiProvider({
+      ...apiDraft,
+      id: apiEditorMode === "edit" ? apiEditorId : apiDraft.id,
+      name: apiDraft.name.trim() || (apiDraft.kind === "image" ? "生图 API" : "文字 API"),
+      baseUrl: apiDraft.baseUrl.trim(),
+      apiKey: apiDraft.apiKey,
+      model: apiDraft.model.trim(),
+      temperature: apiDraft.kind === "image" ? 0.1 : apiDraft.temperature,
+    });
+  }
+
+  async function saveApiEditor() {
+    const provider = normalizedApiDraft();
+    if (!provider.name.trim() || !provider.baseUrl.trim() || !provider.model.trim()) {
+      apiSettingsMessage = "请填写名称、API 地址和模型。";
+      return;
+    }
+    if (apiEditorMode === "edit") {
+      appSettings.aiProviders = appSettings.aiProviders.map((item) => (item.id === apiEditorId ? provider : item));
+    } else {
+      appSettings.aiProviders = [...appSettings.aiProviders, provider];
+    }
+    if (provider.kind !== "image") {
+      if (!appSettings.txtAiProofing.providerId) appSettings.txtAiProofing.providerId = provider.id;
+      if (!appSettings.txtAiProofing.approvalProviderId) appSettings.txtAiProofing.approvalProviderId = provider.id;
+    }
+    saveGlobalSettings();
+    apiEditorOpen = false;
+    apiSettingsMessage = "API 配置已保存。";
+  }
+
+  async function removeAiProvider(providerId: string) {
+    appSettings.aiProviders = appSettings.aiProviders.filter((provider) => provider.id !== providerId);
+    const fallbackId = appSettings.aiProviders.find((provider) => provider.kind !== "image")?.id || "";
+    if (appSettings.txtAiProofing.providerId === providerId) appSettings.txtAiProofing.providerId = fallbackId;
+    if (appSettings.txtAiProofing.approvalProviderId === providerId) appSettings.txtAiProofing.approvalProviderId = appSettings.txtAiProofing.providerId || fallbackId;
+    saveGlobalSettings();
+    apiSettingsMessage = "API 配置已删除。";
+  }
+
+  async function toggleFileAssoc(verb: "epub-read" | "epub-edit" | "txt-make-epub", enabled: boolean) {
+    try {
+      await invoke("set_file_assoc", { verb, enabled });
+      saveGlobalSettings();
+    } catch (e: any) {
+      if (verb === "epub-read") appSettings.assocEpubRead = !enabled;
+      else if (verb === "epub-edit") appSettings.assocEpubEdit = !enabled;
+      else appSettings.assocTxtMakeEpub = !enabled;
+      await message(`设置失败: ${e}`, { title: "错误", kind: "error" });
+    }
+  }
+
+  async function openSettings() {
+    await loadGlobalSettingsWithLegacy();
+    apiEditorOpen = false;
+    apiSettingsMessage = "";
+    if (!toolboxSettingsTabs.some((tab) => tab.id === toolboxSettingsActiveTab)) {
+      toolboxSettingsActiveTab = "general";
+    }
+    showSettings = true;
+  }
+
+  function setToolboxSettingsTab(tabId: string) {
+    if (tabId === "general" || tabId === "assoc" || tabId === "api") {
+      toolboxSettingsActiveTab = tabId;
+    }
+  }
+
   onMount(() => {
+    loadGlobalSettingsWithLegacy();
     openLaunchFiles();
   });
 </script>
@@ -498,9 +744,12 @@
         <h1>工具箱</h1>
         <div class="toolbox-subtitle">常用工具</div>
       </div>
-      {#if statusText}
-        <span class="toolbox-inline-status" aria-live="polite">{statusText}</span>
-      {/if}
+      <div class="toolbox-title-actions">
+        {#if statusText}
+          <span class="toolbox-inline-status" aria-live="polite">{statusText}</span>
+        {/if}
+        <button class="toolbox-settings-btn" type="button" on:click={openSettings} title="设置" aria-label="设置">⚙</button>
+      </div>
     </div>
 
     {#each toolGroups as group}
@@ -529,7 +778,7 @@
               </span>
               <span class="tool-action">{tool.action}</span>
               </button>
-              {#if isProcessingTool(tool.id)}
+              {#if isBatchTool(tool.id)}
                 <button
                   class="tool-batch"
                   type="button"
@@ -547,6 +796,134 @@
     {/each}
   </section>
 </main>
+
+{#if showSettings}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="toolbox-settings-overlay" on:click={(e) => { if (e.target === e.currentTarget) showSettings = false; }}>
+    <SettingsShell
+      title="工具箱设置"
+      tabs={toolboxSettingsTabs}
+      activeTab={toolboxSettingsActiveTab}
+      onTabChange={setToolboxSettingsTab}
+      onClose={() => (showSettings = false)}
+      actionLabel="完成"
+      onAction={() => (showSettings = false)}
+      shellClass="toolbox-settings-panel"
+      contentClass="toolbox-settings-content"
+    >
+      {#if toolboxSettingsActiveTab === "general"}
+        <section class="settings-section">
+          <div class="section-title">通用</div>
+          <div class="set-row">
+            <span class="set-label">界面主题</span>
+            <CustomSelect className="set-control" value={appSettings.uiTheme} options={THEME_OPTIONS} on:change={(e) => setUiTheme(e.detail)} />
+          </div>
+          <label class="set-row toggle-row">
+            <span class="set-label">打开工具时隐藏工具箱主页</span>
+            <input type="checkbox" bind:checked={appSettings.closeToolboxOnToolOpen} on:change={saveGlobalSettings} />
+          </label>
+        </section>
+      {:else if toolboxSettingsActiveTab === "assoc"}
+        <section class="settings-section">
+          <div class="section-title">文件关联</div>
+          <p class="section-hint">注册到系统右键菜单和默认打开方式，修改时会写入注册表。</p>
+          <label class="set-row toggle-row">
+            <span class="set-label">EPUB 阅读 <small>(.epub)</small></span>
+            <input type="checkbox" bind:checked={appSettings.assocEpubRead} on:change={(e) => toggleFileAssoc("epub-read", (e.currentTarget as HTMLInputElement).checked)} />
+          </label>
+          <label class="set-row toggle-row">
+            <span class="set-label">EPUB 编辑 <small>(.epub)</small></span>
+            <input type="checkbox" bind:checked={appSettings.assocEpubEdit} on:change={(e) => toggleFileAssoc("epub-edit", (e.currentTarget as HTMLInputElement).checked)} />
+          </label>
+          <label class="set-row toggle-row">
+            <span class="set-label">制作 EPUB <small>(.txt)</small></span>
+            <input type="checkbox" bind:checked={appSettings.assocTxtMakeEpub} on:change={(e) => toggleFileAssoc("txt-make-epub", (e.currentTarget as HTMLInputElement).checked)} />
+          </label>
+        </section>
+      {:else if toolboxSettingsActiveTab === "api"}
+        <section class="settings-section">
+          <div class="api-section-head">
+            <div>
+              <div class="section-title">API 配置</div>
+              <p class="section-hint">保存后的文字模型用于校对和书库智能匹配，生图模型用于图片处理。</p>
+            </div>
+            <button class="toolbox-mini-btn" type="button" on:click={openNewApiEditor}>新增</button>
+          </div>
+          {#if apiSettingsMessage}
+            <div class="api-status">{apiSettingsMessage}</div>
+          {/if}
+          {#if appSettings.aiProviders.length === 0 && !apiEditorOpen}
+            <div class="api-empty">暂无 API 配置，点击“新增”添加文字模型或生图模型。</div>
+          {:else}
+            <div class="api-list">
+              {#each appSettings.aiProviders as provider}
+                <div class="api-item">
+                  <div class="api-item-main">
+                    <div class="api-item-title">
+                      <strong>{provider.name || provider.model}</strong>
+                      <span class:api-kind-image={provider.kind === "image"}>{providerKindLabel(provider.kind)}</span>
+                    </div>
+                    <div class="api-item-meta">
+                      <span>{provider.model || "未填写模型"}</span>
+                      <span>{provider.baseUrl || "未填写 API 地址"}</span>
+                      <span>{provider.apiKey ? "已保存 Key" : "未填写 Key"}</span>
+                    </div>
+                  </div>
+                  <div class="api-item-actions">
+                    <button class="toolbox-mini-btn" type="button" on:click={() => openEditApiEditor(provider)}>编辑</button>
+                    <button class="toolbox-mini-btn danger" type="button" on:click={() => removeAiProvider(provider.id)}>删除</button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#if apiEditorOpen}
+            <div class="api-editor">
+              <div class="api-editor-head">
+                <strong>{apiEditorMode === "new" ? "新增 API" : "编辑 API"}</strong>
+                <div class="api-editor-actions">
+                  <button class="toolbox-mini-btn" type="button" on:click={saveApiEditor}>保存</button>
+                  <button class="toolbox-mini-btn" type="button" on:click={cancelApiEditor}>取消</button>
+                </div>
+              </div>
+              <div class="set-row">
+                <span class="set-label">模型类型</span>
+                <div class="api-kind-switch">
+                  <button type="button" class:active={apiDraft.kind === "text"} on:click={() => setApiDraftKind("text")}>文字模型</button>
+                  <button type="button" class:active={apiDraft.kind === "image"} on:click={() => setApiDraftKind("image")}>生图模型</button>
+                </div>
+              </div>
+              <div class="set-row">
+                <span class="set-label">名称</span>
+                <input class="set-control" type="text" bind:value={apiDraft.name} placeholder="例如 DeepSeek / OpenAI 生图" />
+              </div>
+              <div class="set-row">
+                <span class="set-label">API 地址</span>
+                <input class="set-control" type="text" bind:value={apiDraft.baseUrl} placeholder="https://api.openai.com/v1" />
+              </div>
+              <div class="set-row">
+                <span class="set-label">API Key</span>
+                <input class="set-control" type="password" bind:value={apiDraft.apiKey} placeholder="sk-..." />
+              </div>
+              <div class="set-row">
+                <span class="set-label">模型</span>
+                <input class="set-control" type="text" bind:value={apiDraft.model} placeholder={apiDraft.kind === "image" ? "gpt-image-1 / seedream / flux" : "gpt-4o-mini / deepseek-chat"} />
+              </div>
+              {#if apiDraft.kind !== "image"}
+                <div class="set-row">
+                  <span class="set-label">温度</span>
+                  <input class="set-control" type="number" min="0" max="1" step="0.1" bind:value={apiDraft.temperature} />
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </section>
+      {/if}
+    </SettingsShell>
+  </div>
+{/if}
 
 <style>
   :global(body) {
@@ -574,6 +951,55 @@
     margin-bottom: 28px;
   }
 
+  .toolbox-title-actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .toolbox-settings-btn,
+  .toolbox-mini-btn {
+    min-height: 32px;
+    box-sizing: border-box;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text-soft);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .toolbox-settings-btn {
+    width: 34px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+
+  .toolbox-mini-btn {
+    flex: 0 0 auto;
+    padding: 0 12px;
+    font-weight: 700;
+  }
+
+  .toolbox-mini-btn.danger {
+    color: var(--color-danger);
+    background: var(--color-danger-soft);
+  }
+
+  .toolbox-settings-btn:hover,
+  .toolbox-mini-btn:hover {
+    border-color: var(--color-border-strong);
+    background: var(--color-hover);
+    color: var(--color-text);
+  }
+
   .toolbox-title-row h1 {
     margin: 0;
     font-size: 22px;
@@ -598,6 +1024,194 @@
     line-height: 1.4;
     text-align: right;
     overflow-wrap: anywhere;
+  }
+
+  .toolbox-settings-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+    background: rgba(15, 23, 42, 0.28);
+  }
+
+  :global(.settings-shell.toolbox-settings-panel) {
+    width: min(92vw, 860px);
+    min-width: min(760px, calc(100vw - 48px));
+    max-width: 860px;
+    min-height: 480px;
+    max-height: 84vh;
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    grid-template-rows: 58px minmax(0, 1fr) 64px;
+  }
+
+  :global(.settings-shell.toolbox-settings-panel .settings-shell-header) {
+    grid-column: 1 / -1;
+  }
+
+  :global(.settings-shell.toolbox-settings-panel .settings-shell-tabs) {
+    grid-column: 1;
+    grid-row: 2 / 4;
+  }
+
+  :global(.settings-shell.toolbox-settings-panel .settings-shell-body) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  :global(.settings-shell.toolbox-settings-panel .settings-shell-footer) {
+    grid-column: 2;
+    grid-row: 3;
+  }
+
+  :global(.settings-shell.toolbox-settings-panel .set-row) {
+    align-items: center;
+  }
+
+  .api-section-head,
+  .api-editor-head,
+  .api-item,
+  .api-item-title,
+  .api-item-actions,
+  .api-editor-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .api-section-head,
+  .api-editor-head,
+  .api-item {
+    justify-content: space-between;
+  }
+
+  .api-section-head {
+    margin-bottom: 12px;
+  }
+
+  .api-section-head .section-hint {
+    margin-bottom: 0;
+  }
+
+  .api-status,
+  .api-empty {
+    box-sizing: border-box;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-soft);
+    color: var(--color-muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .api-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .api-item {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+  }
+
+  .api-item-main {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+  }
+
+  .api-item-title {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .api-item-title strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+  }
+
+  .api-item-title span {
+    flex: 0 0 auto;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--color-accent-quiet);
+    color: var(--color-accent-deep);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .api-item-title span.api-kind-image {
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+  }
+
+  .api-item-meta {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .api-item-meta span {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .api-editor {
+    margin-top: 14px;
+    padding: 12px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+  }
+
+  .api-editor-head {
+    margin-bottom: 12px;
+  }
+
+  .api-kind-switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(90px, 1fr));
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .api-kind-switch button {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 0;
+    background: var(--color-surface);
+    color: var(--color-muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .api-kind-switch button + button {
+    border-left: 1px solid var(--color-border);
+  }
+
+  .api-kind-switch button.active {
+    background: var(--color-accent);
+    color: white;
   }
 
   .toolbox-content {
@@ -807,6 +1421,11 @@
       text-align: left;
     }
 
+    .toolbox-title-actions {
+      width: 100%;
+      justify-content: space-between;
+    }
+
     .open-grid,
     .process-grid {
       grid-template-columns: 1fr;
@@ -841,6 +1460,35 @@
     .tool-batch {
       right: 14px;
       bottom: 12px;
+    }
+
+    :global(.settings-shell.toolbox-settings-panel) {
+      display: flex;
+      width: min(96vw, 520px);
+      min-width: 0;
+      min-height: 0;
+      max-height: min(90vh, 720px);
+    }
+
+    :global(.settings-shell.toolbox-settings-panel .settings-shell-tabs) {
+      flex-direction: row;
+      grid-column: auto;
+      grid-row: auto;
+      overflow-x: auto;
+      border-right: 0;
+      border-bottom: 1px solid var(--color-border);
+      padding: 10px 14px;
+    }
+
+    :global(.settings-shell.toolbox-settings-panel .settings-shell-tabs .tab-btn) {
+      width: auto;
+      white-space: nowrap;
+    }
+
+    :global(.settings-shell.toolbox-settings-panel .settings-shell-body),
+    :global(.settings-shell.toolbox-settings-panel .settings-shell-footer) {
+      grid-column: auto;
+      grid-row: auto;
     }
   }
 </style>

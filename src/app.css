@@ -568,9 +568,43 @@ select option {
     color: var(--color-text);
 }
 
-select option:checked {
-    background: var(--color-accent-soft);
+select option:hover,
+select option:focus {
+    background: var(--color-accent-quiet);
     color: var(--color-accent-deep);
+}
+
+select option:checked {
+    background-color: var(--color-accent) !important;
+    background-image: linear-gradient(var(--color-accent), var(--color-accent)) !important;
+    color: var(--color-accent-contrast, #fff);
+    box-shadow: 0 0 0 100vmax var(--color-accent) inset;
+}
+
+@supports selector(::picker(select)) {
+    select {
+        appearance: base-select;
+        -webkit-appearance: base-select;
+    }
+
+    select::picker(select) {
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-pop);
+        color: var(--color-text);
+    }
+
+    select option {
+        padding: 8px 12px;
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+    }
+
+    select option:hover,
+    select option:focus {
+        background: var(--color-hover);
+    }
 }
 
 button:disabled,
@@ -947,8 +981,10 @@ select:disabled {
 }
 
 :root[data-theme="dark"] select option:checked {
-    background: var(--color-accent-soft);
-    color: var(--color-accent-deep);
+    background-color: var(--color-accent) !important;
+    background-image: linear-gradient(var(--color-accent), var(--color-accent)) !important;
+    color: var(--color-accent-contrast, #fff);
+    box-shadow: 0 0 0 100vmax var(--color-accent) inset;
 }
 
 :root[data-theme="dark"] input::placeholder,

@@ -44,7 +44,16 @@
     values.filter(Boolean).join(" ");
 </script>
 
-<div class={mergeClasses("settings-shell", shellClass)} role="dialog" aria-modal="true">
+<div
+  class={mergeClasses("settings-shell", shellClass)}
+  role="dialog"
+  aria-modal="true"
+  tabindex="-1"
+  onclick={(event) => event.stopPropagation()}
+  onkeydown={(event) => {
+    if (event.key === "Escape") onClose();
+  }}
+>
   <div class="settings-shell-header">
     <h3>{title}</h3>
     <button
