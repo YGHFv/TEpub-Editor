@@ -4036,6 +4036,24 @@
 
     let lastNavChapterId: string | null = null; // 导航锁定的章节ID
     let lastNavLine: number = 0; // 导航锁定章节的行号
+    let navProtectUntil = 0;
+
+    function findViewportChapter(state: {
+        top: number;
+        bottom: number;
+        isAtBottom: boolean;
+    }) {
+        let beforeTop: FlatNode | null = null;
+        let beforeBottom: FlatNode | null = null;
+
+        for (const node of flatToc) {
+            if (node.line <= state.top) beforeTop = node;
+            if (node.line <= state.bottom) beforeBottom = node;
+            if (node.line > state.bottom) break;
+        }
+
+        return state.isAtBottom ? beforeBottom || beforeTop : beforeTop || beforeBottom;
+    }
 
     // 编辑器滚动时触发：高亮侧边栏
     async function handleScroll(state: {
@@ -4052,30 +4070,28 @@
         }
         if (flatToc.length === 0) return;
         if (isNavigating) return; // 正在手动跳转，忽略滚动监听
-
-        // 倒序查找上下边界分别对应的章节
-        // 注意：CM6 使用 scrollIntoView(y:"start") 时，章节标题往往排在视口顶部往下 5-20 行的地方。
-        // 所以我们加上 10 行的容差。如果某个章节标题出现在视口顶部这 10 行内，我们就认为当前处于该章节。
-        let foundTop: FlatNode | null = null;
-        let foundBottom: FlatNode | null = null;
-
-        for (let i = flatToc.length - 1; i >= 0; i--) {
-            if (!foundTop && flatToc[i].line <= state.top + 10) {
-                foundTop = flatToc[i];
+        if (lastNavChapterId && Date.now() < navProtectUntil) {
+            const navLineVisible = state.top <= lastNavLine && lastNavLine <= state.bottom;
+            const navLineNearTop = Math.abs(state.top - lastNavLine) <= 12;
+            if (navLineVisible || navLineNearTop) {
+                if (activeChapterId !== lastNavChapterId) {
+                    activeChapterId = lastNavChapterId;
+                }
+                return;
             }
-            if (!foundBottom && flatToc[i].line <= state.bottom) {
-                foundBottom = flatToc[i];
-            }
-            if (foundTop && foundBottom) break;
         }
 
-        // 默认高亮视口最上方的章节
+        // 默认高亮视口顶部所在章节。
         // 但如果已经滚到了文档绝对底部，则高亮视口最下方的章节
         // 这样可以完美解决最后几章很短导致无法滚动到顶部时的高亮错位问题
-        let found = state.isAtBottom ? foundBottom : foundTop;
+        const found = findViewportChapter(state);
 
         if (found && found.id !== activeChapterId) {
             activeChapterId = found.id;
+            if (found.id === lastNavChapterId) {
+                lastNavChapterId = null;
+                navProtectUntil = 0;
+            }
 
             // 如果是卷内章节，确保父卷展开
             if (found.parentId) {
@@ -4168,6 +4184,7 @@
         activeChapterId = id;
         lastNavChapterId = id;
         lastNavLine = line;
+        navProtectUntil = Date.now() + 2500;
 
         // 4. 执行滚动
         if (editorComponent) {
@@ -4762,7 +4779,8 @@
                             on:click={() =>
                                 node.type === "Volume"
                                     ? toggleVolumeNode(node)
-                                    : editorComponent.scrollToLine(
+                                    : handleChapterClick(
+                                          node.id,
                                           node.line_number,
                                       )}
                             on:keydown={() => {}}
