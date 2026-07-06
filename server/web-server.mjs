@@ -485,6 +485,19 @@ async function handleApi(req, res, url) {
 }
 
 function serveStatic(req, res, url) {
+  if (url.pathname === "/mobile/make" || url.pathname === "/mobile/make/") {
+    const next = new URL("/toolbox/make-epub", `http://${req.headers.host || "localhost"}`);
+    for (const [key, value] of url.searchParams.entries()) next.searchParams.set(key, value);
+    next.searchParams.set("view", "desktop");
+    res.writeHead(302, { location: `${next.pathname}${next.search}` });
+    res.end();
+    return;
+  }
+  if (url.pathname === "/mobile" || url.pathname.startsWith("/mobile/")) {
+    res.writeHead(302, { location: "/" });
+    res.end();
+    return;
+  }
   const requestPath = decodeURIComponent(url.pathname);
   const candidate = normalize(join(root, requestPath));
   const file = candidate.startsWith(root) && existsSync(candidate) && !candidate.endsWith("/") ? candidate : join(root, "index.html");
