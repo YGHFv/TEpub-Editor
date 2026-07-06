@@ -1,20 +1,12 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import { applyTheme, loadAppSettings } from "$lib/appSettings";
 
     onMount(() => {
-        let theme = "modern";
-        try {
-            const stored = localStorage.getItem("app-settings");
-            if (stored) {
-                const settings = JSON.parse(stored);
-                if (settings.uiTheme === "classic" || settings.uiTheme === "dark") {
-                    theme = settings.uiTheme;
-                }
-            }
-        } catch (_) {
-            // ignore parse errors
-        }
-        document.documentElement.setAttribute("data-theme", theme);
+        applyTheme(loadAppSettings().uiTheme);
+        const refreshTheme = () => applyTheme(loadAppSettings().uiTheme);
+        window.addEventListener("tepub-settings-updated", refreshTheme);
+        return () => window.removeEventListener("tepub-settings-updated", refreshTheme);
     });
 </script>
 

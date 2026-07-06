@@ -18,7 +18,7 @@ export default defineConfig(async ({ mode }) => {
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: isWebMode ? 5173 : 1420,
+    port: isWebMode ? 5233 : 1420,
     strictPort: !isWebMode,
     host: host || false,
     hmr: host

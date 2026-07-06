@@ -5,13 +5,24 @@
   import SettingsShell from "$lib/SettingsShell.svelte";
   import {
     applyTheme,
+    DEFAULT_TOC_REGEX_RULES,
     loadAppSettings,
     newAiProvider,
     providerToProofingConfig,
     saveAppSettings,
     type AiProviderConfig,
     type GlobalAppSettings,
+    type TocRegexRule,
   } from "$lib/appSettings";
+  import {
+    getWebAccountSession,
+    loginWebAccount,
+    logoutWebAccount,
+    registerWebAccount,
+    syncRemoteSettings,
+    usesWebScopedSettings,
+    type WebAccountSession,
+  } from "$lib/webAccount";
 
   type ToolId =
     | "library"
@@ -88,6 +99,10 @@
     { value: "modern", label: "现代" },
     { value: "classic", label: "经典" },
     { value: "dark", label: "深色" },
+  ];
+  const REGEX_LEVEL_OPTIONS = [
+    { value: "1", label: "卷" },
+    { value: "3", label: "章" },
   ];
 
   const tools: Tool[] = [
@@ -197,13 +212,20 @@
   let busyTool: ToolId | "" = "";
   let statusText = "";
   let showSettings = false;
-  let toolboxSettingsActiveTab: "general" | "assoc" | "api" = "general";
-  const toolboxSettingsTabs = [
+  let toolboxSettingsActiveTab: "account" | "general" | "assoc" | "regex" | "api" = "general";
+  $: toolboxSettingsTabs = [
+    ...(usesWebScopedSettings() ? [{ id: "account", label: "账号" }] : []),
     { id: "general", label: "通用" },
-    { id: "assoc", label: "文件关联" },
+    ...(usesWebScopedSettings() ? [] : [{ id: "assoc", label: "文件关联" }]),
+    { id: "regex", label: "目录正则" },
     { id: "api", label: "API 配置" },
   ];
   let appSettings: GlobalAppSettings = loadAppSettings();
+  let accountSession: WebAccountSession | null = getWebAccountSession();
+  let accountMode: "login" | "register" = "login";
+  let accountUsername = "";
+  let accountPassword = "";
+  let accountMessage = "";
   let apiEditorOpen = false;
   let apiEditorMode: "new" | "edit" = "new";
   let apiEditorId = "";
@@ -635,6 +657,17 @@
   }
 
   async function loadGlobalSettingsWithLegacy() {
+    if (platform.isWeb) {
+      try {
+        await syncRemoteSettings();
+      } catch (error) {
+        console.warn("同步 Web 账号设置失败:", error);
+      }
+      accountSession = getWebAccountSession();
+      appSettings = loadAppSettings();
+      applyTheme(appSettings.uiTheme);
+      return;
+    }
     try {
       const data = await platform.invoke<LegacyLibraryData>("load_library");
       appSettings = saveAppSettings(loadAppSettings(data?.config || {}));
@@ -659,6 +692,31 @@
   function setUiTheme(value: string) {
     if (value !== "modern" && value !== "classic" && value !== "dark") return;
     appSettings.uiTheme = value;
+    saveGlobalSettings();
+  }
+
+  function updateTocRegexRule(index: number, patch: Partial<TocRegexRule>) {
+    appSettings.customRegexRules = appSettings.customRegexRules.map((rule, i) => (
+      i === index ? { ...rule, ...patch } : rule
+    ));
+    saveGlobalSettings();
+  }
+
+  function addTocRegexRule(level: number) {
+    appSettings.customRegexRules = [
+      ...appSettings.customRegexRules,
+      { enabled: true, level: level <= 1 ? 1 : 3, pattern: "" },
+    ];
+    saveGlobalSettings();
+  }
+
+  function removeTocRegexRule(index: number) {
+    appSettings.customRegexRules = appSettings.customRegexRules.filter((_, i) => i !== index);
+    saveGlobalSettings();
+  }
+
+  function resetTocRegexRules() {
+    appSettings.customRegexRules = DEFAULT_TOC_REGEX_RULES.map((rule) => ({ ...rule }));
     saveGlobalSettings();
   }
 
@@ -753,23 +811,63 @@
 
   async function openSettings() {
     await loadGlobalSettingsWithLegacy();
+    accountSession = getWebAccountSession();
     apiEditorOpen = false;
     apiSettingsMessage = "";
     if (!toolboxSettingsTabs.some((tab) => tab.id === toolboxSettingsActiveTab)) {
-      toolboxSettingsActiveTab = "general";
+      toolboxSettingsActiveTab = usesWebScopedSettings() ? "account" : "general";
     }
     showSettings = true;
   }
 
   function setToolboxSettingsTab(tabId: string) {
-    if (tabId === "general" || tabId === "assoc" || tabId === "api") {
+    if (tabId === "account" || tabId === "general" || tabId === "assoc" || tabId === "regex" || tabId === "api") {
+      if (tabId === "assoc" && usesWebScopedSettings()) return;
       toolboxSettingsActiveTab = tabId;
     }
+  }
+
+  async function submitAccountForm() {
+    accountMessage = "";
+    const username = accountUsername.trim();
+    if (!username || !accountPassword) {
+      accountMessage = "请填写账号和密码。";
+      return;
+    }
+    try {
+      if (accountMode === "register") {
+        await registerWebAccount(username, accountPassword);
+        accountMessage = "注册成功，已登录。";
+      } else {
+        await loginWebAccount(username, accountPassword);
+        accountMessage = "登录成功。";
+      }
+      accountPassword = "";
+      accountSession = getWebAccountSession();
+      appSettings = loadAppSettings();
+      applyTheme(appSettings.uiTheme);
+    } catch (error) {
+      accountMessage = String((error as Error)?.message || error);
+    }
+  }
+
+  function logoutAccount() {
+    logoutWebAccount();
+    accountSession = null;
+    appSettings = loadAppSettings();
+    applyTheme(appSettings.uiTheme);
+    accountMessage = "已退出登录，当前修改只保存在本次浏览器会话。";
   }
 
   onMount(() => {
     loadGlobalSettingsWithLegacy();
     openLaunchFiles();
+    const onSettingsUpdated = () => {
+      accountSession = getWebAccountSession();
+      appSettings = loadAppSettings();
+    };
+    window.addEventListener("tepub-settings-updated", onSettingsUpdated);
+    return () => window.removeEventListener("tepub-settings-updated", onSettingsUpdated);
   });
 </script>
 
@@ -851,7 +949,37 @@
       shellClass="toolbox-settings-panel"
       contentClass="toolbox-settings-content"
     >
-      {#if toolboxSettingsActiveTab === "general"}
+      {#if toolboxSettingsActiveTab === "account"}
+        <section class="settings-section account-settings">
+          <div class="section-title">账号</div>
+          {#if accountSession}
+            <p class="section-hint">
+              当前账号：<strong>{accountSession.username}</strong>{accountSession.localOnly ? "（本机开发模式）" : ""}。设置会按账号独立保存。
+            </p>
+            <button class="toolbox-mini-btn" type="button" on:click={logoutAccount}>退出登录</button>
+          {:else}
+            <p class="section-hint">未登录时，Web 端设置只保存在本次浏览器会话；关闭后重新进入会恢复默认。</p>
+            <div class="api-kind-switch account-mode-switch">
+              <button type="button" class:active={accountMode === "login"} on:click={() => (accountMode = "login")}>登录</button>
+              <button type="button" class:active={accountMode === "register"} on:click={() => (accountMode = "register")}>注册</button>
+            </div>
+            <div class="set-row">
+              <span class="set-label">账号</span>
+              <input class="set-control" type="text" bind:value={accountUsername} autocomplete="username" placeholder="3-32 位字母、数字或下划线" />
+            </div>
+            <div class="set-row">
+              <span class="set-label">密码</span>
+              <input class="set-control" type="password" bind:value={accountPassword} autocomplete={accountMode === "login" ? "current-password" : "new-password"} placeholder="至少 6 位" />
+            </div>
+            <button class="toolbox-mini-btn account-submit" type="button" on:click={submitAccountForm}>
+              {accountMode === "login" ? "登录" : "注册并登录"}
+            </button>
+          {/if}
+          {#if accountMessage}
+            <div class="api-status">{accountMessage}</div>
+          {/if}
+        </section>
+      {:else if toolboxSettingsActiveTab === "general"}
         <section class="settings-section">
           <div class="section-title">通用</div>
           <div class="set-row">
@@ -879,6 +1007,47 @@
             <span class="set-label">制作 EPUB <small>(.txt)</small></span>
             <input type="checkbox" bind:checked={appSettings.assocTxtMakeEpub} on:change={(e) => toggleFileAssoc("txt-make-epub", (e.currentTarget as HTMLInputElement).checked)} />
           </label>
+        </section>
+      {:else if toolboxSettingsActiveTab === "regex"}
+        <section class="settings-section">
+          <div class="api-section-head">
+            <div>
+              <div class="section-title">目录正则</div>
+              <p class="section-hint">用于 TXT 编辑器目录扫描和网页 EPUB 制作页；取消勾选的规则不会参与扫描。</p>
+            </div>
+            <button class="toolbox-mini-btn" type="button" on:click={resetTocRegexRules}>重置</button>
+          </div>
+          <div class="toolbox-regex-list">
+            {#each appSettings.customRegexRules as rule, index}
+              <div class="toolbox-regex-row">
+                <label class="toolbox-regex-enabled" title="是否应用该正则">
+                  <input
+                    type="checkbox"
+                    checked={rule.enabled !== false}
+                    on:change={(e) => updateTocRegexRule(index, { enabled: (e.currentTarget as HTMLInputElement).checked })}
+                  />
+                </label>
+                <CustomSelect
+                  className="set-control toolbox-regex-level"
+                  value={String(rule.level <= 1 ? 1 : 3)}
+                  options={REGEX_LEVEL_OPTIONS}
+                  on:change={(e) => updateTocRegexRule(index, { level: Number(e.detail) })}
+                />
+                <input
+                  class="set-control"
+                  type="text"
+                  value={rule.pattern}
+                  on:input={(e) => updateTocRegexRule(index, { pattern: (e.currentTarget as HTMLInputElement).value })}
+                  placeholder="输入目录匹配正则"
+                />
+                <button class="toolbox-mini-btn danger" type="button" on:click={() => removeTocRegexRule(index)}>删除</button>
+              </div>
+            {/each}
+          </div>
+          <div class="toolbox-regex-actions">
+            <button class="toolbox-mini-btn" type="button" on:click={() => addTocRegexRule(1)}>添加卷规则</button>
+            <button class="toolbox-mini-btn" type="button" on:click={() => addTocRegexRule(3)}>添加章规则</button>
+          </div>
         </section>
       {:else if toolboxSettingsActiveTab === "api"}
         <section class="settings-section">
@@ -1152,6 +1321,49 @@
   .api-list {
     display: grid;
     gap: 10px;
+  }
+
+  .account-mode-switch {
+    margin-bottom: 12px;
+  }
+
+  .account-submit {
+    margin-top: 4px;
+  }
+
+  .toolbox-regex-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .toolbox-regex-row {
+    display: grid;
+    grid-template-columns: 28px 72px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .toolbox-regex-enabled {
+    min-height: 34px;
+    display: grid;
+    place-items: center;
+  }
+
+  .toolbox-regex-enabled input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-accent);
+  }
+
+  :global(.toolbox-regex-level .custom-select-trigger) {
+    min-height: 36px;
+  }
+
+  .toolbox-regex-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
   }
 
   .api-item {

@@ -1,5 +1,13 @@
+import { notifySettingsChanged, readScopedSettingsRaw, writeScopedSettingsRaw } from "$lib/webAccount";
+
 export type UiTheme = "modern" | "classic" | "dark";
 export type AiProviderKind = "text" | "image";
+
+export interface TocRegexRule {
+  enabled: boolean;
+  level: number;
+  pattern: string;
+}
 
 export interface AiProofingConfig {
   enabled: boolean;
@@ -41,6 +49,7 @@ export interface GlobalAppSettings {
   aiProofing: AiProofingConfig;
   aiProviders: AiProviderConfig[];
   txtAiProofing: TxtAiProofingConfig;
+  customRegexRules: TocRegexRule[];
 }
 
 export const DEFAULT_AI_PROOFING: AiProofingConfig = {
@@ -55,6 +64,21 @@ export const DEFAULT_AI_PROOFING: AiProofingConfig = {
   extraPrompt: "",
 };
 
+export const DEFAULT_TOC_REGEX_RULES: TocRegexRule[] = [
+  { enabled: true, level: 1, pattern: "^\\s*(?:内容简介|本书相关|完本感言)\\s*(?:[:：].*)?$" },
+  {
+    enabled: true,
+    level: 1,
+    pattern: "^\\s*(?:第\\s*[零〇一二两三四五六七八九十百千万0-9]+\\s*卷|卷\\s*[零〇一二两三四五六七八九十百千万0-9]+)(?:\\s+|[:：、.．\\-—]+)\\S+.*",
+  },
+  { enabled: true, level: 3, pattern: "^\\s*(?:简介|序(?:章|言)?|前言|楔子|后记|尾声)\\s*(?:[:：].*)?$" },
+  {
+    enabled: true,
+    level: 3,
+    pattern: "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*",
+  },
+];
+
 export const DEFAULT_APP_SETTINGS: GlobalAppSettings = {
   uiTheme: "modern",
   assocEpubRead: false,
@@ -68,6 +92,7 @@ export const DEFAULT_APP_SETTINGS: GlobalAppSettings = {
   aiProofing: { ...DEFAULT_AI_PROOFING },
   aiProviders: [],
   txtAiProofing: { providerId: "", approvalProviderId: "" },
+  customRegexRules: DEFAULT_TOC_REGEX_RULES.map((rule) => ({ ...rule })),
 };
 
 export function normalizeAiProofingConfig(config: Partial<AiProofingConfig> | undefined): AiProofingConfig {
@@ -145,13 +170,18 @@ function isCloseAction(value: unknown): value is "exit" | "library" {
 }
 
 function readStoredSettings(): Record<string, any> {
-  if (typeof localStorage === "undefined") return {};
-  try {
-    const stored = localStorage.getItem("app-settings");
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
+  return readScopedSettingsRaw();
+}
+
+export function normalizeTocRegexRules(rules: Array<Partial<TocRegexRule>> | undefined): TocRegexRule[] {
+  const source = Array.isArray(rules) && rules.length ? rules : DEFAULT_TOC_REGEX_RULES;
+  return source
+    .map((rule) => ({
+      enabled: typeof rule.enabled === "boolean" ? rule.enabled : true,
+      level: Number(rule.level) <= 1 ? 1 : 3,
+      pattern: String(rule.pattern || "").trim(),
+    }))
+    .filter((rule) => rule.pattern);
 }
 
 export function normalizeAppSettings(raw: Record<string, any> = {}): GlobalAppSettings {
@@ -174,6 +204,7 @@ export function normalizeAppSettings(raw: Record<string, any> = {}): GlobalAppSe
       providerId: String(raw.txtAiProofing?.providerId || ""),
       approvalProviderId: String(raw.txtAiProofing?.approvalProviderId || raw.txtAiProofing?.providerId || ""),
     },
+    customRegexRules: normalizeTocRegexRules(raw.customRegexRules),
   };
   return ensureAiProviderSelections(settings);
 }
@@ -217,9 +248,10 @@ export function ensureAiProviderSelections(settings: GlobalAppSettings): GlobalA
 export function saveAppSettings(settings: GlobalAppSettings): GlobalAppSettings {
   const normalized = ensureAiProviderSelections(normalizeAppSettings(settings));
   if (typeof localStorage !== "undefined") {
-    localStorage.setItem("app-settings", JSON.stringify(normalized));
+    writeScopedSettingsRaw(normalized);
   }
   applyTheme(normalized.uiTheme);
+  notifySettingsChanged();
   return normalized;
 }
 
