@@ -142,9 +142,10 @@
     let volumeNumberStyle: NumberStyle = "chinese";
     let chapterNumberStyle: NumberStyle = "arabic";
     let reorderCollapsedVolumeKeys = new Set<string>();
-    let regexOpen = false;
+    let regexOpen = true;
     let tocOpen = true;
     let checkOpen = true;
+    let reorderOpen = false;
     let tocActionTarget: TocItem | null = null;
     let renameTitleSheet: RenameTitleSheetState = {
         open: false,
@@ -970,11 +971,11 @@
         <section class="meta">
             <div class="meta-top">
                 <div class="meta-main">
-                    <label>
+                    <label class="title-field">
                         <span>书名</span>
                         <input bind:value={title} autocomplete="off" />
                     </label>
-                    <label>
+                    <label class="author-field">
                         <span>作者</span>
                         <input bind:value={author} autocomplete="off" />
                     </label>
@@ -1090,6 +1091,43 @@
                 </span>
             </button>
             {#if checkOpen}
+                <div class="check-actions single">
+                    <button type="button" on:click={() => runTocCheck()} disabled={busy}>重新检查</button>
+                </div>
+                {#if sequenceErrors.length || titleErrors.length}
+                    <div class="check-list">
+                        {#each sequenceErrors as item}
+                            <button type="button" class="check-row" on:click={() => revealTocItem(item.id)}>
+                                <strong>序号跳跃</strong>
+                                <span>{item.title}</span>
+                                <small>第 {item.line} 行 · {item.msg}</small>
+                            </button>
+                        {/each}
+                        {#each titleErrors as item}
+                            <button type="button" class="check-row" on:click={() => revealTocItem(item.id)}>
+                                <strong>标题缺失</strong>
+                                <span>{item.title}</span>
+                                <small>第 {item.line} 行 · {item.msg}</small>
+                            </button>
+                        {/each}
+                    </div>
+                {:else}
+                    <p class="check-empty">当前目录没有发现明显问题。</p>
+                {/if}
+            {/if}
+        </section>
+
+        <section class="reorder-panel">
+            <button class="check-head" type="button" on:click={() => (reorderOpen = !reorderOpen)}>
+                <span>目录重排</span>
+                <small>{visibleReorderRows.length} 项预览</small>
+                <span class="chevron-shell" aria-hidden="true">
+                    <svg class:open={reorderOpen} viewBox="0 0 24 24">
+                        <path d="M9 6L15 12L9 18"></path>
+                    </svg>
+                </span>
+            </button>
+            {#if reorderOpen}
                 <div class="reorder-options">
                     <label>
                         <span>重排范围</span>
@@ -1130,7 +1168,6 @@
                     {/if}
                 </div>
                 <div class="check-actions">
-                    <button type="button" on:click={() => runTocCheck()} disabled={busy}>重新检查</button>
                     <button class="secondary" type="button" on:click={applyReorderToc} disabled={busy || !chapters.length}>应用目录重排</button>
                 </div>
                 <div class="reorder-preview">
@@ -1161,26 +1198,6 @@
                         </button>
                     {/each}
                 </div>
-                {#if sequenceErrors.length || titleErrors.length}
-                    <div class="check-list">
-                        {#each sequenceErrors as item}
-                            <button type="button" class="check-row" on:click={() => revealTocItem(item.id)}>
-                                <strong>序号跳跃</strong>
-                                <span>{item.title}</span>
-                                <small>第 {item.line} 行 · {item.msg}</small>
-                            </button>
-                        {/each}
-                        {#each titleErrors as item}
-                            <button type="button" class="check-row" on:click={() => revealTocItem(item.id)}>
-                                <strong>标题缺失</strong>
-                                <span>{item.title}</span>
-                                <small>第 {item.line} 行 · {item.msg}</small>
-                            </button>
-                        {/each}
-                    </div>
-                {:else}
-                    <p class="check-empty">当前目录没有发现明显问题。</p>
-                {/if}
             {/if}
         </section>
 
@@ -1312,6 +1329,7 @@
     .regex-panel,
     .toc-panel,
     .check-panel,
+    .reorder-panel,
     .empty-panel,
     .bottom-actions {
         margin-top: 10px;
@@ -1773,7 +1791,8 @@
         color: #9b3d4f;
     }
 
-    .check-panel {
+    .check-panel,
+    .reorder-panel {
         display: grid;
         gap: 10px;
     }
@@ -1782,6 +1801,10 @@
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 8px;
+    }
+
+    .check-actions.single {
+        grid-template-columns: minmax(0, 140px);
     }
 
     .reorder-options {
@@ -1964,7 +1987,6 @@
         }
 
         .desktop-page .empty-panel,
-        .desktop-page .meta,
         .desktop-page .bottom-actions {
             grid-column: 1 / -1;
         }
@@ -1977,14 +1999,21 @@
         .desktop-page .regex-panel,
         .desktop-page .toc-panel,
         .desktop-page .check-panel,
+        .desktop-page .reorder-panel,
         .desktop-page .bottom-actions {
             margin-top: 0;
         }
 
         .desktop-page .meta {
-            grid-template-columns: minmax(0, 1fr) 108px minmax(220px, 280px);
-            align-items: end;
-            gap: 10px;
+            grid-column: 1;
+            grid-row: 1;
+            grid-template-columns: minmax(0, 1fr) 116px;
+            grid-template-areas:
+                "title cover"
+                "author cover"
+                "uuid cover";
+            align-items: stretch;
+            gap: 8px 10px;
             padding: 10px 12px;
         }
 
@@ -1993,9 +2022,20 @@
         }
 
         .desktop-page .meta-main {
-            grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
-            align-items: end;
-            gap: 10px;
+            display: contents;
+        }
+
+        .desktop-page .title-field {
+            grid-area: title;
+        }
+
+        .desktop-page .author-field {
+            grid-area: author;
+        }
+
+        .desktop-page .cover-field {
+            grid-area: cover;
+            min-height: 0;
         }
 
         .desktop-page .meta label {
@@ -2013,31 +2053,40 @@
         }
 
         .desktop-page .uuid-row {
-            align-self: end;
+            grid-area: uuid;
         }
 
         .desktop-page .cover-box {
-            height: 36px;
-            min-height: 36px;
+            height: 100%;
+            min-height: 0;
+        }
+
+        .desktop-page .cover-box b {
+            max-width: 5em;
         }
 
         .desktop-page .toc-panel {
             grid-column: 1;
-            grid-row: 2 / span 3;
+            grid-row: 2 / span 4;
         }
 
         .desktop-page .regex-panel {
             grid-column: 2;
-            grid-row: 2;
+            grid-row: 1;
         }
 
         .desktop-page .check-panel {
+            grid-column: 2;
+            grid-row: 2;
+        }
+
+        .desktop-page .reorder-panel {
             grid-column: 2;
             grid-row: 3;
         }
 
         .desktop-page .bottom-actions {
-            grid-row: 5;
+            grid-row: 6;
             grid-template-columns: auto auto minmax(0, 1fr);
             align-items: center;
         }
@@ -2067,6 +2116,7 @@
 
         .desktop-page .regex-panel,
         .desktop-page .check-panel,
+        .desktop-page .reorder-panel,
         .desktop-page .toc-panel {
             padding: 12px;
         }
@@ -2089,6 +2139,10 @@
 
         .desktop-page .check-actions {
             grid-template-columns: repeat(2, minmax(0, 140px));
+        }
+
+        .desktop-page .check-actions.single {
+            grid-template-columns: minmax(0, 140px);
         }
 
         .desktop-page .reorder-preview {
