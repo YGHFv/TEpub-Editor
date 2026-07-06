@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import CustomSelect from "$lib/CustomSelect.svelte";
     import { platform } from "$lib/platform";
     import {
         cacheBrowserFileStable,
@@ -74,6 +75,23 @@
 
     type ReorderScope = "all" | "volumes" | "chapters" | "regex";
     type NumberStyle = "arabic" | "chinese";
+
+    const ruleLevelOptions = [
+        { value: "1", label: "卷 / 元信息" },
+        { value: "3", label: "章节" },
+    ];
+
+    const reorderScopeOptions = [
+        { value: "all", label: "卷和章" },
+        { value: "chapters", label: "仅章节" },
+        { value: "volumes", label: "仅卷部" },
+        { value: "regex", label: "手动正则" },
+    ];
+
+    const numberStyleOptions = [
+        { value: "chinese", label: "一二三四" },
+        { value: "arabic", label: "1234" },
+    ];
 
     function chevronLabel(open: boolean) {
         return open ? "收起" : "展开";
@@ -996,10 +1014,12 @@
                 </div>
                 {#each rules as rule, index}
                     <div class="rule-row">
-                        <select bind:value={rule.level}>
-                            <option value={1}>卷/元信息</option>
-                            <option value={3}>章节</option>
-                        </select>
+                        <CustomSelect
+                            className="make-select compact-select"
+                            value={String(rule.level)}
+                            options={ruleLevelOptions}
+                            on:change={(e) => (rules = rules.map((item, i) => (i === index ? { ...item, level: Number(e.detail) } : item)))}
+                        />
                         <input bind:value={rule.pattern} autocomplete="off" />
                         <button type="button" on:click={() => removeRule(index)} aria-label="删除正则">×</button>
                     </div>
@@ -1073,12 +1093,12 @@
                 <div class="reorder-options">
                     <label>
                         <span>重排范围</span>
-                        <select bind:value={reorderScope}>
-                            <option value="all">卷和章</option>
-                            <option value="chapters">仅章节</option>
-                            <option value="volumes">仅卷部</option>
-                            <option value="regex">手动正则</option>
-                        </select>
+                        <CustomSelect
+                            className="make-select"
+                            value={reorderScope}
+                            options={reorderScopeOptions}
+                            on:change={(e) => (reorderScope = e.detail as ReorderScope)}
+                        />
                     </label>
                     <label class="check-toggle">
                         <input type="checkbox" bind:checked={reorderPerVolume} />
@@ -1086,17 +1106,21 @@
                     </label>
                     <label>
                         <span>卷序号</span>
-                        <select bind:value={volumeNumberStyle}>
-                            <option value="chinese">一二三四</option>
-                            <option value="arabic">1234</option>
-                        </select>
+                        <CustomSelect
+                            className="make-select"
+                            value={volumeNumberStyle}
+                            options={numberStyleOptions}
+                            on:change={(e) => (volumeNumberStyle = e.detail as NumberStyle)}
+                        />
                     </label>
                     <label>
                         <span>章序号</span>
-                        <select bind:value={chapterNumberStyle}>
-                            <option value="arabic">1234</option>
-                            <option value="chinese">一二三四</option>
-                        </select>
+                        <CustomSelect
+                            className="make-select"
+                            value={chapterNumberStyle}
+                            options={[numberStyleOptions[1], numberStyleOptions[0]]}
+                            on:change={(e) => (chapterNumberStyle = e.detail as NumberStyle)}
+                        />
                     </label>
                     {#if reorderScope === "regex"}
                         <label class="wide">
@@ -1409,8 +1433,7 @@
         font-weight: 800;
     }
 
-    input,
-    select {
+    input {
         width: 100%;
         box-sizing: border-box;
         border: 1px solid rgba(23, 27, 36, 0.12);
@@ -1419,6 +1442,43 @@
         background: #fff;
         color: inherit;
         font: inherit;
+    }
+
+    :global(.make-select) {
+        --control-height: 36px;
+    }
+
+    :global(.make-select .custom-select-trigger) {
+        min-height: 36px;
+        border-color: rgba(23, 27, 36, 0.12);
+        border-radius: 8px;
+        background: #fff;
+        color: #171b24;
+        box-shadow: none;
+        font-size: 13px;
+        font-weight: 800;
+    }
+
+    :global(.make-select .custom-select-menu) {
+        border-color: rgba(23, 27, 36, 0.14);
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 12px 28px rgba(25, 31, 43, 0.14);
+    }
+
+    :global(.make-select .custom-select-menu button) {
+        border-radius: 7px;
+        font-size: 13px;
+        font-weight: 800;
+    }
+
+    :global(.compact-select) {
+        --control-height: 34px;
+    }
+
+    :global(.compact-select .custom-select-trigger) {
+        min-height: 34px;
+        padding: 6px 9px;
     }
 
     .section-head {
@@ -1893,14 +1953,14 @@
 
     @media (min-width: 900px) {
         .page.desktop-page {
-            width: min(1180px, calc(100vw - 48px));
+            width: min(1280px, calc(100vw - 40px));
             max-width: none;
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 360px;
+            grid-template-columns: minmax(360px, 42%) minmax(420px, 1fr);
             grid-auto-rows: auto;
             align-items: start;
-            gap: 14px;
-            padding: 18px 0 32px;
+            gap: 12px;
+            padding: 14px 0 28px;
         }
 
         .desktop-page .empty-panel,
@@ -1922,30 +1982,58 @@
         }
 
         .desktop-page .meta {
-            grid-template-columns: minmax(0, 1fr);
+            grid-template-columns: minmax(0, 1fr) 108px minmax(220px, 280px);
+            align-items: end;
+            gap: 10px;
+            padding: 10px 12px;
         }
 
         .desktop-page .meta-top {
-            grid-template-columns: minmax(0, 1fr) 150px;
+            display: contents;
+        }
+
+        .desktop-page .meta-main {
+            grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+            align-items: end;
+            gap: 10px;
+        }
+
+        .desktop-page .meta label {
+            gap: 5px;
+        }
+
+        .desktop-page .meta label span {
+            font-size: 11px;
+        }
+
+        .desktop-page .meta input {
+            min-height: 36px;
+            padding: 6px 10px;
+            font-size: 13px;
+        }
+
+        .desktop-page .uuid-row {
+            align-self: end;
         }
 
         .desktop-page .cover-box {
-            height: 180px;
+            height: 36px;
+            min-height: 36px;
         }
 
         .desktop-page .toc-panel {
             grid-column: 1;
-            grid-row: 3 / span 2;
+            grid-row: 2 / span 3;
         }
 
         .desktop-page .regex-panel {
             grid-column: 2;
-            grid-row: 3;
+            grid-row: 2;
         }
 
         .desktop-page .check-panel {
             grid-column: 2;
-            grid-row: 4;
+            grid-row: 3;
         }
 
         .desktop-page .bottom-actions {
@@ -1960,7 +2048,62 @@
         }
 
         .desktop-page .toc-list {
-            max-height: 58vh;
+            max-height: calc(100vh - 260px);
+            overflow: auto;
+        }
+
+        .desktop-page .toc-row,
+        .desktop-page .toc-main {
+            min-height: 38px;
+        }
+
+        .desktop-page .toc-main {
+            padding: 4px 0;
+        }
+
+        .desktop-page .toc-row strong {
+            font-size: 12px;
+        }
+
+        .desktop-page .regex-panel,
+        .desktop-page .check-panel,
+        .desktop-page .toc-panel {
+            padding: 12px;
+        }
+
+        .desktop-page .section-head,
+        .desktop-page .toc-list {
+            margin-top: 0;
+            margin-bottom: 6px;
+        }
+
+        .desktop-page .reorder-options {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            align-items: end;
+        }
+
+        .desktop-page .check-toggle {
+            min-height: 36px;
+        }
+
+        .desktop-page .check-actions {
+            grid-template-columns: repeat(2, minmax(0, 140px));
+        }
+
+        .desktop-page .reorder-preview {
+            max-height: 220px;
+            overflow: auto;
+        }
+
+        .desktop-page .reorder-head,
+        .desktop-page .reorder-row {
+            min-height: 30px;
+            padding: 0 8px;
+        }
+
+        .desktop-page .check-list {
+            max-height: 180px;
             overflow: auto;
         }
     }
