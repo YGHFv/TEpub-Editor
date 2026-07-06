@@ -145,7 +145,7 @@
     let regexOpen = true;
     let tocOpen = true;
     let checkOpen = true;
-    let reorderOpen = false;
+    let reorderOpen = true;
     let tocActionTarget: TocItem | null = null;
     let renameTitleSheet: RenameTitleSheetState = {
         open: false,
@@ -181,6 +181,16 @@
 
     function openCoverPicker() {
         coverInputEl?.click();
+    }
+
+    function toggleCheckPanel() {
+        checkOpen = !checkOpen;
+        if (!checkOpen) reorderOpen = true;
+    }
+
+    function toggleReorderPanel() {
+        reorderOpen = !reorderOpen;
+        if (!reorderOpen && !checkOpen) checkOpen = true;
     }
 
     async function loadSource(sourcePath: string, name = "") {
@@ -969,6 +979,11 @@
 
     {#if selectedPath}
         <section class="meta">
+            <div class="section-head meta-section-head">
+                <div class="static-head">
+                    <span>图书信息</span>
+                </div>
+            </div>
             <div class="meta-top">
                 <div class="meta-main">
                     <label class="title-field">
@@ -1010,10 +1025,6 @@
                 </button>
             </div>
             {#if regexOpen}
-                <div class="regex-actions">
-                    <button type="button" on:click={previewToc} disabled={busy}>重新扫描</button>
-                    <button type="button" on:click={() => runTocCheck()} disabled={busy}>重新检查</button>
-                </div>
                 {#each rules as rule, index}
                     <div class="rule-row">
                         <CustomSelect
@@ -1033,7 +1044,7 @@
             {/if}
         </section>
 
-        <section class="toc-panel">
+        <section class="toc-panel" class:expanded={tocOpen} class:collapsed={!tocOpen}>
             <div class="section-head">
                 <button class="fold-head" type="button" on:click={() => (tocOpen = !tocOpen)}>
                     <span>目录预览</span>
@@ -1046,6 +1057,9 @@
                 </button>
             </div>
             {#if tocOpen}
+                <div class="toc-actions">
+                    <button type="button" on:click={previewToc} disabled={busy}>重新扫描并检查</button>
+                </div>
                 <div class="status">{status}</div>
                 {#if visibleToc.length}
                     <div class="toc-list">
@@ -1081,8 +1095,8 @@
             {/if}
         </section>
 
-        <section class="check-panel">
-            <button class="check-head" type="button" on:click={() => (checkOpen = !checkOpen)}>
+        <section class="check-panel" class:expanded={checkOpen} class:collapsed={!checkOpen}>
+            <button class="check-head" type="button" on:click={toggleCheckPanel}>
                 <span>目录检查</span>
                 <small>{sequenceErrors.length + titleErrors.length} 个问题</small>
                 <span class="chevron-shell" aria-hidden="true">
@@ -1115,8 +1129,8 @@
             {/if}
         </section>
 
-        <section class="reorder-panel">
-            <button class="check-head" type="button" on:click={() => (reorderOpen = !reorderOpen)}>
+        <section class="reorder-panel" class:expanded={reorderOpen} class:collapsed={!reorderOpen}>
+            <button class="check-head" type="button" on:click={toggleReorderPanel}>
                 <span>目录重排</span>
                 <small>{visibleReorderRows.length} 项预览</small>
                 <span class="chevron-shell" aria-hidden="true">
@@ -1533,8 +1547,16 @@
         padding: 0;
     }
 
+    .static-head {
+        width: 100%;
+        min-height: 34px;
+        display: flex;
+        align-items: center;
+    }
+
     .fold-head span,
-    .check-head span {
+    .check-head span,
+    .static-head span {
         font-size: 15px;
         font-weight: 900;
     }
@@ -1572,18 +1594,6 @@
         transform: rotate(90deg);
     }
 
-    .regex-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        margin-bottom: 8px;
-    }
-
-    .regex-actions button {
-        background: #e8f2f8;
-        color: #1677b8;
-    }
-
     .rule-row {
         display: grid;
         grid-template-columns: 86px minmax(0, 1fr) 34px;
@@ -1608,6 +1618,17 @@
     .toc-list {
         display: grid;
         margin-top: 10px;
+    }
+
+    .toc-actions {
+        display: grid;
+        margin-bottom: 8px;
+    }
+
+    .toc-actions button {
+        min-height: 32px;
+        background: #e8f2f8;
+        color: #1677b8;
     }
 
     .toc-row {
@@ -1976,9 +1997,11 @@
             max-width: none;
             display: grid;
             grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
-            grid-auto-rows: auto;
+            grid-template-rows: auto auto minmax(0, 1fr) auto;
             align-items: start;
             gap: 12px;
+            height: calc(100vh - 42px);
+            min-height: 620px;
             padding: 14px 0 28px;
         }
 
@@ -2005,12 +2028,18 @@
             grid-row: 1;
             grid-template-columns: minmax(0, 1fr) 116px;
             grid-template-areas:
+                "head head"
                 "title cover"
                 "author cover"
                 "uuid cover";
             align-items: stretch;
             gap: 8px 10px;
             padding: 10px 12px;
+        }
+
+        .desktop-page .meta-section-head {
+            grid-area: head;
+            margin-bottom: 0;
         }
 
         .desktop-page .meta-top {
@@ -2065,25 +2094,50 @@
 
         .desktop-page .toc-panel {
             grid-column: 1;
-            grid-row: 3;
+            grid-row: 2 / span 2;
+            align-self: start;
+            min-height: 0;
         }
 
         .desktop-page .regex-panel {
-            grid-column: 1;
-            grid-row: 2;
+            grid-column: 2;
+            grid-row: 1;
         }
 
         .desktop-page .check-panel {
             grid-column: 2;
-            grid-row: 1 / span 2;
+            grid-row: 2;
+            align-self: start;
+            min-height: 0;
+            grid-template-rows: auto auto;
+        }
+
+        .desktop-page .check-panel.collapsed {
+            grid-row: 2;
+            align-self: start;
+            grid-template-rows: auto;
         }
 
         .desktop-page .reorder-panel {
             grid-column: 2;
             grid-row: 3;
+            align-self: end;
+            min-height: 0;
+            grid-template-rows: auto;
+        }
+
+        .desktop-page .reorder-panel.expanded {
+            grid-row: 3;
+            align-self: stretch;
+            grid-template-rows: auto auto auto minmax(0, 1fr);
+        }
+
+        .desktop-page .check-panel.collapsed + .reorder-panel.expanded {
+            grid-row: 2 / span 2;
         }
 
         .desktop-page .bottom-actions {
+            grid-column: 1 / -1;
             grid-row: 4;
             grid-template-columns: auto auto minmax(0, 1fr);
             align-items: center;
@@ -2095,7 +2149,7 @@
         }
 
         .desktop-page .toc-list {
-            max-height: calc(100vh - 260px);
+            max-height: calc(100vh - 330px);
             overflow: auto;
         }
 
@@ -2125,6 +2179,10 @@
             margin-bottom: 6px;
         }
 
+        .desktop-page .toc-actions {
+            margin-bottom: 6px;
+        }
+
         .desktop-page .reorder-options {
             grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 8px;
@@ -2140,7 +2198,8 @@
         }
 
         .desktop-page .reorder-preview {
-            max-height: 220px;
+            min-height: 0;
+            max-height: none;
             overflow: auto;
         }
 
@@ -2151,7 +2210,8 @@
         }
 
         .desktop-page .check-list {
-            max-height: 180px;
+            min-height: 0;
+            max-height: min(260px, calc(100vh - 430px));
             overflow: auto;
         }
 
