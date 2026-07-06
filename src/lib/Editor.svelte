@@ -628,7 +628,7 @@
 <div
   class="editor-container"
   bind:this={editorElement}
-  style="display: {initError ? 'none' : 'flex'}"
+  style="display: {initError ? 'none' : 'flex'}; --editor-font-size: {fontSize}px;"
 ></div>
 
 <style>
@@ -645,15 +645,198 @@
 
   /* 确保内部 CM 本体无限填满该区域 */
   :global(.cm-editor) {
+    box-sizing: border-box;
+    display: flex !important;
+    flex-direction: column;
+    position: relative;
     height: 100%;
     width: 100%;
     min-width: 0;
     min-height: 0;
     flex: 1;
+    background-color: var(--color-surface);
+    font-size: var(--editor-font-size);
   }
 
-  :global(.cm-scroller),
-  :global(.cm-content) {
+  /* CodeMirror injects these base layout rules at runtime. In the release
+     WebView that injection can fail, so keep the structural rules static. */
+  :global(.cm-scroller) {
+    display: flex !important;
+    align-items: flex-start !important;
+    font-family: monospace;
+    line-height: 1.4;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: scroll;
+    position: relative;
+    z-index: 0;
+    overflow-anchor: none;
     min-width: 0;
+  }
+
+  :global(.cm-content) {
+    margin: 0;
+    flex-grow: 2;
+    flex-shrink: 0;
+    display: block;
+    white-space: pre;
+    word-wrap: normal;
+    box-sizing: border-box;
+    font-family: var(--font-reading);
+    line-height: 36px;
+    min-height: 100%;
+    padding: 4px 0;
+    outline: none;
+    min-width: 0;
+    -webkit-touch-callout: none;
+  }
+
+  :global(.cm-content[contenteditable="true"]) {
+    -webkit-user-modify: read-write-plaintext-only;
+  }
+
+  :global(.cm-lineWrapping) {
+    white-space: pre-wrap;
+    white-space: break-spaces;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    flex-shrink: 1;
+  }
+
+  :global(.cm-line) {
+    display: block;
+    padding: 0 2px 0 6px;
+    min-height: 36px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  :global(.cm-selectionBackground) {
+    background-color: rgba(22, 119, 184, 0.34) !important;
+  }
+
+  :global(.cm-editor.cm-focused .cm-selectionBackground) {
+    background-color: rgba(22, 119, 184, 0.42) !important;
+  }
+
+  :global(.cm-layer) {
+    position: absolute;
+    left: 0;
+    top: 0;
+    contain: size style;
+  }
+
+  :global(.cm-layer > *) {
+    position: absolute;
+  }
+
+  :global(.cm-cursorLayer) {
+    pointer-events: none;
+  }
+
+  :global(.cm-cursor),
+  :global(.cm-dropCursor) {
+    border-left: 1.2px solid black;
+    margin-left: -0.6px;
+    pointer-events: none;
+  }
+
+  :global(.cm-cursor) {
+    display: none;
+  }
+
+  :global(.cm-dropCursor) {
+    position: absolute;
+  }
+
+  :global(.cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer) {
+    animation: steps(1) cm-blink 1.2s infinite;
+  }
+
+  :global(.cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer .cm-cursor) {
+    display: block;
+  }
+
+  :global(.cm-gutters) {
+    flex-shrink: 0;
+    display: flex;
+    height: 100%;
+    box-sizing: border-box;
+    z-index: 200;
+    background-color: var(--color-surface-soft);
+    color: var(--color-muted);
+    border-right: 1px solid var(--color-border);
+  }
+
+  :global(.cm-gutter) {
+    display: flex !important;
+    flex-direction: column;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    min-height: 100%;
+    overflow: hidden;
+  }
+
+  :global(.cm-gutterElement) {
+    box-sizing: border-box;
+  }
+
+  :global(.cm-lineNumbers .cm-gutterElement) {
+    padding: 0 3px 0 5px;
+    min-width: 20px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  :global(.cm-panels) {
+    box-sizing: border-box;
+    position: sticky;
+    left: 0;
+    right: 0;
+    z-index: 300;
+  }
+
+  :global(.cm-title-line) {
+    color: var(--color-accent-deep);
+    background: var(--color-accent-soft);
+    mix-blend-mode: multiply;
+  }
+
+  :global(.cm-scroller::-webkit-scrollbar) {
+    width: 14px;
+  }
+
+  :global(.cm-scroller::-webkit-scrollbar-track) {
+    background: rgba(226, 235, 244, 0.72);
+  }
+
+  :global(.cm-scroller::-webkit-scrollbar-thumb) {
+    background: linear-gradient(180deg, #bacbda, #93a8bb);
+    border-radius: 7px;
+    border: 3px solid rgba(226, 235, 244, 0.72);
+  }
+
+  :global(.cm-scroller::-webkit-scrollbar-thumb:hover) {
+    background: linear-gradient(180deg, #9dafc0, #748b9f);
+  }
+
+  :global(.cm-scroller::-webkit-scrollbar-thumb:active) {
+    background: #748b9f;
+  }
+
+  :global(.cm-tab) {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: bottom;
+  }
+
+  @keyframes cm-blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
   }
 </style>
