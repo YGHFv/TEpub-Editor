@@ -26,6 +26,7 @@ export interface PlatformAdapter {
   saveDialog(options?: Record<string, unknown>): Promise<string | null>;
   message(text: string, options?: Record<string, unknown>): Promise<void>;
   ask(text: string, options?: Record<string, unknown>): Promise<boolean>;
+  readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array | number[]): Promise<void>;
   revealPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;

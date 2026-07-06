@@ -383,9 +383,19 @@
       event.preventDefault();
       return;
     }
-    if (platform.isWeb && tool.id === "image-tools") return;
+    if (platform.isWeb && isWebRouteTool(tool.id)) return;
     event.preventDefault();
     pickFile(tool);
+  }
+
+  function isWebRouteTool(id: ToolId) {
+    return id === "image-tools" || id === "txt-epub";
+  }
+
+  function webToolHref(id: ToolId) {
+    if (id === "image-tools") return "/toolbox/image-tools";
+    if (id === "txt-epub") return "/mobile/make";
+    return "#";
   }
 
   function isRootToolbox() {
@@ -784,7 +794,7 @@
             >
               <a
                 class="tool-main"
-                href={tool.id === "image-tools" ? "/toolbox/image-tools" : "#"}
+                href={webToolHref(tool.id)}
                 aria-disabled={busyTool !== ""}
                 on:click={(event) => handleToolMainClick(event, tool)}
               >

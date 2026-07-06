@@ -57,6 +57,11 @@ export function createTauriPlatform(): PlatformAdapter {
       return ask(text, options as any);
     },
 
+    async readFile(path) {
+      const { readFile } = await import("@tauri-apps/plugin-fs");
+      return await readFile(path);
+    },
+
     async writeFile(path, data) {
       const { writeFile } = await import("@tauri-apps/plugin-fs");
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);

@@ -1,7 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { invoke } from "@tauri-apps/api/core";
-    import { message } from "@tauri-apps/plugin-dialog";
+    import { platform } from "$lib/platform";
     import {
         cacheBrowserFileStable,
         exportEpubPath,
@@ -166,14 +165,14 @@
             resetResult();
             selectedName = name || selectionName(sourcePath);
             selectedPath = sourcePath;
-            content = await invoke<string>("read_text_file", { path: selectedPath });
+            content = await platform.invoke<string>("read_text_file", { path: selectedPath });
             title = selectionName(selectedName).replace(/\.[^.]+$/, "");
             if (uuidAuto) uuid = crypto.randomUUID?.() ?? uuid;
             status = `已导入 ${selectedName}，正在扫描目录。`;
             await previewToc();
         } catch (err) {
             status = "导入文本失败";
-            await message(`导入文本失败：${err}`, { title: "制作 EPUB", kind: "error" });
+            await platform.message(`导入文本失败：${err}`, { title: "制作 EPUB", kind: "error" });
         } finally {
             busy = false;
         }
@@ -190,7 +189,7 @@
             await loadSource(cachedPath, file.name);
         } catch (err) {
             status = "导入文本失败";
-            await message(`导入文本失败：${err}`, { title: "制作 EPUB", kind: "error" });
+            await platform.message(`导入文本失败：${err}`, { title: "制作 EPUB", kind: "error" });
         }
     }
 
@@ -207,7 +206,7 @@
             coverPreviewUrl = URL.createObjectURL(file);
             resetResult();
         } catch (err) {
-            await message(`封面导入失败：${err}`, { title: "制作 EPUB", kind: "error" });
+            await platform.message(`封面导入失败：${err}`, { title: "制作 EPUB", kind: "error" });
         }
     }
 
@@ -216,7 +215,7 @@
         resetResult();
         try {
             busy = true;
-            chapters = await invoke<RawChapter[]>("mobile_scan_chapters", { content, rules });
+            chapters = await platform.invoke<RawChapter[]>("mobile_scan_chapters", { content, rules });
             expandedIds = new Set(
                 buildToc(chapters)
                     .filter((item) => itemKind(item.title, item.level, item.is_meta) === "volume" && item.hasChildren)
@@ -229,7 +228,7 @@
             runTocCheck(buildToc(chapters));
         } catch (err) {
             status = "目录扫描失败";
-            await message(`目录扫描失败：${err}`, { title: "制作 EPUB", kind: "error" });
+            await platform.message(`目录扫描失败：${err}`, { title: "制作 EPUB", kind: "error" });
         } finally {
             busy = false;
         }
@@ -239,7 +238,7 @@
         if (!selectedPath || !content.trim()) return;
         try {
             busy = true;
-            makeResult = await invoke<MobileMakeEpubResult>("mobile_make_epub", {
+            makeResult = await platform.invoke<MobileMakeEpubResult>("mobile_make_epub", {
                 sourcePath: selectedPath,
                 title: title.trim() || selectedName.replace(/\.[^.]+$/, ""),
                 author: author.trim(),
@@ -250,7 +249,7 @@
             status = `已生成《${makeResult.title}》，${makeResult.chapter_count} 个目录项，约 ${makeResult.word_count} 字。`;
         } catch (err) {
             status = "制作 EPUB 失败";
-            await message(`制作 EPUB 失败：${err}`, { title: "制作 EPUB", kind: "error" });
+            await platform.message(`制作 EPUB 失败：${err}`, { title: "制作 EPUB", kind: "error" });
         } finally {
             busy = false;
         }
@@ -265,7 +264,7 @@
             status = result.message;
         } catch (err) {
             status = "导出 EPUB 失败";
-            await message(`导出 EPUB 失败：${err}`, { title: "制作 EPUB", kind: "error" });
+            await platform.message(`导出 EPUB 失败：${err}`, { title: "制作 EPUB", kind: "error" });
         } finally {
             busy = false;
         }
@@ -369,7 +368,7 @@
         const indent = lines[lineIndex].match(/^[\s　]*/)?.[0] ?? "";
         lines[lineIndex] = `${indent}${nextTitle}`;
         content = lines.join("\n");
-        await invoke("save_text_file", { path: selectedPath, content });
+        await platform.invoke("save_text_file", { path: selectedPath, content });
         closeRenameTitle();
         await previewToc();
         status = `已重命名目录标题：${nextTitle}`;
@@ -416,7 +415,7 @@
             ...lines.slice(chapterEditSheet.endLine),
         ];
         content = nextLines.join("\n");
-        await invoke("save_text_file", { path: selectedPath, content });
+        await platform.invoke("save_text_file", { path: selectedPath, content });
         const titleText = chapterEditSheet.item.title;
         closeChapterEditor();
         await previewToc();
@@ -434,7 +433,7 @@
         lines[lineIndex] = `${indent}原章节标题：${item.title}`;
         content = lines.join("\n");
         tocActionTarget = null;
-        await invoke("save_text_file", { path: selectedPath, content });
+        await platform.invoke("save_text_file", { path: selectedPath, content });
         await previewToc();
         status = `已取消本章标题：${item.title}`;
     }
@@ -653,7 +652,7 @@
         }
 
         content = lines.join("\n");
-        await invoke("save_text_file", { path: selectedPath, content });
+        await platform.invoke("save_text_file", { path: selectedPath, content });
         await previewToc();
         status = changed ? `已重排 ${changed} 个目录标题。` : "目录标题已是当前顺序。";
     }

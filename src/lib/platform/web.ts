@@ -77,6 +77,15 @@ export function createWebPlatform(): PlatformAdapter {
       return window.confirm(text);
     },
 
+    async readFile(path) {
+      if (/^https?:\/\//i.test(path) || path.startsWith("/")) {
+        const response = await fetch(path);
+        if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+        return new Uint8Array(await response.arrayBuffer());
+      }
+      throw new PlatformUnsupportedError("Direct filesystem read", "web");
+    },
+
     async writeFile(path, data) {
       if (typeof window === "undefined" || typeof document === "undefined") return;
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
