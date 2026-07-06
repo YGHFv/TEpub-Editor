@@ -7893,8 +7893,11 @@
 
     .editor-wrapper {
         flex: 1;
+        min-width: 0;
+        min-height: 0;
         overflow: hidden;
         position: relative;
+        display: flex;
     }
     .loading {
         position: absolute;
