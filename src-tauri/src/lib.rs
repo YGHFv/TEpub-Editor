@@ -12784,8 +12784,8 @@ pub fn run() {
             for window in app.webview_windows().values() {
                 let _ = window.set_background_color(app_bg);
             }
-            let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
             let icon = app
                 .default_window_icon()
@@ -12820,7 +12820,10 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if matches!(window.label(), "main" | "toolbox") {
+                if window.label() == "toolbox" {
+                    api.prevent_close();
+                    window.app_handle().exit(0);
+                } else if window.label() == "main" {
                     api.prevent_close();
                     let _ = window.hide();
                 }

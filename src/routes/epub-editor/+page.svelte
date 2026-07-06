@@ -867,7 +867,7 @@
             }
 
             if (analyze.unsupported_reason) {
-                fontStatsError = "Stats failed: " + analyze.unsupported_reason;
+                fontStatsError = "统计失败：" + analyze.unsupported_reason;
                 return;
             }
 
@@ -885,7 +885,7 @@
             fontMissingGlyphCharCount = missingCount;
             fontMissingChars = Array.from(missingSet.values());
         } catch (e) {
-            fontStatsError = "Stats failed: " + e;
+            fontStatsError = "统计失败：" + e;
         } finally {
             if (token === currentFontStatsToken) {
                 fontStatsLoading = false;
@@ -903,7 +903,7 @@
         loadingMessage = "正在加载 EPUB...";
         fontPreviewText = DEFAULT_FONT_PREVIEW_TEXT;
         if (!requestedPath) {
-            error = "No EPUB file path was provided.";
+            error = "未提供 EPUB 文件路径。";
             isLoading = false;
             return;
         }
@@ -1006,7 +1006,7 @@
                 }
             });
         } catch (e) {
-            error = "Failed to open EPUB: " + e;
+            error = "打开 EPUB 失败：" + e;
             isLoading = false;
         }
     };
@@ -1842,7 +1842,7 @@
                                     expandedFolders = expandedFolders;
                                 }
                             } else {
-                                alert("No files found under this TOC item.");
+                                alert("该目录项下未找到文件。");
                             }
                         }
                     }
@@ -2445,9 +2445,9 @@
             await invoke("save_epub_to_disk", { epubPath });
             isProjectDirty = false;
         } catch (e) {
-            console.error("Save failed:", e);
-            await confirm("Save failed: " + e, {
-                title: "Error",
+            console.error("保存失败:", e);
+            await confirm("保存失败：" + e, {
+                title: "错误",
                 kind: "error",
             });
         } finally {
@@ -2472,9 +2472,9 @@
             modifiedFiles = modifiedFiles;
             isProjectDirty = true;
         } catch (e) {
-            console.error("Save failed:", e);
-            await confirm("Save failed: " + e, {
-                title: "Error",
+            console.error("保存失败:", e);
+            await confirm("保存失败：" + e, {
+                title: "错误",
                 kind: "error",
             });
         } finally {
@@ -2590,7 +2590,7 @@
         if (fileContentCache.has(file.path)) {
             fileContent = fileContentCache.get(file.path)!;
         } else {
-                    fileContent = "Failed to load font preview.";
+                    fileContent = "字体预览加载失败。";
         }
 
         // UX Optimization: Immediate Switch for HTML files
@@ -2640,7 +2640,7 @@
                         }
                     } catch (err) {
                         console.error("Failed to load image", err);
-                        fileContent = "Failed to load image preview.";
+                        fileContent = "图片预览加载失败。";
                     }
                 }
                 fileContent = ""; // Clear editor content
@@ -2770,8 +2770,8 @@
             }
         } catch (e) {
             if (currentGeneration === generation) {
-                fileContent = "Failed to load preview source: " + e;
-                previewContent = "Failed to load preview source: " + e;
+                fileContent = "预览源加载失败：" + e;
+                previewContent = "预览源加载失败：" + e;
             }
         }
     }
@@ -2858,7 +2858,7 @@
                         modifiedFiles.delete(pendingCloseFile.path);
                         modifiedFiles = modifiedFiles;
                     } catch (e) {
-                        console.error("Save failed in dialog:", e);
+                        console.error("弹窗保存失败:", e);
                     }
                 }
             }
@@ -2887,7 +2887,7 @@
                 await closeEpubEditorWindow();
             } catch (e) {
                 isSaving = false;
-                await confirm("Save failed: " + e, { kind: "error" });
+                await confirm("保存失败：" + e, { kind: "error" });
                 return;
             }
         }

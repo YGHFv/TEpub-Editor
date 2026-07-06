@@ -303,9 +303,9 @@
       for (const path of paths) {
         await openLaunchPath(path, action);
       }
-      statusText = paths.length > 1 ? `${paths.length} files opened` : "File opened";
+      statusText = paths.length > 1 ? `已打开 ${paths.length} 个文件` : "文件已打开";
     } catch (e) {
-      console.warn("Failed to process launch files:", e);
+      console.warn("处理启动文件失败:", e);
     }
   }
 

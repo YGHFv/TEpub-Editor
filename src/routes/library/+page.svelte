@@ -883,8 +883,8 @@
         });
       }
     } catch (e: any) {
-      console.error("Failed to open reader:", e);
-      await message(`Open failed: ${e}`, { title: "Error", kind: "error" });
+      console.error("打开阅读器失败:", e);
+      await message(`打开失败：${e}`, { title: "错误", kind: "error" });
     }
   }
 
