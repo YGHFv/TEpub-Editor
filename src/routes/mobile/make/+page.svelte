@@ -145,7 +145,7 @@
     let regexOpen = true;
     let tocOpen = true;
     let checkOpen = true;
-    let reorderOpen = true;
+    let reorderOpen = false;
     let tocActionTarget: TocItem | null = null;
     let renameTitleSheet: RenameTitleSheetState = {
         open: false,
@@ -588,6 +588,9 @@
             }
         }
         reorderPreviewRows = buildReorderPreviewRows(items);
+        const hasIssues = sequenceErrors.length + titleErrors.length > 0;
+        checkOpen = hasIssues;
+        reorderOpen = !hasIssues;
     }
 
     function titleBody(text: string) {
@@ -978,6 +981,7 @@
     {/if}
 
     {#if selectedPath}
+        <div class="make-column left-column">
         <section class="meta">
             <div class="section-head meta-section-head">
                 <div class="static-head">
@@ -1010,38 +1014,6 @@
                 <span>UUID</span>
                 <input bind:value={uuid} readonly={uuidAuto} on:focus={enableManualUuid} autocomplete="off" />
             </label>
-        </section>
-
-        <section class="regex-panel">
-            <div class="section-head">
-                <button class="fold-head" type="button" on:click={() => (regexOpen = !regexOpen)}>
-                    <span>目录正则</span>
-                    <small>{rules.length} 条</small>
-                    <span class="chevron-shell" aria-hidden="true">
-                        <svg class:open={regexOpen} viewBox="0 0 24 24">
-                            <path d="M9 6L15 12L9 18"></path>
-                        </svg>
-                    </span>
-                </button>
-            </div>
-            {#if regexOpen}
-                {#each rules as rule, index}
-                    <div class="rule-row">
-                        <CustomSelect
-                            className="make-select compact-select"
-                            value={String(rule.level)}
-                            options={ruleLevelOptions}
-                            on:change={(e) => (rules = rules.map((item, i) => (i === index ? { ...item, level: Number(e.detail) } : item)))}
-                        />
-                        <input bind:value={rule.pattern} autocomplete="off" />
-                        <button type="button" on:click={() => removeRule(index)} aria-label="删除正则">×</button>
-                    </div>
-                {/each}
-                <div class="rule-actions">
-                    <button type="button" on:click={() => addRule(1)}>添加卷规则</button>
-                    <button type="button" on:click={() => addRule(3)}>添加章节规则</button>
-                </div>
-            {/if}
         </section>
 
         <section class="toc-panel" class:expanded={tocOpen} class:collapsed={!tocOpen}>
@@ -1092,6 +1064,54 @@
                         {/each}
                     </div>
                 {/if}
+            {/if}
+        </section>
+
+        <section class="bottom-actions">
+            <button type="button" on:click={makeEpub} disabled={busy}>生成 EPUB</button>
+            {#if makeResult}
+                <button type="button" on:click={exportMadeEpub} disabled={busy}>导出 EPUB</button>
+            {/if}
+            {#if exportPath}<code>{exportPath}</code>{/if}
+        </section>
+        </div>
+
+        <div
+            class="make-column right-column"
+            class:hasIssues={sequenceErrors.length + titleErrors.length > 0}
+            class:noIssues={sequenceErrors.length + titleErrors.length === 0}
+            class:checkCollapsed={!checkOpen}
+            class:reorderExpanded={reorderOpen}
+        >
+        <section class="regex-panel">
+            <div class="section-head">
+                <button class="fold-head" type="button" on:click={() => (regexOpen = !regexOpen)}>
+                    <span>目录正则</span>
+                    <small>{rules.length} 条</small>
+                    <span class="chevron-shell" aria-hidden="true">
+                        <svg class:open={regexOpen} viewBox="0 0 24 24">
+                            <path d="M9 6L15 12L9 18"></path>
+                        </svg>
+                    </span>
+                </button>
+            </div>
+            {#if regexOpen}
+                {#each rules as rule, index}
+                    <div class="rule-row">
+                        <CustomSelect
+                            className="make-select compact-select"
+                            value={String(rule.level)}
+                            options={ruleLevelOptions}
+                            on:change={(e) => (rules = rules.map((item, i) => (i === index ? { ...item, level: Number(e.detail) } : item)))}
+                        />
+                        <input bind:value={rule.pattern} autocomplete="off" />
+                        <button type="button" on:click={() => removeRule(index)} aria-label="删除正则">×</button>
+                    </div>
+                {/each}
+                <div class="rule-actions">
+                    <button type="button" on:click={() => addRule(1)}>添加卷规则</button>
+                    <button type="button" on:click={() => addRule(3)}>添加章节规则</button>
+                </div>
             {/if}
         </section>
 
@@ -1213,13 +1233,7 @@
             {/if}
         </section>
 
-        <section class="bottom-actions">
-            <button type="button" on:click={makeEpub} disabled={busy}>生成 EPUB</button>
-            {#if makeResult}
-                <button type="button" on:click={exportMadeEpub} disabled={busy}>导出 EPUB</button>
-            {/if}
-            {#if exportPath}<code>{exportPath}</code>{/if}
-        </section>
+        </div>
     {/if}
 
     {#if tocActionTarget}
@@ -1984,6 +1998,10 @@
         gap: 10px;
     }
 
+    .make-column {
+        display: contents;
+    }
+
     @media (min-width: 720px) {
         .page {
             max-width: 820px;
@@ -1997,10 +2015,33 @@
             max-width: none;
             display: grid;
             grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
-            grid-template-rows: auto auto auto auto;
-            align-items: start;
+            align-items: stretch;
             gap: 12px;
             padding: 14px 0 28px;
+        }
+
+        .desktop-page .make-column {
+            min-width: 0;
+            display: grid;
+            grid-auto-rows: auto;
+            align-content: start;
+            gap: 12px;
+        }
+
+        .desktop-page .left-column {
+            grid-column: 1;
+        }
+
+        .desktop-page .right-column {
+            grid-column: 2;
+            min-height: calc(100vh - 42px);
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            align-content: stretch;
+        }
+
+        .desktop-page .right-column.noIssues,
+        .desktop-page .right-column.checkCollapsed {
+            grid-template-rows: auto auto minmax(0, 1fr);
         }
 
         .desktop-page .empty-panel {
@@ -2089,55 +2130,43 @@
             max-width: 5em;
         }
 
-        .desktop-page .toc-panel {
-            grid-column: 1;
-            grid-row: 2 / span 2;
-            align-self: start;
-            min-height: 0;
-        }
-
-        .desktop-page .regex-panel {
-            grid-column: 2;
-            grid-row: 1;
-        }
-
-        .desktop-page .check-panel {
-            grid-column: 2;
-            grid-row: 2;
-            align-self: start;
-            min-height: 0;
-            grid-template-rows: auto auto;
-        }
-
-        .desktop-page .check-panel.collapsed {
-            grid-row: 2;
-            align-self: start;
-            grid-template-rows: auto;
-        }
-
-        .desktop-page .reorder-panel {
-            grid-column: 2;
-            grid-row: 3;
-            align-self: start;
-            min-height: 0;
-            grid-template-rows: auto;
-        }
-
-        .desktop-page .reorder-panel.expanded {
-            grid-row: 3;
-            align-self: start;
-            grid-template-rows: auto auto auto auto;
-        }
-
-        .desktop-page .check-panel.collapsed + .reorder-panel.expanded {
-            grid-row: 2 / span 2;
-        }
-
         .desktop-page .bottom-actions {
-            grid-column: 1;
-            grid-row: 4;
             grid-template-columns: auto auto minmax(0, 1fr);
             align-items: center;
+        }
+
+        .desktop-page .make-column > .meta,
+        .desktop-page .make-column > .regex-panel,
+        .desktop-page .make-column > .toc-panel,
+        .desktop-page .make-column > .check-panel,
+        .desktop-page .make-column > .reorder-panel,
+        .desktop-page .make-column > .bottom-actions {
+            grid-column: auto;
+            grid-row: auto;
+            align-self: start;
+        }
+
+        .desktop-page .right-column > .check-panel.expanded {
+            align-self: stretch;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+        }
+
+        .desktop-page .right-column > .check-panel.collapsed {
+            align-self: start;
+        }
+
+        .desktop-page .right-column.checkCollapsed > .reorder-panel.expanded,
+        .desktop-page .right-column.noIssues > .reorder-panel.expanded {
+            align-self: stretch;
+            display: grid;
+            grid-template-rows: auto auto auto minmax(0, 1fr);
+        }
+
+        .desktop-page .right-column > .check-panel.expanded .check-list,
+        .desktop-page .right-column.checkCollapsed > .reorder-panel.expanded .reorder-preview,
+        .desktop-page .right-column.noIssues > .reorder-panel.expanded .reorder-preview {
+            max-height: none;
         }
 
         .desktop-page .bottom-actions button {
