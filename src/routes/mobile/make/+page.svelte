@@ -1337,6 +1337,12 @@ ${heading}${buildTextBody(section.lines)}</body>
     }
 
     onMount(() => {
+        if (platform.isWeb && window.location.pathname === "/mobile/make") {
+            const params = new URLSearchParams(window.location.search);
+            params.set("view", "desktop");
+            window.location.replace(`/toolbox/make-epub?${params.toString()}`);
+            return;
+        }
         const params = new URLSearchParams(window.location.search);
         desktopMode = params.get("view") === "desktop" || (platform.isWeb && !isCompactDevice());
         backHref = desktopMode ? "/" : "/mobile";

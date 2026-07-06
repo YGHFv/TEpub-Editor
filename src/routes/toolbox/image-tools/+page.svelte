@@ -120,6 +120,10 @@
   $: currentGeneratedReady = !!generated && generatedTarget === aiTarget;
   $: previewTarget = activeMode === "ai" ? aiTarget : activeMode === "header" ? "banner" : "duokan";
   $: previewIsBanner = previewTarget === "banner";
+  $: canComparePreview = activeMode !== "header" && !previewIsBanner;
+  $: if (!canComparePreview && previewMode === "compare") {
+    previewMode = "reference";
+  }
   $: showComparePreview = previewMode === "compare" && !previewIsBanner;
   $: activeReferenceImage = activeMode === "cover" ? coverImage : activeMode === "ai" ? aiReferenceImage : headerSourceImage;
   $: activeReferenceName = activeMode === "cover" ? coverName : activeMode === "ai" ? aiReferenceName : headerSourceName;
@@ -168,6 +172,11 @@
 
   function setMode(mode: ToolMode) {
     activeMode = mode;
+    if (mode === "header") {
+      previewMode = "reference";
+    } else if (mode === "cover" || (mode === "ai" && aiTarget !== "banner")) {
+      previewMode = "compare";
+    }
     tick().then(() => {
       drawLocalPreview();
       drawHeaderPreview();
@@ -666,6 +675,7 @@
     const oldDefault = defaultPrompt(aiTarget);
     aiTarget = next;
     aiSize = defaultSize(next);
+    previewMode = next === "banner" ? "reference" : "compare";
     if (!aiPrompt.trim() || aiPrompt === oldDefault) {
       aiPrompt = defaultPrompt(next);
     }
@@ -896,12 +906,16 @@
         referenceData: Array.from(aiReferenceBytes),
       };
       let result: AiImageResult;
-      try {
+      if (platform.isWeb) {
+        try {
+          status = "正在尝试浏览器直连生图...";
+          result = await generateAiImageInBrowser();
+        } catch (error) {
+          status = "浏览器直连失败，尝试后端代理...";
+          result = await platform.invoke<AiImageResult>("toolbox_generate_ai_image", { request });
+        }
+      } else {
         result = await platform.invoke<AiImageResult>("toolbox_generate_ai_image", { request });
-      } catch (error) {
-        if (!platform.isWeb) throw error;
-        status = "后端代理不可用，尝试浏览器直连...";
-        result = await generateAiImageInBrowser();
       }
       generated = result;
       generatedTarget = aiTarget;
@@ -981,8 +995,8 @@
     </div>
     <div class="tool-head-actions">
       <div class="preview-toggle" aria-label="预览模式">
-        <button type="button" class:active={previewMode === "compare"} on:click={() => setPreviewMode("compare")}>对比</button>
-        <button type="button" class:active={previewMode === "reference"} on:click={() => setPreviewMode("reference")}>参考</button>
+        <button type="button" class:active={previewMode === "compare" && canComparePreview} disabled={!canComparePreview} on:click={() => setPreviewMode("compare")}>对比</button>
+        <button type="button" class:active={previewMode === "reference" || !canComparePreview} on:click={() => setPreviewMode("reference")}>预览</button>
       </div>
       <button class="primary" type="button" on:click={saveCurrent} disabled={saveDisabled}>保存</button>
     </div>
@@ -1329,6 +1343,12 @@
   .preview-toggle button.active {
     background: var(--color-accent);
     color: white;
+  }
+
+  .preview-toggle button:disabled {
+    cursor: not-allowed;
+    color: color-mix(in srgb, var(--color-muted) 55%, transparent);
+    background: color-mix(in srgb, var(--color-surface-muted) 65%, transparent);
   }
 
   .workspace {

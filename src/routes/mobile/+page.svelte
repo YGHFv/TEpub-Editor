@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import { goto } from "$app/navigation";
     import { buildMobileRoute, cacheBrowserFileStable } from "$lib/mobileFlow";
     import { platform } from "$lib/platform";
@@ -134,6 +135,12 @@
             if (token === pickToken) busy = false;
         }
     }
+
+    onMount(() => {
+        if (platform.isWeb) {
+            window.location.replace("/");
+        }
+    });
 </script>
 
 <svelte:head>
