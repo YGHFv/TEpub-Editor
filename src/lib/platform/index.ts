@@ -14,7 +14,10 @@ function hasTauriRuntime(): boolean {
 }
 
 function resolvePlatformKind(): PlatformKind {
-  if (typeof __TEPUB_TARGET__ !== "undefined") return __TEPUB_TARGET__;
+  if (typeof __TEPUB_TARGET__ !== "undefined") {
+    if (__TEPUB_TARGET__ === "web") return "web";
+    return hasTauriRuntime() ? "tauri" : "web";
+  }
   return hasTauriRuntime() ? "tauri" : "web";
 }
 

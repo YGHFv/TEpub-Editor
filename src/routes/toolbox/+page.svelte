@@ -378,6 +378,16 @@
     }
   }
 
+  function handleToolMainClick(event: MouseEvent, tool: Tool) {
+    if (busyTool !== "") {
+      event.preventDefault();
+      return;
+    }
+    if (platform.isWeb && tool.id === "image-tools") return;
+    event.preventDefault();
+    pickFile(tool);
+  }
+
   function isRootToolbox() {
     return typeof window !== "undefined" && window.location.pathname === "/";
   }
@@ -772,11 +782,11 @@
               class:tool-card-disabled={busyTool !== ""}
               aria-label={tool.title}
             >
-              <button
+              <a
                 class="tool-main"
-                type="button"
-                on:click={() => pickFile(tool)}
-                disabled={busyTool !== ""}
+                href={tool.id === "image-tools" ? "/toolbox/image-tools" : "#"}
+                aria-disabled={busyTool !== ""}
+                on:click={(event) => handleToolMainClick(event, tool)}
               >
               <span class="tool-icon">{tool.icon}</span>
               <span class="tool-copy">
@@ -784,7 +794,7 @@
                 <span class="tool-detail">{busyTool === tool.id ? "处理中..." : tool.detail}</span>
               </span>
               <span class="tool-action">{tool.action}</span>
-              </button>
+              </a>
               {#if isBatchTool(tool.id)}
                 <button
                   class="tool-batch"
@@ -1311,6 +1321,7 @@
     color: inherit;
     cursor: pointer;
     text-align: left;
+    text-decoration: none;
     font: inherit;
   }
 
@@ -1321,6 +1332,7 @@
   }
 
   .tool-main:disabled,
+  .tool-main[aria-disabled="true"],
   .tool-batch:disabled {
     cursor: wait;
   }
