@@ -422,6 +422,11 @@
   }
 
   async function openImageTools() {
+    if (platform.isWeb && typeof window !== "undefined") {
+      window.location.href = "/toolbox/image-tools";
+      return;
+    }
+
     const win = await createToolWindow(windowLabel("image-tools"), {
       url: "/toolbox/image-tools",
       title: "TEpub-Editor-图片处理",
