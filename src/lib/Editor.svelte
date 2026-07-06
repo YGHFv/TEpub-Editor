@@ -149,6 +149,14 @@
     }
 
     let cleanupSearchListener: () => void;
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && editorElement) {
+      resizeObserver = new ResizeObserver(() => {
+        view?.requestMeasure();
+      });
+      resizeObserver.observe(editorElement);
+    }
+
     listen("search-action", (event: any) => {
       const p = event.payload;
       if (!view) return;
@@ -265,6 +273,7 @@
     return () => {
       window.removeEventListener("keydown", blockNativeSearch, true);
       window.removeEventListener("error", handleGlobalError);
+      resizeObserver?.disconnect();
       if (cleanupSearchListener) cleanupSearchListener();
       view?.destroy();
     };
@@ -626,6 +635,8 @@
   .editor-container {
     width: 100%;
     height: 100%;
+    min-width: 0;
+    min-height: 0;
     overflow: hidden;
     position: relative;
     display: flex; /* 让 CM6 真正的填满 */
@@ -635,6 +646,14 @@
   /* 确保内部 CM 本体无限填满该区域 */
   :global(.cm-editor) {
     height: 100%;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
     flex: 1;
+  }
+
+  :global(.cm-scroller),
+  :global(.cm-content) {
+    min-width: 0;
   }
 </style>
