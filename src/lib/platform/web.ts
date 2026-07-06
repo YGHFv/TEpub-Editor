@@ -16,7 +16,14 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(detail || `Request failed with ${response.status}`);
+    let message = detail;
+    try {
+      const parsed = JSON.parse(detail);
+      message = parsed?.error || parsed?.message || detail;
+    } catch {
+      // Keep the raw response text when it is not JSON.
+    }
+    throw new Error(message || `Request failed with ${response.status}`);
   }
 
   if (response.status === 204) return undefined as T;

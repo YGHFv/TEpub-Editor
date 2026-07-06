@@ -7,6 +7,9 @@ const port = Number(process.env.PORT || 5233);
 const root = resolve(process.env.TEPUB_WEB_ROOT || "build");
 const dataDir = resolve(process.env.TEPUB_DATA_DIR || "data");
 const usersFile = join(dataDir, "users.json");
+const maxAiImageResponseBytes = 64 * 1024 * 1024;
+const maxAiImageInputBytes = 20 * 1024 * 1024;
+const aiImageUserAgent = "TEpub-Editor/web-image-tools";
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -89,9 +92,346 @@ function authUser(req, db) {
   return Object.values(db.users).find((user) => user.sessions?.includes(token)) || null;
 }
 
+function normalizeAiBaseUrl(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function removeSuffixIgnoreCase(value, suffix) {
+  return value.toLowerCase().endsWith(suffix.toLowerCase()) ? value.slice(0, -suffix.length) : value;
+}
+
+function isVersionedAiBaseUrl(baseUrl) {
+  const lower = baseUrl.toLowerCase();
+  const match = lower.match(/\/api\/v(\d+)$/);
+  return Boolean(match);
+}
+
+function aiImageGenerationUrl(baseUrl) {
+  const base = normalizeAiBaseUrl(baseUrl);
+  if (!base) throw new Error("Base URL 不能为空");
+  const lower = base.toLowerCase();
+  if (lower.endsWith("/images/generations")) return base;
+  if (lower.endsWith("/chat/completions")) return `${removeSuffixIgnoreCase(base, "/chat/completions")}/images/generations`;
+  if (lower.endsWith("/v1") || isVersionedAiBaseUrl(base)) return `${base}/images/generations`;
+  return `${base}/v1/images/generations`;
+}
+
+function aiImageEditsUrl(baseUrl) {
+  const base = normalizeAiBaseUrl(baseUrl);
+  if (!base) throw new Error("Base URL 不能为空");
+  const lower = base.toLowerCase();
+  if (lower.endsWith("/images/edits")) return base;
+  if (lower.endsWith("/images/generations")) return `${removeSuffixIgnoreCase(base, "/images/generations")}/images/edits`;
+  if (lower.endsWith("/chat/completions")) return `${removeSuffixIgnoreCase(base, "/chat/completions")}/images/edits`;
+  if (lower.endsWith("/v1") || isVersionedAiBaseUrl(base)) return `${base}/images/edits`;
+  return `${base}/v1/images/edits`;
+}
+
+function imageMimeFromBytes(bytes) {
+  if (bytes.length >= 12) {
+    const riff = Buffer.from(bytes.slice(0, 4)).toString("ascii");
+    const webp = Buffer.from(bytes.slice(8, 12)).toString("ascii");
+    if (riff === "RIFF" && webp === "WEBP") return { extension: "webp", mime: "image/webp" };
+  }
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return { extension: "png", mime: "image/png" };
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return { extension: "gif", mime: "image/gif" };
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return { extension: "jpg", mime: "image/jpeg" };
+  return { extension: "jpg", mime: "image/jpeg" };
+}
+
+function validateAiImageBytes(bytes, label) {
+  if (!bytes?.length) throw new Error(`${label}为空`);
+  if (bytes.length > maxAiImageResponseBytes) throw new Error(`${label}过大`);
+  const { mime } = imageMimeFromBytes(bytes);
+  if (!mime.startsWith("image/")) throw new Error(`无法识别${label}的图片内容`);
+}
+
+function decodeAiBase64Image(value) {
+  const trimmed = String(value || "").trim();
+  const encoded = trimmed.toLowerCase().startsWith("data:image/") ? trimmed.split(",").slice(1).join(",").trim() : trimmed;
+  if (encoded.length < 80 || /\s/.test(encoded)) return null;
+  try {
+    const bytes = Buffer.from(encoded, "base64");
+    validateAiImageBytes(bytes, "返回图片");
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+function isRemoteAiUrl(value) {
+  return /^https?:\/\//i.test(String(value || "").trim());
+}
+
+function aiJsonErrorPreview(text) {
+  try {
+    const parsed = JSON.parse(text);
+    const error = parsed?.error?.message || parsed?.error;
+    if (typeof error === "string") return error;
+    if (error) return JSON.stringify(error).slice(0, 240);
+  } catch {
+    // fall through
+  }
+  return String(text || "").slice(0, 240);
+}
+
+function imageSizeCandidates(requested, target) {
+  const fallback = target === "banner" ? "1536x768" : target === "standard" ? "1200x1600" : "1024x1792";
+  const secondary = target === "banner" ? "1280x640" : target === "standard" ? "1024x1365" : "1400x2400";
+  return [...new Set([String(requested || "").trim(), fallback, secondary, ""])];
+}
+
+function renderAiImagePrompt(template, titleValue, authorValue) {
+  const title = String(titleValue || "").trim() || "当前书籍";
+  const rawAuthor = String(authorValue || "").trim();
+  let prompt = String(template || "").trim();
+  if (!rawAuthor) {
+    for (const marker of ["作者{author}的", "作者{{author}}的", "作者 {author} 的", "作者 {{author}} 的"]) {
+      prompt = prompt.replaceAll(marker, "");
+    }
+  }
+  const replaced = prompt
+    .replaceAll("{title}", title)
+    .replaceAll("{{title}}", title)
+    .replaceAll("{{text}}", title)
+    .replaceAll("{author}", rawAuthor)
+    .replaceAll("{{author}}", rawAuthor);
+  if (prompt.includes("{title}") || prompt.includes("{{title}}") || prompt.includes("{{text}}") || prompt.includes("{author}") || prompt.includes("{{author}}")) {
+    return replaced;
+  }
+  return `${replaced}\n\n书籍信息：${rawAuthor ? `${title} / ${rawAuthor}` : title}`;
+}
+
+function buildAiImageRequestBodies(model, prompt, size, referenceDataUrl) {
+  const baseBody = () => {
+    const body = { model, prompt, n: 1 };
+    if (String(size || "").trim()) body.size = String(size).trim();
+    return body;
+  };
+  const bodies = [];
+  if (referenceDataUrl) {
+    for (const variant of ["image_array", "image_string", "image_urls_array", "image_array_no_format", "image_string_no_format", "image_urls_array_no_format"]) {
+      const body = baseBody();
+      if (variant.startsWith("image_array")) body.image = [referenceDataUrl];
+      else if (variant.startsWith("image_string")) body.image = referenceDataUrl;
+      else body.image_urls = [referenceDataUrl];
+      if (!variant.endsWith("_no_format")) body.response_format = "b64_json";
+      bodies.push(body);
+    }
+  }
+  bodies.push({ ...baseBody(), response_format: "b64_json" });
+  bodies.push(baseBody());
+  const seen = new Set();
+  return bodies.filter((body) => {
+    const key = JSON.stringify(body);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function downloadAiImageUrl(url) {
+  const response = await fetch(String(url || "").trim(), {
+    headers: { accept: "image/*,*/*;q=0.8", "user-agent": aiImageUserAgent },
+  });
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!response.ok) throw new Error(`下载生成图片返回 ${response.status}`);
+  validateAiImageBytes(bytes, "生成图片");
+  return bytes;
+}
+
+async function extractAiImageBytes(value, keyHint = "") {
+  if (typeof value === "string") {
+    const decoded = decodeAiBase64Image(value);
+    if (decoded) return decoded;
+    const key = String(keyHint || "").toLowerCase();
+    if ((key.includes("url") || key === "uri" || key === "href") && isRemoteAiUrl(value)) {
+      try {
+        return await downloadAiImageUrl(value);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const bytes = await extractAiImageBytes(item, keyHint);
+      if (bytes) return bytes;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    for (const key of ["b64_json", "base64", "image_base64", "data", "content", "url", "image_url", "uri", "href"]) {
+      if (key in value) {
+        const bytes = await extractAiImageBytes(value[key], key);
+        if (bytes) return bytes;
+      }
+    }
+    for (const [key, item] of Object.entries(value)) {
+      const bytes = await extractAiImageBytes(item, key);
+      if (bytes) return bytes;
+    }
+  }
+  return null;
+}
+
+async function requestAiImageGeneration(request, body) {
+  const response = await fetch(aiImageGenerationUrl(request.baseUrl), {
+    method: "POST",
+    headers: {
+      accept: "application/json,image/*",
+      "content-type": "application/json",
+      authorization: `Bearer ${String(request.apiKey || "").trim()}`,
+      "user-agent": aiImageUserAgent,
+    },
+    body: JSON.stringify(body),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > maxAiImageResponseBytes) throw new Error("生图响应过大");
+  if (!response.ok) throw new Error(`生图接口返回 ${response.status}: ${aiJsonErrorPreview(bytes.toString("utf8"))}`);
+  if (contentType.startsWith("image/")) {
+    validateAiImageBytes(bytes, "生成图片");
+    return bytes;
+  }
+  let value;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch (error) {
+    throw new Error(`生图接口未返回有效 JSON: ${error.message}; ${bytes.toString("utf8").slice(0, 180)}`);
+  }
+  const out = await extractAiImageBytes(value);
+  if (!out) throw new Error("生图接口返回中没有图片数据");
+  return out;
+}
+
+async function requestAiImageEdit(request, prompt, size, referenceBytes) {
+  const { extension, mime } = imageMimeFromBytes(referenceBytes);
+  const form = new FormData();
+  form.set("model", String(request.model || "").trim());
+  form.set("prompt", prompt);
+  form.set("n", "1");
+  form.set("response_format", "b64_json");
+  if (String(size || "").trim()) form.set("size", String(size).trim());
+  form.set("image", new Blob([referenceBytes], { type: mime }), `reference.${extension}`);
+  const response = await fetch(aiImageEditsUrl(request.baseUrl), {
+    method: "POST",
+    headers: {
+      accept: "application/json,image/*",
+      authorization: `Bearer ${String(request.apiKey || "").trim()}`,
+      "user-agent": aiImageUserAgent,
+    },
+    body: form,
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > maxAiImageResponseBytes) throw new Error("图片编辑响应过大");
+  if (!response.ok) throw new Error(`图片编辑接口返回 ${response.status}: ${aiJsonErrorPreview(bytes.toString("utf8"))}`);
+  if (contentType.startsWith("image/")) {
+    validateAiImageBytes(bytes, "生成图片");
+    return bytes;
+  }
+  let value;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch (error) {
+    throw new Error(`图片编辑接口未返回有效 JSON: ${error.message}; ${bytes.toString("utf8").slice(0, 180)}`);
+  }
+  const out = await extractAiImageBytes(value);
+  if (!out) throw new Error("图片编辑接口返回中没有图片数据");
+  return out;
+}
+
+function sanitizeFilenamePart(value) {
+  return String(value || "")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+async function generateAiImageCommand(payload) {
+  const request = payload?.request || {};
+  if (!String(request.baseUrl || "").trim() || !String(request.apiKey || "").trim() || !String(request.model || "").trim()) {
+    throw new Error("请先填写 Base URL、API Key 和模型");
+  }
+  if (!String(request.prompt || "").trim()) throw new Error("提示词不能为空");
+  const target = ["duokan", "cover"].includes(String(request.target || "").trim())
+    ? "duokan"
+    : String(request.target || "").trim() === "standard"
+      ? "standard"
+      : String(request.target || "").trim() === "banner"
+        ? "banner"
+        : "duokan";
+  const referenceBytes = Array.isArray(request.referenceData) ? Buffer.from(request.referenceData) : null;
+  if (referenceBytes?.length) {
+    if (referenceBytes.length > maxAiImageInputBytes) throw new Error("参考封面图片过大");
+    validateAiImageBytes(referenceBytes, "参考封面");
+  }
+  const prompt = renderAiImagePrompt(request.prompt, request.title, request.author);
+  const referenceDataUrl = referenceBytes?.length ? `data:${imageMimeFromBytes(referenceBytes).mime};base64,${referenceBytes.toString("base64")}` : "";
+  const sizes = imageSizeCandidates(request.size, target);
+  const isGptImage = String(request.model || "").toLowerCase().includes("gpt-image");
+  let lastError = null;
+
+  if (isGptImage && referenceBytes?.length) {
+    for (const size of sizes) {
+      try {
+        const out = await requestAiImageEdit(request, prompt, size, referenceBytes);
+        return formatAiImageResult(out, request.title, target, prompt, size);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  for (const size of sizes) {
+    for (const body of buildAiImageRequestBodies(request.model, prompt, size, referenceDataUrl)) {
+      try {
+        const out = await requestAiImageGeneration(request, body);
+        return formatAiImageResult(out, request.title, target, prompt, size);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  throw lastError || new Error("未获取到生图结果");
+}
+
+function formatAiImageResult(bytes, title, target, prompt, size) {
+  const { extension, mime } = imageMimeFromBytes(bytes);
+  const stem = sanitizeFilenamePart(title) || target;
+  return {
+    bytes: Array.from(bytes),
+    mime,
+    extension,
+    fileName: `${stem}-${target}.${extension}`,
+    prompt,
+    size,
+  };
+}
+
+async function handleCommand(req, res, command) {
+  try {
+    const body = await readBody(req);
+    if (req.method === "POST" && command === "toolbox_generate_ai_image") {
+      return json(res, 200, await generateAiImageCommand(body));
+    }
+    return json(res, 404, { error: "Not found" });
+  } catch (error) {
+    return json(res, 400, { error: String(error?.message || error) });
+  }
+}
+
 async function handleApi(req, res, url) {
   try {
     const db = loadDb();
+
+    if (url.pathname.startsWith("/api/commands/")) {
+      return handleCommand(req, res, decodeURIComponent(url.pathname.slice("/api/commands/".length)));
+    }
 
     if (req.method === "POST" && url.pathname === "/api/auth/register") {
       const body = await readBody(req);
@@ -168,4 +508,3 @@ createServer((req, res) => {
 }).listen(port, "0.0.0.0", () => {
   console.log(`TEpub web server listening on ${port}`);
 });
-
