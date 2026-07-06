@@ -1012,6 +1012,7 @@
             {#if regexOpen}
                 <div class="regex-actions">
                     <button type="button" on:click={previewToc} disabled={busy}>重新扫描</button>
+                    <button type="button" on:click={() => runTocCheck()} disabled={busy}>重新检查</button>
                 </div>
                 {#each rules as rule, index}
                     <div class="rule-row">
@@ -1091,9 +1092,6 @@
                 </span>
             </button>
             {#if checkOpen}
-                <div class="check-actions single">
-                    <button type="button" on:click={() => runTocCheck()} disabled={busy}>重新检查</button>
-                </div>
                 {#if sequenceErrors.length || titleErrors.length}
                     <div class="check-list">
                         {#each sequenceErrors as item}
@@ -1576,6 +1574,8 @@
 
     .regex-actions {
         display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
         margin-bottom: 8px;
     }
 
@@ -1803,10 +1803,6 @@
         gap: 8px;
     }
 
-    .check-actions.single {
-        grid-template-columns: minmax(0, 140px);
-    }
-
     .reorder-options {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -1979,7 +1975,7 @@
             width: min(1280px, calc(100vw - 40px));
             max-width: none;
             display: grid;
-            grid-template-columns: minmax(360px, 42%) minmax(420px, 1fr);
+            grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
             grid-auto-rows: auto;
             align-items: start;
             gap: 12px;
@@ -2036,6 +2032,8 @@
         .desktop-page .cover-field {
             grid-area: cover;
             min-height: 0;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
         }
 
         .desktop-page .meta label {
@@ -2043,7 +2041,7 @@
         }
 
         .desktop-page .meta label span {
-            font-size: 11px;
+            font-size: 12px;
         }
 
         .desktop-page .meta input {
@@ -2057,8 +2055,8 @@
         }
 
         .desktop-page .cover-box {
-            height: 100%;
-            min-height: 0;
+            height: auto;
+            min-height: 132px;
         }
 
         .desktop-page .cover-box b {
@@ -2067,17 +2065,17 @@
 
         .desktop-page .toc-panel {
             grid-column: 1;
-            grid-row: 2 / span 4;
+            grid-row: 3;
         }
 
         .desktop-page .regex-panel {
-            grid-column: 2;
-            grid-row: 1;
+            grid-column: 1;
+            grid-row: 2;
         }
 
         .desktop-page .check-panel {
             grid-column: 2;
-            grid-row: 2;
+            grid-row: 1 / span 2;
         }
 
         .desktop-page .reorder-panel {
@@ -2086,7 +2084,7 @@
         }
 
         .desktop-page .bottom-actions {
-            grid-row: 6;
+            grid-row: 4;
             grid-template-columns: auto auto minmax(0, 1fr);
             align-items: center;
         }
@@ -2141,10 +2139,6 @@
             grid-template-columns: repeat(2, minmax(0, 140px));
         }
 
-        .desktop-page .check-actions.single {
-            grid-template-columns: minmax(0, 140px);
-        }
-
         .desktop-page .reorder-preview {
             max-height: 220px;
             overflow: auto;
@@ -2159,6 +2153,18 @@
         .desktop-page .check-list {
             max-height: 180px;
             overflow: auto;
+        }
+
+        .desktop-page .check-row {
+            grid-template-columns: 86px minmax(0, 1fr) auto;
+            grid-template-areas: "type title meta";
+            min-height: 40px;
+            align-items: center;
+        }
+
+        .desktop-page .check-row small {
+            justify-self: end;
+            white-space: nowrap;
         }
     }
 </style>
