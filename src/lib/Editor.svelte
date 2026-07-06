@@ -114,7 +114,7 @@
     // 终极杀手锏：拦截无论在何时发生的异步算绘崩溃！
     const handleGlobalError = (event: ErrorEvent) => {
       console.error("Global captured error:", event.error);
-      initError = "RUNTIME CRASH:\\n" + (event.error?.stack || event.message);
+      initError = "运行时崩溃：\\n" + (event.error?.stack || event.message);
     };
     window.addEventListener("error", handleGlobalError);
 
@@ -620,7 +620,7 @@
   <div
     style="padding: 20px; color: red; background: #ffebee; height: 100%; overflow: auto; font-family: monospace; white-space: pre-wrap;"
   >
-    <h2>CodeMirror Initialization Error</h2>
+    <h2>编辑器初始化失败</h2>
     {initError}
   </div>
 {/if}
