@@ -17,17 +17,6 @@
         background: #eef4f8;
       }
     </style>
-    <script>
-      (() => {
-        try {
-          if (/Android/i.test(navigator.userAgent || "") && location.pathname === "/") {
-            location.replace("/mobile" + location.search + location.hash);
-          }
-        } catch (_) {
-          /* keep desktop boot unchanged */
-        }
-      })();
-    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">
