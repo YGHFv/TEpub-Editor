@@ -137,7 +137,7 @@
 </script>
 
 <svelte:head>
-    <title>TEpub Mobile</title>
+    <title>TEpub-Editor</title>
 </svelte:head>
 
 <main class:about-mode={activeTab === "about"} class="mobile-shell">

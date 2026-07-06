@@ -394,7 +394,7 @@
 
   function webToolHref(id: ToolId) {
     if (id === "image-tools") return "/toolbox/image-tools";
-    if (id === "txt-epub") return "/mobile/make";
+    if (id === "txt-epub") return "/toolbox/make-epub?view=desktop";
     return "#";
   }
 

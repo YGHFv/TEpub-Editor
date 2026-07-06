@@ -104,6 +104,8 @@
     let coverPreviewUrl = "";
     let uuid = crypto.randomUUID?.() ?? "";
     let uuidAuto = true;
+    let desktopMode = false;
+    let backHref = "/mobile";
     let status = "选择 TXT、MD 或 HTML 文件后预览目录。";
     let busy = false;
     let chapters: RawChapter[] = [];
@@ -662,7 +664,15 @@
         if (!uuid) uuid = crypto.randomUUID?.() ?? "";
     }
 
+    function isCompactDevice() {
+        if (typeof navigator === "undefined") return false;
+        return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+    }
+
     onMount(() => {
+        const params = new URLSearchParams(window.location.search);
+        desktopMode = params.get("view") === "desktop" || (platform.isWeb && !isCompactDevice());
+        backHref = desktopMode ? "/" : "/mobile";
         const selection = readMobileSelection(window.location.search);
         if (selection.path) {
             void loadSource(selection.path, selection.name);
@@ -671,21 +681,32 @@
 </script>
 
 <svelte:head>
-    <title>制作 EPUB</title>
+    <title>TEpub-Editor</title>
 </svelte:head>
 
-<main class="page">
+<main class="page" class:desktop-page={desktopMode}>
     <input bind:this={fileInputEl} class="file-input" type="file" accept=".txt,.md,.html,.htm" on:change={onFileChange} />
     <input bind:this={coverInputEl} class="file-input" type="file" accept="image/*" on:change={onCoverChange} />
 
     <header class="topbar">
-        <a href="/mobile" aria-label="返回">
+        <a href={backHref} aria-label="返回">
             <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M15 6L9 12L15 18"></path>
             </svg>
         </a>
         <h1>制作 EPUB</h1>
+        <button class="topbar-action" type="button" on:click={openPicker} disabled={busy}>选择文本</button>
     </header>
+
+    {#if !selectedPath}
+        <section class="empty-panel">
+            <div>
+                <h2>选择文本文件开始制作</h2>
+                <p>支持 TXT、Markdown 和 HTML 文件，导入后可扫描目录、调整规则并生成 EPUB。</p>
+            </div>
+            <button type="button" on:click={openPicker} disabled={busy}>选择文本文件</button>
+        </section>
+    {/if}
 
     {#if selectedPath}
         <section class="meta">
@@ -982,7 +1003,7 @@
 
     .topbar {
         display: grid;
-        grid-template-columns: 38px minmax(0, 1fr);
+        grid-template-columns: 38px minmax(0, 1fr) auto;
         align-items: center;
         gap: 8px;
         min-height: 52px;
@@ -1018,16 +1039,50 @@
         font-size: 22px;
     }
 
+    .topbar-action {
+        min-height: 34px;
+        padding: 0 14px;
+    }
+
     .meta,
     .regex-panel,
     .toc-panel,
     .check-panel,
+    .empty-panel,
     .bottom-actions {
         margin-top: 10px;
         border: 1px solid rgba(23, 27, 36, 0.08);
         border-radius: 8px;
         background: #fff;
         padding: 12px;
+    }
+
+    .empty-panel {
+        display: grid;
+        gap: 14px;
+        min-height: 220px;
+        align-content: center;
+        justify-items: center;
+        text-align: center;
+    }
+
+    .empty-panel h2 {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.25;
+    }
+
+    .empty-panel p {
+        max-width: 520px;
+        margin-top: 8px;
+        color: #626a78;
+        font-size: 14px;
+        line-height: 1.6;
+    }
+
+    .empty-panel button {
+        min-width: 150px;
+        padding: 0 18px;
     }
 
     .status,
@@ -1593,6 +1648,91 @@
         .page {
             max-width: 820px;
             margin: 0 auto;
+        }
+    }
+
+    @media (min-width: 900px) {
+        .page.desktop-page {
+            width: min(1180px, calc(100vw - 48px));
+            max-width: none;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            grid-auto-rows: auto;
+            gap: 14px;
+            padding: 24px 0 32px;
+        }
+
+        .desktop-page .topbar,
+        .desktop-page .empty-panel,
+        .desktop-page .meta,
+        .desktop-page .bottom-actions {
+            grid-column: 1 / -1;
+        }
+
+        .desktop-page .topbar {
+            min-height: 58px;
+            margin: 0;
+            padding: 0 14px;
+            border: 1px solid rgba(23, 27, 36, 0.08);
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .desktop-page .topbar a {
+            border-radius: 8px;
+            background: #eef3f7;
+            color: #4e5968;
+        }
+
+        .desktop-page .meta,
+        .desktop-page .regex-panel,
+        .desktop-page .toc-panel,
+        .desktop-page .check-panel,
+        .desktop-page .bottom-actions {
+            margin-top: 0;
+        }
+
+        .desktop-page .meta {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .desktop-page .meta-top {
+            grid-template-columns: minmax(0, 1fr) 150px;
+        }
+
+        .desktop-page .cover-box {
+            height: 180px;
+        }
+
+        .desktop-page .toc-panel {
+            grid-column: 1;
+            grid-row: 3 / span 2;
+        }
+
+        .desktop-page .regex-panel {
+            grid-column: 2;
+            grid-row: 3;
+        }
+
+        .desktop-page .check-panel {
+            grid-column: 2;
+            grid-row: 4;
+        }
+
+        .desktop-page .bottom-actions {
+            grid-row: 5;
+            grid-template-columns: auto auto minmax(0, 1fr);
+            align-items: center;
+        }
+
+        .desktop-page .bottom-actions button {
+            min-width: 128px;
+            padding: 0 18px;
+        }
+
+        .desktop-page .toc-list {
+            max-height: 58vh;
+            overflow: auto;
         }
     }
 </style>
