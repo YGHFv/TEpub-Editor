@@ -1950,15 +1950,18 @@
     .check-list {
         display: grid;
         gap: 6px;
+        align-content: start;
+        grid-auto-rows: 44px;
     }
 
     .check-row {
+        height: 44px;
         min-height: 44px;
         display: grid;
         grid-template-columns: 70px minmax(0, 1fr);
         grid-template-areas:
-            "type title"
-            "type meta";
+            "type meta"
+            "type title";
         gap: 2px 8px;
         padding: 7px 9px;
         border: 1px solid #ece1d6;
@@ -2238,18 +2241,20 @@
         .desktop-page .check-list {
             min-height: 0;
             max-height: clamp(180px, calc(100vh - 520px), 360px);
+            grid-auto-rows: 40px;
             overflow: auto;
         }
 
         .desktop-page .check-row {
-            grid-template-columns: 86px minmax(0, 1fr) auto;
-            grid-template-areas: "type title meta";
+            grid-template-columns: 86px 160px minmax(0, 1fr);
+            grid-template-areas: "type meta title";
+            height: 40px;
             min-height: 40px;
             align-items: center;
         }
 
         .desktop-page .check-row small {
-            justify-self: end;
+            justify-self: start;
             white-space: nowrap;
         }
     }
