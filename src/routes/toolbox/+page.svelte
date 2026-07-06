@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { platform, type PlatformWindowHandle } from "$lib/platform";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
@@ -407,7 +408,11 @@
       event.preventDefault();
       return;
     }
-    if (platform.isWeb && isWebRouteTool(tool.id)) return;
+    if (platform.isWeb && isWebRouteTool(tool.id)) {
+      event.preventDefault();
+      void goto(webToolHref(tool.id));
+      return;
+    }
     if (isWebUnavailableTool(tool.id)) {
       event.preventDefault();
       statusText = `${tool.title} ${WEB_UNAVAILABLE_TEXT}`;
@@ -437,7 +442,7 @@
 
   async function openLibrary() {
     if (isRootToolbox()) {
-      window.location.href = "/library";
+      await goto("/library");
       return;
     }
 
@@ -453,7 +458,7 @@
       console.warn("唤起主窗口失败，改为在当前窗口打开书库:", e);
     }
 
-    window.location.href = "/library";
+    await goto("/library");
   }
 
   async function hideToolboxHomeWhileOpen(childWindow: PlatformWindowHandle) {
@@ -476,7 +481,7 @@
 
   async function openImageTools() {
     if (platform.isWeb && typeof window !== "undefined") {
-      window.location.href = "/toolbox/image-tools";
+      await goto("/toolbox/image-tools");
       return;
     }
 
