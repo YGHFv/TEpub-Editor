@@ -129,8 +129,12 @@ export async function offerSystemExport(path: string, fileName: string, bytes?: 
         };
 
         if (nav.share && (!nav.canShare || nav.canShare({ files: [file] }))) {
-            await nav.share({ files: [file], title: outputName, text: "TEpub-Editor EPUB 导出" });
-            return `已打开系统分享/保存面板：${outputName}`;
+            try {
+                await nav.share({ files: [file], title: outputName, text: "TEpub-Editor EPUB 导出" });
+                return `已打开系统分享/保存面板：${outputName}`;
+            } catch (shareErr) {
+                console.warn("System share/save failed; falling back to browser download", shareErr);
+            }
         }
 
         const url = URL.createObjectURL(blob);

@@ -82,6 +82,8 @@
   const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
   const TOOLBOX_WINDOW_WIDTH = 1200;
   const TOOLBOX_WINDOW_HEIGHT = 740;
+  const WEB_UNAVAILABLE_TEXT = "\u7f51\u9875\u7248\u6682\u672a\u5b9e\u88c5";
+  const WEB_UNAVAILABLE_ACTION = "\u6682\u4e0d\u53ef\u7528";
   const THEME_OPTIONS = [
     { value: "modern", label: "现代" },
     { value: "classic", label: "经典" },
@@ -384,12 +386,21 @@
       return;
     }
     if (platform.isWeb && isWebRouteTool(tool.id)) return;
+    if (isWebUnavailableTool(tool.id)) {
+      event.preventDefault();
+      statusText = `${tool.title} ${WEB_UNAVAILABLE_TEXT}`;
+      return;
+    }
     event.preventDefault();
     pickFile(tool);
   }
 
   function isWebRouteTool(id: ToolId) {
     return id === "image-tools" || id === "txt-epub";
+  }
+
+  function isWebUnavailableTool(id: ToolId) {
+    return platform.isWeb && !isWebRouteTool(id);
   }
 
   function webToolHref(id: ToolId) {
@@ -789,28 +800,29 @@
           {#each group.tools as tool}
             <div
               class="tool-card"
-              class:tool-card-disabled={busyTool !== ""}
+              class:tool-card-disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
+              class:tool-card-web-unavailable={isWebUnavailableTool(tool.id)}
               aria-label={tool.title}
             >
               <a
                 class="tool-main"
                 href={webToolHref(tool.id)}
-                aria-disabled={busyTool !== ""}
+                aria-disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
                 on:click={(event) => handleToolMainClick(event, tool)}
               >
               <span class="tool-icon">{tool.icon}</span>
               <span class="tool-copy">
                 <span class="tool-title">{tool.title}</span>
-                <span class="tool-detail">{busyTool === tool.id ? "处理中..." : tool.detail}</span>
+                <span class="tool-detail">{busyTool === tool.id ? "处理中..." : isWebUnavailableTool(tool.id) ? WEB_UNAVAILABLE_TEXT : tool.detail}</span>
               </span>
-              <span class="tool-action">{tool.action}</span>
+              <span class="tool-action">{isWebUnavailableTool(tool.id) ? WEB_UNAVAILABLE_ACTION : tool.action}</span>
               </a>
               {#if isBatchTool(tool.id)}
                 <button
                   class="tool-batch"
                   type="button"
                   on:click={() => runBatchForFolder(tool)}
-                  disabled={busyTool !== ""}
+                  disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
                   title="选择文件夹批量处理"
                 >
                   批量
@@ -1315,6 +1327,16 @@
 
   .tool-card-disabled {
     opacity: 0.68;
+  }
+
+  .tool-card-web-unavailable .tool-main {
+    cursor: not-allowed;
+  }
+
+  .tool-card-web-unavailable .tool-action {
+    border-color: var(--color-border);
+    background: var(--color-hover);
+    color: var(--color-muted);
   }
 
   .tool-main {
