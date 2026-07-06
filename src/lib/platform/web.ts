@@ -1,4 +1,4 @@
-import { PlatformUnsupportedError, type PlatformAdapter } from "./types";
+import { PlatformUnsupportedError, type PlatformAdapter, type PlatformWindowHandle } from "./types";
 
 function getWebApiBaseUrl(): string {
   const env = import.meta.env.PUBLIC_TEPUB_API_BASE;
@@ -21,6 +21,28 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+function createBrowserWindowHandle(target: Window | null = null): PlatformWindowHandle {
+  return {
+    label: null,
+    async show() {
+      target?.focus();
+    },
+    async setFocus() {
+      target?.focus();
+    },
+    async hide() {},
+    async close() {
+      target?.close();
+    },
+    async destroy() {
+      target?.close();
+    },
+    async once() {
+      return () => {};
+    },
+  };
 }
 
 export function createWebPlatform(): PlatformAdapter {
@@ -70,12 +92,25 @@ export function createWebPlatform(): PlatformAdapter {
       return null;
     },
 
+    async getWindowByLabel() {
+      return null;
+    },
+
+    getCurrentWindow() {
+      return createBrowserWindowHandle(typeof window === "undefined" ? null : window);
+    },
+
+    async onCurrentWindowCloseRequested() {
+      return () => {};
+    },
+
     async closeCurrentWindow() {
       if (typeof window !== "undefined") window.close();
     },
 
     async createWebviewWindow(_label, url) {
-      if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
+      const target = typeof window === "undefined" ? null : window.open(url, "_blank", "noopener,noreferrer");
+      return createBrowserWindowHandle(target);
     },
   };
 }

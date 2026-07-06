@@ -38,6 +38,8 @@ The request body is the command args as JSON. The response body should be JSON.
 
 Do not add new direct imports from `@tauri-apps/*` in Svelte pages. New or touched features should use `$lib/platform` first. Existing pages can be migrated gradually, one workflow at a time, so desktop behavior stays stable.
 
+Some older Svelte pages contain historically mojibake text. Avoid whole-file PowerShell rewrites on those files; use targeted patches or UTF-8-preserving editor operations so string literals are not damaged during migration.
+
 ## Web Limitations
 
 Browser builds cannot directly use local paths, native save/open dialogs, file associations, system tray, or Explorer reveal. Web workflows must use browser upload/download and server-side temporary files.

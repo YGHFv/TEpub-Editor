@@ -1,4 +1,29 @@
-import type { PlatformAdapter } from "./types";
+import type { PlatformAdapter, PlatformWindowHandle } from "./types";
+
+function wrapTauriWindow(win: any): PlatformWindowHandle {
+  return {
+    label: typeof win.label === "string" ? win.label : null,
+    async show() {
+      await win.show?.();
+    },
+    async setFocus() {
+      await win.setFocus?.();
+    },
+    async hide() {
+      await win.hide?.();
+    },
+    async close() {
+      await win.close?.();
+    },
+    async destroy() {
+      await (win.destroy ? win.destroy() : win.close?.());
+    },
+    async once(event, handler) {
+      if (!win.once) return () => {};
+      return await win.once(event, handler);
+    },
+  };
+}
 
 export function createTauriPlatform(): PlatformAdapter {
   return {
@@ -53,6 +78,47 @@ export function createTauriPlatform(): PlatformAdapter {
       return getCurrentWindow().label;
     },
 
+    async getWindowByLabel(label) {
+      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const win = await WebviewWindow.getByLabel(label);
+      return win ? wrapTauriWindow(win) : null;
+    },
+
+    getCurrentWindow() {
+      const lazyWindow = {
+        get value() {
+          return import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow());
+        },
+      };
+      return {
+        label: null,
+        async show() {
+          await (await lazyWindow.value).show();
+        },
+        async setFocus() {
+          await (await lazyWindow.value).setFocus();
+        },
+        async hide() {
+          await (await lazyWindow.value).hide();
+        },
+        async close() {
+          await (await lazyWindow.value).close();
+        },
+        async destroy() {
+          const win = await lazyWindow.value;
+          await (win.destroy ? win.destroy() : win.close());
+        },
+        async once(event, handler) {
+          return await (await lazyWindow.value).once(event, handler);
+        },
+      };
+    },
+
+    async onCurrentWindowCloseRequested(handler) {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return await getCurrentWindow().onCloseRequested(handler);
+    },
+
     async closeCurrentWindow() {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().close();
@@ -60,7 +126,7 @@ export function createTauriPlatform(): PlatformAdapter {
 
     async createWebviewWindow(label, url, options = {}) {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      new WebviewWindow(label, { url, ...(options as any) });
+      return wrapTauriWindow(new WebviewWindow(label, { url, ...(options as any) }));
     },
   };
 }

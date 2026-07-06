@@ -1,8 +1,7 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
-    import { message } from "@tauri-apps/plugin-dialog";
-    import { openUrl } from "@tauri-apps/plugin-opener";
     import { buildMobileRoute, cacheBrowserFileStable } from "$lib/mobileFlow";
+    import { platform } from "$lib/platform";
 
     interface MobileModule {
         title: string;
@@ -102,7 +101,7 @@
     async function openExternal(href?: string) {
         if (!href) return;
         try {
-            await openUrl(href);
+            await platform.openExternal(href);
         } catch {
             window.open(href, "_blank", "noopener,noreferrer");
         }
@@ -130,7 +129,7 @@
         } catch (err) {
             if (token !== pickToken) return;
             status = "导入文件失败";
-            await message(`导入文件失败：${err}`, { title: item.title, kind: "error" });
+            await platform.message(`导入文件失败：${err}`, { title: item.title, kind: "error" });
         } finally {
             if (token === pickToken) busy = false;
         }

@@ -1,5 +1,20 @@
 export type PlatformKind = "tauri" | "web";
 
+export type PlatformUnlisten = () => void;
+export type PlatformCloseEvent = {
+  preventDefault(): void;
+};
+
+export interface PlatformWindowHandle {
+  label: string | null;
+  show(): Promise<void>;
+  setFocus(): Promise<void>;
+  hide(): Promise<void>;
+  close(): Promise<void>;
+  destroy(): Promise<void>;
+  once(event: string, handler: () => void | Promise<void>): Promise<PlatformUnlisten>;
+}
+
 export interface PlatformAdapter {
   kind: PlatformKind;
   isTauri: boolean;
@@ -15,8 +30,11 @@ export interface PlatformAdapter {
   revealPath(path: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   getCurrentWindowLabel(): Promise<string | null>;
+  getWindowByLabel(label: string): Promise<PlatformWindowHandle | null>;
+  getCurrentWindow(): PlatformWindowHandle;
+  onCurrentWindowCloseRequested(handler: (event: PlatformCloseEvent) => void | Promise<void>): Promise<PlatformUnlisten>;
   closeCurrentWindow(): Promise<void>;
-  createWebviewWindow(label: string, url: string, options?: Record<string, unknown>): Promise<void>;
+  createWebviewWindow(label: string, url: string, options?: Record<string, unknown>): Promise<PlatformWindowHandle>;
 }
 
 export class PlatformUnsupportedError extends Error {
