@@ -9,6 +9,7 @@
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
     import FileTreeItem from "$lib/FileTreeItem.svelte";
+    import CustomSelect from "$lib/CustomSelect.svelte";
 
     // Setup Close Listener
     onMount(() => {
@@ -587,6 +588,24 @@
     let searchDirection: "down" | "up" = "down";
     let wrapAround = true;
     let textOnly = false;
+
+    const FIND_MODE_OPTIONS = [
+        { value: "text", label: "普通文本" },
+        { value: "regex", label: "正则表达式" },
+    ];
+
+    const SEARCH_SCOPE_OPTIONS = [
+        { value: "current", label: "当前文件" },
+        { value: "open", label: "已打开" },
+        { value: "html", label: "HTML文件" },
+        { value: "selected", label: "选中文件" },
+        { value: "all", label: "全部文件" },
+    ];
+
+    const SEARCH_DIRECTION_OPTIONS = [
+        { value: "down", label: "向下" },
+        { value: "up", label: "向上" },
+    ];
 
     // 婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柛娑橈攻閸欏繘鏌ｉ幋锝嗩棄闁哄绶氶弻娑樷槈濮楀牊鏁鹃梺鍛婄懃缁绘﹢寮婚敐澶婄闁挎繂妫Λ鍕⒑閸濆嫷鍎庣紒鑸靛哺瀵鎮㈤崗灏栨嫽闁诲酣娼ф竟濠偽ｉ鍓х＜闁诡垎鍐ｆ寖缂備緡鍣崹鎶藉箲閵忕姭妲堥柕蹇曞Х椤撳搫鈹戦悙鍙夘棞缂佺粯甯″畷婵嬪箻椤旇В鎷洪柡澶屽仦婢瑰棝藝閿斿浜滈柟瀛樼箖椤ャ垹鈹戦敍鍕毈鐎规洜鍠栭、娑橆潩妲屾牕鏅梻浣藉吹婵儳鈻嶉敐澶婄？闁靛牆顦伴崐闈浳旈敐鍛殲闁抽攱鍨块弻娑樷槈濮楀牆濮涢梺鐟板暱閸熸壆妲愰幒鏃傜＜婵鐗愰埀顒佸椤ㄣ儵鎮欓幓鎺撴闁剧粯鐗犻弻娑樷槈閸楃偞鐝┑鈽嗗亜閸燁偊鍩為幋锔藉€烽柡澶嬪灩娴犳悂姊洪懡銈呮珢缂佺姵鎸搁悾閿嬪閺夋垹鐤€闂佺粯顨呴悧鍐箯閾忓湱纾介柛灞剧懅閸斿秵銇勯鐐村枠闁诡垰鏈换婵嬪礃閿旇法鐩庢俊鐐€栭幐鐐叏閹绢喖鍌ㄩ悗鐢电《閸嬫挸鈻撻崹顔界仌濡炪倖娉﹂崶褏鍙€婵犮垼娉涜癌闁绘柨顨庨悡銉╂煕閺囥劌澧绘俊顐㈠暣閹鎲撮崟顒傤槰闂佹寧娲忛崹钘夌暦濞差亜鐒洪柛鎰ㄦ櫅椤庢捇姊虹紒妯虹仸妞ゎ厼娲俊鏉戭嚈閻х碁torage闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閹冣挃闁硅櫕鎹囬垾鏃堝礃椤忎礁浜鹃柨婵嗙凹缁ㄥジ鏌熼惂鍝ョМ闁哄矉缍侀、姗€鎮欓幖顓燁棧闂備線娼уΛ娆戞暜閹烘缍栨繝闈涱儐閺呮煡鏌涘☉鍗炲妞ゃ儲鑹鹃埞鎴炲箠闁稿﹥顨嗛幈銊╂倻閽樺锛涘┑鐐村灍閹崇偤宕堕浣镐缓缂備礁顑呴悘婵嬫倵椤撶喍绻嗛柕鍫濈箳閸掍即鏌涢悤浣镐簽缂侇喛顕ч埥澶娢熻箛鎾剁Ш闁轰焦鍔欏畷銊╊敊鐠侯煈鏀ㄧ紓鍌氬€风粈渚€顢栭崟顖涘殑闁告挷鐒﹂～鏇㈡煙閹规劦鍤欑痪鎯у悑閹便劌顫滈崱妤€骞嬮梺绋款儐閹瑰洭骞冨鍫熷殟闁靛鍎崑鎾诲锤濡や胶鍙嗛梺鍝勬处濮樸劑宕濆澶嬬厵闁告劘灏欓悞鍛婃叏婵犲嫮甯涢柟宄版嚇瀹曘劍绻濋崒娑欑暭闂傚倷娴囧畷鐢稿窗閸℃稑纾块柟鎯版缁犳煡鏌曡箛鏇烆€屾繛绗哄姂閺屽秷顧侀柛鎾寸懇椤㈡岸鏁愰崱娆戠槇濠殿喗锕╅崢鍏肩濠婂懐纾奸柣鎰靛墮椤庢粌顪冪€涙ɑ鍊愮€殿喗鐓￠、妤呭礋椤戣姤瀚奸梻浣告贡椤牆霉妞嬪海涓嶉柟鎯ь嚟缁犻箖鎮归崶鍥ф噹閸╁矂鏌℃担鍝ュ濞ｅ洤锕俊鍫曞川椤斿吋顏￠梻浣侯焾椤戝倿宕滃┑鍫熷床婵犻潧娲ㄧ弧鈧梺绋挎湰缁嬫垵鈻嶉敐鍜佹富闁靛牆绻掗崚浼存煏閸喐鍊愭鐐插暞缁傛帞鈧絽鐏氶弲顒€鈹戦悙鏉戠仸閽冮亶鎮归崶鈺佷槐婵﹨娅ｉ幏鐘诲灳閾忣偆浜堕梻浣藉吹閸ｏ附淇婇崶顒€绠查柕蹇曞Л閺€浠嬫倵閿濆簼绨芥い锔哄姂濮婃椽骞愭惔銏╂⒖濠电偛顦板ú鐔煎箚閸曨剚鍎熼柕濠忚吂閹风粯绻涙潏鍓ф偧闁稿簺鍊濆畷鐢稿焵椤掑嫭鈷戦柛锔诲幐閹凤繝鏌涚€ｎ亜顏柣蹇擃儏閳规垶骞婇柛濠冩崌閹虫宕奸弴妯峰亾閸涙潙钃熼柕澶涘閸橀亶姊洪崷顓炰壕妞ゃ劌鎳橀獮濠囧箛閻楀牊娅栧┑鐘绘涧濞层劎绮绘ィ鍐ㄧ骇闁割偅绻傞埛鏃堟煕閹哄秴宓嗛柡宀€鍠撻崰濠囧础閻愭澘鏋堥梻浣筋嚙闁帮綁寮ㄦ潏銊р攳濠电姴娲﹂崐閿嬨亜韫囨挸顏ら柛瀣崌婵¤埖寰勬繝鍕剁幢闂備礁鎲″ú锕傚垂娓氣偓瀹曞爼顢楁担鍝勫Ц闁诲骸绠嶉崕閬嶅箠閹伴偊鏁婂鑸靛姈閳锋垿姊婚崼鐔恒€掔紒鐘插暱閳规垿顢氶崨顓炵睄閻庢鍠撻崝宥囩矉閹烘柡鍋撻敐搴′簽闁告﹢浜跺娲濞戣鲸肖闂佹悶鍔岄幖顐﹀煝瀹ュ鐐婃い鎺嶈兌閸樹粙姊洪幐搴㈢５闁稿鎹囬弻锝呂旀担鐟扮濡炪値鍋勭换姗€骞栬ぐ鎺戞嵍妞ゆ挾濮烽崢顖炴⒒娴ｅ憡璐℃い顓炵墢閳ь剚绋堥弲鐘荤嵁韫囨梹缍囬柍鍝勫暟閿涙繃绻涙潏鍓у埌濠㈢懓锕畷鏇㈠箛閻楀牏鍘遍梺闈浤涢崟顒佺槗闂備胶纭堕弬鍌炲垂瑜版帩鏁囬柛蹇曞帶缁剁偤鎮楅敐搴′簼闁绘繂鍟块埞鎴︽偐椤旇偐浼囧┑鐐差槹閻╊垶銆侀弽顓炵＜闁绘劘灏欓鍡涙⒑閹呯婵犫偓鏉堚晛顥氶柦妯侯棦瑜版帗鏅查柛娑卞弾濡矂姊虹粙鍨劉闁告梹鐗犳俊鐢稿礋椤栨氨顓洪梺缁樺姇閻忔岸宕虫导瀛樺€甸悷娆忓缁€鍐╃箾閸欏绠樼紒顔款嚙閳藉濮€閻樻彃绁梻浣虹帛椤洭銆傞鐐潟闁圭粯宸婚弨浠嬫煟濮楀棗鏋涢柣蹇氶哺缁绘稒寰勭€ｎ剚鍒涢悗娈垮枤閺佸銆佸Δ鍛妞ゆ劑鍨洪崕顏堟⒒娓氣偓閳ь剛鍋涢懟顖涙櫠椤斿浜滄い蹇撳閺嗭絽鈹戦檱閸╂牠骞嗛弮鍫濈伋闁肩⒈鍓涘▔璺ㄧ磽閸屾艾鈧兘鎳楅崜浣稿灊妞ゆ牜鍋涚粈澶嬩繆閵堝懏鍣归柣顓燁殜閺屾稑鈽夐崡鐐插濠电偞鎸搁…鐑藉蓟閺囥垹閱囨繝闈涙搐濞呇呯磽娴ｅ搫校濠㈢懓妫涘Σ鎰板箳閹惧磭绐為柣蹇曞仧閸嬫挸袙閸儲鍊垫繛鍫濈仢閺嬬喓鎲搁弶鍨殻闁糕晝鍋ら獮瀣偐椤愵澀澹曢梺鎸庣箓妤犲憡绂嶉幇鐗堢厵闂佸灝顑嗛妵婵囨叏婵犲偆鐓肩€规洘甯掗～婵嬪础閻戝棙婢戠紓鍌氬€风粈渚€顢栭崱娑樼闁告挆鍐ㄧ亰闁荤姴娲ゅΟ濠傤焽閳哄懏鐓犻柛婵勫劜閺嗏晠鏌涘Ο缁樺€愭慨濠冩そ瀹曘劍绻濇担铏圭畳闂備礁鎽滄慨闈涚暆閹间礁绠氱€光偓閸曨偆顔婂┑掳鍊撻懗鍫曞储闁秵鈷戠€规洖娲﹂崵鈧梺璇茬箲缁诲牓骞冨鈧幊鐘活敄閽樺澹曢柣鐔哥懃鐎氼厾绮堥埀顒勬⒑闂堟稓澧曢柟娴嬪墲缁岃鲸绻濋崶銊モ偓濠氭煠閹帒鍔滄繛鍛閺岋綁鎮㈤崫銉﹀櫑闁诲孩鍑归崜鐔笺€?
     if (typeof localStorage !== "undefined") {
@@ -4875,15 +4894,15 @@
                                 </div>
                             {/if}
                         </div>
-                        <div class="fr-actions">
+                        <div class="fr-actions fr-find-actions">
+                            <button class="fr-btn fr-btn-text" on:click={countMatches} title="&#35745;&#25968;"
+                                >&#35745;&#25968;</button
+                            >
                             <button class="fr-btn fr-btn-text" on:click={findPrev} title="&#19978;&#19968;&#20010;"
                                 >&#19978;&#19968;&#20010;</button
                             >
                             <button class="fr-btn fr-btn-text" on:click={findNext} title="&#19979;&#19968;&#20010;"
                                 >&#19979;&#19968;&#20010;</button
-                            >
-                            <button class="fr-btn fr-close-btn" on:click={closeFindReplace} title="&#20851;&#38381;"
-                                >&times;</button
                             >
                         </div>
                     </div>
@@ -4936,33 +4955,33 @@
                                 >&#26367;&#25442;</button
                             >
                             <button
-                                class="fr-btn fr-btn-text fr-danger"
+                                class="fr-btn fr-btn-wide fr-danger"
                                 on:click={performReplaceAll}
                                 title="&#20840;&#37096;&#26367;&#25442;"
-                                >&#20840;&#37096;</button
-                            >
-                            <button class="fr-btn fr-btn-text" on:click={countMatches} title="&#35745;&#25968;"
-                                >&#35745;&#25968;</button
+                                >&#20840;&#37096;&#26367;&#25442;</button
                             >
                         </div>
                     </div>
                     <div class="fr-row fr-options">
                         <span class="fr-label">&#25628;&#32034;&#36873;&#39033;:</span>
-                        <select class="fr-select fr-select-sm" bind:value={isRegex}>
-                            <option value={false}>&#26222;&#36890;&#25991;&#26412;</option>
-                            <option value={true}>&#27491;&#21017;&#34920;&#36798;&#24335;</option>
-                        </select>
-                        <select class="fr-select" bind:value={searchScope}>
-                            <option value="current">&#24403;&#21069;&#25991;&#20214;</option>
-                            <option value="open">&#24050;&#25171;&#24320;</option>
-                            <option value="html">HTML&#25991;&#20214;</option>
-                            <option value="selected">&#36873;&#20013;&#25991;&#20214;</option>
-                            <option value="all">&#20840;&#37096;&#25991;&#20214;</option>
-                        </select>
-                        <select class="fr-select fr-select-sm" bind:value={searchDirection}>
-                            <option value="down">&#21521;&#19979;</option>
-                            <option value="up">&#21521;&#19978;</option>
-                        </select>
+                        <CustomSelect
+                            className="fr-custom-select fr-select-sm"
+                            value={isRegex ? "regex" : "text"}
+                            options={FIND_MODE_OPTIONS}
+                            on:change={(event) => (isRegex = event.detail === "regex")}
+                        />
+                        <CustomSelect
+                            className="fr-custom-select"
+                            value={searchScope}
+                            options={SEARCH_SCOPE_OPTIONS}
+                            on:change={(event) => (searchScope = event.detail as typeof searchScope)}
+                        />
+                        <CustomSelect
+                            className="fr-custom-select fr-select-xs"
+                            value={searchDirection}
+                            options={SEARCH_DIRECTION_OPTIONS}
+                            on:change={(event) => (searchDirection = event.detail as typeof searchDirection)}
+                        />
                         <label class="fr-checkbox">
                             <input type="checkbox" bind:checked={wrapAround} />&#24490;&#29615;
                         </label>
@@ -5721,37 +5740,63 @@
         background: linear-gradient(to bottom, #ffe6d9, #ffcc99);
     }
 
-    .fr-close-btn {
-        background: linear-gradient(to bottom, #fee, #fcc);
-        border-color: #d99;
-    }
-
-    .fr-close-btn:hover {
-        background: linear-gradient(to bottom, #fdd, #faa);
-        border-color: #c66;
-    }
-
-    .fr-select-sm {
-        min-width: 50px;
-        padding: 4px 6px;
-    }
-
-    .fr-select {
-        padding: 4px 8px;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        background: #fff;
-        font-size: 12px;
-        min-width: 75px;
-    }
-
-    .fr-select:focus {
-        outline: none;
-        border-color: #2196f3;
-    }
-
     .fr-options {
         font-size: 12px;
+    }
+
+    .fr-find-actions {
+        width: 102px;
+    }
+
+    .fr-options :global(.fr-custom-select) {
+        flex: 0 0 104px;
+        width: 104px;
+    }
+
+    .fr-options :global(.fr-custom-select.fr-select-sm) {
+        flex-basis: 96px;
+        width: 96px;
+    }
+
+    .fr-options :global(.fr-custom-select.fr-select-xs) {
+        flex-basis: 70px;
+        width: 70px;
+    }
+
+    .fr-options :global(.fr-custom-select .custom-select-trigger) {
+        height: 30px;
+        min-height: 30px;
+        padding: 0 8px;
+        border-color: #ccc;
+        border-radius: 4px;
+        background: #fff;
+        color: #333;
+        box-shadow: none;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    .fr-options :global(.fr-custom-select.open .custom-select-trigger),
+    .fr-options :global(.fr-custom-select .custom-select-trigger:focus-visible) {
+        border-color: #2196f3;
+        box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+    }
+
+    .fr-options :global(.fr-custom-select .custom-select-menu) {
+        top: auto;
+        bottom: calc(100% + 4px);
+        border-color: #ccc;
+        border-radius: 4px;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+    }
+
+    .fr-options :global(.fr-custom-select .custom-select-menu button) {
+        min-height: 28px;
+        padding: 5px 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: 600;
     }
 
     .fr-checkbox {
@@ -6369,7 +6414,6 @@
     }
 
     .fr-input,
-    .fr-select,
     .fr-dropdown-btn {
         border-color: var(--color-border);
         background: rgba(255, 255, 255, 0.92);
@@ -6381,8 +6425,7 @@
         font-family: var(--font-code);
     }
 
-    .fr-input:focus,
-    .fr-select:focus {
+    .fr-input:focus {
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
     }
@@ -6423,15 +6466,13 @@
         transform: translateY(1px);
     }
 
-    .fr-danger,
-    .fr-close-btn {
+    .fr-danger {
         background: var(--color-danger-soft);
         border-color: rgba(215, 68, 82, 0.3);
         color: var(--color-danger);
     }
 
-    .fr-danger:hover,
-    .fr-close-btn:hover {
+    .fr-danger:hover {
         background: #ffe7eb;
         border-color: rgba(215, 68, 82, 0.42);
     }

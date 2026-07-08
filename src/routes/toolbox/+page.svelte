@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
+  import { base } from "$app/paths";
   import { platform, type PlatformWindowHandle } from "$lib/platform";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
@@ -27,6 +28,7 @@
 
   type ToolId =
     | "library"
+    | "txt-edit"
     | "txt-epub"
     | "epub-edit"
     | "epub-read"
@@ -122,6 +124,13 @@
       action: "打开",
     },
     {
+      id: "txt-edit",
+      icon: "EDIT",
+      title: "TXT 编辑器",
+      detail: "导入、校对、查找替换",
+      action: "编辑",
+    },
+    {
       id: "epub-edit",
       icon: "EPUB",
       title: "EPUB 编辑器",
@@ -198,7 +207,7 @@
       id: "open",
       title: "常用入口",
       meta: "书库 / 新窗口",
-      tools: tools.filter((tool) => tool.id === "library" || tool.id === "txt-epub" || tool.id === "epub-edit" || tool.id === "epub-read"),
+      tools: tools.filter((tool) => tool.id === "library" || tool.id === "txt-epub" || tool.id === "txt-edit" || tool.id === "epub-edit" || tool.id === "epub-read"),
       gridClass: "open-grid",
     },
     {
@@ -209,6 +218,14 @@
       gridClass: "process-grid",
     },
   ];
+
+  $: visibleToolGroups = toolGroups
+    .map((group) => ({
+      ...group,
+      meta: platform.isWeb && group.id === "open" ? "Web 工具入口" : group.meta,
+      tools: group.tools.filter((tool) => !isHiddenWebTool(tool.id)),
+    }))
+    .filter((group) => group.tools.length > 0);
 
   let busyTool: ToolId | "" = "";
   let statusText = "";
@@ -232,6 +249,11 @@
   let apiEditorId = "";
   let apiDraft: AiProviderConfig = newAiProvider({ kind: "text" });
   let apiSettingsMessage = "";
+
+  function appPath(path: string) {
+    if (!path || path === "#" || /^https?:\/\//i.test(path)) return path;
+    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  }
 
   function windowLabel(prefix: string) {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -270,7 +292,7 @@
 
     if (ext === "txt") {
       await createToolWindow(windowLabel("editor"), {
-        url: `/editor?file=${encoded}&fromLibrary=1`,
+        url: appPath(`/editor?file=${encoded}&fromLibrary=1`),
         title: "TEpub-Editor-TXT",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -286,7 +308,7 @@
 
     if (action === "reader") {
       await createToolWindow(windowLabel("reader"), {
-        url: `/reader?file=${encoded}`,
+        url: appPath(`/reader?file=${encoded}`),
         title: "TEpub-Editor-Reader",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -299,7 +321,7 @@
     }
 
     await createToolWindow(windowLabel("epub-editor"), {
-      url: `/epub-editor?file=${encoded}`,
+      url: appPath(`/epub-editor?file=${encoded}`),
       title: "TEpub-Editor-EPUB",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
@@ -312,6 +334,7 @@
 
   async function openLaunchFiles() {
     if (!isRootToolbox()) return;
+    if (platform.isWeb) return;
 
     try {
       const launchInfo = await platform.invoke<LaunchInfo>("get_launch_info");
@@ -354,7 +377,7 @@
       const selected = await platform.openDialog<string | string[] | null>({
         multiple: false,
         filters: [
-          tool.id === "txt-epub"
+          tool.id === "txt-epub" || tool.id === "txt-edit"
             ? { name: "TXT 文件", extensions: ["txt"] }
             : { name: "EPUB 文件", extensions: ["epub"] },
         ],
@@ -423,7 +446,11 @@
   }
 
   function isWebRouteTool(id: ToolId) {
-    return id === "image-tools" || id === "txt-epub";
+    return id === "image-tools" || id === "txt-epub" || id === "txt-edit" || id === "epub-edit";
+  }
+
+  function isHiddenWebTool(id: ToolId) {
+    return platform.isWeb && id === "library";
   }
 
   function isWebUnavailableTool(id: ToolId) {
@@ -431,18 +458,21 @@
   }
 
   function webToolHref(id: ToolId) {
-    if (id === "image-tools") return "/toolbox/image-tools";
-    if (id === "txt-epub") return "/toolbox/make-epub?view=desktop";
+    if (id === "image-tools") return appPath("/toolbox/image-tools");
+    if (id === "txt-epub") return appPath("/toolbox/make-epub");
+    if (id === "txt-edit") return appPath("/toolbox/text-editor");
+    if (id === "epub-edit") return appPath("/toolbox/epub-editor");
     return "#";
   }
 
   function isRootToolbox() {
-    return typeof window !== "undefined" && window.location.pathname === "/";
+    const rootPath = `${base || ""}/`;
+    return typeof window !== "undefined" && window.location.pathname === rootPath;
   }
 
   async function openLibrary() {
     if (isRootToolbox()) {
-      await goto("/library");
+      await goto(appPath("/library"));
       return;
     }
 
@@ -458,7 +488,7 @@
       console.warn("唤起主窗口失败，改为在当前窗口打开书库:", e);
     }
 
-    await goto("/library");
+    await goto(appPath("/library"));
   }
 
   async function hideToolboxHomeWhileOpen(childWindow: PlatformWindowHandle) {
@@ -481,12 +511,12 @@
 
   async function openImageTools() {
     if (platform.isWeb && typeof window !== "undefined") {
-      await goto("/toolbox/image-tools");
+      await goto(appPath("/toolbox/image-tools"));
       return;
     }
 
     const win = await createToolWindow(windowLabel("image-tools"), {
-      url: "/toolbox/image-tools",
+      url: appPath("/toolbox/image-tools"),
       title: "TEpub-Editor-图片处理",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
@@ -582,7 +612,7 @@
         }),
       );
       const win = await createToolWindow(windowLabel("batch-progress"), {
-        url: `/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`,
+        url: appPath(`/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`),
         title: `${tool.title} 批量处理`,
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -608,9 +638,9 @@
 
   async function openToolForPath(tool: Tool, filePath: string) {
     const encoded = encodeURIComponent(filePath);
-    if (tool.id === "txt-epub") {
+    if (tool.id === "txt-epub" || tool.id === "txt-edit") {
       const win = await createToolWindow(windowLabel("editor"), {
-        url: `/editor?file=${encoded}&fromLibrary=1`,
+        url: appPath(`/editor?file=${encoded}&fromLibrary=1`),
         title: "TEpub-Editor-TXT",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -625,7 +655,7 @@
 
     if (tool.id === "epub-edit") {
       const win = await createToolWindow(windowLabel("epub-editor"), {
-        url: `/epub-editor?file=${encoded}`,
+        url: appPath(`/epub-editor?file=${encoded}`),
         title: "TEpub-Editor-EPUB",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -639,7 +669,7 @@
     }
 
     const win = await createToolWindow(windowLabel("reader"), {
-      url: `/reader?file=${encoded}`,
+      url: appPath(`/reader?file=${encoded}`),
       title: "TEpub-Editor-Reader",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
@@ -893,7 +923,7 @@
       </div>
     </div>
 
-    {#each toolGroups as group}
+    {#each visibleToolGroups as group}
       <section class="tool-section" aria-labelledby={`toolbox-section-${group.id}`}>
         <div class="section-head">
           <h2 id={`toolbox-section-${group.id}`}>{group.title}</h2>
@@ -936,6 +966,22 @@
         </div>
       </section>
     {/each}
+
+    {#if platform.isWeb}
+      <footer class="web-toolbox-footer" aria-label="版权信息">
+        <div class="web-toolbox-footer-card">
+          <div class="web-footer-line">
+            <span>© 2026</span>
+            <a href="https://blog.ygvlive.com" target="_blank" rel="noreferrer">源谷绘</a>
+            <span>. All Rights Reserved.</span>
+          </div>
+          <div class="web-footer-line web-footer-powered">
+            <span>Powered by</span>
+            <a href="https://github.com/YGHFv/TEpub-Editor" target="_blank" rel="noreferrer">TEpub-Editor</a>
+          </div>
+        </div>
+      </footer>
+    {/if}
   </section>
 </main>
 
@@ -1478,6 +1524,8 @@
     min-height: 0;
     margin: 0 auto;
     padding: 30px 0 34px;
+    display: flex;
+    flex-direction: column;
     overflow: auto;
   }
 
@@ -1665,6 +1713,54 @@
     background: var(--color-hover);
   }
 
+  .web-toolbox-footer {
+    margin-top: auto;
+    padding-top: 24px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .web-toolbox-footer-card {
+    box-sizing: border-box;
+    min-width: min(340px, 100%);
+    max-width: 100%;
+    padding: 8px 24px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    box-shadow: none;
+    color: color-mix(in srgb, var(--color-text) 78%, #526581);
+    text-align: center;
+  }
+
+  .web-footer-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 14px;
+    line-height: 1.18;
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  .web-footer-powered {
+    margin-top: 5px;
+    color: color-mix(in srgb, var(--color-muted) 84%, var(--color-text));
+    font-size: 12px;
+  }
+
+  .web-toolbox-footer a {
+    color: #1677ff;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .web-toolbox-footer a:hover {
+    text-decoration: underline;
+  }
+
   @media (max-width: 980px) {
     .open-grid,
     .process-grid {
@@ -1729,6 +1825,26 @@
     .tool-batch {
       right: 14px;
       bottom: 12px;
+    }
+
+    .web-toolbox-footer {
+      margin-top: auto;
+      padding-top: 20px;
+    }
+
+    .web-toolbox-footer-card {
+      min-width: 0;
+      width: 100%;
+      padding: 8px 16px;
+      border-radius: 20px;
+    }
+
+    .web-footer-line {
+      font-size: 13px;
+    }
+
+    .web-footer-powered {
+      font-size: 12px;
     }
 
     :global(.settings-shell.toolbox-settings-panel) {

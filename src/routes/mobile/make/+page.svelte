@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { base } from "$app/paths";
     import { onMount, tick } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import { platform } from "$lib/platform";
@@ -1336,15 +1337,27 @@ ${heading}${buildTextBody(section.lines)}</body>
         return new Uint8Array(out);
     }
 
+    function withBasePath(path: string) {
+        return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+    }
+
     onMount(() => {
-        if (platform.isWeb && window.location.pathname === "/mobile/make") {
+        const toolboxMakePath = withBasePath("/toolbox/make-epub");
+        if (platform.isWeb && window.location.pathname === withBasePath("/mobile/make")) {
             const params = new URLSearchParams(window.location.search);
-            params.set("view", "desktop");
-            window.location.replace(`/toolbox/make-epub?${params.toString()}`);
+            params.delete("view");
+            const suffix = params.toString();
+            window.location.replace(`${toolboxMakePath}${suffix ? `?${suffix}` : ""}`);
             return;
         }
         const params = new URLSearchParams(window.location.search);
-        desktopMode = params.get("view") === "desktop" || (platform.isWeb && !isCompactDevice());
+        const isToolboxMakeRoute = window.location.pathname === toolboxMakePath;
+        if (isToolboxMakeRoute && params.get("view") === "desktop") {
+            params.delete("view");
+            const suffix = params.toString();
+            window.history.replaceState(null, "", `${toolboxMakePath}${suffix ? `?${suffix}` : ""}`);
+        }
+        desktopMode = isToolboxMakeRoute || params.get("view") === "desktop" || (platform.isWeb && !isCompactDevice());
         backHref = desktopMode ? "/" : "/mobile";
         const refreshRules = () => {
             if (suppressRuleRefresh) return;
@@ -1364,7 +1377,7 @@ ${heading}${buildTextBody(section.lines)}</body>
     <title>TEpub-Editor</title>
 </svelte:head>
 
-<main class="page" class:desktop-page={desktopMode} on:wheel|nonpassive={handlePageWheel}>
+<main class="page" class:desktop-page={desktopMode} class:web-import-page={platform.isWeb && desktopMode && !selectedPath} on:wheel|nonpassive={handlePageWheel}>
     <input bind:this={fileInputEl} class="file-input" type="file" accept=".txt,.md,.html,.htm" on:change={onFileChange} />
     <input bind:this={coverInputEl} class="file-input" type="file" accept="image/*" on:change={onCoverChange} />
 
@@ -1379,7 +1392,7 @@ ${heading}${buildTextBody(section.lines)}</body>
     </header>
 
     {#if !selectedPath}
-        <section class="empty-panel">
+        <section class="empty-panel" class:web-import-panel={platform.isWeb && desktopMode}>
             <div>
                 <h2>选择文本文件开始制作</h2>
                 <p>支持 TXT、Markdown 和 HTML 文件，导入后可扫描目录、调整规则并生成 EPUB。</p>
@@ -2496,6 +2509,14 @@ ${heading}${buildTextBody(section.lines)}</body>
             padding: 14px 0 96px;
         }
 
+        .page.desktop-page.web-import-page {
+            width: auto;
+            min-height: 100vh;
+            grid-template-columns: minmax(0, 1fr);
+            padding: 36px 128px;
+            box-sizing: border-box;
+        }
+
         .desktop-page .make-column {
             min-width: 0;
             display: grid;
@@ -2522,6 +2543,40 @@ ${heading}${buildTextBody(section.lines)}</body>
 
         .desktop-page .empty-panel {
             grid-column: 1 / -1;
+        }
+
+        .desktop-page .empty-panel.web-import-panel {
+            width: min(100%, 1792px);
+            min-height: 342px;
+            margin: 0 auto;
+            align-content: center;
+            gap: 16px;
+            border: 1px solid rgba(23, 27, 36, 0.08);
+            border-radius: 8px;
+            padding: 48px 24px;
+            box-sizing: border-box;
+        }
+
+        .desktop-page .empty-panel.web-import-panel h2 {
+            font-size: 22px;
+            line-height: 1.3;
+        }
+
+        .desktop-page .empty-panel.web-import-panel p {
+            margin-top: 0;
+            color: #64748b;
+        }
+
+        .desktop-page .empty-panel.web-import-panel button {
+            height: 34px;
+            min-height: 34px;
+            min-width: 0;
+            padding: 0 12px;
+            border: 1px solid #1677b8;
+            border-radius: 6px;
+            background: #1677b8;
+            color: #ffffff;
+            font-weight: 800;
         }
 
         .desktop-page .topbar {
