@@ -32,6 +32,96 @@ Main areas:
 
 ## Change History
 
+### 2026-07-07 17:35 +08:00
+
+Request: adjust the Web TXT editor layout after visual review: keep the TOC count inline with the TOC title, make the TOC and editor touch the top of the workspace, keep the right tool column offset under the top actions, and make the right tool column scroll vertically instead of compressing all tool blocks together.
+
+Changes:
+
+- Updated `src/routes/toolbox/text-editor/+page.svelte`:
+  - TOC title and item count now render on one line.
+  - Workspace top padding was removed so the left TOC and center editor align directly under the header.
+  - Right tool column keeps its top spacing while remaining independently scrollable.
+  - Tool sections no longer shrink to fit the viewport, so the right column scrolls instead of squeezing expanded panels.
+
+Verification:
+
+- `pnpm check` passed with 0 errors and the existing 51 warnings.
+- `pnpm build:web` passed; existing accessibility warnings and large chunk warnings remain.
+
+### 2026-07-07 17:30 +08:00
+
+Request: refine the Web TXT editor after full migration: make TOC navigation fast, move the TOC to a fixed left column, keep the TOC/editor viewport fixed without page scroll, make the right tool panel scrollable and collapsible like EPUB creation, make proof/check rows locate text, keep volume headers sticky, simplify regex controls, and remove the duplicate regex-processing block.
+
+Changes:
+
+- Reworked `src/routes/toolbox/text-editor/+page.svelte` into a fixed three-column Web editor:
+  - left TOC column,
+  - center fixed-height text editor,
+  - right scrollable tool column.
+- Added cached line-start offsets so TOC/proof-row location no longer recalculates offsets by slicing the full text on every click.
+- Made volume TOC rows sticky at the top of the TOC scroll area.
+- Moved TOC regex editing into a collapsible right-side block and simplified rule controls:
+  - checkbox has no trailing text,
+  - rule level labels are now `卷` / `章`.
+- Made search/replace, proofreading, and draft blocks collapsible.
+- Removed the separate duplicate `正则处理` block because search/replace already supports regex mode.
+- Made proofreading preview rows clickable for locating the corresponding text line without applying replacements.
+
+Verification:
+
+- `pnpm check` passed with 0 errors and the existing 51 warnings.
+- `pnpm build:web` passed; existing accessibility warnings and large chunk warnings remain.
+- Local dev route `http://127.0.0.1:5233/toolbox/text-editor` returned HTTP 200.
+
+### 2026-07-07 16:47 +08:00
+
+Request: continue the Web migration work after the existing TXT-to-EPUB, image tools, and toolbox Web shell were already in place.
+
+Changes:
+
+- Added a lightweight Web TXT editor route at `src/routes/toolbox/text-editor/+page.svelte`.
+- The Web TXT editor supports browser file import, selectable decoding (`UTF-8`, `GB18030`, `Big5`), direct text editing, search/replace, regex replace, local draft save/clear, text export through browser download, and basic proofing actions using the existing `textProofing.ts` helpers.
+- Wired the toolbox to expose a new `TXT 编辑器` entry:
+  - Web mode opens `/toolbox/text-editor`.
+  - Desktop/Tauri mode still routes selected TXT files through the existing full `/editor?file=...` flow.
+
+Verification:
+
+- `pnpm check` passed with 0 errors; existing project-wide Svelte accessibility/CSS warnings remain.
+- `pnpm build:web` passed; existing Svelte warnings and large chunk warnings remain.
+- `pnpm dev:web` was started locally and `http://127.0.0.1:5233/toolbox/text-editor` returned HTTP 200.
+
+Caveats:
+
+- This is intentionally a lightweight browser editor and does not yet migrate the desktop editor's history versions, full EPUB export modal, Tauri window search panel, or local-path save semantics.
+- Built-in title-bracket cleanup is not exposed in this Web page yet because it depends on TOC/title node context; the current proofing actions focus on ads, pinyin, indentation, and Chinese script conversion.
+
+### 2026-07-07 17:10 +08:00
+
+Request: continue the Web migration for the full TXT editor, including TOC recognition, regex adjustment, proofreading with confirmation instead of click-to-auto-replace, and handoff into EPUB creation.
+
+Changes:
+
+- Added the Web TXT editor route at `src/routes/toolbox/text-editor/+page.svelte`:
+  - TXT import with encoding selection,
+  - full textarea editing, search/replace, and draft persistence,
+  - TOC recognition using the shared TOC regex settings,
+  - editable TOC regex rules with save/reset/add/remove,
+  - TOC preview and line jump,
+  - proofreading previews for built-in cleanup and simplified/traditional conversion,
+  - selection-based apply flow so candidates are not auto-replaced on click.
+- Added the TXT editor entry to the Web toolbox in `src/routes/toolbox/+page.svelte`.
+- Connected the TXT editor to Web EPUB creation:
+  - the editor stores handoff data in `sessionStorage`,
+  - `src/routes/mobile/make/+page.svelte` now reads the handoff on `/toolbox/make-epub?view=desktop&fromTextEditor=1`,
+  - imported content, TOC regex rules, detected chapters, and metadata are initialized in the existing EPUB creation flow.
+
+Verification:
+
+- `pnpm check` passed with 0 errors and the existing 51 warnings.
+- `pnpm build:web` passed; existing accessibility warnings and large chunk warnings remain.
+
 ### 2026-05-21 22:34 +08:00
 
 Request: record all recent changes in the root project log, make GitHub uploads automatically trigger the release Action, and publish releases as `TEpub-Editor v<version>`.
@@ -2565,6 +2655,49 @@ Verification:
 Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
+
+### 2026-07-07 17:55 +08:00
+
+Request: fix the Web TXT editor freezing on large text import, slow TOC click positioning, and replace the custom TOC preview styling with the EPUB-making TOC style.
+
+Changes:
+
+- Reworked `src/routes/toolbox/text-editor/+page.svelte` large-text hot paths:
+  - import/redecode/edit now use lightweight stats first and no longer split the full text synchronously,
+  - TOC scanning now streams through the text line by line, yields back to the browser during long scans, and records only TOC line offsets,
+  - TOC/proof preview click positioning now uses recorded or lightweight line offsets and sets textarea scroll before selection,
+  - search/replace no longer runs full-text matching reactively while typing or importing; it refreshes on find/replace actions.
+- Updated the Web TXT TOC preview to follow the EPUB-making compact row style:
+  - left standalone TOC column,
+  - sticky volume rows,
+  - inline item count beside the TOC title,
+  - no old card/badge directory styling.
+- Kept the fixed-height workspace layout:
+  - page body does not scroll,
+  - TOC and editor fill the available viewport height,
+  - right tool panel scrolls independently.
+
+Verification:
+
+- `pnpm check` passed with 0 errors and the existing 51 warnings.
+- `pnpm build:web` passed; existing accessibility and large chunk warnings remain unrelated.
+
+### 2026-07-07 18:05 +08:00
+
+Request: remove the remaining top banner from the Web TXT editor and address continued severe lag on large TXT import/navigation.
+
+Changes:
+
+- Removed the full-width top banner/title area from `src/routes/toolbox/text-editor/+page.svelte`.
+- Moved `返回` / `导入` / `制作 EPUB` / `导出 TXT` into the right tool column header area.
+- Replaced the Web TXT editor's native `textarea` with a new lightweight CodeMirror-based `src/lib/TxtCodeEditor.svelte`.
+- Stopped auto-scanning the full document immediately after import/redecode/edit/replace/proof apply; import now keeps the editor responsive and asks the user to click `扫描` when directory recognition is needed.
+- Kept TOC scanning available manually and before EPUB handoff, using the existing streaming scan path and CodeMirror selection for fast locating.
+
+Verification:
+
+- `pnpm check` passed with 0 errors and the existing 51 warnings.
+- `pnpm build:web` passed; existing accessibility and large chunk warnings remain unrelated.
 
 ### 2026-07-04 14:56 +08:00
 

@@ -847,4 +847,9 @@
       opacity: 0;
     }
   }
+
+  :global(.cm-scroller),
+  :global(.cm-content) {
+    min-width: 0;
+  }
 </style>

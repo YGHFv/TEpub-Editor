@@ -5,7 +5,11 @@ import { sveltekit } from "@sveltejs/kit/vite";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig(async ({ mode }) => {
+  // @ts-expect-error process is a nodejs global
+  const isWebMode = mode === "web" || process.env.TEPUB_TARGET === "web";
+
+  return {
   plugins: [sveltekit()],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -14,8 +18,8 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
-    strictPort: true,
+    port: isWebMode ? 5233 : 1420,
+    strictPort: !isWebMode,
     host: host || false,
     hmr: host
       ? {
@@ -45,4 +49,8 @@ export default defineConfig(async () => ({
       },
     },
   },
-}));
+  define: {
+    __TEPUB_TARGET__: JSON.stringify(isWebMode ? "web" : "tauri"),
+  },
+  };
+});

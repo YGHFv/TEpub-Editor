@@ -1,0 +1,12 @@
+node_modules
+.svelte-kit
+build
+src-tauri/target
+src-tauri/gen
+flutter/**/build
+flutter/**/.dart_tool
+.git
+.github
+.env
+*.log
+1.3.html

@@ -95,11 +95,11 @@
     justify-content: space-between;
     gap: 10px;
     padding: 7px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
-    color: var(--color-text);
-    box-shadow: var(--shadow-xs);
+    border: 1px solid var(--color-border, #cbd5e1);
+    border-radius: var(--radius-sm, 6px);
+    background: color-mix(in srgb, var(--color-surface, #ffffff) 94%, var(--color-accent-quiet, #e8f2f8));
+    color: var(--color-text, #172033);
+    box-shadow: var(--shadow-xs, none);
     text-align: left;
     font: inherit;
     font-size: 13px;
@@ -117,8 +117,8 @@
   .custom-select.open .custom-select-trigger,
   .custom-select-trigger:focus-visible {
     outline: none;
-    border-color: var(--color-accent);
-    box-shadow: var(--focus-ring), var(--shadow-xs);
+    border-color: var(--color-accent, #1677b8);
+    box-shadow: var(--focus-ring, 0 0 0 2px rgba(22, 119, 184, 0.18)), var(--shadow-xs, none);
   }
 
   .custom-select.disabled .custom-select-trigger {
@@ -132,7 +132,7 @@
     height: 0;
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
-    border-top: 7px solid var(--color-text-soft);
+    border-top: 7px solid var(--color-text-soft, #334155);
   }
 
   .custom-select-menu {
@@ -145,10 +145,10 @@
     max-height: 240px;
     overflow-y: auto;
     padding: 4px;
-    border: 1px solid var(--color-border-strong);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    box-shadow: var(--shadow-pop);
+    border: 1px solid var(--color-border-strong, #cbd5e1);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--color-surface, #ffffff);
+    box-shadow: var(--shadow-pop, 0 8px 24px rgba(15, 23, 42, 0.16));
   }
 
   .custom-select-menu button {
@@ -156,9 +156,9 @@
     min-height: 34px;
     padding: 7px 10px;
     border: 0;
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-xs, 4px);
     background: transparent;
-    color: var(--color-text);
+    color: var(--color-text, #172033);
     text-align: left;
     font: inherit;
     font-size: 13px;
@@ -177,7 +177,7 @@
 
   .custom-select-menu button small {
     margin-top: 2px;
-    color: var(--color-muted);
+    color: var(--color-muted, #64748b);
     font-size: 11px;
     font-weight: 600;
   }
@@ -185,12 +185,12 @@
   .custom-select-menu button:hover,
   .custom-select-menu button:focus-visible {
     outline: none;
-    background: var(--color-hover);
-    color: var(--color-accent-deep);
+    background: var(--color-hover, #f1f5f9);
+    color: var(--color-accent-deep, #155e96);
   }
 
   .custom-select-menu button.active {
-    background: var(--color-accent);
+    background: var(--color-accent, #1677b8);
     color: var(--color-accent-contrast, #fff);
   }
 

@@ -1,12 +1,12 @@
-import { invoke } from "@tauri-apps/api/core";
-import { appDataDir, join } from "@tauri-apps/api/path";
-import { message } from "@tauri-apps/plugin-dialog";
-import { mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
+import { platform } from "$lib/platform";
 
 export interface MobileExportResult {
     output_path: string;
     public_output: boolean;
     message: string;
+    bytes?: number[];
+    downloadUrl?: string;
+    fileName?: string;
 }
 
 export interface MobileSelection {
@@ -60,37 +60,11 @@ export function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: strin
     });
 }
 
-export async function cacheBrowserFile(file: File, fallbackExt: string) {
-    const root = await appDataDir();
-    const dir = await join(root, "mobile-imports");
-    await mkdir(dir, { recursive: true });
-    const cachedPath = await join(dir, `${Date.now()}_${safeFileName(file.name, fallbackExt)}`);
-    const bytes = new Uint8Array(
-        await withTimeout(file.arrayBuffer(), 45000, "读取文件超时，请确认文件在本机可访问后重试。"),
-    );
-    await withTimeout(writeFile(cachedPath, bytes), 45000, "写入应用缓存超时，请换一个较小的文件或重试。");
-    return cachedPath;
-}
-
-export async function cacheBrowserFileStable(file: File, fallbackExt: string) {
-    const bytes = new Uint8Array(await withTimeout(file.arrayBuffer(), 45000, "read selected file timed out"));
-
-    if (bytes.byteLength <= 12 * 1024 * 1024) {
-        try {
-            return await withTimeout(
-                invoke<string>("mobile_cache_input_file", {
-                    sourceName: file.name,
-                    data: Array.from(bytes),
-                    fallbackExt,
-                }),
-                45000,
-                "cache selected file timed out",
-            );
-        } catch (err) {
-            console.warn("mobile_cache_input_file failed; falling back to plugin-fs cache write", err);
-        }
-    }
-
+async function cacheFileWithTauriFs(file: File, fallbackExt: string, bytes: Uint8Array) {
+    const [{ appDataDir, join }, { mkdir, writeFile }] = await Promise.all([
+        import("@tauri-apps/api/path"),
+        import("@tauri-apps/plugin-fs"),
+    ]);
     const root = await appDataDir();
     const dir = await join(root, "mobile-imports");
     await mkdir(dir, { recursive: true });
@@ -99,9 +73,53 @@ export async function cacheBrowserFileStable(file: File, fallbackExt: string) {
     return cachedPath;
 }
 
-export async function offerSystemExport(path: string, fileName: string) {
+export async function cacheBrowserFile(file: File, fallbackExt: string) {
+    const bytes = new Uint8Array(
+        await withTimeout(file.arrayBuffer(), 45000, "读取文件超时，请确认文件在本机可访问后重试。"),
+    );
+    if (!platform.isTauri) {
+        return await withTimeout(
+            platform.invoke<string>("mobile_cache_input_file", {
+                sourceName: file.name,
+                data: Array.from(bytes),
+                fallbackExt,
+            }),
+            45000,
+            "cache selected file timed out",
+        );
+    }
+    return cacheFileWithTauriFs(file, fallbackExt, bytes);
+}
+
+export async function cacheBrowserFileStable(file: File, fallbackExt: string) {
+    const bytes = new Uint8Array(await withTimeout(file.arrayBuffer(), 45000, "read selected file timed out"));
+
+    if (bytes.byteLength <= 12 * 1024 * 1024) {
+        try {
+            return await withTimeout(
+                platform.invoke<string>("mobile_cache_input_file", {
+                    sourceName: file.name,
+                    data: Array.from(bytes),
+                    fallbackExt,
+                }),
+                45000,
+                "cache selected file timed out",
+            );
+        } catch (err) {
+            if (!platform.isTauri) throw err;
+            console.warn("mobile_cache_input_file failed; falling back to plugin-fs cache write", err);
+        }
+    }
+
+    if (!platform.isTauri) {
+        throw new Error("Selected file is too large for the current web cache API.");
+    }
+    return cacheFileWithTauriFs(file, fallbackExt, bytes);
+}
+
+export async function offerSystemExport(path: string, fileName: string, bytes?: Uint8Array) {
     try {
-        const data = await readFile(path);
+        const data = bytes ?? (await platform.readFile(path));
         const outputName = safeFileName(fileName, "epub");
         const blob = new Blob([data], { type: "application/epub+zip" });
         const file = new File([blob], outputName, { type: "application/epub+zip" });
@@ -111,8 +129,12 @@ export async function offerSystemExport(path: string, fileName: string) {
         };
 
         if (nav.share && (!nav.canShare || nav.canShare({ files: [file] }))) {
-            await nav.share({ files: [file], title: outputName, text: "TEpub-Editor EPUB 导出" });
-            return `已打开系统分享/保存面板：${outputName}`;
+            try {
+                await nav.share({ files: [file], title: outputName, text: "TEpub-Editor EPUB 导出" });
+                return `已打开系统分享/保存面板：${outputName}`;
+            } catch (shareErr) {
+                console.warn("System share/save failed; falling back to browser download", shareErr);
+            }
         }
 
         const url = URL.createObjectURL(blob);
@@ -126,7 +148,7 @@ export async function offerSystemExport(path: string, fileName: string) {
         setTimeout(() => URL.revokeObjectURL(url), 30000);
         return `已触发系统下载：${outputName}`;
     } catch (err) {
-        await message(`系统另存/分享失败：${err}\n\n后端副本位置：${path}`, {
+        await platform.message(`系统另存/分享失败：${err}\n\n后端副本位置：${path}`, {
             title: "导出 EPUB",
             kind: "warning",
         });
@@ -135,11 +157,15 @@ export async function offerSystemExport(path: string, fileName: string) {
 }
 
 export async function exportEpubPath(path: string, fileName: string) {
-    const result = await invoke<MobileExportResult>("mobile_export_epub", {
+    const result = await platform.invoke<MobileExportResult>("mobile_export_epub", {
         epubPath: path,
         fileName,
     });
-    const handoff = await offerSystemExport(result.output_path, fileName);
+    const handoff = await offerSystemExport(
+        result.downloadUrl || result.output_path,
+        result.fileName || fileName,
+        result.bytes ? new Uint8Array(result.bytes) : undefined,
+    );
     return {
         ...result,
         message: result.public_output ? result.message : `${result.message}；${handoff}`,

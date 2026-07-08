@@ -1,11 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
-  import type { UnlistenFn } from "@tauri-apps/api/event";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { save, message } from "@tauri-apps/plugin-dialog";
-  import { writeFile } from "@tauri-apps/plugin-fs";
+  import { platform, type PlatformUnlisten } from "$lib/platform";
   import { loadAppSettings, type AiProviderConfig, type GlobalAppSettings } from "$lib/appSettings";
 
   type AiTarget = "duokan" | "standard" | "banner";
@@ -125,6 +120,10 @@
   $: currentGeneratedReady = !!generated && generatedTarget === aiTarget;
   $: previewTarget = activeMode === "ai" ? aiTarget : activeMode === "header" ? "banner" : "duokan";
   $: previewIsBanner = previewTarget === "banner";
+  $: canComparePreview = activeMode !== "header" && !previewIsBanner;
+  $: if (!canComparePreview && previewMode === "compare") {
+    previewMode = "reference";
+  }
   $: showComparePreview = previewMode === "compare" && !previewIsBanner;
   $: activeReferenceImage = activeMode === "cover" ? coverImage : activeMode === "ai" ? aiReferenceImage : headerSourceImage;
   $: activeReferenceName = activeMode === "cover" ? coverName : activeMode === "ai" ? aiReferenceName : headerSourceName;
@@ -153,7 +152,7 @@
     if (loadAppSettings().closeToolboxOnToolOpen === false) return;
     for (const label of ["toolbox", "main"]) {
       try {
-        const win = await WebviewWindow.getByLabel(label);
+        const win = await platform.getWindowByLabel(label);
         if (!win) continue;
         await win.show();
         await win.setFocus();
@@ -168,11 +167,16 @@
     if (closingByCode) return;
     closingByCode = true;
     await restoreToolboxHome();
-    await getCurrentWindow().destroy();
+    await platform.getCurrentWindow().destroy();
   }
 
   function setMode(mode: ToolMode) {
     activeMode = mode;
+    if (mode === "header") {
+      previewMode = "reference";
+    } else if (mode === "cover" || (mode === "ai" && aiTarget !== "banner")) {
+      previewMode = "compare";
+    }
     tick().then(() => {
       drawLocalPreview();
       drawHeaderPreview();
@@ -291,7 +295,7 @@
 
   async function loadImageFile(file: File, purpose: ImagePurpose = fileInputPurpose) {
     if (!file.type.startsWith("image/")) {
-      await message("请选择图片文件。", { title: "图片处理", kind: "warning" });
+      await platform.message("请选择图片文件。", { title: "图片处理", kind: "warning" });
       return;
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -328,7 +332,7 @@
 
   async function loadHeaderSampleFile(file: File) {
     if (!file.type.startsWith("image/")) {
-      await message("请选择图片文件。", { title: "图片处理", kind: "warning" });
+      await platform.message("请选择图片文件。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (headerSampleObjectUrl) URL.revokeObjectURL(headerSampleObjectUrl);
@@ -347,7 +351,7 @@
     if (file) {
       loadImageFile(file, fileInputPurpose).catch((err) => {
         status = "图片载入失败";
-        message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
+        platform.message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
       });
     }
     input.value = "";
@@ -359,7 +363,7 @@
     if (file) {
       loadHeaderSampleFile(file).catch((err) => {
         status = "头图样图载入失败";
-        message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
+        platform.message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
       });
     }
     input.value = "";
@@ -372,14 +376,14 @@
       if (activeMode === "header" && !headerSampleImage) {
         loadHeaderSampleFile(file).catch((err) => {
           status = "头图样图载入失败";
-          message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
+          platform.message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
         });
         return;
       }
       const purpose: ImagePurpose = activeMode === "header" ? "headerSource" : activeMode === "ai" ? "ai" : "cover";
       loadImageFile(file, purpose).catch((err) => {
         status = "图片载入失败";
-        message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
+        platform.message(String(err?.message ?? err), { title: "图片处理", kind: "error" });
       });
     }
   }
@@ -638,12 +642,12 @@
   }
 
   async function saveBytes(bytes: Uint8Array, defaultName: string, extension: string) {
-    const selected = await save({
+    const selected = await platform.saveDialog({
       defaultPath: defaultName,
       filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
     });
     if (!selected) return;
-    await writeFile(selected, bytes);
+    await platform.writeFile(selected, bytes);
     status = `已保存 ${selected}`;
   }
 
@@ -671,6 +675,7 @@
     const oldDefault = defaultPrompt(aiTarget);
     aiTarget = next;
     aiSize = defaultSize(next);
+    previewMode = next === "banner" ? "reference" : "compare";
     if (!aiPrompt.trim() || aiPrompt === oldDefault) {
       aiPrompt = defaultPrompt(next);
     }
@@ -681,21 +686,207 @@
     generatedUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
   }
 
+  function normalizeAiBaseUrl(value: string) {
+    return value.trim().replace(/\/+$/, "");
+  }
+
+  function removeSuffixIgnoreCase(value: string, suffix: string) {
+    return value.toLowerCase().endsWith(suffix.toLowerCase()) ? value.slice(0, -suffix.length) : value;
+  }
+
+  function browserAiImageGenerationUrl(baseUrl: string) {
+    const base = normalizeAiBaseUrl(baseUrl);
+    if (!base) throw new Error("Base URL 不能为空");
+    const lower = base.toLowerCase();
+    if (lower.endsWith("/images/generations")) return base;
+    if (lower.endsWith("/chat/completions")) return `${removeSuffixIgnoreCase(base, "/chat/completions")}/images/generations`;
+    if (lower.endsWith("/v1") || /\/api\/v\d+$/i.test(base)) return `${base}/images/generations`;
+    return `${base}/v1/images/generations`;
+  }
+
+  function bytesToBase64(bytes: Uint8Array) {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function bytesToDataUrl(bytes: Uint8Array, mime: string) {
+    return `data:${mime || detectMime(bytes, "image/jpeg")};base64,${bytesToBase64(bytes)}`;
+  }
+
+  function renderAiPrompt(template: string) {
+    const cleanTitle = title.trim() || "当前书籍";
+    const cleanAuthor = author.trim();
+    let prompt = template.trim();
+    if (!cleanAuthor) {
+      for (const marker of ["作者{author}的", "作者{{author}}的", "作者 {author} 的", "作者 {{author}} 的"]) {
+        prompt = prompt.replaceAll(marker, "");
+      }
+    }
+    const replaced = prompt
+      .replaceAll("{title}", cleanTitle)
+      .replaceAll("{{title}}", cleanTitle)
+      .replaceAll("{{text}}", cleanTitle)
+      .replaceAll("{author}", cleanAuthor)
+      .replaceAll("{{author}}", cleanAuthor);
+    return prompt.includes("{title}") || prompt.includes("{{title}}") || prompt.includes("{{text}}") || prompt.includes("{author}") || prompt.includes("{{author}}")
+      ? replaced
+      : `${replaced}\n\n书籍信息：${cleanAuthor ? `${cleanTitle} / ${cleanAuthor}` : cleanTitle}`;
+  }
+
+  function browserImageSizeCandidates(requested: string, target: AiTarget) {
+    const fallback = target === "banner" ? "1536x768" : target === "standard" ? "1200x1600" : "1024x1792";
+    const secondary = target === "banner" ? "1280x640" : target === "standard" ? "1024x1365" : "1400x2400";
+    return Array.from(new Set([requested.trim(), fallback, secondary, ""]));
+  }
+
+  function browserAiRequestBodies(model: string, prompt: string, size: string, referenceDataUrl: string) {
+    const baseBody = () => {
+      const body: Record<string, unknown> = { model, prompt, n: 1 };
+      if (size.trim()) body.size = size.trim();
+      return body;
+    };
+    const bodies: Record<string, unknown>[] = [];
+    if (referenceDataUrl) {
+      for (const variant of ["image_array", "image_string", "image_urls_array", "image_array_no_format", "image_string_no_format", "image_urls_array_no_format"]) {
+        const body = baseBody();
+        if (variant.startsWith("image_array")) body.image = [referenceDataUrl];
+        else if (variant.startsWith("image_string")) body.image = referenceDataUrl;
+        else body.image_urls = [referenceDataUrl];
+        if (!variant.endsWith("_no_format")) body.response_format = "b64_json";
+        bodies.push(body);
+      }
+    }
+    bodies.push({ ...baseBody(), response_format: "b64_json" });
+    bodies.push(baseBody());
+    const seen = new Set<string>();
+    return bodies.filter((body) => {
+      const key = JSON.stringify(body);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function decodeBase64Image(value: string) {
+    const raw = value.trim().toLowerCase().startsWith("data:image/")
+      ? value.split(",").slice(1).join(",").trim()
+      : value.trim();
+    if (raw.length < 80 || /\s/.test(raw)) return null;
+    try {
+      const binary = atob(raw);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    } catch {
+      return null;
+    }
+  }
+
+  function extractBrowserAiImageBytes(value: unknown): Uint8Array | null {
+    if (typeof value === "string") return decodeBase64Image(value);
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const bytes = extractBrowserAiImageBytes(item);
+        if (bytes) return bytes;
+      }
+      return null;
+    }
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      for (const key of ["b64_json", "base64", "image_base64", "data", "content"]) {
+        const bytes = extractBrowserAiImageBytes(record[key]);
+        if (bytes) return bytes;
+      }
+      for (const item of Object.values(record)) {
+        const bytes = extractBrowserAiImageBytes(item);
+        if (bytes) return bytes;
+      }
+    }
+    return null;
+  }
+
+  async function requestBrowserAiImage(body: Record<string, unknown>) {
+    if (!selectedImageProvider) throw new Error("未选择生图模型");
+    const response = await fetch(browserAiImageGenerationUrl(selectedImageProvider.baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json,image/*",
+        authorization: `Bearer ${selectedImageProvider.apiKey.trim()}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const buffer = new Uint8Array(await response.arrayBuffer());
+    if (!response.ok) {
+      const text = new TextDecoder().decode(buffer);
+      let detail = text;
+      try {
+        const parsed = JSON.parse(text);
+        detail = parsed?.error?.message || parsed?.error || parsed?.message || text;
+      } catch {
+        // Keep raw text.
+      }
+      throw new Error(`生图接口返回 ${response.status}: ${detail}`);
+    }
+    if (contentType.startsWith("image/")) return buffer;
+    const text = new TextDecoder().decode(buffer);
+    const value = JSON.parse(text);
+    const bytes = extractBrowserAiImageBytes(value);
+    if (!bytes) throw new Error("生图接口返回中没有图片数据");
+    return bytes;
+  }
+
+  async function generateAiImageInBrowser() {
+    if (!selectedImageProvider || !aiReferenceBytes) throw new Error("缺少生图模型或参考图");
+    const prompt = renderAiPrompt(aiPrompt);
+    const referenceDataUrl = bytesToDataUrl(aiReferenceBytes, aiReferenceMime);
+    let lastError: unknown = null;
+    for (const size of browserImageSizeCandidates(aiSize, aiTarget)) {
+      for (const body of browserAiRequestBodies(selectedImageProvider.model.trim(), prompt, size, referenceDataUrl)) {
+        try {
+          const bytes = await requestBrowserAiImage(body);
+          const mime = detectMime(bytes, "image/jpeg");
+          const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+          return {
+            bytes: Array.from(bytes),
+            mime,
+            extension,
+            fileName: `${(title || aiTarget).replace(/[\\/:*?"<>|]/g, "_")}-${aiTarget}.${extension}`,
+            prompt,
+            size,
+          };
+        } catch (error) {
+          lastError = error;
+        }
+      }
+    }
+    const message = String((lastError as Error | null)?.message || lastError || "浏览器直连生图失败");
+    if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
+      throw new Error("浏览器直连生图失败，通常是该 API 不允许跨域请求。Docker/正式部署请更新后走后端代理。");
+    }
+    throw new Error(message);
+  }
+
   async function generateAiImage() {
     if (!aiReferenceBytes) {
-      await message("请先选择参考封面。", { title: "图片处理", kind: "warning" });
+      await platform.message("请先选择参考封面。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (!selectedImageProvider) {
-      await message("请先在工具箱设置的 API 配置中新增生图模型。", { title: "图片处理", kind: "warning" });
+      await platform.message("请先在工具箱设置的 API 配置中新增生图模型。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (!selectedImageProvider.baseUrl.trim() || !selectedImageProvider.apiKey.trim() || !selectedImageProvider.model.trim()) {
-      await message("选中的生图模型缺少 API 地址、Key 或模型名。", { title: "图片处理", kind: "warning" });
+      await platform.message("选中的生图模型缺少 API 地址、Key 或模型名。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (!title.trim()) {
-      await message("请填写书名。", { title: "图片处理", kind: "warning" });
+      await platform.message("请填写书名。", { title: "图片处理", kind: "warning" });
       return;
     }
     if (!canGenerate) return;
@@ -703,26 +894,36 @@
     generating = true;
     status = `正在生成${targetLabel(aiTarget)}...`;
     try {
-      const result = await invoke<AiImageResult>("toolbox_generate_ai_image", {
-        request: {
-          baseUrl: selectedImageProvider.baseUrl,
-          apiKey: selectedImageProvider.apiKey,
-          model: selectedImageProvider.model,
-          target: aiTarget,
-          title,
-          author,
-          prompt: aiPrompt,
-          size: aiSize,
-          referenceData: Array.from(aiReferenceBytes),
-        },
-      });
+      const request = {
+        baseUrl: selectedImageProvider.baseUrl,
+        apiKey: selectedImageProvider.apiKey,
+        model: selectedImageProvider.model,
+        target: aiTarget,
+        title,
+        author,
+        prompt: aiPrompt,
+        size: aiSize,
+        referenceData: Array.from(aiReferenceBytes),
+      };
+      let result: AiImageResult;
+      if (platform.isWeb) {
+        try {
+          status = "正在尝试浏览器直连生图...";
+          result = await generateAiImageInBrowser();
+        } catch (error) {
+          status = "浏览器直连失败，尝试后端代理...";
+          result = await platform.invoke<AiImageResult>("toolbox_generate_ai_image", { request });
+        }
+      } else {
+        result = await platform.invoke<AiImageResult>("toolbox_generate_ai_image", { request });
+      }
       generated = result;
       generatedTarget = aiTarget;
       setGeneratedUrl(new Uint8Array(result.bytes), result.mime);
       status = `生成完成：${result.size || "auto"}`;
     } catch (err) {
       status = "AI 生成失败";
-      await message(String(err), { title: "图片处理", kind: "error" });
+      await platform.message(String(err), { title: "图片处理", kind: "error" });
     } finally {
       generating = false;
     }
@@ -762,8 +963,8 @@
     imageProviderId = appSettings.aiProviders.find((provider) => provider.kind === "image")?.id || "";
     loadConfig();
     drawLocalPreview();
-    let unlistenClose: UnlistenFn | undefined;
-    getCurrentWindow().onCloseRequested(async (event) => {
+    let unlistenClose: PlatformUnlisten | undefined;
+    platform.onCurrentWindowCloseRequested(async (event) => {
       if (closingByCode) return;
       event.preventDefault();
       await closeWindow();
@@ -794,8 +995,8 @@
     </div>
     <div class="tool-head-actions">
       <div class="preview-toggle" aria-label="预览模式">
-        <button type="button" class:active={previewMode === "compare"} on:click={() => setPreviewMode("compare")}>对比</button>
-        <button type="button" class:active={previewMode === "reference"} on:click={() => setPreviewMode("reference")}>参考</button>
+        <button type="button" class:active={previewMode === "compare" && canComparePreview} disabled={!canComparePreview} on:click={() => setPreviewMode("compare")}>对比</button>
+        <button type="button" class:active={previewMode === "reference" || !canComparePreview} on:click={() => setPreviewMode("reference")}>预览</button>
       </div>
       <button class="primary" type="button" on:click={saveCurrent} disabled={saveDisabled}>保存</button>
     </div>
@@ -1142,6 +1343,12 @@
   .preview-toggle button.active {
     background: var(--color-accent);
     color: white;
+  }
+
+  .preview-toggle button:disabled {
+    cursor: not-allowed;
+    color: color-mix(in srgb, var(--color-muted) 55%, transparent);
+    background: color-mix(in srgb, var(--color-surface-muted) 65%, transparent);
   }
 
   .workspace {

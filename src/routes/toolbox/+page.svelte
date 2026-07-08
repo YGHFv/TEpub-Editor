@@ -1,23 +1,34 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
-  import { open, message } from "@tauri-apps/plugin-dialog";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import { goto } from "$app/navigation";
+  import { base } from "$app/paths";
+  import { platform, type PlatformWindowHandle } from "$lib/platform";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
   import {
     applyTheme,
+    DEFAULT_TOC_REGEX_RULES,
     loadAppSettings,
     newAiProvider,
     providerToProofingConfig,
     saveAppSettings,
     type AiProviderConfig,
     type GlobalAppSettings,
+    type TocRegexRule,
   } from "$lib/appSettings";
+  import {
+    getWebAccountSession,
+    loginWebAccount,
+    logoutWebAccount,
+    registerWebAccount,
+    syncRemoteSettings,
+    usesWebScopedSettings,
+    type WebAccountSession,
+  } from "$lib/webAccount";
 
   type ToolId =
     | "library"
+    | "txt-edit"
     | "txt-epub"
     | "epub-edit"
     | "epub-read"
@@ -85,10 +96,16 @@
   const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
   const TOOLBOX_WINDOW_WIDTH = 1200;
   const TOOLBOX_WINDOW_HEIGHT = 740;
+  const WEB_UNAVAILABLE_TEXT = "\u7f51\u9875\u7248\u6682\u672a\u5b9e\u88c5";
+  const WEB_UNAVAILABLE_ACTION = "\u6682\u4e0d\u53ef\u7528";
   const THEME_OPTIONS = [
     { value: "modern", label: "现代" },
     { value: "classic", label: "经典" },
     { value: "dark", label: "深色" },
+  ];
+  const REGEX_LEVEL_OPTIONS = [
+    { value: "1", label: "卷" },
+    { value: "3", label: "章" },
   ];
 
   const tools: Tool[] = [
@@ -105,6 +122,13 @@
       title: "TXT 制作 EPUB",
       detail: "选择 TXT 文件",
       action: "打开",
+    },
+    {
+      id: "txt-edit",
+      icon: "EDIT",
+      title: "TXT 编辑器",
+      detail: "导入、校对、查找替换",
+      action: "编辑",
     },
     {
       id: "epub-edit",
@@ -183,7 +207,7 @@
       id: "open",
       title: "常用入口",
       meta: "书库 / 新窗口",
-      tools: tools.filter((tool) => tool.id === "library" || tool.id === "txt-epub" || tool.id === "epub-edit" || tool.id === "epub-read"),
+      tools: tools.filter((tool) => tool.id === "library" || tool.id === "txt-epub" || tool.id === "txt-edit" || tool.id === "epub-edit" || tool.id === "epub-read"),
       gridClass: "open-grid",
     },
     {
@@ -195,24 +219,49 @@
     },
   ];
 
+  $: visibleToolGroups = toolGroups
+    .map((group) => ({
+      ...group,
+      meta: platform.isWeb && group.id === "open" ? "Web 工具入口" : group.meta,
+      tools: group.tools.filter((tool) => !isHiddenWebTool(tool.id)),
+    }))
+    .filter((group) => group.tools.length > 0);
+
   let busyTool: ToolId | "" = "";
   let statusText = "";
   let showSettings = false;
-  let toolboxSettingsActiveTab: "general" | "assoc" | "api" = "general";
-  const toolboxSettingsTabs = [
+  let toolboxSettingsActiveTab: "account" | "general" | "assoc" | "regex" | "api" = "general";
+  $: toolboxSettingsTabs = [
+    ...(usesWebScopedSettings() ? [{ id: "account", label: "账号" }] : []),
     { id: "general", label: "通用" },
-    { id: "assoc", label: "文件关联" },
+    ...(usesWebScopedSettings() ? [] : [{ id: "assoc", label: "文件关联" }]),
+    { id: "regex", label: "目录正则" },
     { id: "api", label: "API 配置" },
   ];
   let appSettings: GlobalAppSettings = loadAppSettings();
+  let accountSession: WebAccountSession | null = getWebAccountSession();
+  let accountMode: "login" | "register" = "login";
+  let accountUsername = "";
+  let accountPassword = "";
+  let accountMessage = "";
   let apiEditorOpen = false;
   let apiEditorMode: "new" | "edit" = "new";
   let apiEditorId = "";
   let apiDraft: AiProviderConfig = newAiProvider({ kind: "text" });
   let apiSettingsMessage = "";
 
+  function appPath(path: string) {
+    if (!path || path === "#" || /^https?:\/\//i.test(path)) return path;
+    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  }
+
   function windowLabel(prefix: string) {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+
+  async function createToolWindow(label: string, options: Record<string, any> & { url: string }) {
+    const { url, ...windowOptions } = options;
+    return platform.createWebviewWindow(label, url, windowOptions);
   }
 
   function collectLaunchPaths(launchInfo: LaunchInfo | null | undefined) {
@@ -242,8 +291,8 @@
     const encoded = encodeURIComponent(filePath);
 
     if (ext === "txt") {
-      new WebviewWindow(windowLabel("editor"), {
-        url: `/editor?file=${encoded}&fromLibrary=1`,
+      await createToolWindow(windowLabel("editor"), {
+        url: appPath(`/editor?file=${encoded}&fromLibrary=1`),
         title: "TEpub-Editor-TXT",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -258,8 +307,8 @@
     if (ext !== "epub") return;
 
     if (action === "reader") {
-      new WebviewWindow(windowLabel("reader"), {
-        url: `/reader?file=${encoded}`,
+      await createToolWindow(windowLabel("reader"), {
+        url: appPath(`/reader?file=${encoded}`),
         title: "TEpub-Editor-Reader",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -271,8 +320,8 @@
       return;
     }
 
-    new WebviewWindow(windowLabel("epub-editor"), {
-      url: `/epub-editor?file=${encoded}`,
+    await createToolWindow(windowLabel("epub-editor"), {
+      url: appPath(`/epub-editor?file=${encoded}`),
       title: "TEpub-Editor-EPUB",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
@@ -285,9 +334,10 @@
 
   async function openLaunchFiles() {
     if (!isRootToolbox()) return;
+    if (platform.isWeb) return;
 
     try {
-      const launchInfo = await invoke<LaunchInfo>("get_launch_info");
+      const launchInfo = await platform.invoke<LaunchInfo>("get_launch_info");
       const action = launchInfo?.action ?? "";
       const paths = collectLaunchPaths(launchInfo).filter(supportedLaunchPath);
       if (paths.length === 0) return;
@@ -324,10 +374,10 @@
         return;
       }
 
-      const selected = await open({
+      const selected = await platform.openDialog<string | string[] | null>({
         multiple: false,
         filters: [
-          tool.id === "txt-epub"
+          tool.id === "txt-epub" || tool.id === "txt-edit"
             ? { name: "TXT 文件", extensions: ["txt"] }
             : { name: "EPUB 文件", extensions: ["epub"] },
         ],
@@ -342,14 +392,14 @@
         statusText = result.issues.length === 0
           ? "EPUB 诊断未发现明显问题"
           : `EPUB 诊断完成：${result.errorCount} 错误 / ${result.warningCount} 警告`;
-        await message(formatDiagnosticReport(result), {
+        await platform.message(formatDiagnosticReport(result), {
           title: tool.title,
           kind: result.errorCount > 0 ? "error" : result.warningCount > 0 ? "warning" : "info",
         });
       } else if (isProcessingTool(tool.id)) {
         let txtPath: string | undefined;
         if (tool.id === "font-decrypt") {
-          const selectedTxt = await open({
+          const selectedTxt = await platform.openDialog<string | string[] | null>({
             multiple: false,
             filters: [{ name: "TXT 文件", extensions: ["txt"] }],
             title: "选择与 EPUB 对应的明文 TXT",
@@ -359,7 +409,7 @@
         }
         const result = await runProcessingTool(tool, selected, txtPath);
         statusText = result.changed ? `${tool.title} 已完成` : result.message;
-        await message(`${result.message}\n\n${result.outputPath}`, {
+        await platform.message(`${result.message}\n\n${result.outputPath}`, {
           title: tool.title,
           kind: result.changed ? "info" : "warning",
         });
@@ -370,40 +420,80 @@
     } catch (e: any) {
       console.error("工具箱打开失败:", e);
       statusText = "打开失败";
-      await message(`打开失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`打开失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       busyTool = "";
     }
   }
 
+  function handleToolMainClick(event: MouseEvent, tool: Tool) {
+    if (busyTool !== "") {
+      event.preventDefault();
+      return;
+    }
+    if (platform.isWeb && isWebRouteTool(tool.id)) {
+      event.preventDefault();
+      void goto(webToolHref(tool.id));
+      return;
+    }
+    if (isWebUnavailableTool(tool.id)) {
+      event.preventDefault();
+      statusText = `${tool.title} ${WEB_UNAVAILABLE_TEXT}`;
+      return;
+    }
+    event.preventDefault();
+    pickFile(tool);
+  }
+
+  function isWebRouteTool(id: ToolId) {
+    return id === "image-tools" || id === "txt-epub" || id === "txt-edit" || id === "epub-edit";
+  }
+
+  function isHiddenWebTool(id: ToolId) {
+    return platform.isWeb && id === "library";
+  }
+
+  function isWebUnavailableTool(id: ToolId) {
+    return platform.isWeb && !isWebRouteTool(id);
+  }
+
+  function webToolHref(id: ToolId) {
+    if (id === "image-tools") return appPath("/toolbox/image-tools");
+    if (id === "txt-epub") return appPath("/toolbox/make-epub");
+    if (id === "txt-edit") return appPath("/toolbox/text-editor");
+    if (id === "epub-edit") return appPath("/toolbox/epub-editor");
+    return "#";
+  }
+
   function isRootToolbox() {
-    return typeof window !== "undefined" && window.location.pathname === "/";
+    const rootPath = `${base || ""}/`;
+    return typeof window !== "undefined" && window.location.pathname === rootPath;
   }
 
   async function openLibrary() {
     if (isRootToolbox()) {
-      window.location.href = "/library";
+      await goto(appPath("/library"));
       return;
     }
 
     try {
-      const mainWin = await WebviewWindow.getByLabel("main");
+      const mainWin = await platform.getWindowByLabel("main");
       if (mainWin) {
         await mainWin.show();
         await mainWin.setFocus();
-        await getCurrentWindow().close();
+        await platform.closeCurrentWindow();
         return;
       }
     } catch (e) {
       console.warn("唤起主窗口失败，改为在当前窗口打开书库:", e);
     }
 
-    window.location.href = "/library";
+    await goto(appPath("/library"));
   }
 
-  async function hideToolboxHomeWhileOpen(childWindow: WebviewWindow) {
+  async function hideToolboxHomeWhileOpen(childWindow: PlatformWindowHandle) {
     if (appSettings.closeToolboxOnToolOpen === false) return;
-    const toolboxWindow = getCurrentWindow();
+    const toolboxWindow = platform.getCurrentWindow();
     try {
       childWindow.once("tauri://destroyed", async () => {
         try {
@@ -420,8 +510,13 @@
   }
 
   async function openImageTools() {
-    const win = new WebviewWindow(windowLabel("image-tools"), {
-      url: "/toolbox/image-tools",
+    if (platform.isWeb && typeof window !== "undefined") {
+      await goto(appPath("/toolbox/image-tools"));
+      return;
+    }
+
+    const win = await createToolWindow(windowLabel("image-tools"), {
+      url: appPath("/toolbox/image-tools"),
       title: "TEpub-Editor-图片处理",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
@@ -461,7 +556,7 @@
   }
 
   async function runProcessingTool(tool: Tool, filePath: string, txtPath?: string) {
-    return await invoke<ToolboxResult>(commandForTool(tool.id), {
+    return await platform.invoke<ToolboxResult>(commandForTool(tool.id), {
       epubPath: filePath,
       txtPath,
       imageFormat: tool.id === "image-convert" ? "auto" : undefined,
@@ -469,7 +564,7 @@
   }
 
   async function runEpubDiagnose(filePath: string) {
-    return await invoke<ToolboxDiagnosticResult>("toolbox_epub_diagnose", {
+    return await platform.invoke<ToolboxDiagnosticResult>("toolbox_epub_diagnose", {
       epubPath: filePath,
     });
   }
@@ -516,8 +611,8 @@
           imageFormat: tool.id === "image-convert" ? "auto" : undefined,
         }),
       );
-      const win = new WebviewWindow(windowLabel("batch-progress"), {
-        url: `/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`,
+      const win = await createToolWindow(windowLabel("batch-progress"), {
+        url: appPath(`/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`),
         title: `${tool.title} 批量处理`,
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -531,7 +626,7 @@
     } catch (e: any) {
       console.error("批量处理失败:", e);
       statusText = "批量处理失败";
-      await message(`批量处理失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`批量处理失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       busyTool = "";
     }
@@ -543,9 +638,9 @@
 
   async function openToolForPath(tool: Tool, filePath: string) {
     const encoded = encodeURIComponent(filePath);
-    if (tool.id === "txt-epub") {
-      const win = new WebviewWindow(windowLabel("editor"), {
-        url: `/editor?file=${encoded}&fromLibrary=1`,
+    if (tool.id === "txt-epub" || tool.id === "txt-edit") {
+      const win = await createToolWindow(windowLabel("editor"), {
+        url: appPath(`/editor?file=${encoded}&fromLibrary=1`),
         title: "TEpub-Editor-TXT",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -559,8 +654,8 @@
     }
 
     if (tool.id === "epub-edit") {
-      const win = new WebviewWindow(windowLabel("epub-editor"), {
-        url: `/epub-editor?file=${encoded}`,
+      const win = await createToolWindow(windowLabel("epub-editor"), {
+        url: appPath(`/epub-editor?file=${encoded}`),
         title: "TEpub-Editor-EPUB",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -573,8 +668,8 @@
       return;
     }
 
-    const win = new WebviewWindow(windowLabel("reader"), {
-      url: `/reader?file=${encoded}`,
+    const win = await createToolWindow(windowLabel("reader"), {
+      url: appPath(`/reader?file=${encoded}`),
       title: "TEpub-Editor-Reader",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
@@ -587,7 +682,7 @@
   }
 
   function closeWindow() {
-    getCurrentWindow().close();
+    platform.closeCurrentWindow();
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -597,8 +692,19 @@
   }
 
   async function loadGlobalSettingsWithLegacy() {
+    if (platform.isWeb) {
+      try {
+        await syncRemoteSettings();
+      } catch (error) {
+        console.warn("同步 Web 账号设置失败:", error);
+      }
+      accountSession = getWebAccountSession();
+      appSettings = loadAppSettings();
+      applyTheme(appSettings.uiTheme);
+      return;
+    }
     try {
-      const data = await invoke<LegacyLibraryData>("load_library");
+      const data = await platform.invoke<LegacyLibraryData>("load_library");
       appSettings = saveAppSettings(loadAppSettings(data?.config || {}));
     } catch {
       appSettings = loadAppSettings();
@@ -621,6 +727,31 @@
   function setUiTheme(value: string) {
     if (value !== "modern" && value !== "classic" && value !== "dark") return;
     appSettings.uiTheme = value;
+    saveGlobalSettings();
+  }
+
+  function updateTocRegexRule(index: number, patch: Partial<TocRegexRule>) {
+    appSettings.customRegexRules = appSettings.customRegexRules.map((rule, i) => (
+      i === index ? { ...rule, ...patch } : rule
+    ));
+    saveGlobalSettings();
+  }
+
+  function addTocRegexRule(level: number) {
+    appSettings.customRegexRules = [
+      ...appSettings.customRegexRules,
+      { enabled: true, level: level <= 1 ? 1 : 3, pattern: "" },
+    ];
+    saveGlobalSettings();
+  }
+
+  function removeTocRegexRule(index: number) {
+    appSettings.customRegexRules = appSettings.customRegexRules.filter((_, i) => i !== index);
+    saveGlobalSettings();
+  }
+
+  function resetTocRegexRules() {
+    appSettings.customRegexRules = DEFAULT_TOC_REGEX_RULES.map((rule) => ({ ...rule }));
     saveGlobalSettings();
   }
 
@@ -703,35 +834,75 @@
 
   async function toggleFileAssoc(verb: "epub-read" | "epub-edit" | "txt-make-epub", enabled: boolean) {
     try {
-      await invoke("set_file_assoc", { verb, enabled });
+      await platform.invoke("set_file_assoc", { verb, enabled });
       saveGlobalSettings();
     } catch (e: any) {
       if (verb === "epub-read") appSettings.assocEpubRead = !enabled;
       else if (verb === "epub-edit") appSettings.assocEpubEdit = !enabled;
       else appSettings.assocTxtMakeEpub = !enabled;
-      await message(`设置失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`设置失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 
   async function openSettings() {
     await loadGlobalSettingsWithLegacy();
+    accountSession = getWebAccountSession();
     apiEditorOpen = false;
     apiSettingsMessage = "";
     if (!toolboxSettingsTabs.some((tab) => tab.id === toolboxSettingsActiveTab)) {
-      toolboxSettingsActiveTab = "general";
+      toolboxSettingsActiveTab = usesWebScopedSettings() ? "account" : "general";
     }
     showSettings = true;
   }
 
   function setToolboxSettingsTab(tabId: string) {
-    if (tabId === "general" || tabId === "assoc" || tabId === "api") {
+    if (tabId === "account" || tabId === "general" || tabId === "assoc" || tabId === "regex" || tabId === "api") {
+      if (tabId === "assoc" && usesWebScopedSettings()) return;
       toolboxSettingsActiveTab = tabId;
     }
+  }
+
+  async function submitAccountForm() {
+    accountMessage = "";
+    const username = accountUsername.trim();
+    if (!username || !accountPassword) {
+      accountMessage = "请填写账号和密码。";
+      return;
+    }
+    try {
+      if (accountMode === "register") {
+        await registerWebAccount(username, accountPassword);
+        accountMessage = "注册成功，已登录。";
+      } else {
+        await loginWebAccount(username, accountPassword);
+        accountMessage = "登录成功。";
+      }
+      accountPassword = "";
+      accountSession = getWebAccountSession();
+      appSettings = loadAppSettings();
+      applyTheme(appSettings.uiTheme);
+    } catch (error) {
+      accountMessage = String((error as Error)?.message || error);
+    }
+  }
+
+  function logoutAccount() {
+    logoutWebAccount();
+    accountSession = null;
+    appSettings = loadAppSettings();
+    applyTheme(appSettings.uiTheme);
+    accountMessage = "已退出登录，当前修改只保存在本次浏览器会话。";
   }
 
   onMount(() => {
     loadGlobalSettingsWithLegacy();
     openLaunchFiles();
+    const onSettingsUpdated = () => {
+      accountSession = getWebAccountSession();
+      appSettings = loadAppSettings();
+    };
+    window.addEventListener("tepub-settings-updated", onSettingsUpdated);
+    return () => window.removeEventListener("tepub-settings-updated", onSettingsUpdated);
   });
 </script>
 
@@ -752,7 +923,7 @@
       </div>
     </div>
 
-    {#each toolGroups as group}
+    {#each visibleToolGroups as group}
       <section class="tool-section" aria-labelledby={`toolbox-section-${group.id}`}>
         <div class="section-head">
           <h2 id={`toolbox-section-${group.id}`}>{group.title}</h2>
@@ -762,28 +933,29 @@
           {#each group.tools as tool}
             <div
               class="tool-card"
-              class:tool-card-disabled={busyTool !== ""}
+              class:tool-card-disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
+              class:tool-card-web-unavailable={isWebUnavailableTool(tool.id)}
               aria-label={tool.title}
             >
-              <button
+              <a
                 class="tool-main"
-                type="button"
-                on:click={() => pickFile(tool)}
-                disabled={busyTool !== ""}
+                href={webToolHref(tool.id)}
+                aria-disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
+                on:click={(event) => handleToolMainClick(event, tool)}
               >
               <span class="tool-icon">{tool.icon}</span>
               <span class="tool-copy">
                 <span class="tool-title">{tool.title}</span>
-                <span class="tool-detail">{busyTool === tool.id ? "处理中..." : tool.detail}</span>
+                <span class="tool-detail">{busyTool === tool.id ? "处理中..." : isWebUnavailableTool(tool.id) ? WEB_UNAVAILABLE_TEXT : tool.detail}</span>
               </span>
-              <span class="tool-action">{tool.action}</span>
-              </button>
+              <span class="tool-action">{isWebUnavailableTool(tool.id) ? WEB_UNAVAILABLE_ACTION : tool.action}</span>
+              </a>
               {#if isBatchTool(tool.id)}
                 <button
                   class="tool-batch"
                   type="button"
                   on:click={() => runBatchForFolder(tool)}
-                  disabled={busyTool !== ""}
+                  disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
                   title="选择文件夹批量处理"
                 >
                   批量
@@ -794,6 +966,22 @@
         </div>
       </section>
     {/each}
+
+    {#if platform.isWeb}
+      <footer class="web-toolbox-footer" aria-label="版权信息">
+        <div class="web-toolbox-footer-card">
+          <div class="web-footer-line">
+            <span>© 2026</span>
+            <a href="https://blog.ygvlive.com" target="_blank" rel="noreferrer">源谷绘</a>
+            <span>. All Rights Reserved.</span>
+          </div>
+          <div class="web-footer-line web-footer-powered">
+            <span>Powered by</span>
+            <a href="https://github.com/YGHFv/TEpub-Editor" target="_blank" rel="noreferrer">TEpub-Editor</a>
+          </div>
+        </div>
+      </footer>
+    {/if}
   </section>
 </main>
 
@@ -812,7 +1000,37 @@
       shellClass="toolbox-settings-panel"
       contentClass="toolbox-settings-content"
     >
-      {#if toolboxSettingsActiveTab === "general"}
+      {#if toolboxSettingsActiveTab === "account"}
+        <section class="settings-section account-settings">
+          <div class="section-title">账号</div>
+          {#if accountSession}
+            <p class="section-hint">
+              当前账号：<strong>{accountSession.username}</strong>{accountSession.localOnly ? "（本机开发模式）" : ""}。设置会按账号独立保存。
+            </p>
+            <button class="toolbox-mini-btn" type="button" on:click={logoutAccount}>退出登录</button>
+          {:else}
+            <p class="section-hint">未登录时，Web 端设置只保存在本次浏览器会话；关闭后重新进入会恢复默认。</p>
+            <div class="api-kind-switch account-mode-switch">
+              <button type="button" class:active={accountMode === "login"} on:click={() => (accountMode = "login")}>登录</button>
+              <button type="button" class:active={accountMode === "register"} on:click={() => (accountMode = "register")}>注册</button>
+            </div>
+            <div class="set-row">
+              <span class="set-label">账号</span>
+              <input class="set-control" type="text" bind:value={accountUsername} autocomplete="username" placeholder="3-32 位字母、数字或下划线" />
+            </div>
+            <div class="set-row">
+              <span class="set-label">密码</span>
+              <input class="set-control" type="password" bind:value={accountPassword} autocomplete={accountMode === "login" ? "current-password" : "new-password"} placeholder="至少 6 位" />
+            </div>
+            <button class="toolbox-mini-btn account-submit" type="button" on:click={submitAccountForm}>
+              {accountMode === "login" ? "登录" : "注册并登录"}
+            </button>
+          {/if}
+          {#if accountMessage}
+            <div class="api-status">{accountMessage}</div>
+          {/if}
+        </section>
+      {:else if toolboxSettingsActiveTab === "general"}
         <section class="settings-section">
           <div class="section-title">通用</div>
           <div class="set-row">
@@ -840,6 +1058,47 @@
             <span class="set-label">制作 EPUB <small>(.txt)</small></span>
             <input type="checkbox" bind:checked={appSettings.assocTxtMakeEpub} on:change={(e) => toggleFileAssoc("txt-make-epub", (e.currentTarget as HTMLInputElement).checked)} />
           </label>
+        </section>
+      {:else if toolboxSettingsActiveTab === "regex"}
+        <section class="settings-section">
+          <div class="api-section-head">
+            <div>
+              <div class="section-title">目录正则</div>
+              <p class="section-hint">用于 TXT 编辑器目录扫描和网页 EPUB 制作页；取消勾选的规则不会参与扫描。</p>
+            </div>
+            <button class="toolbox-mini-btn" type="button" on:click={resetTocRegexRules}>重置</button>
+          </div>
+          <div class="toolbox-regex-list">
+            {#each appSettings.customRegexRules as rule, index}
+              <div class="toolbox-regex-row">
+                <label class="toolbox-regex-enabled" title="是否应用该正则">
+                  <input
+                    type="checkbox"
+                    checked={rule.enabled !== false}
+                    on:change={(e) => updateTocRegexRule(index, { enabled: (e.currentTarget as HTMLInputElement).checked })}
+                  />
+                </label>
+                <CustomSelect
+                  className="set-control toolbox-regex-level"
+                  value={String(rule.level <= 1 ? 1 : 3)}
+                  options={REGEX_LEVEL_OPTIONS}
+                  on:change={(e) => updateTocRegexRule(index, { level: Number(e.detail) })}
+                />
+                <input
+                  class="set-control"
+                  type="text"
+                  value={rule.pattern}
+                  on:input={(e) => updateTocRegexRule(index, { pattern: (e.currentTarget as HTMLInputElement).value })}
+                  placeholder="输入目录匹配正则"
+                />
+                <button class="toolbox-mini-btn danger" type="button" on:click={() => removeTocRegexRule(index)}>删除</button>
+              </div>
+            {/each}
+          </div>
+          <div class="toolbox-regex-actions">
+            <button class="toolbox-mini-btn" type="button" on:click={() => addTocRegexRule(1)}>添加卷规则</button>
+            <button class="toolbox-mini-btn" type="button" on:click={() => addTocRegexRule(3)}>添加章规则</button>
+          </div>
         </section>
       {:else if toolboxSettingsActiveTab === "api"}
         <section class="settings-section">
@@ -928,13 +1187,14 @@
 <style>
   :global(body) {
     margin: 0;
-    overflow: hidden;
+    overflow: auto;
     background: var(--color-canvas);
   }
 
   .toolbox-app {
     box-sizing: border-box;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     background: var(--color-canvas);
@@ -1115,6 +1375,49 @@
     gap: 10px;
   }
 
+  .account-mode-switch {
+    margin-bottom: 12px;
+  }
+
+  .account-submit {
+    margin-top: 4px;
+  }
+
+  .toolbox-regex-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .toolbox-regex-row {
+    display: grid;
+    grid-template-columns: 28px 72px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .toolbox-regex-enabled {
+    min-height: 34px;
+    display: grid;
+    place-items: center;
+  }
+
+  .toolbox-regex-enabled input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-accent);
+  }
+
+  :global(.toolbox-regex-level .custom-select-trigger) {
+    min-height: 36px;
+  }
+
+  .toolbox-regex-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
   .api-item {
     min-width: 0;
     padding: 12px;
@@ -1221,6 +1524,8 @@
     min-height: 0;
     margin: 0 auto;
     padding: 30px 0 34px;
+    display: flex;
+    flex-direction: column;
     overflow: auto;
   }
 
@@ -1290,6 +1595,16 @@
     opacity: 0.68;
   }
 
+  .tool-card-web-unavailable .tool-main {
+    cursor: not-allowed;
+  }
+
+  .tool-card-web-unavailable .tool-action {
+    border-color: var(--color-border);
+    background: var(--color-hover);
+    color: var(--color-muted);
+  }
+
   .tool-main {
     width: 100%;
     min-height: 104px;
@@ -1304,6 +1619,7 @@
     color: inherit;
     cursor: pointer;
     text-align: left;
+    text-decoration: none;
     font: inherit;
   }
 
@@ -1314,6 +1630,7 @@
   }
 
   .tool-main:disabled,
+  .tool-main[aria-disabled="true"],
   .tool-batch:disabled {
     cursor: wait;
   }
@@ -1396,6 +1713,54 @@
     background: var(--color-hover);
   }
 
+  .web-toolbox-footer {
+    margin-top: auto;
+    padding-top: 24px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .web-toolbox-footer-card {
+    box-sizing: border-box;
+    min-width: min(340px, 100%);
+    max-width: 100%;
+    padding: 8px 24px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    box-shadow: none;
+    color: color-mix(in srgb, var(--color-text) 78%, #526581);
+    text-align: center;
+  }
+
+  .web-footer-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 14px;
+    line-height: 1.18;
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  .web-footer-powered {
+    margin-top: 5px;
+    color: color-mix(in srgb, var(--color-muted) 84%, var(--color-text));
+    font-size: 12px;
+  }
+
+  .web-toolbox-footer a {
+    color: #1677ff;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .web-toolbox-footer a:hover {
+    text-decoration: underline;
+  }
+
   @media (max-width: 980px) {
     .open-grid,
     .process-grid {
@@ -1460,6 +1825,26 @@
     .tool-batch {
       right: 14px;
       bottom: 12px;
+    }
+
+    .web-toolbox-footer {
+      margin-top: auto;
+      padding-top: 20px;
+    }
+
+    .web-toolbox-footer-card {
+      min-width: 0;
+      width: 100%;
+      padding: 8px 16px;
+      border-radius: 20px;
+    }
+
+    .web-footer-line {
+      font-size: 13px;
+    }
+
+    .web-footer-powered {
+      font-size: 12px;
     }
 
     :global(.settings-shell.toolbox-settings-panel) {

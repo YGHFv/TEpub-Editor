@@ -10,6 +10,9 @@
     ) => void;
     export let getFileIcon: (type: string) => string;
     export let getFileDescription: (node: any) => string;
+    export let onFolderAdd: ((node: any, event?: MouseEvent) => void) | undefined = undefined;
+    export let onFolderDrop: ((node: any, files: FileList) => void) | undefined = undefined;
+    export let onFileMenu: ((node: any, event: MouseEvent) => void) | undefined = undefined;
 
     $: isExpanded = expandedFolders.has(node.path);
     $: isSelected =
@@ -28,6 +31,8 @@
             class="node-label"
             on:click={() => toggleFolder(node.path)}
             on:keydown={(e) => e.key === "Enter" && toggleFolder(node.path)}
+            on:dragover|preventDefault
+            on:drop|preventDefault={(e) => e.dataTransfer?.files?.length && onFolderDrop?.(node, e.dataTransfer.files)}
             role="button"
             tabindex="0"
         >
@@ -36,6 +41,16 @@
             </span>
             <span class="icon">{getFileIcon(node.file_type)}</span>
             <span class="name">{node.name}</span>
+            {#if onFolderAdd}
+                <button
+                    type="button"
+                    class="node-action folder-add"
+                    title="添加文件"
+                    on:click|stopPropagation={(e) => onFolderAdd?.(node, e)}
+                >
+                    +
+                </button>
+            {/if}
         </div>
         {#if node.children && isExpanded}
             <div class="children">
@@ -49,6 +64,9 @@
                         {selectFile}
                         {getFileIcon}
                         {getFileDescription}
+                        {onFolderAdd}
+                        {onFolderDrop}
+                        {onFileMenu}
                     />
                 {/each}
             </div>
@@ -70,12 +88,23 @@
             <span class="name">{node.name}</span>
             <span class="description">{getFileDescription(node)}</span>
         </div>
+        {#if onFileMenu}
+            <button
+                type="button"
+                class="node-action file-menu"
+                title="更多操作"
+                on:click|stopPropagation={(e) => onFileMenu?.(node, e)}
+            >
+                ⋯
+            </button>
+        {/if}
     </div>
 {/if}
 
 <style>
     .tree-node {
         margin: 2px 0;
+        min-width: 0;
     }
 
     .folder-node {
@@ -85,6 +114,7 @@
     .node-label {
         display: flex;
         align-items: center;
+        min-width: 0;
         padding: 6px 8px;
         font-weight: 600;
         color: #555;
@@ -129,6 +159,7 @@
     .file-node {
         display: flex;
         align-items: center;
+        min-width: 0;
         padding: 4px 8px 4px 18px;
         cursor: pointer;
         border-radius: 4px;
@@ -163,6 +194,11 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .node-label > .name {
+        flex: 1;
+        min-width: 0;
     }
 
     .description {
@@ -252,5 +288,30 @@
 
     .description {
         color: var(--color-muted);
+    }
+
+    .node-action {
+        width: 24px;
+        height: 24px;
+        min-height: 0;
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        margin-left: 6px;
+        padding: 0;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.82);
+        color: var(--color-muted);
+        font: inherit;
+        font-weight: 800;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    .node-action:hover {
+        border-color: var(--color-accent);
+        background: var(--color-accent-soft);
+        color: var(--color-accent-deep);
     }
 </style>

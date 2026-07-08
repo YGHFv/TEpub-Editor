@@ -421,6 +421,10 @@ function normalizeParagraphIndent(line: string) {
   return `　　${trimmed}`;
 }
 
+function hasNormalParagraphIndent(line: string) {
+  return /^(?:\u3000\u3000| {2,}|\t+)\S/.test(line) || /^[ \t]{2,}\S/.test(line);
+}
+
 function toChineseNumber(num: number): string {
   if (!Number.isFinite(num) || num <= 0) return String(num);
   if (num < 10) return CHINESE_DIGITS[num];
@@ -977,6 +981,9 @@ export function buildBuiltinRegexPreview(
       if (!original.trim() || titleLines.has(lineNumber) || isTitleLikeLine(original)) {
         continue;
       }
+      if (hasNormalParagraphIndent(original)) {
+        continue;
+      }
       const replacement = normalizeParagraphIndent(original);
       if (replacement !== original) {
         pushRow(lineNumber, lineNumber, original, replacement);
@@ -1004,7 +1011,7 @@ export function applyBuiltinRegexPreview(
   const selected = selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
   const targets = rows
     .filter((row) => selected.has(row.id))
-    .sort((a, b) => b.lineStart - a.lineStart);
+    .sort((a, b) => a.startOffset - b.startOffset || a.endOffset - b.endOffset);
 
   if (targets.length === 0) {
     return {
@@ -1014,22 +1021,27 @@ export function applyBuiltinRegexPreview(
     };
   }
 
-  let normalized = content.replace(/\r\n|\r|\u2028|\u2029/g, "\n");
+  const normalized = content.replace(/\r\n|\r|\u2028|\u2029/g, "\n");
+  const chunks: string[] = [];
+  let cursor = 0;
   let changedCount = 0;
 
   for (const row of targets) {
     if (row.startOffset < 0 || row.endOffset < row.startOffset || row.startOffset > normalized.length) {
       continue;
     }
-    const before = normalized.slice(0, row.startOffset);
-    const after = normalized.slice(row.endOffset);
-    content = `${before}${row.replacement}${after}`;
-    normalized = content;
+    if (row.startOffset < cursor) {
+      continue;
+    }
+    chunks.push(normalized.slice(cursor, row.startOffset), row.replacement);
+    cursor = Math.min(row.endOffset, normalized.length);
     changedCount++;
   }
 
+  chunks.push(normalized.slice(cursor));
+
   return {
-    text: normalized,
+    text: chunks.join(""),
     changedCount,
     message: changedCount > 0 ? `已替换 ${changedCount} 个匹配项` : "没有可替换的匹配项",
   };

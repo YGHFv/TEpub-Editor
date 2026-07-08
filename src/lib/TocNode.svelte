@@ -6,6 +6,7 @@
         children?: any[];
     };
     export let level = 0;
+    export let selectedSrc = "";
     export let onSelect: (src: string) => void;
 
     let expanded = true;
@@ -48,6 +49,7 @@
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <div
         class="node-content"
+        class:selected={!!selectedSrc && selectedSrc === item.src}
         style="padding-left: {level * 12 + 12}px"
         on:click={handleClick}
         role="button"
@@ -72,6 +74,7 @@
                 bind:this={childRefs[i]}
                 item={child}
                 level={level + 1}
+                {selectedSrc}
                 {onSelect}
             />
         {/each}
@@ -159,5 +162,11 @@
 
     .node-content:hover .label {
         color: var(--color-accent-deep);
+    }
+
+    .node-content.selected {
+        background: var(--color-accent-soft);
+        color: var(--color-accent-deep);
+        box-shadow: inset 3px 0 0 var(--color-accent);
     }
 </style>
