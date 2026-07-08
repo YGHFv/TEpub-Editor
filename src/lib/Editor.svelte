@@ -40,6 +40,11 @@
   let isRestoringProgrammaticScroll = false;
   let programmaticScrollRestoreId = 0;
 
+  function getCodeMirrorCspNonce() {
+    const nonceElement = document.querySelector("style[nonce], script[nonce]") as HTMLElement | null;
+    return nonceElement?.nonce || nonceElement?.getAttribute("nonce") || "";
+  }
+
   // 静态标题装饰生成器，不依赖 ViewPlugin 防止重绘死锁
   function createTitleDecorations(lines: number[], state: EditorState) {
     const safeLines = Array.isArray(lines) ? lines : [];
@@ -280,9 +285,12 @@
   });
 
   function createEditorState(initialDoc: string) {
+    const cspNonce = getCodeMirrorCspNonce();
+
     return EditorState.create({
       doc: initialDoc,
       extensions: [
+        ...(cspNonce ? [EditorView.cspNonce.of(cspNonce)] : []),
         basicSetup,
         wrapCompartment.of(wordWrap ? EditorView.lineWrapping : []),
         whiteSpaceCompartment.of(showWhitespace ? highlightWhitespace() : []),
