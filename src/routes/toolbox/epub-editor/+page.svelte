@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from "$app/paths";
   import { onDestroy, onMount, tick } from "svelte";
   import { EditorView } from "@codemirror/view";
   import CustomSelect from "$lib/CustomSelect.svelte";
@@ -41,6 +42,10 @@
     src: string;
     children?: WebTocTreeNode[];
   };
+
+  function appPath(path: string) {
+    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  }
 
   const FIND_MODE_OPTIONS = [
     { value: "text", label: "普通文本" },
@@ -1410,6 +1415,14 @@
 
   {#if !doc}
     <div class="import-shell">
+      <header class="mobile-import-topbar">
+        <a href={appPath("/")} aria-label="返回">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15 6L9 12L15 18"></path>
+          </svg>
+        </a>
+        <h1>EPUB 编辑器</h1>
+      </header>
       <main class="empty-state">
         <section class="import-card">
           <h1>选择 EPUB 文件开始编辑</h1>
@@ -1718,6 +1731,10 @@
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     overflow: hidden;
+  }
+
+  .mobile-import-topbar {
+    display: none;
   }
 
   .file-input {
@@ -2569,5 +2586,122 @@
       border: 0;
       border-bottom: 1px solid #d8e0eb;
     }
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .web-epub-page {
+    height: 100dvh;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .import-shell {
+    height: 100dvh;
+    grid-template-rows: auto minmax(0, 1fr);
+    background: #f4f5f8;
+    overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: max(10px, env(safe-area-inset-top)) 14px 0;
+    box-sizing: border-box;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar a {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar h1 {
+    font-size: 22px;
+    line-height: 1.2;
+    font-weight: 900;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .empty-state {
+    padding: 18px 10px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .import-card {
+    min-height: min(360px, calc(100dvh - 36px));
+    padding: 30px 18px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .workspace {
+    height: 100dvh;
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(180px, 24dvh) minmax(360px, 1fr) minmax(320px, 38dvh);
+    overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .left-panel,
+  :global(:root[data-tepub-client="web-mobile"]) .editor-panel,
+  :global(:root[data-tepub-client="web-mobile"]) .right-panel {
+    border: 0;
+    border-bottom: 1px solid #d8e0eb;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .editor-head {
+    height: auto;
+    min-height: 50px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .editor-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .editor-actions button {
+    flex: 1 1 auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .metadata-form {
+    grid-template-columns: 1fr;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .metadata-top {
+    grid-template-columns: minmax(0, 1fr) 86px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .metadata-cover {
+    width: 86px;
+    height: 116px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .find-replace-panel {
+    overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .fr-row {
+    flex-wrap: wrap;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .fr-label {
+    flex-basis: 100%;
+    text-align: left;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .fr-actions,
+  :global(:root[data-tepub-client="web-mobile"]) .fr-find-actions {
+    width: auto;
+    flex: 1 1 160px;
   }
 </style>

@@ -64,6 +64,17 @@ body {
     overscroll-behavior: none;
 }
 
+:root[data-tepub-client="web-mobile"],
+:root[data-tepub-client="web-mobile"] body {
+    min-width: 0;
+    overflow-x: hidden;
+}
+
+:root[data-tepub-client="web-mobile"] body {
+    overscroll-behavior-y: auto;
+    touch-action: manipulation;
+}
+
 button,
 input,
 textarea,

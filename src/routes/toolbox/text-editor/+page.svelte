@@ -1079,6 +1079,14 @@
 
   {#if !hasLoadedText}
     <div class="import-shell">
+      <header class="mobile-import-topbar">
+        <a href={appPath("/")} aria-label="返回">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15 6L9 12L15 18"></path>
+          </svg>
+        </a>
+        <h1>TXT 编辑器</h1>
+      </header>
       <main class="empty-state">
         <section class="import-card">
           <h1>选择 TXT 文件开始编辑</h1>
@@ -1413,6 +1421,10 @@
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     overflow: hidden;
+  }
+
+  .mobile-import-topbar {
+    display: none;
   }
 
   .file-input {
@@ -2192,5 +2204,93 @@
     .icon-button {
       width: 34px;
     }
+  }
+
+  :global(:root[data-tepub-client="web-mobile"] body) {
+    overflow: hidden;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .text-editor-page {
+    height: 100dvh;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .import-shell {
+    height: 100dvh;
+    grid-template-rows: auto minmax(0, 1fr);
+    background: #f4f5f8;
+    overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: max(10px, env(safe-area-inset-top)) 14px 0;
+    box-sizing: border-box;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar a {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar h1 {
+    font-size: 22px;
+    line-height: 1.2;
+    font-weight: 900;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(128px, 22dvh) minmax(360px, 1fr) minmax(300px, 36dvh);
+    gap: 10px;
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+    overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .toc-sidebar,
+  :global(:root[data-tepub-client="web-mobile"]) .editor-shell,
+  :global(:root[data-tepub-client="web-mobile"]) .side-panel {
+    height: auto;
+    min-height: 0;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .editor-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .editor-stats {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .side-panel {
+    overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .empty-state {
+    padding: 18px 10px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .import-card {
+    min-height: min(360px, calc(100dvh - 36px));
+    padding: 30px 18px;
   }
 </style>

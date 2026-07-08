@@ -27,5 +27,6 @@ yarn-error.log*
 .codex-logs/
 .codex-ref/
 .codex-tauri-dev*.log
+.codex-web-dev*.log
 1.3.html
 AGENTS.md

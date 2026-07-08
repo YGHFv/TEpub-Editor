@@ -2,6 +2,7 @@
     import { base } from "$app/paths";
     import { onMount, tick } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import { isWebMobileClient } from "$lib/clientProfile";
     import { platform } from "$lib/platform";
     import {
         cacheBrowserFileStable,
@@ -248,7 +249,7 @@ p.te-divider-line {
     let uuid = crypto.randomUUID?.() ?? "";
     let uuidAuto = true;
     let desktopMode = false;
-    let backHref = "/mobile";
+    let backHref = platform.isWeb ? withBasePath("/") : withBasePath("/mobile");
     let status = "选择 TXT、MD 或 HTML 文件后预览目录。";
     let busy = false;
     let chapters: RawChapter[] = [];
@@ -1352,13 +1353,17 @@ ${heading}${buildTextBody(section.lines)}</body>
         }
         const params = new URLSearchParams(window.location.search);
         const isToolboxMakeRoute = window.location.pathname === toolboxMakePath;
+        const webMobileClient = isWebMobileClient();
         if (isToolboxMakeRoute && params.get("view") === "desktop") {
             params.delete("view");
             const suffix = params.toString();
             window.history.replaceState(null, "", `${toolboxMakePath}${suffix ? `?${suffix}` : ""}`);
         }
-        desktopMode = isToolboxMakeRoute || params.get("view") === "desktop" || (platform.isWeb && !isCompactDevice());
-        backHref = desktopMode ? "/" : "/mobile";
+        desktopMode =
+            (isToolboxMakeRoute && !webMobileClient) ||
+            params.get("view") === "desktop" ||
+            (platform.isWeb && !webMobileClient && !isCompactDevice());
+        backHref = platform.isWeb || desktopMode ? withBasePath("/") : withBasePath("/mobile");
         const refreshRules = () => {
             if (suppressRuleRefresh) return;
             rules = loadMakeRules();
@@ -1388,7 +1393,6 @@ ${heading}${buildTextBody(section.lines)}</body>
             </svg>
         </a>
         <h1>制作 EPUB</h1>
-        <button class="topbar-action" type="button" on:click={openPicker} disabled={busy}>选择文本</button>
     </header>
 
     {#if !selectedPath}
@@ -1757,7 +1761,7 @@ ${heading}${buildTextBody(section.lines)}</body>
 
     .topbar {
         display: grid;
-        grid-template-columns: 38px minmax(0, 1fr) auto;
+        grid-template-columns: 38px minmax(0, 1fr);
         align-items: center;
         gap: 8px;
         min-height: 52px;
@@ -1791,11 +1795,6 @@ ${heading}${buildTextBody(section.lines)}</body>
 
     h1 {
         font-size: 22px;
-    }
-
-    .topbar-action {
-        min-height: 34px;
-        padding: 0 14px;
     }
 
     .meta,

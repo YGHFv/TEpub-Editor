@@ -2093,4 +2093,58 @@
       height: 320px;
     }
   }
+
+  :global(:root[data-tepub-client="web-mobile"] body) {
+    overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .image-tool-app {
+    min-height: 100dvh;
+    height: auto;
+    padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+    overflow: visible;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .tool-head {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .tool-head-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .workspace {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .preview-pane {
+    min-height: min(460px, 58dvh);
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .control-pane,
+  :global(:root[data-tepub-client="web-mobile"]) .unified-panel {
+    height: auto;
+    overflow: visible;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .split-preview,
+  :global(:root[data-tepub-client="web-mobile"]) .form-grid.two,
+  :global(:root[data-tepub-client="web-mobile"]) .form-grid.ai-config,
+  :global(:root[data-tepub-client="web-mobile"]) .segmented.ai-targets,
+  :global(:root[data-tepub-client="web-mobile"]) .mode-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .split-preview {
+    padding-right: 0;
+    overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .source-frame,
+  :global(:root[data-tepub-client="web-mobile"]) .result-frame {
+    height: 320px;
+  }
 </style>

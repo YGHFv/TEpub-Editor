@@ -1761,6 +1761,67 @@
     text-decoration: underline;
   }
 
+  :global(:root[data-tepub-client="web-mobile"]) .toolbox-app {
+    min-height: 100dvh;
+    height: auto;
+    overflow: visible;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .toolbox-content {
+    width: calc(100% - 20px);
+    flex: 0 0 auto;
+    min-height: auto;
+    padding: max(14px, env(safe-area-inset-top)) 0 max(18px, env(safe-area-inset-bottom));
+    overflow: visible;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .toolbox-title-row {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .toolbox-title-actions {
+    width: auto;
+    justify-self: end;
+    justify-content: flex-end;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .toolbox-inline-status {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .open-grid,
+  :global(:root[data-tepub-client="web-mobile"]) .process-grid {
+    grid-template-columns: 1fr;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .tool-main {
+    grid-template-columns: 44px minmax(0, 1fr);
+    min-height: 88px;
+    padding: 14px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .tool-icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .tool-action {
+    position: static;
+    grid-column: 2;
+    justify-self: start;
+    margin-top: -2px;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .tool-copy {
+    padding-right: 0;
+  }
+
   @media (max-width: 980px) {
     .open-grid,
     .process-grid {
