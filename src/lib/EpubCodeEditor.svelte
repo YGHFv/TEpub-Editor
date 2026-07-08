@@ -23,6 +23,13 @@
     let compartment = new Compartment();
     let skipSelectionEmit = false;
 
+    function getCodeMirrorCspNonce() {
+        const nonceElement = document.querySelector(
+            "style[nonce], script[nonce]",
+        ) as HTMLElement | null;
+        return nonceElement?.nonce || nonceElement?.getAttribute("nonce") || "";
+    }
+
     export function selectText(text: string) {
         if (!view || !text) return;
         const doc = view.state.doc.toString();
@@ -207,9 +214,12 @@
     }
 
     function createEditorState(initialDoc: string) {
+        const cspNonce = getCodeMirrorCspNonce();
+
         return EditorState.create({
             doc: initialDoc,
             extensions: [
+                ...(cspNonce ? [EditorView.cspNonce.of(cspNonce)] : []),
                 basicSetup,
                 drawSelection(),
                 EditorView.lineWrapping,
