@@ -433,6 +433,8 @@ p.te-divider-line {
         label: style.name,
         meta: style.sourceKind === "saved" ? "自定义" : "内置",
     }));
+    $: desktopStyleWorkflowEnabled = platform.isTauri && desktopMode;
+    $: desktopStylePageActive = desktopStyleWorkflowEnabled && webMakeStep === "style";
     $: activeFullCoverAsset = fullCoverAsset || autoFullCoverAsset || coverAsset;
     $: headerProcessKey = [
         headerAsset?.objectUrl || "",
@@ -440,7 +442,7 @@ p.te-divider-line {
         selectedHeaderStyle?.sampleWidth || "",
         selectedHeaderStyle?.sampleHeight || "",
     ].join("|");
-    $: if (platform.isWeb) {
+    $: if (platform.isWeb || desktopStyleWorkflowEnabled) {
         void refreshProcessedHeaderFromSelection(headerProcessKey);
     }
     $: activeHeaderPreviewSrc = processedHeaderAsset?.objectUrl || selectedHeaderStyle?.sampleDataUrl || "";
@@ -448,6 +450,7 @@ p.te-divider-line {
         selectedHeaderStyle?.id || "",
         selectedHeaderStyle?.css || "",
         activeHeaderPreviewSrc,
+        selectedHeaderStyle?.templateDataUrl || "",
         selectedTitleStyle?.id || "",
         selectedTitleStyle?.css || "",
         resolveSelectedTitleLayout(),
@@ -768,7 +771,7 @@ p.te-divider-line {
     }
 
     async function refreshAutoFullCoverFromCover() {
-        if (!platform.isWeb || !coverAsset || fullCoverManuallySelected) return;
+        if ((!platform.isWeb && !desktopStyleWorkflowEnabled) || !coverAsset || fullCoverManuallySelected) return;
         const previous = autoFullCoverAsset;
         try {
             const generated = await buildDefaultFullCoverFromAsset(coverAsset);
@@ -884,10 +887,9 @@ p.te-divider-line {
             if (platform.isWeb) {
                 await setWebImageSlot("cover", file);
             } else {
-                coverPath = await cacheBrowserFileStable(file, "cover");
-                coverName = file.name;
-                if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
-                coverPreviewUrl = URL.createObjectURL(file);
+                const cachedCoverPath = await cacheBrowserFileStable(file, "cover");
+                await setWebImageSlot("cover", file);
+                coverPath = cachedCoverPath;
                 resetResult();
             }
         } catch (err) {
@@ -959,8 +961,7 @@ p.te-divider-line {
         }
     }
 
-    async function enterWebStyleStep() {
-        if (!platform.isWeb) return false;
+    async function prepareStyleStep() {
         savedEpubStyles = loadSavedEpubStyles();
         if (!webTitleStyles.some((style) => style.id === selectedTitleStyleId)) {
             selectedTitleStyleId = webTitleStyles.find((style) => style.id === DEFAULT_WEB_TITLE_STYLE_ID)?.id || webTitleStyles[0]?.id || "";
@@ -970,12 +971,36 @@ p.te-divider-line {
         }
         webMakeStep = "style";
         status = "";
+    }
+
+    async function enterWebStyleStep() {
+        if (!platform.isWeb) return false;
+        await prepareStyleStep();
+        return true;
+    }
+
+    async function enterDesktopStyleStep() {
+        if (!desktopStyleWorkflowEnabled) return false;
+        await prepareStyleStep();
         return true;
     }
 
     function backToWebEditStep() {
         webMakeStep = "edit";
         status = "已返回目录与元数据编辑。";
+    }
+
+    async function exportDesktopStyledEpubBytes(fileName: string, bytes: Uint8Array) {
+        const outputName = safeFileName(fileName, "epub");
+        const selected = await platform.saveDialog({
+            defaultPath: outputName,
+            filters: [{ name: "EPUB", extensions: ["epub"] }],
+        });
+        if (!selected) {
+            return { message: "已取消导出 EPUB。", path: "" };
+        }
+        await platform.writeFile(selected, bytes);
+        return { message: `已导出 EPUB：${selected}`, path: selected };
     }
 
     function onWebHeaderStyleChange(styleId: string) {
@@ -998,6 +1023,10 @@ p.te-divider-line {
             await enterWebStyleStep();
             return;
         }
+        if (desktopStyleWorkflowEnabled && webMakeStep !== "style") {
+            await enterDesktopStyleStep();
+            return;
+        }
         try {
             busy = true;
             if (platform.isWeb) {
@@ -1012,6 +1041,24 @@ p.te-divider-line {
                 };
                 status = await offerSystemExport("", fileName, webEpubBytes);
                 exportPath = fileName;
+                return;
+            }
+            if (desktopStyleWorkflowEnabled && webMakeStep === "style") {
+                const outputTitle = title.trim() || textBaseName(selectedName) || "book";
+                webEpubBytes = await buildSimpleEpubBytes(outputTitle, author.trim(), content, chapters);
+                const fileName = safeFileName(outputTitle, "epub");
+                makeResult = {
+                    output_path: `desktop-local:${fileName}`,
+                    title: outputTitle,
+                    chapter_count: Math.max(1, chapters.length),
+                    word_count: countWords(content),
+                };
+                const exported = await exportDesktopStyledEpubBytes(fileName, webEpubBytes);
+                status = exported.message;
+                exportPath = exported.path || "";
+                if (exported.path) {
+                    makeResult = { ...makeResult, output_path: exported.path };
+                }
                 return;
             }
             makeResult = await platform.invoke<MobileMakeEpubResult>("mobile_make_epub", {
@@ -1039,6 +1086,13 @@ p.te-divider-line {
                 const fileName = safeFileName(makeResult.title, "epub");
                 status = await offerSystemExport("", fileName, webEpubBytes);
                 exportPath = fileName;
+                return;
+            }
+            if (desktopStyleWorkflowEnabled && webEpubBytes) {
+                const fileName = safeFileName(makeResult.title, "epub");
+                const exported = await exportDesktopStyledEpubBytes(fileName, webEpubBytes);
+                status = exported.message;
+                exportPath = exported.path || "";
                 return;
             }
             const result = await exportEpubPath(makeResult.output_path, safeFileName(makeResult.title, "epub"));
@@ -1674,6 +1728,7 @@ p.te-divider-line {
         headerStyleId: string,
         headerCss: string,
         headerImageSrc: string,
+        headerTemplateMaskSrc: string,
         titleStyleId: string,
         titleCss: string,
         titleLayout: string,
@@ -1686,7 +1741,7 @@ p.te-divider-line {
             ? `<h3 class="te-chapter-title"><span class="te-chapter-number">第十二章</span><span class="te-chapter-name">灯塔来信</span></h3>`
             : `<h3 class="te-chapter-title">第十二章 灯塔来信</h3>`;
         const headerMarkup = hasHeaderStyle
-            ? `<figure class="te-header-figure"><img class="te-header-image" src="${escapeXml(headerImageSrc)}" alt="" /></figure>`
+            ? `<figure class="te-header-figure"><img class="te-header-image${headerTemplateMaskSrc ? " te-header-image--masked" : ""}"${headerTemplateMaskSrc ? ` style="--te-header-template-mask: url('${headerTemplateMaskSrc}')"` : ""} src="${escapeXml(headerImageSrc)}" alt="" /></figure>`
             : "";
         const baseCss = `
 html, body {
@@ -1724,6 +1779,17 @@ p.te-paragraph {
     line-height: 1.75;
     text-align: justify;
     text-indent: 2em;
+}
+
+.te-header-image--masked {
+    -webkit-mask-image: var(--te-header-template-mask);
+    mask-image: var(--te-header-template-mask);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
 }
 `;
         const spacingCss = hasHeaderStyle
@@ -2131,7 +2197,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     class="page"
     class:desktop-page={desktopMode}
     class:web-import-page={platform.isWeb && desktopMode && !selectedPath}
+    class:desktop-import-page={desktopStyleWorkflowEnabled && !selectedPath}
     class:web-style-mode={platform.isWeb && webMakeStep === "style"}
+    class:desktop-style-mode={desktopStylePageActive}
     on:wheel|nonpassive={handlePageWheel}
 >
     <input bind:this={fileInputEl} class="file-input" type="file" accept=".txt,.md,.html,.htm" on:change={onFileChange} />
@@ -2140,7 +2208,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     <input bind:this={bannerInputEl} class="file-input" type="file" accept="image/*" on:change={onBannerChange} />
     <input bind:this={headerInputEl} class="file-input" type="file" accept="image/*" on:change={onHeaderChange} />
 
-    {#if !(platform.isWeb && webMakeStep === "style")}
+    {#if !((platform.isWeb && webMakeStep === "style") || desktopStylePageActive)}
         <header class="topbar">
             <a href={backHref} aria-label="返回">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2152,14 +2220,18 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     {/if}
 
     {#if !selectedPath}
-        <section class="empty-panel" class:web-import-panel={platform.isWeb && desktopMode}>
+        <section
+            class="empty-panel"
+            class:web-import-panel={platform.isWeb && desktopMode}
+            class:desktop-import-panel={desktopStyleWorkflowEnabled}
+        >
             <div>
                 <h2>选择文本文件开始制作</h2>
                 <p>支持 TXT、Markdown 和 HTML 文件，导入后可扫描目录、调整规则并生成 EPUB。</p>
             </div>
             <button type="button" on:click={openPicker} disabled={busy}>选择文本文件</button>
         </section>
-    {:else if platform.isWeb && webMakeStep === "style"}
+    {:else if (platform.isWeb && webMakeStep === "style") || desktopStylePageActive}
         <section class="web-style-page">
             <div class="web-style-grid">
                 <div class="web-style-head">
@@ -2177,7 +2249,13 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
                 <section class="web-style-panel">
                     <div class="panel-title">
                         <h3>封面与横幅</h3>
-                        <p>全屏封面会用当前封面按图片处理默认参数自动生成，也可以单独替换；阅微横幅会作为封面后的独立横幅页。</p>
+                        <p>
+                            {#if desktopStylePageActive}
+                                全屏封面会用当前封面按图片处理默认参数自动生成，也可以单独替换；阅微横幅会作为 cover~banner 写入 EPUB。
+                            {:else}
+                                全屏封面会用当前封面按图片处理默认参数自动生成，也可以单独替换；阅微横幅会作为封面后的独立横幅页。
+                            {/if}
+                        </p>
                     </div>
                     <div class="asset-grid">
                         <button class="asset-card full-cover-card" type="button" on:click={openFullCoverPicker}>
@@ -3530,7 +3608,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
             padding: 14px 0 96px;
         }
 
-        .page.desktop-page.web-style-mode {
+        .page.desktop-page.web-style-mode,
+        .page.desktop-page.desktop-style-mode {
             width: min(1600px, calc(100vw - 40px));
             height: 100vh;
             min-height: 0;
@@ -3539,7 +3618,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
             padding: 18px 0;
         }
 
-        .page.desktop-page.web-import-page {
+        .page.desktop-page.web-import-page,
+        .page.desktop-page.desktop-import-page {
             width: auto;
             min-height: 100vh;
             grid-template-columns: minmax(0, 1fr);
@@ -3575,7 +3655,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
             grid-column: 1 / -1;
         }
 
-        .desktop-page .empty-panel.web-import-panel {
+        .desktop-page .empty-panel.web-import-panel,
+        .desktop-page .empty-panel.desktop-import-panel {
             width: min(100%, 1792px);
             min-height: 342px;
             margin: 0 auto;
@@ -3587,17 +3668,20 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
             box-sizing: border-box;
         }
 
-        .desktop-page .empty-panel.web-import-panel h2 {
+        .desktop-page .empty-panel.web-import-panel h2,
+        .desktop-page .empty-panel.desktop-import-panel h2 {
             font-size: 22px;
             line-height: 1.3;
         }
 
-        .desktop-page .empty-panel.web-import-panel p {
+        .desktop-page .empty-panel.web-import-panel p,
+        .desktop-page .empty-panel.desktop-import-panel p {
             margin-top: 0;
             color: #64748b;
         }
 
-        .desktop-page .empty-panel.web-import-panel button {
+        .desktop-page .empty-panel.web-import-panel button,
+        .desktop-page .empty-panel.desktop-import-panel button {
             height: 34px;
             min-height: 34px;
             min-width: 0;

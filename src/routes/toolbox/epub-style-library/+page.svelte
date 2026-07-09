@@ -218,7 +218,7 @@
     const boundTitleStyle = style.kind === "header" ? resolveHeaderTitleStyle(style) : null;
     const hasHeaderPreview = style.kind === "header";
     const previewHtml = style.kind === "header"
-      ? headerPreviewHtml(style.sampleDataUrl || "", resolveTitleLayout(boundTitleStyle))
+      ? headerPreviewHtml(style.sampleDataUrl || "", resolveTitleLayout(boundTitleStyle), style.templateDataUrl || "")
       : (style.previewHtml || fallbackPreviewHtml(style));
     const previewCss = style.kind === "header"
       ? `${boundTitleStyle?.css || EPUB_HEADER_PREVIEW_TITLE_CSS}\n\n${style.css}`
@@ -289,6 +289,17 @@
           radial-gradient(circle at 22% 28%, rgba(255, 251, 235, 0.85), transparent 24%),
           linear-gradient(150deg, #93c5fd, #fda4af);
       }
+
+      .te-header-image--masked {
+        -webkit-mask-image: var(--te-header-template-mask);
+        mask-image: var(--te-header-template-mask);
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        -webkit-mask-size: 100% 100%;
+        mask-size: 100% 100%;
+      }
     `;
     return `<!doctype html>
       <html>
@@ -309,7 +320,7 @@
 
   function fallbackPreviewHtml(style: EpubStyleModule) {
     if (style.kind === "header") {
-      return headerPreviewHtml(style.sampleDataUrl || "");
+      return headerPreviewHtml(style.sampleDataUrl || "", "split", style.templateDataUrl || "");
     }
     return titlePreviewHtml(resolveTitleLayout(style));
   }
@@ -327,9 +338,9 @@
       : `<h3 class="te-chapter-title">第十二章 灯塔来信</h3>`;
   }
 
-  function headerPreviewHtml(dataUrl: string, titleMode: EpubTitleLayout = "split") {
+  function headerPreviewHtml(dataUrl: string, titleMode: EpubTitleLayout = "split", templateDataUrl = "") {
     const image = dataUrl
-      ? `<img class="te-header-image" src="${dataUrl}" alt="" />`
+      ? `<img class="te-header-image${templateDataUrl ? " te-header-image--masked" : ""}"${templateDataUrl ? ` style="--te-header-template-mask: url('${templateDataUrl}')"` : ""} src="${dataUrl}" alt="" />`
       : `<div class="te-header-image te-header-placeholder"></div>`;
     return `
       <main class="te-preview-page te-preview-header-page">
