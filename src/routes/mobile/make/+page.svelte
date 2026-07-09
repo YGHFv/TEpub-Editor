@@ -450,7 +450,6 @@ p.te-divider-line {
         selectedHeaderStyle?.id || "",
         selectedHeaderStyle?.css || "",
         activeHeaderPreviewSrc,
-        selectedHeaderStyle?.templateDataUrl || "",
         selectedTitleStyle?.id || "",
         selectedTitleStyle?.css || "",
         resolveSelectedTitleLayout(),
@@ -1728,7 +1727,6 @@ p.te-divider-line {
         headerStyleId: string,
         headerCss: string,
         headerImageSrc: string,
-        headerTemplateMaskSrc: string,
         titleStyleId: string,
         titleCss: string,
         titleLayout: string,
@@ -1741,7 +1739,7 @@ p.te-divider-line {
             ? `<h3 class="te-chapter-title"><span class="te-chapter-number">第十二章</span><span class="te-chapter-name">灯塔来信</span></h3>`
             : `<h3 class="te-chapter-title">第十二章 灯塔来信</h3>`;
         const headerMarkup = hasHeaderStyle
-            ? `<figure class="te-header-figure"><img class="te-header-image${headerTemplateMaskSrc ? " te-header-image--masked" : ""}"${headerTemplateMaskSrc ? ` style="--te-header-template-mask: url('${headerTemplateMaskSrc}')"` : ""} src="${escapeXml(headerImageSrc)}" alt="" /></figure>`
+            ? `<figure class="te-header-figure"><img class="te-header-image" src="${escapeXml(headerImageSrc)}" alt="" /></figure>`
             : "";
         const baseCss = `
 html, body {
@@ -1779,17 +1777,6 @@ p.te-paragraph {
     line-height: 1.75;
     text-align: justify;
     text-indent: 2em;
-}
-
-.te-header-image--masked {
-    -webkit-mask-image: var(--te-header-template-mask);
-    mask-image: var(--te-header-template-mask);
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
-    -webkit-mask-position: center;
-    mask-position: center;
-    -webkit-mask-size: 100% 100%;
-    mask-size: 100% 100%;
 }
 `;
         const spacingCss = hasHeaderStyle

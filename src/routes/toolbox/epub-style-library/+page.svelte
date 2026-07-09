@@ -218,7 +218,7 @@
     const boundTitleStyle = style.kind === "header" ? resolveHeaderTitleStyle(style) : null;
     const hasHeaderPreview = style.kind === "header";
     const previewHtml = style.kind === "header"
-      ? headerPreviewHtml(style.sampleDataUrl || "", resolveTitleLayout(boundTitleStyle), style.templateDataUrl || "")
+      ? headerPreviewHtml(style.sampleDataUrl || "", resolveTitleLayout(boundTitleStyle))
       : (style.previewHtml || fallbackPreviewHtml(style));
     const previewCss = style.kind === "header"
       ? `${boundTitleStyle?.css || EPUB_HEADER_PREVIEW_TITLE_CSS}\n\n${style.css}`
@@ -290,16 +290,6 @@
           linear-gradient(150deg, #93c5fd, #fda4af);
       }
 
-      .te-header-image--masked {
-        -webkit-mask-image: var(--te-header-template-mask);
-        mask-image: var(--te-header-template-mask);
-        -webkit-mask-repeat: no-repeat;
-        mask-repeat: no-repeat;
-        -webkit-mask-position: center;
-        mask-position: center;
-        -webkit-mask-size: 100% 100%;
-        mask-size: 100% 100%;
-      }
     `;
     return `<!doctype html>
       <html>
@@ -320,7 +310,7 @@
 
   function fallbackPreviewHtml(style: EpubStyleModule) {
     if (style.kind === "header") {
-      return headerPreviewHtml(style.sampleDataUrl || "", "split", style.templateDataUrl || "");
+      return headerPreviewHtml(style.sampleDataUrl || "");
     }
     return titlePreviewHtml(resolveTitleLayout(style));
   }
@@ -338,9 +328,9 @@
       : `<h3 class="te-chapter-title">第十二章 灯塔来信</h3>`;
   }
 
-  function headerPreviewHtml(dataUrl: string, titleMode: EpubTitleLayout = "split", templateDataUrl = "") {
+  function headerPreviewHtml(dataUrl: string, titleMode: EpubTitleLayout = "split") {
     const image = dataUrl
-      ? `<img class="te-header-image${templateDataUrl ? " te-header-image--masked" : ""}"${templateDataUrl ? ` style="--te-header-template-mask: url('${templateDataUrl}')"` : ""} src="${dataUrl}" alt="" />`
+      ? `<img class="te-header-image" src="${dataUrl}" alt="" />`
       : `<div class="te-header-image te-header-placeholder"></div>`;
     return `
       <main class="te-preview-page te-preview-header-page">

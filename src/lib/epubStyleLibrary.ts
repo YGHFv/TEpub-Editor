@@ -138,6 +138,7 @@ const headerTemplateSamples = {
   scatterEdge: new URL("./assets/epub-style-library/sample-harbor-studio.png", import.meta.url).href,
   inkEdge: new URL("./assets/epub-style-library/sample-night-guard.png", import.meta.url).href,
   diagonalBrush: new URL("./assets/epub-style-library/sample-court-lineup.png", import.meta.url).href,
+  rightMemoryCollage: new URL("./assets/epub-style-library/sample-right-memory-collage.png", import.meta.url).href,
 } as const;
 
 function svgDataUrl(svg: string) {
@@ -378,13 +379,13 @@ export const EPUB_HEADER_STYLES: EpubStyleModule[] = [
 .te-header-caption {
   display: none;
 }`,
-    previewHtml: headerPreview(fixedPreviewHeader),
-    sampleDataUrl: fixedPreviewHeader,
+    previewHtml: headerPreview(headerTemplateSamples.rightMemoryCollage),
+    sampleDataUrl: headerTemplateSamples.rightMemoryCollage,
     templateDataUrl: rightMemoryCollageMask,
-    sampleWidth: 1200,
-    sampleHeight: 720,
-    originalSampleWidth: 1200,
-    originalSampleHeight: 720,
+    sampleWidth: 1080,
+    sampleHeight: 664,
+    originalSampleWidth: 1080,
+    originalSampleHeight: 664,
     boundTitleStyleId: "title-cinematic-slab",
   },
   {
