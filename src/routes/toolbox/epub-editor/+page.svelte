@@ -1,5 +1,6 @@
 <script lang="ts">
   import { base } from "$app/paths";
+  import { page } from "$app/stores";
   import { onDestroy, onMount, tick } from "svelte";
   import { EditorView } from "@codemirror/view";
   import CustomSelect from "$lib/CustomSelect.svelte";
@@ -104,6 +105,19 @@
   let searchMessage = "";
   let currentMatchInfo: { path: string; from: number; to: number } | null = null;
   let previewBuildId = 0;
+  let readerPreviewFontSize = 18;
+  let readerTocCollapsed = false;
+
+  $: readerMode = $page.url.searchParams.get("mode") === "reader";
+  $: headTitle = readerMode ? "Web EPUB 阅读器 - TEpub Editor" : "Web EPUB 编辑器 - TEpub Editor";
+  $: importHeading = readerMode ? "选择 EPUB 文件开始阅读" : "选择 EPUB 文件开始编辑";
+  $: importDescription = readerMode
+    ? "导入后在浏览器内解包，左侧显示目录，中间以宽屏滚动预览方式阅读。"
+    : "支持无 DRM 的标准 EPUB，导入后可编辑文件结构、资源和元数据。";
+  $: importAction = readerMode ? "选择 EPUB 文件" : "选择 EPUB 文件";
+  $: currentPreviewTitle = selectedFile
+    ? (fileTitleMap.get(selectedFile.path) || selectedFile.name)
+    : (doc?.metadata.title || doc?.fileName || "未选择章节");
 
   $: dirty = editorText !== savedEditorText;
   $: editableFiles = doc?.files.filter((file) => file.editable) ?? [];
@@ -475,6 +489,7 @@
   }
 
   function persistCurrentFile(options: { refreshPreview?: boolean } = {}) {
+    if (readerMode) return;
     if (!doc || !selectedFile || !dirty) return;
     const content = currentEditorContent();
     editorText = content;
@@ -959,6 +974,22 @@
     return nextIndex >= 0 && nextIndex < files.length;
   }
 
+  function canAdjustReaderFont(delta: number) {
+    const nextSize = readerPreviewFontSize + delta;
+    return nextSize >= 14 && nextSize <= 26;
+  }
+
+  async function adjustReaderFont(delta: number) {
+    if (!readerMode || busy || !canAdjustReaderFont(delta)) return;
+    readerPreviewFontSize += delta;
+    if (selectedFile?.kind === "xhtml") await refreshPreviewFromEditor();
+  }
+
+  function toggleReaderToc() {
+    if (!readerMode) return;
+    readerTocCollapsed = !readerTocCollapsed;
+  }
+
   function revokePreviewUrls() {
     for (const url of previewBlobUrls) URL.revokeObjectURL(url);
     previewBlobUrls = [];
@@ -991,9 +1022,12 @@
       }
     }
     const style = htmlDoc.createElement("style");
+    const bodyMaxWidth = readerMode ? "980px" : "820px";
+    const bodyPadding = readerMode ? "42px 56px 64px" : "28px 34px";
+    const bodyFontSize = readerMode ? `${readerPreviewFontSize}px` : "inherit";
     style.textContent = `
       html, body { margin: 0; padding: 0; background: #fffdf9; color: #172033; }
-      body { box-sizing: border-box; max-width: 820px; margin: 0 auto; padding: 28px 34px; line-height: 1.8; }
+      body { box-sizing: border-box; max-width: ${bodyMaxWidth}; margin: 0 auto; padding: ${bodyPadding}; font-size: ${bodyFontSize}; line-height: 1.8; }
       img, svg, video { max-width: 100%; height: auto; }
     `;
     htmlDoc.head.prepend(style);
@@ -1136,13 +1170,16 @@
 
   async function previewPath(path: string | undefined) {
     const file = fileByPath(path);
-    if (!file) return;
-    if (file.kind === "xhtml") await previewFile(file);
-    else await openFile(file);
+    if (!file) return false;
+    if (file.kind === "xhtml") {
+      await previewFile(file);
+      return true;
+    }
+    return await openPath(path);
   }
 
   async function handleTocSelect(path: string) {
-    const opened = await openPath(path);
+    const opened = readerMode ? await previewPath(path) : await openPath(path);
     if (opened) await revealTreePath(path);
   }
 
@@ -1404,7 +1441,7 @@
 </script>
 
 <svelte:head>
-  <title>Web EPUB 编辑器 - TEpub Editor</title>
+  <title>{headTitle}</title>
 </svelte:head>
 
 <svelte:window on:click={closeFileMenu} />
@@ -1421,25 +1458,29 @@
             <path d="M15 6L9 12L15 18"></path>
           </svg>
         </a>
-        <h1>EPUB 编辑器</h1>
+        <h1>{readerMode ? "EPUB 阅读器" : "EPUB 编辑器"}</h1>
       </header>
       <main class="empty-state">
         <section class="import-card">
-          <h1>选择 EPUB 文件开始编辑</h1>
-          <p>支持无 DRM 的标准 EPUB，导入后可编辑文件结构、资源和元数据。</p>
+          <h1>{importHeading}</h1>
+          <p>{importDescription}</p>
           <div class="import-actions">
-            <button type="button" class="primary" on:click={pickFile} disabled={busy}>选择 EPUB 文件</button>
+            <button type="button" class="primary" on:click={pickFile} disabled={busy}>{importAction}</button>
           </div>
         </section>
       </main>
     </div>
   {:else}
-    <main class="workspace">
+    <main class="workspace" class:reader-workspace={readerMode} class:reader-toc-collapsed={readerMode && readerTocCollapsed}>
       <aside class="left-panel">
         <div class="tree-header">
-          <h2>文件结构</h2>
+          <h2>{readerMode ? "目录" : "文件结构"}</h2>
           <div class="tree-actions">
-            <button type="button" class="primary" on:click={exportEpub} disabled={busy} title="导出 EPUB">导出</button>
+            {#if readerMode}
+              <button type="button" on:click={pickFile} disabled={busy} title="重新选择 EPUB">换书</button>
+            {:else}
+              <button type="button" class="primary" on:click={exportEpub} disabled={busy} title="导出 EPUB">导出</button>
+            {/if}
           </div>
         </div>
 
@@ -1449,6 +1490,19 @@
           <small>{doc.fileName}</small>
         </section>
 
+        {#if readerMode}
+          <div class="toc-container reader-toc-container">
+            {#if tocTree.length === 0}
+              <p class="panel-empty">未读取到 NAV / NCX 目录。</p>
+            {:else}
+              <div class="toc-list">
+                {#each tocTree as item (item.id)}
+                  <TocNode {item} selectedSrc={selectedFile?.path || ""} onSelect={handleTocSelect} />
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {:else}
         <div class="tabs">
           <button type="button" class:active={activeTab === "files"} on:click={() => (activeTab = "files")}>文件</button>
           <button type="button" class:active={activeTab === "metadata"} on:click={() => (activeTab = "metadata")}>信息</button>
@@ -1511,8 +1565,10 @@
             </div>
           </form>
         {/if}
+        {/if}
       </aside>
 
+      {#if !readerMode}
       <section class="editor-panel">
         <div class="editor-head">
           <div>
@@ -1650,21 +1706,38 @@
           </div>
         {/if}
       </section>
+      {/if}
 
       <aside class="right-panel">
         <section class="preview-pane">
-          <div class="preview-header">
-            <button type="button" class:active={rightTab === "preview"} on:click={() => (rightTab = "preview")}>预览</button>
-            <button type="button" class:active={rightTab === "toc"} on:click={() => (rightTab = "toc")}>目录</button>
-          </div>
-          {#if rightTab === "preview"}
+          {#if readerMode}
+            <div class="preview-header reader-preview-header">
+              <div class="reader-preview-title">
+                <strong>{currentPreviewTitle}</strong>
+                <span>{previewNavLabel()}</span>
+              </div>
+              <div class="reader-preview-actions">
+                <button type="button" class="reader-toc-toggle" class:active={!readerTocCollapsed} on:click={toggleReaderToc} aria-pressed={!readerTocCollapsed} title={readerTocCollapsed ? "显示目录" : "收起目录"}>目录</button>
+                <button type="button" class="reader-font-btn" on:click={() => adjustReaderFont(-1)} disabled={!canAdjustReaderFont(-1) || busy} title="减小字号">A-</button>
+                <button type="button" class="reader-font-btn" on:click={() => adjustReaderFont(1)} disabled={!canAdjustReaderFont(1) || busy} title="增大字号">A+</button>
+                <button type="button" on:click={() => previewRelative(-1)} disabled={!canPreviewRelative(-1) || busy}>上一章</button>
+                <button type="button" on:click={() => previewRelative(1)} disabled={!canPreviewRelative(1) || busy}>下一章</button>
+              </div>
+            </div>
+          {:else}
+            <div class="preview-header">
+              <button type="button" class:active={rightTab === "preview"} on:click={() => (rightTab = "preview")}>预览</button>
+              <button type="button" class:active={rightTab === "toc"} on:click={() => (rightTab = "toc")}>目录</button>
+            </div>
+          {/if}
+          {#if readerMode || rightTab === "preview"}
             <div class="preview-body">
               {#if selectedFile?.kind === "xhtml" && previewHtml}
-                <div class="mobile-frame">
-                  <iframe class="chapter-preview" title="章节预览" srcdoc={previewHtml} sandbox="allow-same-origin allow-scripts"></iframe>
+                <div class="mobile-frame" class:reader-frame={readerMode}>
+                  <iframe class="chapter-preview" title={readerMode ? "章节阅读预览" : "章节预览"} srcdoc={previewHtml} sandbox="allow-same-origin allow-scripts"></iframe>
                 </div>
               {:else if (!selectedFile && !selectedImage) || selectedFile?.kind === "xhtml"}
-                <div class="preview-empty">选择 XHTML 章节后自动预览。</div>
+                <div class="preview-empty">{readerMode ? "选择目录中的章节后开始阅读。" : "选择 XHTML 章节后自动预览。"}</div>
               {/if}
             </div>
           {:else}
@@ -1854,6 +1927,15 @@
     overflow: hidden;
   }
 
+  .workspace.reader-workspace {
+    grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    background: #eef2f7;
+  }
+
+  .workspace.reader-workspace.reader-toc-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .left-panel,
   .right-panel,
   .editor-panel {
@@ -1870,10 +1952,22 @@
     border-right: 1px solid #d8e0eb;
   }
 
+  .reader-workspace .left-panel {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .reader-workspace.reader-toc-collapsed .left-panel {
+    display: none;
+  }
+
   .right-panel {
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     border-left: 1px solid #d8e0eb;
+  }
+
+  .reader-workspace .right-panel {
+    border-left: 0;
   }
 
   .book-summary {
@@ -2452,6 +2546,75 @@
     box-shadow: inset 0 -2px 0 var(--color-accent);
   }
 
+  .reader-preview-header {
+    height: 56px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px 0 18px;
+  }
+
+  .reader-preview-title {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .reader-preview-title strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #172033;
+    font-size: 15px;
+  }
+
+  .reader-preview-title span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .reader-preview-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .reader-preview-actions button {
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #334155;
+    font-weight: 800;
+  }
+
+  .reader-preview-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .reader-preview-actions .reader-font-btn {
+    min-width: 38px;
+    padding: 0 9px;
+    font-size: 14px;
+  }
+
+  .reader-preview-actions .reader-toc-toggle {
+    min-width: 54px;
+    padding: 0 10px;
+  }
+
+  .reader-preview-actions .reader-toc-toggle.active {
+    border-color: #334155;
+    background: #172033;
+    color: #ffffff;
+  }
+
   .preview-body {
     min-height: 0;
     display: flex;
@@ -2460,6 +2623,11 @@
     padding: 10px;
     background: #f0f0f0;
     overflow: hidden;
+  }
+
+  .reader-workspace .preview-body {
+    padding: 18px clamp(16px, 3vw, 42px);
+    background: #eef2f7;
   }
 
   .mobile-frame,
@@ -2477,6 +2645,12 @@
     background: #ffffff;
     box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
     overflow: hidden;
+  }
+
+  .reader-frame {
+    width: min(100%, 1080px);
+    border-color: #cbd5e1;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
   }
 
   .chapter-preview {
@@ -2580,6 +2754,27 @@
       grid-template-rows: 220px minmax(320px, 1fr) 360px;
     }
 
+    .workspace.reader-workspace {
+      grid-template-columns: 1fr;
+      grid-template-rows: minmax(220px, 34vh) minmax(420px, 1fr);
+    }
+
+    .workspace.reader-workspace.reader-toc-collapsed {
+      grid-template-rows: minmax(420px, 1fr);
+    }
+
+    .reader-preview-header {
+      height: auto;
+      min-height: 56px;
+      grid-template-columns: minmax(0, 1fr);
+      align-content: center;
+      padding: 10px 12px;
+    }
+
+    .reader-preview-actions {
+      justify-content: flex-start;
+    }
+
     .left-panel,
     .editor-panel,
     .right-panel {
@@ -2648,6 +2843,14 @@
     grid-template-columns: 1fr;
     grid-template-rows: minmax(180px, 24dvh) minmax(360px, 1fr) minmax(320px, 38dvh);
     overflow: auto;
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .workspace.reader-workspace {
+    grid-template-rows: minmax(220px, 34dvh) minmax(420px, 1fr);
+  }
+
+  :global(:root[data-tepub-client="web-mobile"]) .workspace.reader-workspace.reader-toc-collapsed {
+    grid-template-rows: minmax(420px, 1fr);
   }
 
   :global(:root[data-tepub-client="web-mobile"]) .left-panel,

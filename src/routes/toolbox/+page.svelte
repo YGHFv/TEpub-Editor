@@ -30,6 +30,7 @@
     | "library"
     | "txt-edit"
     | "txt-epub"
+    | "epub-style-library"
     | "epub-edit"
     | "epub-read"
     | "font-encrypt"
@@ -124,6 +125,13 @@
       action: "打开",
     },
     {
+      id: "epub-style-library",
+      icon: "CSS",
+      title: "EPUB 样式库",
+      detail: "预览头图与标题样式",
+      action: "预览",
+    },
+    {
       id: "txt-edit",
       icon: "EDIT",
       title: "TXT 编辑器",
@@ -207,7 +215,7 @@
       id: "open",
       title: "常用入口",
       meta: "书库 / 新窗口",
-      tools: tools.filter((tool) => tool.id === "library" || tool.id === "txt-epub" || tool.id === "txt-edit" || tool.id === "epub-edit" || tool.id === "epub-read"),
+      tools: tools.filter((tool) => tool.id === "library" || tool.id === "txt-epub" || tool.id === "epub-style-library" || tool.id === "txt-edit" || tool.id === "epub-edit" || tool.id === "epub-read"),
       gridClass: "open-grid",
     },
     {
@@ -441,12 +449,17 @@
       statusText = `${tool.title} ${WEB_UNAVAILABLE_TEXT}`;
       return;
     }
+    if (tool.id === "epub-style-library") {
+      event.preventDefault();
+      void openStyleLibrary();
+      return;
+    }
     event.preventDefault();
     pickFile(tool);
   }
 
   function isWebRouteTool(id: ToolId) {
-    return id === "image-tools" || id === "txt-epub" || id === "txt-edit" || id === "epub-edit";
+    return id === "image-tools" || id === "txt-epub" || id === "epub-style-library" || id === "txt-edit" || id === "epub-edit" || id === "epub-read";
   }
 
   function isHiddenWebTool(id: ToolId) {
@@ -460,8 +473,10 @@
   function webToolHref(id: ToolId) {
     if (id === "image-tools") return appPath("/toolbox/image-tools");
     if (id === "txt-epub") return appPath("/toolbox/make-epub");
+    if (id === "epub-style-library") return appPath("/toolbox/epub-style-library");
     if (id === "txt-edit") return appPath("/toolbox/text-editor");
     if (id === "epub-edit") return appPath("/toolbox/epub-editor");
+    if (id === "epub-read") return appPath("/toolbox/epub-editor?mode=reader");
     return "#";
   }
 
@@ -526,6 +541,31 @@
       center: true,
     });
     await hideToolboxHomeWhileOpen(win);
+  }
+
+  async function openStyleLibrary() {
+    busyTool = "epub-style-library";
+    statusText = "正在打开 EPUB 样式库...";
+    try {
+      const win = await createToolWindow(windowLabel("epub-style-library"), {
+        url: appPath("/toolbox/epub-style-library"),
+        title: "TEpub-Editor-EPUB-Style-Library",
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: 900,
+        minHeight: 620,
+        dragDropEnabled: false,
+        center: true,
+      });
+      await hideToolboxHomeWhileOpen(win);
+      statusText = "EPUB 样式库已打开";
+    } catch (e: any) {
+      console.error("打开 EPUB 样式库失败:", e);
+      statusText = "打开 EPUB 样式库失败";
+      await platform.message(`打开 EPUB 样式库失败: ${e}`, { title: "错误", kind: "error" });
+    } finally {
+      busyTool = "";
+    }
   }
 
   function isProcessingTool(id: ToolId) {

@@ -1,6 +1,6 @@
 <script lang="ts">
     import { base } from "$app/paths";
-    import { onMount, tick } from "svelte";
+    import { onDestroy, onMount, tick } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import { isWebMobileClient } from "$lib/clientProfile";
     import { platform } from "$lib/platform";
@@ -13,6 +13,11 @@
         selectionName,
     } from "$lib/mobileFlow";
     import { DEFAULT_TOC_REGEX_RULES, loadAppSettings, saveAppSettings, type TocRegexRule } from "$lib/appSettings";
+    import {
+        EPUB_HEADER_STYLES,
+        EPUB_TITLE_STYLES,
+        type EpubStyleModule,
+    } from "$lib/epubStyleLibrary";
 
     interface RegexRule {
         enabled: boolean;
@@ -79,6 +84,14 @@
 
     type ReorderScope = "all" | "volumes" | "chapters" | "regex";
     type NumberStyle = "arabic" | "chinese";
+    type WebMakeStep = "edit" | "style";
+    type WebImageSlot = "cover" | "fullCover" | "banner" | "header";
+    type WebImageAsset = {
+        fileName: string;
+        bytes: Uint8Array;
+        mime: string;
+        objectUrl: string;
+    };
 
     const ruleLevelOptions = [
         { value: "1", label: "卷" },
@@ -108,6 +121,33 @@
     const DEFAULT_CHAPTER_REGEX =
         "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*";
     const WEB_EPUB_FONT_CSS = `@charset "utf-8";`;
+    const EPUB_STYLE_LIBRARY_STORAGE_KEY = "tepub-epub-style-library-v1";
+    const DEFAULT_WEB_TITLE_STYLE_ID = "title-cinematic-slab";
+    const DEFAULT_FULL_COVER_WIDTH = 1400;
+    const DEFAULT_FULL_COVER_HEIGHT = 2400;
+    const WEB_STYLE_PREVIEW_WIDTH = 360;
+    const WEB_STYLE_PREVIEW_HEIGHT = 700;
+    const DEFAULT_WEB_HEADER_CSS = `.te-header-figure {
+  margin: 0 0 1.35em;
+  padding: 0;
+  overflow: hidden;
+  line-height: 0;
+  text-align: center;
+  text-indent: 0;
+  duokan-text-indent: 0;
+}
+
+.te-header-image {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  object-fit: cover;
+}
+
+.te-header-caption {
+  display: none;
+}`;
     const WEB_EPUB_MAIN_CSS = `@charset "utf-8";
 
 @import url("font.css");
@@ -215,6 +255,40 @@ body.te-chapter-page.te-chapter-page--no-image .te-chapter-title {
     color: #c2181e;
 }
 
+body.te-cover-page,
+body.te-banner-page {
+    margin: 0;
+    padding: 0;
+    text-align: center;
+    background: #ffffff;
+}
+
+.te-cover-page-wrap {
+    min-height: 98vh;
+    display: block;
+    line-height: 0;
+    text-align: center;
+}
+
+.te-cover-page-wrap img {
+    width: 100%;
+    height: auto;
+    max-height: 98vh;
+    object-fit: cover;
+}
+
+.te-banner-page-wrap {
+    padding: 7vh 5% 5vh;
+    text-align: center;
+    line-height: 0;
+}
+
+.te-banner-page-wrap img {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+}
+
 p.te-divider-line {
     text-align: center;
     text-indent: 0;
@@ -234,10 +308,44 @@ p.te-divider-line {
         return normalizeMakeRules(loadAppSettings().customRegexRules);
     }
 
+    function normalizeSavedEpubStyle(style: EpubStyleModule) {
+        if (style.kind === "header") {
+            return { ...style } satisfies EpubStyleModule;
+        }
+        const legacyNumberCss = style.titleCssA || "";
+        const legacyNameCss = style.titleCssB || style.titleCssA || "";
+        return {
+            ...style,
+            titleLayout: style.titleLayout || (style.titleNameCss || style.titleCssB ? "split" : "single"),
+            titleNumberCss: style.titleNumberCss || legacyNumberCss,
+            titleNameCss: style.titleNameCss || legacyNameCss,
+        } satisfies EpubStyleModule;
+    }
+
+    function loadSavedEpubStyles() {
+        if (typeof localStorage === "undefined") return [];
+        try {
+            const raw = localStorage.getItem(EPUB_STYLE_LIBRARY_STORAGE_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed?.styles)
+                ? parsed.styles
+                    .filter((style: Partial<EpubStyleModule>) => style && style.id && style.kind && style.name && style.css)
+                    .map(normalizeSavedEpubStyle)
+                : [];
+        } catch (error) {
+            console.warn("读取 EPUB 样式库失败", error);
+            return [];
+        }
+    }
+
     let rules: RegexRule[] = loadMakeRules();
 
     let fileInputEl: HTMLInputElement | null = null;
     let coverInputEl: HTMLInputElement | null = null;
+    let fullCoverInputEl: HTMLInputElement | null = null;
+    let bannerInputEl: HTMLInputElement | null = null;
+    let headerInputEl: HTMLInputElement | null = null;
     let selectedPath = "";
     let selectedName = "";
     let content = "";
@@ -246,6 +354,14 @@ p.te-divider-line {
     let coverPath = "";
     let coverName = "";
     let coverPreviewUrl = "";
+    let coverAsset: WebImageAsset | null = null;
+    let autoFullCoverAsset: WebImageAsset | null = null;
+    let fullCoverAsset: WebImageAsset | null = null;
+    let bannerAsset: WebImageAsset | null = null;
+    let headerAsset: WebImageAsset | null = null;
+    let processedHeaderAsset: WebImageAsset | null = null;
+    let processedHeaderKey = "";
+    let fullCoverManuallySelected = false;
     let uuid = crypto.randomUUID?.() ?? "";
     let uuidAuto = true;
     let desktopMode = false;
@@ -273,6 +389,10 @@ p.te-divider-line {
     let checkOpen = true;
     let reorderOpen = false;
     let activeTocId = "";
+    let webMakeStep: WebMakeStep = "edit";
+    let savedEpubStyles: EpubStyleModule[] = [];
+    let selectedHeaderStyleId = "";
+    let selectedTitleStyleId = DEFAULT_WEB_TITLE_STYLE_ID;
     let suppressRuleRefresh = false;
     let tocActionTarget: TocItem | null = null;
     let renameTitleSheet: RenameTitleSheetState = {
@@ -292,6 +412,45 @@ p.te-divider-line {
     $: visibleToc = tocItems.filter((item) => item.kind !== "chapter" || !item.volumeKey || expandedIds.has(item.volumeKey));
     $: visibleReorderRows = reorderPreviewRows.filter(
         (row) => row.kind !== "chapter" || !reorderCollapsedVolumeKeys.has(row.volumeKey),
+    );
+    $: webHeaderStyles = [...EPUB_HEADER_STYLES, ...savedEpubStyles.filter((style) => style.kind === "header")];
+    $: webTitleStyles = [...EPUB_TITLE_STYLES, ...savedEpubStyles.filter((style) => style.kind === "title" && style.target === "chapter-title")];
+    $: selectedHeaderStyle = webHeaderStyles.find((style) => style.id === selectedHeaderStyleId) || null;
+    $: selectedTitleStyle = webTitleStyles.find((style) => style.id === selectedTitleStyleId)
+        || webTitleStyles.find((style) => style.id === DEFAULT_WEB_TITLE_STYLE_ID)
+        || webTitleStyles[0]
+        || null;
+    $: styleHeaderOptions = [
+        { value: "", label: "不使用头图样式", meta: "仅应用标题排版" },
+        ...webHeaderStyles.map((style) => ({
+            value: style.id,
+            label: style.name,
+            meta: style.sourceKind === "saved" ? "自定义" : "内置",
+        })),
+    ];
+    $: styleTitleOptions = webTitleStyles.map((style) => ({
+        value: style.id,
+        label: style.name,
+        meta: style.sourceKind === "saved" ? "自定义" : "内置",
+    }));
+    $: activeFullCoverAsset = fullCoverAsset || autoFullCoverAsset || coverAsset;
+    $: headerProcessKey = [
+        headerAsset?.objectUrl || "",
+        selectedHeaderStyle?.id || "",
+        selectedHeaderStyle?.sampleWidth || "",
+        selectedHeaderStyle?.sampleHeight || "",
+    ].join("|");
+    $: if (platform.isWeb) {
+        void refreshProcessedHeaderFromSelection(headerProcessKey);
+    }
+    $: activeHeaderPreviewSrc = processedHeaderAsset?.objectUrl || selectedHeaderStyle?.sampleDataUrl || "";
+    $: webStylePreviewDoc = buildWebStylePreviewDoc(
+        selectedHeaderStyle?.id || "",
+        selectedHeaderStyle?.css || "",
+        activeHeaderPreviewSrc,
+        selectedTitleStyle?.id || "",
+        selectedTitleStyle?.css || "",
+        resolveSelectedTitleLayout(),
     );
     $: if (tocItems.length) {
         reorderPreviewRows = buildReorderPreviewRows(tocItems);
@@ -387,6 +546,274 @@ p.te-divider-line {
         coverInputEl?.click();
     }
 
+    function openFullCoverPicker() {
+        fullCoverInputEl?.click();
+    }
+
+    function openBannerPicker() {
+        bannerInputEl?.click();
+    }
+
+    function openHeaderPicker() {
+        headerInputEl?.click();
+    }
+
+    function detectImageMime(file: File) {
+        return file.type && file.type.startsWith("image/") ? file.type : "image/jpeg";
+    }
+
+    function imageExtensionFromMime(mime: string, fileName = "") {
+        const ext = fileName.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+        if (ext && ["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) return ext === "jpeg" ? "jpg" : ext;
+        if (mime.includes("png")) return "png";
+        if (mime.includes("webp")) return "webp";
+        if (mime.includes("gif")) return "gif";
+        return "jpg";
+    }
+
+    function mediaTypeForExtension(ext: string) {
+        if (ext === "png") return "image/png";
+        if (ext === "webp") return "image/webp";
+        if (ext === "gif") return "image/gif";
+        return "image/jpeg";
+    }
+
+    function revokeWebImageAsset(asset: WebImageAsset | null) {
+        if (asset?.objectUrl) URL.revokeObjectURL(asset.objectUrl);
+    }
+
+    async function readWebImageAsset(file: File): Promise<WebImageAsset> {
+        return {
+            fileName: file.name,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+            mime: detectImageMime(file),
+            objectUrl: URL.createObjectURL(file),
+        };
+    }
+
+    function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+    }
+
+    async function loadImageElement(src: string) {
+        const img = new Image();
+        img.decoding = "async";
+        img.src = src;
+        if (img.decode) {
+            await img.decode();
+        } else {
+            await new Promise<void>((resolve, reject) => {
+                img.onload = () => resolve();
+                img.onerror = () => reject(new Error("image load failed"));
+            });
+        }
+        return img;
+    }
+
+    function canvasToBlob(canvas: HTMLCanvasElement, mime: string, quality: number) {
+        return new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((blob) => {
+                if (blob) resolve(blob);
+                else reject(new Error("canvas export failed"));
+            }, mime, quality);
+        });
+    }
+
+    async function buildDefaultFullCoverFromAsset(source: WebImageAsset): Promise<WebImageAsset> {
+        const img = await loadImageElement(source.objectUrl);
+        const width = DEFAULT_FULL_COVER_WIDTH;
+        const height = DEFAULT_FULL_COVER_HEIGHT;
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("canvas unavailable");
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.clearRect(0, 0, width, height);
+
+        const bgScale = Math.max(width / img.width, height / img.height);
+        const bgW = img.width * bgScale;
+        const bgH = img.height * bgScale;
+        const bgX = (width - bgW) / 2;
+        const bgY = (height - bgH) / 2;
+        const off = document.createElement("canvas");
+        off.width = Math.ceil(bgW);
+        off.height = Math.ceil(bgH);
+        const offCtx = off.getContext("2d");
+        if (offCtx) {
+            offCtx.filter = `blur(${10 * 2 * (width / 1400)}px)`;
+            offCtx.drawImage(img, 0, 0, bgW, bgH);
+            ctx.drawImage(off, bgX, bgY);
+        }
+
+        const foregroundSize = 80;
+        const radius = 10;
+        const fgScale = Math.min((width * (foregroundSize / 100)) / img.width, (height * 0.8) / img.height);
+        const fgW = img.width * fgScale;
+        const fgH = img.height * fgScale;
+        const fgX = (width - fgW) / 2;
+        const fgY = (height - fgH) / 2;
+        const scaledRadius = radius * 5 * (width / 1400);
+
+        ctx.save();
+        roundedRect(ctx, fgX, fgY, fgW, fgH, scaledRadius);
+        ctx.clip();
+        ctx.drawImage(img, fgX, fgY, fgW, fgH);
+        ctx.restore();
+
+        const blob = await canvasToBlob(canvas, "image/jpeg", 0.92);
+        const stem = source.fileName.replace(/\.[^.]+$/, "") || "cover";
+        return {
+            fileName: `${stem}-full-cover.jpg`,
+            bytes: new Uint8Array(await blob.arrayBuffer()),
+            mime: "image/jpeg",
+            objectUrl: URL.createObjectURL(blob),
+        };
+    }
+
+    async function buildProcessedHeaderFromAsset(source: WebImageAsset, style: EpubStyleModule | null): Promise<WebImageAsset> {
+        const img = await loadImageElement(source.objectUrl);
+        const width = Math.max(320, Math.round(style?.sampleWidth || style?.originalSampleWidth || 1920));
+        const height = Math.max(180, Math.round(style?.sampleHeight || style?.originalSampleHeight || 1080));
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("canvas unavailable");
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.clearRect(0, 0, width, height);
+
+        const scale = Math.max(width / img.width, height / img.height);
+        const drawW = img.width * scale;
+        const drawH = img.height * scale;
+        const drawX = (width - drawW) / 2;
+        const drawY = (height - drawH) / 2;
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+        const maskSrc = style?.templateDataUrl || style?.sampleDataUrl || "";
+        if (maskSrc) {
+            try {
+                const mask = await loadImageElement(maskSrc);
+                const maskCanvas = document.createElement("canvas");
+                const maskCtx = maskCanvas.getContext("2d");
+                if (maskCtx) {
+                    maskCanvas.width = width;
+                    maskCanvas.height = height;
+                    maskCtx.clearRect(0, 0, width, height);
+                    maskCtx.drawImage(mask, 0, 0, width, height);
+                    const data = maskCtx.getImageData(0, 0, width, height).data;
+                    let hasTransparentMask = false;
+                    for (let i = 3; i < data.length; i += 4) {
+                        if (data[i] < 250) {
+                            hasTransparentMask = true;
+                            break;
+                        }
+                    }
+                    if (hasTransparentMask) {
+                        ctx.save();
+                        ctx.globalCompositeOperation = "destination-in";
+                        ctx.drawImage(maskCanvas, 0, 0);
+                        ctx.restore();
+                    }
+                }
+            } catch (error) {
+                console.warn("应用章节头图样板蒙版失败", error);
+            }
+        }
+
+        const blob = await canvasToBlob(canvas, "image/png", 1);
+        const stem = source.fileName.replace(/\.[^.]+$/, "") || "chapter-header";
+        return {
+            fileName: `${stem}-chapter-header.png`,
+            bytes: new Uint8Array(await blob.arrayBuffer()),
+            mime: "image/png",
+            objectUrl: URL.createObjectURL(blob),
+        };
+    }
+
+    async function refreshProcessedHeaderFromSelection(key: string) {
+        if (!headerAsset) {
+            if (processedHeaderAsset) {
+                revokeWebImageAsset(processedHeaderAsset);
+                processedHeaderAsset = null;
+            }
+            processedHeaderKey = "";
+            return;
+        }
+        if (key && key === processedHeaderKey && processedHeaderAsset) return;
+        const activeKey = key;
+        try {
+            const generated = await buildProcessedHeaderFromAsset(headerAsset, selectedHeaderStyle);
+            if (activeKey !== headerProcessKey) {
+                revokeWebImageAsset(generated);
+                return;
+            }
+            revokeWebImageAsset(processedHeaderAsset);
+            processedHeaderAsset = generated;
+            processedHeaderKey = activeKey;
+            resetResult();
+        } catch (error) {
+            console.warn("自动处理章节头图失败", error);
+        }
+    }
+
+    async function refreshAutoFullCoverFromCover() {
+        if (!platform.isWeb || !coverAsset || fullCoverManuallySelected) return;
+        const previous = autoFullCoverAsset;
+        try {
+            const generated = await buildDefaultFullCoverFromAsset(coverAsset);
+            revokeWebImageAsset(previous);
+            autoFullCoverAsset = generated;
+        } catch (error) {
+            console.warn("自动生成全屏封面失败", error);
+            revokeWebImageAsset(previous);
+            autoFullCoverAsset = null;
+        }
+    }
+
+    async function setWebImageSlot(slot: WebImageSlot, file: File) {
+        const asset = await readWebImageAsset(file);
+        if (slot === "cover") {
+            const previousAsset = coverAsset;
+            const previousPreviewUrl = coverPreviewUrl;
+            revokeWebImageAsset(previousAsset);
+            if (previousPreviewUrl && previousPreviewUrl !== previousAsset?.objectUrl) {
+                URL.revokeObjectURL(previousPreviewUrl);
+            }
+            coverAsset = asset;
+            coverPath = platform.isWeb ? `web-local:${file.name}` : coverPath;
+            coverName = file.name;
+            coverPreviewUrl = asset.objectUrl;
+            await refreshAutoFullCoverFromCover();
+        } else if (slot === "fullCover") {
+            revokeWebImageAsset(fullCoverAsset);
+            fullCoverAsset = asset;
+            fullCoverManuallySelected = true;
+            revokeWebImageAsset(autoFullCoverAsset);
+            autoFullCoverAsset = null;
+        } else if (slot === "banner") {
+            revokeWebImageAsset(bannerAsset);
+            bannerAsset = asset;
+        } else {
+            revokeWebImageAsset(headerAsset);
+            revokeWebImageAsset(processedHeaderAsset);
+            headerAsset = asset;
+            processedHeaderAsset = null;
+            processedHeaderKey = "";
+        }
+        resetResult();
+    }
+
     function toggleCheckPanel() {
         checkOpen = !checkOpen;
         if (!checkOpen) reorderOpen = true;
@@ -454,13 +881,53 @@ p.te-divider-line {
         if (!file) return;
 
         try {
-            coverPath = platform.isWeb ? `web-local:${file.name}` : await cacheBrowserFileStable(file, "cover");
-            coverName = file.name;
-            if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
-            coverPreviewUrl = URL.createObjectURL(file);
-            resetResult();
+            if (platform.isWeb) {
+                await setWebImageSlot("cover", file);
+            } else {
+                coverPath = await cacheBrowserFileStable(file, "cover");
+                coverName = file.name;
+                if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
+                coverPreviewUrl = URL.createObjectURL(file);
+                resetResult();
+            }
         } catch (err) {
             await platform.message(`封面导入失败：${err}`, { title: "制作 EPUB", kind: "error" });
+        }
+    }
+
+    async function onFullCoverChange(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+        input.value = "";
+        if (!file) return;
+        try {
+            await setWebImageSlot("fullCover", file);
+        } catch (err) {
+            await platform.message(`全屏封面导入失败：${err}`, { title: "制作 EPUB", kind: "error" });
+        }
+    }
+
+    async function onBannerChange(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+        input.value = "";
+        if (!file) return;
+        try {
+            await setWebImageSlot("banner", file);
+        } catch (err) {
+            await platform.message(`阅微横幅导入失败：${err}`, { title: "制作 EPUB", kind: "error" });
+        }
+    }
+
+    async function onHeaderChange(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+        input.value = "";
+        if (!file) return;
+        try {
+            await setWebImageSlot("header", file);
+        } catch (err) {
+            await platform.message(`头图导入失败：${err}`, { title: "制作 EPUB", kind: "error" });
         }
     }
 
@@ -492,20 +959,59 @@ p.te-divider-line {
         }
     }
 
+    async function enterWebStyleStep() {
+        if (!platform.isWeb) return false;
+        savedEpubStyles = loadSavedEpubStyles();
+        if (!webTitleStyles.some((style) => style.id === selectedTitleStyleId)) {
+            selectedTitleStyleId = webTitleStyles.find((style) => style.id === DEFAULT_WEB_TITLE_STYLE_ID)?.id || webTitleStyles[0]?.id || "";
+        }
+        if (coverAsset && !fullCoverManuallySelected && !autoFullCoverAsset) {
+            await refreshAutoFullCoverFromCover();
+        }
+        webMakeStep = "style";
+        status = "";
+        return true;
+    }
+
+    function backToWebEditStep() {
+        webMakeStep = "edit";
+        status = "已返回目录与元数据编辑。";
+    }
+
+    function onWebHeaderStyleChange(styleId: string) {
+        selectedHeaderStyleId = styleId;
+        const nextHeader = webHeaderStyles.find((style) => style.id === styleId);
+        if (nextHeader?.boundTitleStyleId && webTitleStyles.some((style) => style.id === nextHeader.boundTitleStyleId)) {
+            selectedTitleStyleId = nextHeader.boundTitleStyleId;
+        }
+        resetResult();
+    }
+
+    function onWebTitleStyleChange(styleId: string) {
+        selectedTitleStyleId = styleId;
+        resetResult();
+    }
+
     async function makeEpub() {
         if (!selectedPath || !content.trim()) return;
+        if (platform.isWeb && webMakeStep !== "style") {
+            await enterWebStyleStep();
+            return;
+        }
         try {
             busy = true;
             if (platform.isWeb) {
                 const outputTitle = title.trim() || textBaseName(selectedName) || "book";
-                webEpubBytes = buildSimpleEpubBytes(outputTitle, author.trim(), content, chapters);
+                webEpubBytes = await buildSimpleEpubBytes(outputTitle, author.trim(), content, chapters);
+                const fileName = safeFileName(outputTitle, "epub");
                 makeResult = {
-                    output_path: `web-local:${safeFileName(outputTitle, "epub")}`,
+                    output_path: `web-local:${fileName}`,
                     title: outputTitle,
                     chapter_count: Math.max(1, chapters.length),
                     word_count: countWords(content),
                 };
-                status = `已生成《${makeResult.title}》，${makeResult.chapter_count} 个目录项，约 ${makeResult.word_count} 字。`;
+                status = await offerSystemExport("", fileName, webEpubBytes);
+                exportPath = fileName;
                 return;
             }
             makeResult = await platform.invoke<MobileMakeEpubResult>("mobile_make_epub", {
@@ -770,12 +1276,17 @@ p.te-divider-line {
     function handlePageWheel(event: WheelEvent) {
         if (!desktopMode || !event.deltaY) return;
         const target = event.target as HTMLElement | null;
-        const scrollBox = target?.closest<HTMLElement>(".toc-list, .check-list, .reorder-preview");
+        const inChapterSheet = Boolean(target?.closest(".chapter-sheet"));
+        const scrollBox = target?.closest<HTMLElement>(".toc-list, .check-list, .reorder-preview, .custom-select-menu, .chapter-sheet textarea");
         if (scrollBox && scrollBox.scrollHeight > scrollBox.clientHeight) {
             const goingDown = event.deltaY > 0;
             const canScrollDown = scrollBox.scrollTop + scrollBox.clientHeight < scrollBox.scrollHeight - 1;
             const canScrollUp = scrollBox.scrollTop > 0;
             if ((goingDown && canScrollDown) || (!goingDown && canScrollUp)) return;
+        }
+        if (inChapterSheet) {
+            event.preventDefault();
+            return;
         }
         event.preventDefault();
         window.scrollBy({ top: event.deltaY, left: 0, behavior: "auto" });
@@ -1155,7 +1666,125 @@ p.te-divider-line {
         });
     }
 
-    function buildChapterXhtml(section: { title: string; level: number; isMeta: boolean; lines: string[] }) {
+    function resolveSelectedTitleLayout() {
+        return selectedTitleStyle?.titleLayout || (selectedTitleStyle?.titleNameCss || selectedTitleStyle?.titleCssB ? "split" : "single");
+    }
+
+    function buildWebStylePreviewDoc(
+        headerStyleId: string,
+        headerCss: string,
+        headerImageSrc: string,
+        titleStyleId: string,
+        titleCss: string,
+        titleLayout: string,
+    ) {
+        void headerStyleId;
+        void titleStyleId;
+        const hasHeaderStyle = Boolean(headerImageSrc);
+        const activeHeaderCss = hasHeaderStyle ? (headerCss?.trim() || DEFAULT_WEB_HEADER_CSS) : "";
+        const titleMarkup = titleLayout === "split"
+            ? `<h3 class="te-chapter-title"><span class="te-chapter-number">第十二章</span><span class="te-chapter-name">灯塔来信</span></h3>`
+            : `<h3 class="te-chapter-title">第十二章 灯塔来信</h3>`;
+        const headerMarkup = hasHeaderStyle
+            ? `<figure class="te-header-figure"><img class="te-header-image" src="${escapeXml(headerImageSrc)}" alt="" /></figure>`
+            : "";
+        const baseCss = `
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #eef2f7;
+    color: #172033;
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+body {
+    box-sizing: border-box;
+}
+
+.te-preview-page {
+    --te-preview-width: ${WEB_STYLE_PREVIEW_WIDTH}px;
+    --te-preview-height: ${WEB_STYLE_PREVIEW_HEIGHT}px;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    padding: ${hasHeaderStyle ? "0 24px 42px" : "46px 24px 42px"};
+    overflow: hidden;
+    background: #fffdf8;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+}
+
+p.te-paragraph {
+    margin: 0 0 0.85em;
+    color: #263244;
+    font-family: "DK-SONGTI", "SimSun", serif;
+    font-size: 16px;
+    line-height: 1.75;
+    text-align: justify;
+    text-indent: 2em;
+}
+`;
+        const spacingCss = hasHeaderStyle
+            ? `.te-header-figure { margin-bottom: 1.15em; }
+.te-header-figure + .te-chapter-title { margin-top: 0.85em; }
+.te-chapter-title { margin-bottom: 2.15em; }`
+            : `.te-chapter-title { margin-top: 2.65em; margin-bottom: 2.45em; }`;
+        return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>${baseCss}</style>
+  <style>${titleCss}</style>
+  <style>${activeHeaderCss}</style>
+  <style>${spacingCss}</style>
+</head>
+<body>
+  <main class="te-preview-page">
+    ${headerMarkup}
+    ${titleMarkup}
+    <p class="te-paragraph">夜色沉入城市边缘，风从旧站台吹过，带着潮湿的铁锈味。</p>
+    <p class="te-paragraph">她合上手中的书，抬头看见远处灯塔亮起，像一枚缓慢落下的星。</p>
+  </main>
+</body>
+</html>`;
+    }
+
+    function buildWebStyleCss(hasHeaderStyle: boolean) {
+        const titleCss = selectedTitleStyle?.css?.trim() || "";
+        const headerCss = hasHeaderStyle ? (selectedHeaderStyle?.css?.trim() || DEFAULT_WEB_HEADER_CSS) : "";
+        const spacingCss = hasHeaderStyle
+            ? `body.te-chapter-page--with-header .te-header-figure {
+    margin-bottom: 1.15em;
+}
+
+body.te-chapter-page--with-header .te-header-figure + .te-chapter-title {
+    margin-top: 0.85em;
+}
+
+body.te-chapter-page--with-header .te-chapter-title {
+    margin-bottom: 2.15em;
+}`
+            : `body.te-chapter-page--no-header .te-chapter-title {
+    margin-top: 2.65em;
+    margin-bottom: 2.45em;
+}
+
+body.te-chapter-page--no-header p.te-paragraph:first-of-type {
+    margin-top: 0;
+}`;
+        return [WEB_EPUB_MAIN_CSS, titleCss, headerCss, spacingCss]
+            .filter((block) => block && block.trim())
+            .join("\n\n");
+    }
+
+    function buildHeaderFigureXhtml(hasHeaderStyle: boolean, imageSrc: string) {
+        if (!hasHeaderStyle) return "";
+        return `  <figure class="te-header-figure" aria-label="章节头图">\n    <img class="te-header-image" src="${imageSrc}" alt="" />\n  </figure>\n`;
+    }
+
+    function buildChapterXhtml(section: { title: string; level: number; isMeta: boolean; lines: string[] }, hasHeaderStyle: boolean, headerImageSrc: string) {
         const titleParts = splitEpubTitle(section.title);
         const safeDisplayTitle = escapeXml(titleParts.display || section.title || "正文");
         let bodyClass = "te-book-body te-chapter-page";
@@ -1169,11 +1798,17 @@ p.te-divider-line {
             const safeNumber = escapeXml(titleParts.number || titleParts.display || section.title);
             const safeName = escapeXml(titleParts.name || titleParts.display || section.title);
             heading = `  <h1 class="te-volume-title" title="${safeDisplayTitle}">${safeNumber}</h1>\n  <p class="te-volume-subtitle">${safeName}</p>\n`;
-        } else if (titleParts.number) {
+        } else {
+            bodyClass = `te-book-body te-chapter-page ${hasHeaderStyle ? "te-chapter-page--with-header" : "te-chapter-page--no-header"}`;
+        }
+
+        if (!section.isMeta && section.level !== 1 && titleParts.number && resolveSelectedTitleLayout() !== "single") {
             const safeNumber = escapeXml(titleParts.number);
             const safeName = escapeXml(titleParts.name || "");
-            heading = `  <h3 class="te-chapter-title"><span class="te-chapter-number">${safeNumber}</span><br /><b class="te-chapter-name">${safeName}</b></h3>\n`;
+            heading = `  <h3 class="te-chapter-title"><span class="te-chapter-number">${safeNumber}</span><span class="te-chapter-name">${safeName}</span></h3>\n`;
         }
+
+        const headerFigure = !section.isMeta && section.level !== 1 ? buildHeaderFigureXhtml(hasHeaderStyle, headerImageSrc) : "";
 
         return `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
@@ -1184,7 +1819,7 @@ p.te-divider-line {
   <link href="../Styles/main.css" type="text/css" rel="stylesheet" />
 </head>
 <body class="${bodyClass}">
-${heading}${buildTextBody(section.lines)}</body>
+${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 </html>`;
     }
 
@@ -1222,11 +1857,72 @@ ${heading}${buildTextBody(section.lines)}</body>
         return { navMap: navPoints.join("\n"), depth: maxDepth };
     }
 
-    function buildSimpleEpubBytes(bookTitle: string, bookAuthor: string, text: string, list: RawChapter[]) {
+    function buildImagePageXhtml(pageTitle: string, imageSrc: string, className: string) {
+        return `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>${escapeXml(pageTitle)}</title>
+  <link href="../Styles/font.css" type="text/css" rel="stylesheet" />
+  <link href="../Styles/main.css" type="text/css" rel="stylesheet" />
+</head>
+<body class="te-book-body ${className}">
+  <div class="${className}-wrap"><img src="${imageSrc}" alt="${escapeXml(pageTitle)}" /></div>
+</body>
+</html>`;
+    }
+
+    function dataUrlToBytes(dataUrl: string) {
+        const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/);
+        if (!match) return null;
+        const isBase64 = /;base64,/.test(dataUrl.slice(0, Math.min(dataUrl.length, 80)));
+        const raw = isBase64 ? atob(match[2]) : decodeURIComponent(match[2]);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+        return {
+            mime: match[1] || "image/png",
+            bytes,
+        };
+    }
+
+    async function imageSourceToBytes(src: string) {
+        if (!src) return null;
+        const data = dataUrlToBytes(src);
+        if (data) return data;
+        const response = await fetch(src);
+        if (!response.ok) return null;
+        const mime = response.headers.get("content-type") || "image/png";
+        return {
+            mime,
+            bytes: new Uint8Array(await response.arrayBuffer()),
+        };
+    }
+
+    async function buildSimpleEpubBytes(bookTitle: string, bookAuthor: string, text: string, list: RawChapter[]) {
         const sections = chapterSections(text, list);
         const files: { name: string; data: Uint8Array }[] = [];
         const encoder = new TextEncoder();
         const addText = (name: string, value: string) => files.push({ name, data: encoder.encode(value) });
+        const addBytes = (name: string, data: Uint8Array) => files.push({ name, data });
+        let exportHeaderAsset = processedHeaderAsset;
+        if (headerAsset && !exportHeaderAsset) {
+            exportHeaderAsset = await buildProcessedHeaderFromAsset(headerAsset, selectedHeaderStyle);
+            revokeWebImageAsset(processedHeaderAsset);
+            processedHeaderAsset = exportHeaderAsset;
+            processedHeaderKey = headerProcessKey;
+        }
+        const fallbackHeaderImage = !exportHeaderAsset && selectedHeaderStyle?.sampleDataUrl
+            ? await imageSourceToBytes(selectedHeaderStyle.sampleDataUrl)
+            : null;
+        const headerImage = exportHeaderAsset
+            ? { mime: exportHeaderAsset.mime, bytes: exportHeaderAsset.bytes, fileName: exportHeaderAsset.fileName }
+            : fallbackHeaderImage
+                ? { ...fallbackHeaderImage, fileName: "chapter-header.png" }
+                : null;
+        const headerExt = headerImage ? imageExtensionFromMime(headerImage.mime || "image/png", headerImage.fileName) : "png";
+        const headerImageName = `Images/chapter-header.${headerExt}`;
+        const headerImageSrc = `../${headerImageName}`;
+        const hasHeaderStyle = Boolean(headerImage?.bytes);
         const fullUuid = normalizeEpubUuid(uuid);
         const date = new Date().toISOString().slice(0, 10);
         files.push({ name: "mimetype", data: encoder.encode("application/epub+zip") });
@@ -1235,7 +1931,7 @@ ${heading}${buildTextBody(section.lines)}</body>
             `<?xml version="1.0"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n  <rootfiles>\n    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>\n  </rootfiles>\n</container>`,
         );
         addText("OEBPS/Styles/font.css", WEB_EPUB_FONT_CSS);
-        addText("OEBPS/Styles/main.css", WEB_EPUB_MAIN_CSS);
+        addText("OEBPS/Styles/main.css", buildWebStyleCss(hasHeaderStyle));
 
         const manifestItems: string[] = [
             `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`,
@@ -1243,11 +1939,43 @@ ${heading}${buildTextBody(section.lines)}</body>
             `<item id="main-css" href="Styles/main.css" media-type="text/css"/>`,
         ];
         const spineItems: string[] = [];
+        const metadataExtras: string[] = [];
+
+        const primaryCoverAsset = coverAsset || activeFullCoverAsset;
+        if (primaryCoverAsset) {
+            const coverExt = imageExtensionFromMime(primaryCoverAsset.mime, primaryCoverAsset.fileName);
+            const coverImageName = `Images/cover.${coverExt}`;
+            addBytes(`OEBPS/${coverImageName}`, primaryCoverAsset.bytes);
+            addText("OEBPS/Text/cover.xhtml", buildImagePageXhtml("封面", `../${coverImageName}`, "te-cover-page"));
+            manifestItems.push(`<item id="cover-image" href="${coverImageName}" media-type="${mediaTypeForExtension(coverExt)}" properties="cover-image"/>`);
+            manifestItems.push(`<item id="cover-page" href="Text/cover.xhtml" media-type="application/xhtml+xml"/>`);
+            metadataExtras.push(`<meta name="cover" content="cover-image"/>`);
+            spineItems.push(`<itemref idref="cover-page"/>`);
+        }
+
+        if (coverAsset && activeFullCoverAsset) {
+            const slimExt = imageExtensionFromMime(activeFullCoverAsset.mime, activeFullCoverAsset.fileName);
+            const slimImageName = `Images/cover~slim.${slimExt}`;
+            addBytes(`OEBPS/${slimImageName}`, activeFullCoverAsset.bytes);
+            manifestItems.push(`<item id="cover-slim-image" href="${slimImageName}" media-type="${mediaTypeForExtension(slimExt)}"/>`);
+        }
+
+        if (primaryCoverAsset && bannerAsset) {
+            const bannerExt = imageExtensionFromMime(bannerAsset.mime, bannerAsset.fileName);
+            const bannerImageName = `Images/cover~banner.${bannerExt}`;
+            addBytes(`OEBPS/${bannerImageName}`, bannerAsset.bytes);
+            manifestItems.push(`<item id="cover-banner-image" href="${bannerImageName}" media-type="${mediaTypeForExtension(bannerExt)}"/>`);
+        }
+
+        if (hasHeaderStyle && headerImage) {
+            addBytes(`OEBPS/${headerImageName}`, headerImage.bytes);
+            manifestItems.push(`<item id="chapter-header-image" href="${headerImageName}" media-type="${mediaTypeForExtension(headerExt)}"/>`);
+        }
 
         sections.forEach((section, index) => {
             const fileName = `Text/chapter${index}.xhtml`;
             const id = `chapter${index}`;
-            addText(`OEBPS/${fileName}`, buildChapterXhtml(section));
+            addText(`OEBPS/${fileName}`, buildChapterXhtml(section, hasHeaderStyle, headerImageSrc));
             manifestItems.push(`<item id="${id}" href="${fileName}" media-type="application/xhtml+xml"/>`);
             spineItems.push(`<itemref idref="${id}"/>`);
         });
@@ -1255,7 +1983,7 @@ ${heading}${buildTextBody(section.lines)}</body>
 
         addText(
             "OEBPS/content.opf",
-            `<?xml version="1.0" encoding="utf-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">\n    <dc:title>${escapeXml(bookTitle)}</dc:title>\n    <dc:creator>${escapeXml(bookAuthor || "未知作者")}</dc:creator>\n    <dc:language>zh-CN</dc:language>\n    <dc:date>${date}</dc:date>\n    <dc:identifier opf:scheme="UUID" id="BookId">${escapeXml(fullUuid)}</dc:identifier>\n  </metadata>\n  <manifest>\n    ${manifestItems.join("\n    ")}\n  </manifest>\n  <spine toc="ncx">\n    ${spineItems.join("\n    ")}\n  </spine>\n</package>`,
+            `<?xml version="1.0" encoding="utf-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">\n    <dc:title>${escapeXml(bookTitle)}</dc:title>\n    <dc:creator>${escapeXml(bookAuthor || "未知作者")}</dc:creator>\n    <dc:language>zh-CN</dc:language>\n    <dc:date>${date}</dc:date>\n    <dc:identifier opf:scheme="UUID" id="BookId">${escapeXml(fullUuid)}</dc:identifier>${metadataExtras.length ? `\n    ${metadataExtras.join("\n    ")}` : ""}\n  </metadata>\n  <manifest>\n    ${manifestItems.join("\n    ")}\n  </manifest>\n  <spine toc="ncx">\n    ${spineItems.join("\n    ")}\n  </spine>\n</package>`,
         );
         addText(
             "OEBPS/toc.ncx",
@@ -1376,24 +2104,52 @@ ${heading}${buildTextBody(section.lines)}</body>
         }
         return () => window.removeEventListener("tepub-settings-updated", refreshRules);
     });
+
+    onDestroy(() => {
+        const assetUrls = new Set(
+            [
+                coverAsset?.objectUrl,
+                autoFullCoverAsset?.objectUrl,
+                fullCoverAsset?.objectUrl,
+                bannerAsset?.objectUrl,
+                headerAsset?.objectUrl,
+                processedHeaderAsset?.objectUrl,
+            ].filter(Boolean) as string[],
+        );
+        assetUrls.forEach((url) => URL.revokeObjectURL(url));
+        if (coverPreviewUrl && !assetUrls.has(coverPreviewUrl)) {
+            URL.revokeObjectURL(coverPreviewUrl);
+        }
+    });
 </script>
 
 <svelte:head>
     <title>TEpub-Editor</title>
 </svelte:head>
 
-<main class="page" class:desktop-page={desktopMode} class:web-import-page={platform.isWeb && desktopMode && !selectedPath} on:wheel|nonpassive={handlePageWheel}>
+<main
+    class="page"
+    class:desktop-page={desktopMode}
+    class:web-import-page={platform.isWeb && desktopMode && !selectedPath}
+    class:web-style-mode={platform.isWeb && webMakeStep === "style"}
+    on:wheel|nonpassive={handlePageWheel}
+>
     <input bind:this={fileInputEl} class="file-input" type="file" accept=".txt,.md,.html,.htm" on:change={onFileChange} />
     <input bind:this={coverInputEl} class="file-input" type="file" accept="image/*" on:change={onCoverChange} />
+    <input bind:this={fullCoverInputEl} class="file-input" type="file" accept="image/*" on:change={onFullCoverChange} />
+    <input bind:this={bannerInputEl} class="file-input" type="file" accept="image/*" on:change={onBannerChange} />
+    <input bind:this={headerInputEl} class="file-input" type="file" accept="image/*" on:change={onHeaderChange} />
 
-    <header class="topbar">
-        <a href={backHref} aria-label="返回">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M15 6L9 12L15 18"></path>
-            </svg>
-        </a>
-        <h1>制作 EPUB</h1>
-    </header>
+    {#if !(platform.isWeb && webMakeStep === "style")}
+        <header class="topbar">
+            <a href={backHref} aria-label="返回">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M15 6L9 12L15 18"></path>
+                </svg>
+            </a>
+            <h1>制作 EPUB</h1>
+        </header>
+    {/if}
 
     {#if !selectedPath}
         <section class="empty-panel" class:web-import-panel={platform.isWeb && desktopMode}>
@@ -1403,9 +2159,94 @@ ${heading}${buildTextBody(section.lines)}</body>
             </div>
             <button type="button" on:click={openPicker} disabled={busy}>选择文本文件</button>
         </section>
-    {/if}
+    {:else if platform.isWeb && webMakeStep === "style"}
+        <section class="web-style-page">
+            <div class="web-style-grid">
+                <div class="web-style-head">
+                    <div>
+                        <p class="web-style-kicker">EPUB 样式</p>
+                        <h2>{title.trim() || textBaseName(selectedName) || "未命名作品"}</h2>
+                        <p>{chapters.length ? `${chapters.length} 个目录项` : "未识别目录，将按正文生成"} · {author.trim() || "未填写作者"}</p>
+                    </div>
+                    <div class="web-style-actions">
+                        <button class="secondary" type="button" on:click={backToWebEditStep} disabled={busy}>返回编辑</button>
+                        <button type="button" on:click={makeEpub} disabled={busy}>生成 EPUB</button>
+                    </div>
+                </div>
 
-    {#if selectedPath}
+                <section class="web-style-panel">
+                    <div class="panel-title">
+                        <h3>封面与横幅</h3>
+                        <p>全屏封面会用当前封面按图片处理默认参数自动生成，也可以单独替换；阅微横幅会作为封面后的独立横幅页。</p>
+                    </div>
+                    <div class="asset-grid">
+                        <button class="asset-card full-cover-card" type="button" on:click={openFullCoverPicker}>
+                            {#if activeFullCoverAsset}
+                                <img src={activeFullCoverAsset.objectUrl} alt="全屏封面" />
+                                <span>{fullCoverAsset ? "手动全屏封面" : autoFullCoverAsset ? "自动全屏封面" : "当前封面"}</span>
+                            {:else}
+                                <span>选择全屏封面</span>
+                            {/if}
+                        </button>
+                        <button class="asset-card banner-card" type="button" on:click={openBannerPicker}>
+                            {#if bannerAsset}
+                                <img src={bannerAsset.objectUrl} alt="阅微横幅" />
+                            {:else}
+                                <span>选择阅微横幅</span>
+                            {/if}
+                        </button>
+                        <button class="asset-card header-card" type="button" on:click={openHeaderPicker}>
+                            {#if headerAsset}
+                                <img src={processedHeaderAsset?.objectUrl || headerAsset.objectUrl} alt="章节头图" />
+                                <span>已选择章节头图</span>
+                            {:else if selectedHeaderStyle?.sampleDataUrl}
+                                <img src={selectedHeaderStyle.sampleDataUrl} alt="头图样式样图" />
+                                <span>选择章节头图</span>
+                            {:else}
+                                <span>选择章节头图</span>
+                            {/if}
+                        </button>
+                    </div>
+                </section>
+
+                <section class="web-style-panel">
+                    <div class="panel-title">
+                        <h3>章节样式</h3>
+                        <p>头图样式会使用样式库内的头图样板；标题样式会自动按有无头图调整上下留白。</p>
+                    </div>
+                    <div class="style-fields">
+                        <label>
+                            <span>头图样式</span>
+                            <CustomSelect
+                                className="make-select style-select"
+                                value={selectedHeaderStyleId}
+                                options={styleHeaderOptions}
+                                on:change={(e) => onWebHeaderStyleChange(e.detail)}
+                            />
+                        </label>
+                        <label>
+                            <span>标题样式</span>
+                            <CustomSelect
+                                className="make-select style-select"
+                                value={selectedTitleStyle?.id || selectedTitleStyleId}
+                                options={styleTitleOptions}
+                                placeholder="选择标题样式"
+                                on:change={(e) => onWebTitleStyleChange(e.detail)}
+                            />
+                        </label>
+                    </div>
+                </section>
+
+                <section class="web-style-panel web-preview-panel">
+                    <div class="chapter-preview">
+                        <div class="phone-preview-frame">
+                            <iframe title="章节样式预览" srcdoc={webStylePreviewDoc}></iframe>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </section>
+    {:else}
         <div class="make-column left-column">
         <section class="meta" class:expanded={metaOpen} class:collapsed={!metaOpen}>
             <div class="section-head meta-section-head">
@@ -1803,6 +2644,7 @@ ${heading}${buildTextBody(section.lines)}</body>
     .check-panel,
     .reorder-panel,
     .empty-panel,
+    .web-style-panel,
     .bottom-actions {
         margin-top: 10px;
         border: 1px solid rgba(23, 27, 36, 0.08);
@@ -1837,6 +2679,181 @@ ${heading}${buildTextBody(section.lines)}</body>
     .empty-panel button {
         min-width: 150px;
         padding: 0 18px;
+    }
+
+    .web-style-page {
+        display: grid;
+        gap: 12px;
+    }
+
+    .web-style-head {
+        display: grid;
+        gap: 12px;
+        margin-top: 10px;
+        border: 1px solid rgba(23, 27, 36, 0.08);
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px 12px;
+    }
+
+    .web-style-kicker {
+        color: #1677b8;
+        font-size: 12px;
+        font-weight: 900;
+    }
+
+    .web-style-head h2,
+    .panel-title h3 {
+        margin: 0;
+        letter-spacing: 0;
+    }
+
+    .web-style-head h2 {
+        margin-top: 4px;
+        font-size: 18px;
+        line-height: 1.25;
+    }
+
+    .web-style-head p,
+    .panel-title p {
+        color: #626a78;
+        font-size: 12px;
+        line-height: 1.55;
+    }
+
+    .web-style-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+
+    .web-style-actions button {
+        min-height: 40px;
+        padding: 0 12px;
+    }
+
+    .web-style-actions .secondary {
+        background: #eef1f6;
+        color: #4f5867;
+    }
+
+    .web-style-grid {
+        display: grid;
+        gap: 12px;
+    }
+
+    .web-style-panel {
+        display: grid;
+        gap: 12px;
+    }
+
+    .web-preview-panel {
+        grid-template-rows: minmax(0, 1fr);
+        min-height: 0;
+    }
+
+    .panel-title {
+        display: grid;
+        gap: 5px;
+    }
+
+    .panel-title h3 {
+        font-size: 16px;
+        line-height: 1.3;
+    }
+
+    .asset-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 10px;
+    }
+
+    .asset-card {
+        position: relative;
+        min-height: 0;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        border: 1px solid rgba(23, 27, 36, 0.1);
+        border-radius: 8px;
+        background: #f6f8fb;
+        color: #657080;
+        padding: 0;
+        font-size: 13px;
+        font-weight: 900;
+    }
+
+    .asset-card span {
+        position: relative;
+        z-index: 1;
+        display: inline-grid;
+        place-items: center;
+        max-width: calc(100% - 20px);
+        min-height: 26px;
+        box-sizing: border-box;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.88);
+        color: #4f5867;
+        padding: 4px 10px;
+        font-size: 12px;
+        line-height: 1.2;
+    }
+
+    .asset-card img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .full-cover-card {
+        aspect-ratio: 3 / 4;
+        grid-row: span 2;
+    }
+
+    .banner-card {
+        aspect-ratio: 16 / 9;
+        align-self: start;
+    }
+
+    .header-card {
+        aspect-ratio: 16 / 9;
+        align-self: start;
+    }
+
+    .style-fields {
+        display: grid;
+        gap: 10px;
+    }
+
+    .chapter-preview {
+        height: 100%;
+        min-height: 0;
+        display: grid;
+        place-items: stretch center;
+        overflow: hidden;
+        background: transparent;
+    }
+
+    .phone-preview-frame {
+        width: min(100%, 360px, calc(100% * 360 / 700));
+        max-height: 100%;
+        aspect-ratio: 360 / 700;
+        overflow: hidden;
+        border: 1px solid rgba(23, 27, 36, 0.14);
+        border-radius: 6px;
+        background: #ffffff;
+        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+    }
+
+    .chapter-preview iframe {
+        width: 100%;
+        height: 100%;
+        display: block;
+        border: 0;
+        background: #eef2f7;
+        overflow: hidden;
     }
 
     .status,
@@ -1954,6 +2971,9 @@ ${heading}${buildTextBody(section.lines)}</body>
     }
 
     :global(.make-select .custom-select-menu) {
+        max-height: min(360px, calc(100vh - 220px));
+        overflow-y: auto;
+        overscroll-behavior: contain;
         border-color: rgba(23, 27, 36, 0.14);
         border-radius: 8px;
         background: #fff;
@@ -2271,6 +3291,8 @@ ${heading}${buildTextBody(section.lines)}</body>
     .chapter-sheet textarea {
         width: 100%;
         min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
         resize: none;
         box-sizing: border-box;
         border: 1px solid rgba(23, 27, 36, 0.12);
@@ -2508,6 +3530,15 @@ ${heading}${buildTextBody(section.lines)}</body>
             padding: 14px 0 96px;
         }
 
+        .page.desktop-page.web-style-mode {
+            width: min(1600px, calc(100vw - 40px));
+            height: 100vh;
+            min-height: 0;
+            overflow: hidden;
+            display: block;
+            padding: 18px 0;
+        }
+
         .page.desktop-page.web-import-page {
             width: auto;
             min-height: 100vh;
@@ -2587,8 +3618,79 @@ ${heading}${buildTextBody(section.lines)}</body>
         .desktop-page .toc-panel,
         .desktop-page .check-panel,
         .desktop-page .reorder-panel,
+        .desktop-page .web-style-head,
+        .desktop-page .web-style-panel,
         .desktop-page .bottom-actions {
             margin-top: 0;
+        }
+
+        .desktop-page .web-style-page {
+            grid-column: 1 / -1;
+            height: 100%;
+            min-height: 0;
+            gap: 12px;
+        }
+
+        .desktop-page .web-style-head {
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            margin-top: 0;
+        }
+
+        .desktop-page .web-style-actions {
+            grid-template-columns: auto auto;
+        }
+
+        .desktop-page .web-style-actions button {
+            min-width: 104px;
+            min-height: 38px;
+            padding: 0 14px;
+        }
+
+        .desktop-page .web-style-grid {
+            height: 100%;
+            min-height: 0;
+            grid-template-columns: minmax(280px, 0.7fr) minmax(300px, 0.82fr) max-content;
+            grid-template-rows: auto auto minmax(0, 1fr);
+            align-items: start;
+        }
+
+        .desktop-page .web-style-panel {
+            min-height: 0;
+        }
+
+        .desktop-page .web-style-head {
+            grid-column: 1 / 3;
+            grid-row: 1;
+        }
+
+        .desktop-page .web-style-grid > .web-style-panel:not(.web-preview-panel) {
+            align-self: start;
+        }
+
+        .desktop-page .web-preview-panel {
+            grid-column: 3;
+            grid-row: 1 / 4;
+            align-self: stretch;
+            justify-self: end;
+            padding: 12px;
+        }
+
+        .desktop-page .asset-grid {
+            grid-template-columns: minmax(0, 0.78fr) minmax(0, 1fr);
+            align-items: start;
+        }
+
+        .desktop-page .chapter-preview {
+            height: 100%;
+            min-height: 0;
+        }
+
+        .desktop-page .phone-preview-frame {
+            width: calc((100vh - 62px) * 360 / 700);
+            max-width: 100%;
+            height: calc(100vh - 62px);
+            aspect-ratio: 360 / 700;
         }
 
         .desktop-page .meta {
