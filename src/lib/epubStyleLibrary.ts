@@ -139,6 +139,10 @@ const headerTemplateSamples = {
   inkEdge: new URL("./assets/epub-style-library/sample-night-guard.png", import.meta.url).href,
   diagonalBrush: new URL("./assets/epub-style-library/sample-court-lineup.png", import.meta.url).href,
   rightMemoryCollage: new URL("./assets/epub-style-library/sample-right-memory-collage.png", import.meta.url).href,
+  deliveryBikeCollage: new URL("./assets/epub-style-library/sample-delivery-bike-collage.png", import.meta.url).href,
+  deliveryBikeCollageTemplate: new URL("./assets/epub-style-library/template-delivery-bike-collage.png", import.meta.url).href,
+  cloudGateInkBanner: new URL("./assets/epub-style-library/sample-cloud-gate-ink-banner.png", import.meta.url).href,
+  cloudGateInkBannerTemplate: new URL("./assets/epub-style-library/template-cloud-gate-ink-banner.png", import.meta.url).href,
 } as const;
 
 function svgDataUrl(svg: string) {
@@ -387,6 +391,36 @@ export const EPUB_HEADER_STYLES: EpubStyleModule[] = [
     originalSampleWidth: 1080,
     originalSampleHeight: 664,
     boundTitleStyleId: "title-cinematic-slab",
+  },
+  {
+    ...headerTemplateStyle(
+      "header-template-delivery-bike-collage",
+      "左叠拼片散边头图",
+      "左侧拼片式透明轮廓，主体向中下部展开，适合需要留白和碎片感的章节头图。",
+      "使用拼片样板的 alpha 作为蒙版裁切用户头图；内置预览图只是示例填充，制作 EPUB 时会换成用户选择的头图内容。",
+      headerTemplateSamples.deliveryBikeCollage,
+      1080,
+      810,
+      1000,
+      750,
+    ),
+    templateDataUrl: headerTemplateSamples.deliveryBikeCollageTemplate,
+    boundTitleStyleId: "title-soft-magazine",
+  },
+  {
+    ...headerTemplateStyle(
+      "header-template-cloud-gate-ink-banner",
+      "墨染横幅散边头图",
+      "横幅式透明蒙版，四周带墨染散边，适合需要大场景铺陈和卷首仪式感的章节头图。",
+      "使用墨染边缘样板的透明度裁切用户头图；模板本身只负责形状，生成时不会强制保留示例图内容。",
+      headerTemplateSamples.cloudGateInkBanner,
+      1080,
+      650,
+      1080,
+      650,
+    ),
+    templateDataUrl: headerTemplateSamples.cloudGateInkBannerTemplate,
+    boundTitleStyleId: "title-scroll-border",
   },
   {
     id: "header-card-shadow",

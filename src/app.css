@@ -75,6 +75,17 @@ body {
     touch-action: manipulation;
 }
 
+:root[data-tepub-client="web-desktop"],
+:root[data-tepub-client="web-desktop"] body {
+    min-width: 1200px;
+    overflow-x: auto;
+}
+
+:root[data-tepub-client="web-desktop"] body {
+    overscroll-behavior: none;
+    touch-action: auto;
+}
+
 button,
 input,
 textarea,

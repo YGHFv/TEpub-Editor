@@ -4,6 +4,23 @@
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        try {
+          var isWeb = location.protocol === "http:" || location.protocol === "https:";
+          if (!isWeb) return;
+          var queryView = new URLSearchParams(location.search).get("view");
+          var storedView = localStorage.getItem("tepub-web-view-mode");
+          var view = queryView === "desktop" || queryView === "mobile" ? queryView : storedView;
+          if (view === "desktop") {
+            document.querySelector('meta[name="viewport"]').setAttribute("content", "width=1200, initial-scale=1");
+            document.documentElement.dataset.tepubClient = "web-desktop";
+          }
+        } catch (error) {
+          // Keep the default responsive viewport if browser storage is unavailable.
+        }
+      })();
+    </script>
     <title>TEpub-Editor</title>
     <style>
       :root {

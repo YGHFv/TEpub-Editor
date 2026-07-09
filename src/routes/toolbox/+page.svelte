@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { base } from "$app/paths";
+  import { getWebClientViewOverride, setWebClientViewOverride } from "$lib/clientProfile";
   import { platform, type PlatformWindowHandle } from "$lib/platform";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
@@ -238,6 +239,7 @@
   let busyTool: ToolId | "" = "";
   let statusText = "";
   let showSettings = false;
+  let webDesktopViewEnabled = false;
   let toolboxSettingsActiveTab: "account" | "general" | "assoc" | "regex" | "api" = "general";
   $: toolboxSettingsTabs = [
     ...(usesWebScopedSettings() ? [{ id: "account", label: "账号" }] : []),
@@ -895,6 +897,19 @@
     showSettings = true;
   }
 
+  function refreshWebClientViewState() {
+    webDesktopViewEnabled = getWebClientViewOverride() === "desktop";
+  }
+
+  function toggleWebDesktopView() {
+    if (!platform.isWeb) return;
+    const nextDesktop = !webDesktopViewEnabled;
+    setWebClientViewOverride(nextDesktop ? "desktop" : "");
+    webDesktopViewEnabled = nextDesktop;
+    statusText = nextDesktop ? "已切换为电脑页面" : "已恢复自动页面";
+    window.location.reload();
+  }
+
   function setToolboxSettingsTab(tabId: string) {
     if (tabId === "account" || tabId === "general" || tabId === "assoc" || tabId === "regex" || tabId === "api") {
       if (tabId === "assoc" && usesWebScopedSettings()) return;
@@ -936,6 +951,7 @@
 
   onMount(() => {
     loadGlobalSettingsWithLegacy();
+    refreshWebClientViewState();
     openLaunchFiles();
     const onSettingsUpdated = () => {
       accountSession = getWebAccountSession();
@@ -948,7 +964,7 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-<main class="toolbox-app">
+<main class="toolbox-app" class:desktop-view={webDesktopViewEnabled}>
   <section class="toolbox-content" aria-label="工具列表">
     <div class="toolbox-title-row">
       <div>
@@ -958,6 +974,17 @@
       <div class="toolbox-title-actions">
         {#if statusText}
           <span class="toolbox-inline-status" aria-live="polite">{statusText}</span>
+        {/if}
+        {#if platform.isWeb}
+          <button
+            class="toolbox-settings-btn"
+            class:active={webDesktopViewEnabled}
+            type="button"
+            on:click={toggleWebDesktopView}
+            title={webDesktopViewEnabled ? "恢复自动页面" : "切换电脑页面"}
+            aria-label={webDesktopViewEnabled ? "恢复自动页面" : "切换电脑页面"}
+            aria-pressed={webDesktopViewEnabled}
+          >PC</button>
         {/if}
         <button class="toolbox-settings-btn" type="button" on:click={openSettings} title="设置" aria-label="设置">⚙</button>
       </div>
@@ -1298,6 +1325,12 @@
     border-color: var(--color-border-strong);
     background: var(--color-hover);
     color: var(--color-text);
+  }
+
+  .toolbox-settings-btn.active {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: #ffffff;
   }
 
   .toolbox-title-row h1 {
@@ -1976,5 +2009,127 @@
       grid-column: auto;
       grid-row: auto;
     }
+  }
+
+  :global(:root[data-tepub-client="web-desktop"] body) {
+    min-width: 1200px;
+    overflow-x: auto;
+  }
+
+  .toolbox-app.desktop-view,
+  :global(:root[data-tepub-client="web-desktop"]) .toolbox-app {
+    min-width: 1200px;
+    min-height: 100vh;
+    height: auto;
+    overflow: auto;
+  }
+
+  .toolbox-app.desktop-view .toolbox-content,
+  :global(:root[data-tepub-client="web-desktop"]) .toolbox-content {
+    width: min(1100px, calc(100% - 48px));
+    flex: 1;
+    min-height: 0;
+    padding: 30px 0 34px;
+    overflow: auto;
+  }
+
+  .toolbox-app.desktop-view .toolbox-title-row,
+  :global(:root[data-tepub-client="web-desktop"]) .toolbox-title-row {
+    min-height: 50px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+
+  .toolbox-app.desktop-view .toolbox-title-actions,
+  :global(:root[data-tepub-client="web-desktop"]) .toolbox-title-actions {
+    width: auto;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  .toolbox-app.desktop-view .toolbox-inline-status,
+  :global(:root[data-tepub-client="web-desktop"]) .toolbox-inline-status {
+    max-width: min(420px, 42vw);
+    text-align: right;
+  }
+
+  .toolbox-app.desktop-view .open-grid,
+  .toolbox-app.desktop-view .process-grid,
+  :global(:root[data-tepub-client="web-desktop"]) .open-grid,
+  :global(:root[data-tepub-client="web-desktop"]) .process-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .toolbox-app.desktop-view .tool-card,
+  :global(:root[data-tepub-client="web-desktop"]) .tool-card {
+    min-height: 104px;
+  }
+
+  .toolbox-app.desktop-view .tool-main,
+  :global(:root[data-tepub-client="web-desktop"]) .tool-main {
+    grid-template-columns: 48px minmax(0, 1fr);
+    min-height: 104px;
+    padding: 16px 18px;
+  }
+
+  .toolbox-app.desktop-view .tool-icon,
+  :global(:root[data-tepub-client="web-desktop"]) .tool-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .toolbox-app.desktop-view .tool-copy,
+  :global(:root[data-tepub-client="web-desktop"]) .tool-copy {
+    padding-right: 58px;
+  }
+
+  .toolbox-app.desktop-view .tool-action,
+  :global(:root[data-tepub-client="web-desktop"]) .tool-action {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    grid-column: auto;
+    justify-self: auto;
+    margin-top: 0;
+  }
+
+  .toolbox-app.desktop-view .tool-batch,
+  :global(:root[data-tepub-client="web-desktop"]) .tool-batch {
+    right: 14px;
+    bottom: 12px;
+  }
+
+  .toolbox-app.desktop-view .web-toolbox-footer,
+  :global(:root[data-tepub-client="web-desktop"]) .web-toolbox-footer {
+    margin-top: auto;
+    padding-top: 24px;
+  }
+
+  .toolbox-app.desktop-view .web-toolbox-footer-card,
+  :global(:root[data-tepub-client="web-desktop"]) .web-toolbox-footer-card {
+    min-width: min(340px, 100%);
+    width: auto;
+    padding: 8px 24px;
+    border-radius: 999px;
+  }
+
+  .toolbox-app.desktop-view .web-footer-line,
+  :global(:root[data-tepub-client="web-desktop"]) .web-footer-line {
+    font-size: 14px;
+  }
+
+  :global(:root[data-tepub-client="web-desktop"] .settings-shell.toolbox-settings-panel) {
+    width: min(92vw, 860px);
+    min-width: min(760px, calc(100vw - 48px));
+    max-width: 860px;
+    min-height: 480px;
+    max-height: 84vh;
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    grid-template-rows: 58px minmax(0, 1fr) 64px;
   }
 </style>
