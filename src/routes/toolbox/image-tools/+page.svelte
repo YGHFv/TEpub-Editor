@@ -25,6 +25,7 @@
     "帮我制作作者{author}的小说《{title}》的标准书籍封面，比例严格为3:4，可以参考原书籍封面。保留书籍气质，画面精致、清晰、无水印，适合 EPUB 封面使用。";
   const DEFAULT_BANNER_PROMPT =
     "帮我制作作者{author}的小说《{title}》的阅微横幅封面，比例严格为2:1，可以参考原书籍封面。画面适合小说阅读应用首页横幅，主体清晰，构图横向展开，精致、清晰、无水印。";
+  const HEADER_SAMPLE_LONG_EDGE = 1080;
 
   const AI_TARGETS: Array<{ id: AiTarget; label: string; size: string; ratioLabel: string }> = [
     { id: "standard", label: "标准封面", size: "1200x1600", ratioLabel: "3:4" },
@@ -215,6 +216,42 @@
     return img;
   }
 
+  function canvasToObjectUrl(canvas: HTMLCanvasElement, mime = "image/png") {
+    return new Promise<string>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("生成图片失败"));
+          return;
+        }
+        resolve(URL.createObjectURL(blob));
+      }, mime);
+    });
+  }
+
+  async function normalizeHeaderSampleImage(image: HTMLImageElement) {
+    const sourceWidth = image.naturalWidth || image.width || 1;
+    const sourceHeight = image.naturalHeight || image.height || 1;
+    const scale = HEADER_SAMPLE_LONG_EDGE / Math.max(sourceWidth, sourceHeight, 1);
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("无法创建头图样图画布");
+    ctx.clearRect(0, 0, width, height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, 0, 0, width, height);
+    const objectUrl = await canvasToObjectUrl(canvas, "image/png");
+    return {
+      image: await imageFromObjectUrl(objectUrl),
+      objectUrl,
+      width,
+      height,
+    };
+  }
+
   function defaultPrompt(target: AiTarget) {
     if (target === "banner") return DEFAULT_BANNER_PROMPT;
     if (target === "standard") return DEFAULT_STANDARD_PROMPT;
@@ -335,14 +372,25 @@
       await platform.message("请选择图片文件。", { title: "图片处理", kind: "warning" });
       return;
     }
-    if (headerSampleObjectUrl) URL.revokeObjectURL(headerSampleObjectUrl);
-    headerSampleObjectUrl = URL.createObjectURL(file);
-    headerSampleImage = await imageFromObjectUrl(headerSampleObjectUrl);
-    headerSampleName = file.name;
-    status = `已载入头图样图 ${file.name}`;
-    resetHeaderTransform();
-    await tick();
-    drawHeaderPreview();
+    const sourceObjectUrl = URL.createObjectURL(file);
+    let normalizedObjectUrl = "";
+    try {
+      const sourceImage = await imageFromObjectUrl(sourceObjectUrl);
+      const normalized = await normalizeHeaderSampleImage(sourceImage);
+      normalizedObjectUrl = normalized.objectUrl;
+      if (headerSampleObjectUrl) URL.revokeObjectURL(headerSampleObjectUrl);
+      headerSampleObjectUrl = normalized.objectUrl;
+      normalizedObjectUrl = "";
+      headerSampleImage = normalized.image;
+      headerSampleName = file.name;
+      status = `已载入头图样图 ${file.name}，长边已规范为 ${HEADER_SAMPLE_LONG_EDGE}px（${normalized.width}x${normalized.height}）`;
+      resetHeaderTransform();
+      await tick();
+      drawHeaderPreview();
+    } finally {
+      URL.revokeObjectURL(sourceObjectUrl);
+      if (normalizedObjectUrl) URL.revokeObjectURL(normalizedObjectUrl);
+    }
   }
 
   function onFileChange(event: Event) {
@@ -1202,7 +1250,7 @@
               <label>横向偏移<input type="number" step="1" bind:value={headerOffsetX} on:input={() => drawHeaderPreview()} /></label>
               <label>纵向偏移<input type="number" step="1" bind:value={headerOffsetY} on:input={() => drawHeaderPreview()} /></label>
             </div>
-            <p class="header-hint">拖动画布调整位置，滚轮缩放；保存时按样图尺寸输出 PNG，并保留样图透明边缘。</p>
+            <p class="header-hint">拖动画布调整位置，滚轮缩放；样图导入时长边规范为 1080，保存时按规范后的样图尺寸输出 PNG，并保留透明边缘。</p>
           </div>
         {:else}
           <div class="mode-section">
