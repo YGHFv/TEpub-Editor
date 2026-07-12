@@ -109,6 +109,6 @@ pnpm tauri build    # 构建桌面安装包
 pnpm dev:web        # Web 版开发服务器
 ```
 
-## 许可证
+## 许可
 
-`package.json` 中标注为 MIT，但仓库暂未包含正式的 `LICENSE` 文件。
+本项目不声明任何开源许可，仅公示源代码。保留所有权利。
