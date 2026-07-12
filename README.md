@@ -151,6 +151,62 @@ TEpub Editor 目前主要覆盖 5 条核心工作流：
 - **macOS**: `.dmg`
 - **Linux**: `.deb` 或 `.AppImage`
 
+## Web 版与 Docker 部署
+
+除了桌面客户端，TEpub Editor 还提供一套 **Web 版**，可以自托管到服务器上，通过浏览器访问。Web 版由一个静态前端加一个轻量 Node 服务组成，服务端负责账号登录、设置同步和 AI 生图代理，用户数据持久化在 `/data` 目录。
+
+### 方式一：docker run（最快上手）
+
+镜像发布在 Docker Hub，可直接拉取运行：
+
+```bash
+docker run -d \
+  --name tepub-editor-web \
+  -p 5233:5233 \
+  -v tepub-web-data:/data \
+  --restart unless-stopped \
+  yghf/tepub-editor-web:latest
+```
+
+启动后访问 `http://<服务器IP>:5233` 即可。用户账号和设置会保存在 `tepub-web-data` 这个命名卷里，容器重建也不会丢。
+
+### 方式二：docker compose（推荐长期部署）
+
+仓库根目录已经带了 `docker-compose.yml`。克隆仓库或只下载这个文件后，执行：
+
+```bash
+docker compose up -d
+```
+
+默认会从 Docker Hub 拉取 `yghf/tepub-editor-web:latest` 镜像并在 `5233` 端口启动，无需本地编译。可以通过环境变量调整：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `TEPUB_WEB_PORT` | `5233` | 对外映射的端口 |
+| `PUBLIC_TEPUB_API_BASE` | `/api` | 前端请求 API 的基础路径 |
+
+如果想改成从本地源码现场构建，把 `docker-compose.yml` 里的 `image:` 段换成 `build: { context: . }` 即可。
+
+### 方式三：本地构建镜像
+
+```bash
+docker build -t tepub-editor-web .
+docker run -d -p 5233:5233 -v tepub-web-data:/data tepub-editor-web
+```
+
+### 数据与升级
+
+- **数据位置**：所有用户数据落在容器内 `/data`（`users.json`），务必挂载卷持久化。
+- **健康检查**：`GET /healthz` 返回 `ok`，可用于探针。
+- **升级**：拉取新镜像后重建容器即可，数据卷保持不变。
+
+```bash
+docker compose pull && docker compose up -d
+# 或 docker run 方式：
+docker pull yghf/tepub-editor-web:latest
+docker rm -f tepub-editor-web && docker run -d ...（同上）
+```
+
 ## 本地开发
 
 ### 环境要求
@@ -171,6 +227,46 @@ pnpm tauri dev
 ```bash
 pnpm tauri build
 ```
+
+### Web 版开发与构建
+
+```bash
+pnpm dev:web          # 启动 Web 开发服务器（127.0.0.1:5233）
+pnpm build:web        # 构建静态前端到 build/
+pnpm serve:web        # 用内置 Node 服务托管 build/（含 API）
+```
+
+## 持续集成与自动发布
+
+仓库内置了几条 GitHub Actions 流水线：
+
+- **Release**（`release.yml`）：推送 `v*` tag 时自动构建 Windows / macOS / Linux 安装包与 Android APK，并发布到 Releases。
+- **Deploy Web To GitHub Pages**（`pages.yml`）：推送到 `main` 时把 Web 版部署到 GitHub Pages（纯静态，API 不可用）。
+- **Publish Docker Image**（`docker-publish.yml`）：推送到 `main` 或 `v*` tag 时，自动构建多架构镜像并推送到 Docker Hub。
+
+### 配置 Docker Hub 自动上传
+
+要让 `docker-publish.yml` 能推送镜像，需要在 Docker Hub 和 GitHub 各做一步配置：
+
+1. **在 Docker Hub 创建访问令牌（Access Token）**
+   - 登录 [hub.docker.com](https://hub.docker.com) → 右上角头像 → **Account settings** → **Personal access tokens**。
+   - 点击 **Generate new token**，权限选择 **Read & Write**，复制生成的令牌（只显示一次）。
+   - 用令牌而不是登录密码更安全，也不会因改密码而失效。
+
+2. **在 GitHub 仓库添加 Secrets**
+   - 进入仓库 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**。
+   - 添加两个：
+     - `DOCKERHUB_USERNAME`：你的 Docker Hub 用户名。
+     - `DOCKERHUB_TOKEN`：上一步生成的访问令牌。
+
+3. **触发发布**
+   - 推送到 `main` 分支会打上 `latest` 标签。
+   - 推送 `v1.2.3` 这样的 tag 会额外打上 `1.2.3`、`1.2` 语义化版本标签。
+   - 也可以在 Actions 页面手动 **Run workflow**。
+
+镜像会自动构建 `linux/amd64` 和 `linux/arm64` 两种架构，并使用 GitHub Actions 缓存加速后续构建。首次成功推送后，就能在 Docker Hub 的仓库页面看到镜像，之后每次推送代码都会自动更新。
+
+> 提示：Docker Hub 仓库默认是公开的。如果想要私有仓库，在 Docker Hub 网站上把对应仓库改为 Private 即可，workflow 无需改动。
 
 ## 这个项目的特点
 

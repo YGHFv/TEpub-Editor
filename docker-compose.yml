@@ -1,10 +1,6 @@
 services:
   tepub-web:
-    build:
-      context: .
-      args:
-        PUBLIC_TEPUB_API_BASE: ${PUBLIC_TEPUB_API_BASE:-/api}
-    image: tepub-editor-web:latest
+    image: yghf/tepub-editor-web:latest
     container_name: tepub-editor-web
     ports:
       - "${TEPUB_WEB_PORT:-5233}:5233"
