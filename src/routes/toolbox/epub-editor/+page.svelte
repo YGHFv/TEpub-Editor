@@ -1027,7 +1027,8 @@
     const bodyFontSize = readerMode ? `${readerPreviewFontSize}px` : "inherit";
     style.textContent = `
       html, body { margin: 0; padding: 0; background: #fffdf9; color: #172033; }
-      body { box-sizing: border-box; max-width: ${bodyMaxWidth}; margin: 0 auto; padding: ${bodyPadding}; font-size: ${bodyFontSize}; line-height: 1.8; }
+      html { overflow-x: hidden; }
+      body { box-sizing: border-box; max-width: ${bodyMaxWidth}; margin: 0 auto; padding: ${bodyPadding}; font-size: ${bodyFontSize}; line-height: 1.8; overflow-x: hidden; }
       img, svg, video { max-width: 100%; height: auto; }
     `;
     htmlDoc.head.prepend(style);
