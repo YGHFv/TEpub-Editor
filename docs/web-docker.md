@@ -1,6 +1,6 @@
 # Web Docker 部署
 
-Web 版本容器包含静态前端和轻量 Node API 服务。API 当前提供账号注册、登录和账号级设置保存，数据默认写入容器卷 `/data/users.json`。
+Web 版本容器包含静态前端和轻量 Node API 服务。API 提供账号注册、登录、账号级设置保存，以及文字模型和生图请求的可选代理；账号数据默认写入容器卷 `/data/users.json`。
 
 ## 本地开发
 
@@ -56,7 +56,7 @@ TEPUB_WEB_PORT=8090 docker compose up -d --build
 ## 更新流程
 
 ```bash
-git checkout feature/web-deploy
+git checkout main
 git pull
 docker compose up -d --build
 docker image prune -f
@@ -66,5 +66,6 @@ docker image prune -f
 
 - 未登录：设置只保存在当前浏览器会话，关闭浏览器后会恢复默认。
 - 已登录：设置按账号保存到服务器 `/data/users.json`，包括主题、API 配置、工具箱设置和目录正则。
+- Web 书库图书、封面和 TXT 历史版本保存在当前浏览器的 IndexedDB 中，不会上传到服务端；清理站点数据会删除这些本地内容。
 - 桌面端/Tauri 不使用这个 Node API，原有平台功能不受影响。
 

@@ -7,6 +7,7 @@
   import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
   import FileTreeItem from "$lib/FileTreeItem.svelte";
   import TocNode from "$lib/TocNode.svelte";
+  import { getWebLibraryBook, replaceWebLibraryBookBlob } from "$lib/webLibrary";
   import {
     addWebEpubResource,
     deleteWebEpubResource,
@@ -107,6 +108,7 @@
   let previewBuildId = 0;
   let readerPreviewFontSize = 18;
   let readerTocCollapsed = false;
+  let libraryBookId = "";
 
   $: readerMode = $page.url.searchParams.get("mode") === "reader";
   $: headTitle = readerMode ? "Web EPUB 阅读器 - TEpub Editor" : "Web EPUB 编辑器 - TEpub Editor";
@@ -436,6 +438,16 @@
       document.body.style.overflow = bodyOverflow;
       document.documentElement.style.overflow = htmlOverflow;
     };
+    const requestedLibraryBook = $page.url.searchParams.get("library") || "";
+    if (requestedLibraryBook) {
+      libraryBookId = requestedLibraryBook;
+      void getWebLibraryBook(requestedLibraryBook).then((book) => {
+        if (!book || book.kind !== "epub") throw new Error("书库中找不到该 EPUB");
+        return loadEpubFile(new File([book.blob], book.fileName, { type: "application/epub+zip", lastModified: book.modifiedAt }));
+      }).catch((error) => {
+        status = `从书库载入失败：${error instanceof Error ? error.message : String(error)}`;
+      });
+    }
   });
 
   onDestroy(() => {
@@ -445,9 +457,7 @@
     restorePageOverflow?.();
   });
 
-  async function onFileChange(event: Event) {
-    const file = (event.currentTarget as HTMLInputElement).files?.[0];
-    if (!file) return;
+  async function loadEpubFile(file: File) {
     busy = true;
     status = "正在解包 EPUB...";
     selectedFile = null;
@@ -486,6 +496,13 @@
       busy = false;
       if (fileInput) fileInput.value = "";
     }
+  }
+
+  async function onFileChange(event: Event) {
+    const file = (event.currentTarget as HTMLInputElement).files?.[0];
+    if (!file) return;
+    libraryBookId = "";
+    await loadEpubFile(file);
   }
 
   function persistCurrentFile(options: { refreshPreview?: boolean } = {}) {
@@ -890,13 +907,14 @@
     status = "正在重新打包 EPUB...";
     try {
       const blob = await exportWebEpubBlob(doc);
+      if (libraryBookId) await replaceWebLibraryBookBlob(libraryBookId, blob);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = outputFileName();
       anchor.click();
       URL.revokeObjectURL(url);
-      status = `已导出 ${anchor.download}`;
+      status = libraryBookId ? `已保存到 Web 书库并导出 ${anchor.download}` : `已导出 ${anchor.download}`;
     } catch (error) {
       status = `导出失败：${String(error)}`;
     } finally {
@@ -1454,7 +1472,7 @@
   {#if !doc}
     <div class="import-shell">
       <header class="mobile-import-topbar">
-        <a href={appPath("/")} aria-label="返回">
+        <a href={appPath(libraryBookId ? "/toolbox/library" : "/")} aria-label="返回">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M15 6L9 12L15 18"></path>
           </svg>

@@ -413,11 +413,55 @@ function formatAiImageResult(bytes, title, target, prompt, size) {
   };
 }
 
+async function runAiProofingCommand(payload) {
+  const request = payload?.request || {};
+  const config = request.config || {};
+  const base = String(config.baseUrl || "").trim().replace(/\/+$/, "");
+  const apiKey = String(config.apiKey || "").trim();
+  const model = String(config.model || "").trim();
+  if (!base || !apiKey || !model) throw new Error("请先填写文字模型 API 地址、API Key 和模型名");
+  const endpoint = base.toLowerCase().endsWith("/chat/completions") ? base : `${base}/chat/completions`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(30, Math.min(1800, Number(config.responseTimeoutSec) || 300)) * 1000);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        temperature: Math.max(0, Math.min(1, Number(config.temperature) || 0.1)),
+        max_tokens: 8192,
+        stream: false,
+        messages: [
+          { role: "system", content: String(request.systemPrompt || "") },
+          { role: "user", content: String(request.userPrompt || "") },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let value;
+    try { value = JSON.parse(text); } catch { throw new Error(`文字模型未返回有效 JSON：${text.slice(0, 180)}`); }
+    if (!response.ok) throw new Error(value?.error?.message || value?.error || value?.message || `文字模型返回 ${response.status}`);
+    const raw = value?.choices?.[0]?.message?.content;
+    const content = Array.isArray(raw)
+      ? raw.map((item) => typeof item === "string" ? item : item?.text || item?.content || "").join("")
+      : String(raw || "");
+    if (!content.trim()) throw new Error("文字模型响应中没有可用内容");
+    return { content };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function handleCommand(req, res, command) {
   try {
     const body = await readBody(req);
     if (req.method === "POST" && command === "toolbox_generate_ai_image") {
       return json(res, 200, await generateAiImageCommand(body));
+    }
+    if (req.method === "POST" && command === "run_ai_proofing") {
+      return json(res, 200, await runAiProofingCommand(body));
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {

@@ -1,14 +1,24 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { base } from "$app/paths";
+  import { page } from "$app/stores";
   import { onMount, tick } from "svelte";
   import {
     DEFAULT_TOC_REGEX_RULES,
     loadAppSettings,
+    providerToProofingConfig,
     saveAppSettings,
     type TocRegexRule,
   } from "$lib/appSettings";
   import { platform } from "$lib/platform";
+  import {
+    getWebLibraryBook,
+    listWebTextHistory,
+    removeWebTextHistorySnapshot,
+    replaceWebLibraryBookBlob,
+    saveWebTextHistorySnapshot,
+    type WebTextHistorySnapshot,
+  } from "$lib/webLibrary";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import TxtCodeEditor from "$lib/TxtCodeEditor.svelte";
   import {
@@ -22,6 +32,7 @@
     type ProofRegexPreviewRow,
     type ProofTocNode,
   } from "$lib/textProofing";
+  import { runWebAiText } from "$lib/webAiText";
 
   type EncodingOption = "utf-8" | "gb18030" | "big5";
   type SearchMode = "plain" | "regex";
@@ -86,6 +97,15 @@
     message: string;
   };
 
+  type AiProofRow = {
+    id: string;
+    start: number;
+    end: number;
+    original: string;
+    replacement: string;
+    selected: boolean;
+  };
+
   const DRAFT_KEY = "tepub-web-text-editor-draft";
   const EPUB_HANDOFF_KEY = "tepub-web-text-editor-epub-handoff";
   const encodingLabels: Record<EncodingOption, string> = {
@@ -141,6 +161,7 @@
   let regexPanelOpen = false;
   let searchPanelOpen = true;
   let proofPanelOpen = true;
+  let historyPanelOpen = false;
   let checkPanelOpen = false;
   let reorderPanelOpen = false;
   let sequenceErrors: TocCheckIssue[] = [];
@@ -158,6 +179,12 @@
   let charCount = 0;
   let wordCount = 0;
   let byteCount = 0;
+  let libraryBookId = "";
+  let historyList: WebTextHistorySnapshot[] = [];
+  let aiProofRunning = false;
+  let aiProofMessage = "";
+  let aiProofRows: AiProofRow[] = [];
+  let aiProofBaseContent = "";
 
   $: if (currentMatchIndex >= matches.length) currentMatchIndex = matches.length - 1;
   $: visibleTocItems = tocItems.filter((item) => item.kind !== "chapter" || !item.volumeKey || expandedVolumes.has(item.volumeKey));
@@ -169,6 +196,17 @@
   $: hasLoadedText = Boolean(sourceBytes || content.trim());
 
   onMount(() => {
+    const requestedLibraryBook = $page.url.searchParams.get("library") || "";
+    if (requestedLibraryBook) {
+      libraryBookId = requestedLibraryBook;
+      void getWebLibraryBook(requestedLibraryBook).then((book) => {
+        if (!book || book.kind !== "txt") throw new Error("书库中找不到该 TXT");
+        return loadTextFile(new File([book.blob], book.fileName, { type: "text/plain", lastModified: book.modifiedAt }));
+      }).catch((error) => {
+        status = `从书库载入失败：${error instanceof Error ? error.message : String(error)}`;
+      });
+      return;
+    }
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft) {
       try {
@@ -294,11 +332,7 @@
     fileInput?.click();
   }
 
-  async function onFileChange(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = "";
-    if (!file) return;
+  async function loadTextFile(file: File) {
     try {
       sourceBytes = new Uint8Array(await file.arrayBuffer());
       fileName = file.name || "untitled.txt";
@@ -314,10 +348,21 @@
       updateTextStats(true);
       status = `已导入 ${fileName}，自动识别为 ${encodingLabels[encoding]}，正在扫描目录...`;
       await scanLoadedContent(`已导入 ${fileName}`);
+      await saveWebTextHistorySnapshot(historySourceKey(), fileName, content);
+      if (historyPanelOpen) await refreshHistory();
       editorEl?.focus?.();
     } catch (error) {
       await platform.message(`导入失败：${String(error)}`, { title: "TXT 编辑器", kind: "error" });
     }
+  }
+
+  async function onFileChange(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    libraryBookId = "";
+    await loadTextFile(file);
   }
 
   function decodeSourceBytesAuto(bytes: Uint8Array): { encoding: EncodingOption; text: string } {
@@ -366,8 +411,145 @@
     }
     const selected = await platform.saveDialog({ defaultPath: outputFileName() });
     if (!selected) return;
-    await platform.writeFile(selected, Array.from(new TextEncoder().encode(content)));
-    status = `已导出 ${selected.split(/[\\/]/).pop() || selected}`;
+    await saveWebTextHistorySnapshot(historySourceKey(), fileName, content);
+    const bytes = new TextEncoder().encode(content);
+    if (libraryBookId) await replaceWebLibraryBookBlob(libraryBookId, new Blob([bytes], { type: "text/plain;charset=utf-8" }));
+    await platform.writeFile(selected, Array.from(bytes));
+    status = libraryBookId
+      ? `已保存到 Web 书库并导出 ${selected.split(/[\\/]/).pop() || selected}`
+      : `已导出 ${selected.split(/[\\/]/).pop() || selected}`;
+    if (historyPanelOpen) await refreshHistory();
+  }
+
+  function historySourceKey() {
+    return libraryBookId ? `library:${libraryBookId}` : `file:${fileName.trim().toLowerCase() || "untitled.txt"}`;
+  }
+
+  async function refreshHistory() {
+    historyList = await listWebTextHistory(historySourceKey());
+  }
+
+  async function toggleHistoryPanel() {
+    historyPanelOpen = !historyPanelOpen;
+    if (historyPanelOpen) await refreshHistory();
+  }
+
+  async function createHistorySnapshot() {
+    syncContentFromEditor();
+    if (!content) return;
+    await saveWebTextHistorySnapshot(historySourceKey(), fileName, content);
+    await refreshHistory();
+    status = "已创建历史快照";
+  }
+
+  async function restoreHistorySnapshot(snapshot: WebTextHistorySnapshot) {
+    if (!confirm(`回退到 ${new Date(snapshot.timestamp).toLocaleString()} 的版本？\n当前内容会先保存为新快照。`)) return;
+    syncContentFromEditor();
+    await saveWebTextHistorySnapshot(historySourceKey(), fileName, content);
+    resetEditorContent(snapshot.content);
+    sourceBytes = new TextEncoder().encode(snapshot.content);
+    tocLineOffsets = new Map();
+    markSearchDirty();
+    updateTextStats(true);
+    await scanLoadedContent("已回退到历史版本");
+    await refreshHistory();
+    status = `已回退到 ${new Date(snapshot.timestamp).toLocaleString()}，导出后写入文件`;
+  }
+
+  async function deleteHistorySnapshot(snapshot: WebTextHistorySnapshot) {
+    await removeWebTextHistorySnapshot(snapshot.id);
+    await refreshHistory();
+  }
+
+  function buildAiProofChunks(text: string, requestedSize: number) {
+    const maxSize = Math.max(2000, Math.min(12000, requestedSize || 8000));
+    const chunks: Array<{ start: number; end: number; text: string }> = [];
+    let start = 0;
+    while (start < text.length) {
+      let end = Math.min(text.length, start + maxSize);
+      if (end < text.length) {
+        const lineBreak = text.lastIndexOf("\n", end);
+        if (lineBreak > start + maxSize * 0.55) end = lineBreak + 1;
+      }
+      chunks.push({ start, end, text: text.slice(start, end) });
+      start = end;
+    }
+    return chunks;
+  }
+
+  function parseAiProofText(raw: string) {
+    const clean = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    try {
+      const value = JSON.parse(clean);
+      const result = value?.text ?? value?.corrected ?? value?.content;
+      if (typeof result === "string") return result;
+    } catch {
+      // Some compatible APIs ignore JSON-only instructions and return the corrected text directly.
+    }
+    return clean;
+  }
+
+  async function runAiProofing() {
+    syncContentFromEditor();
+    if (!content || aiProofRunning) return;
+    const settings = loadAppSettings();
+    const provider = settings.aiProviders.find((item) => item.id === settings.txtAiProofing.providerId && item.kind === "text")
+      || settings.aiProviders.find((item) => item.kind === "text");
+    const config = providerToProofingConfig(provider, settings.aiProofing);
+    const chunks = buildAiProofChunks(content, config.maxChapterChars);
+    aiProofRunning = true;
+    aiProofRows = [];
+    aiProofBaseContent = content;
+    try {
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index];
+        aiProofMessage = `智能校对 ${index + 1} / ${chunks.length}`;
+        const response = await runWebAiText(
+          config,
+          `你是中文小说校对编辑。修正明显错别字、标点和病句，不改变剧情、叙述人称、段落顺序与换行。只返回 JSON：{\"text\":\"完整校对后文本\"}。${config.extraPrompt || ""}`,
+          chunk.text,
+        );
+        const replacement = parseAiProofText(response.content);
+        if (replacement && replacement !== chunk.text) {
+          aiProofRows = [...aiProofRows, { id: `ai-${index}`, start: chunk.start, end: chunk.end, original: chunk.text, replacement, selected: true }];
+        }
+      }
+      aiProofMessage = aiProofRows.length ? `发现 ${aiProofRows.length} 个分块修改，请预览后应用` : "未发现需要修改的内容";
+    } catch (error) {
+      aiProofMessage = `智能校对失败：${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      aiProofRunning = false;
+    }
+  }
+
+  function toggleAiProofRow(id: string) {
+    aiProofRows = aiProofRows.map((row) => row.id === id ? { ...row, selected: !row.selected } : row);
+  }
+
+  function setAllAiProofRows(selected: boolean) {
+    aiProofRows = aiProofRows.map((row) => ({ ...row, selected }));
+  }
+
+  async function applyAiProofing() {
+    syncContentFromEditor();
+    if (content !== aiProofBaseContent) {
+      aiProofMessage = "文本已在校对后发生变化，请重新运行智能校对";
+      return;
+    }
+    const selected = aiProofRows.filter((row) => row.selected).sort((a, b) => b.start - a.start);
+    if (!selected.length) return;
+    await saveWebTextHistorySnapshot(historySourceKey(), fileName, content);
+    let next = content;
+    for (const row of selected) next = `${next.slice(0, row.start)}${row.replacement}${next.slice(row.end)}`;
+    resetEditorContent(next);
+    sourceBytes = new TextEncoder().encode(next);
+    tocLineOffsets = new Map();
+    markSearchDirty();
+    updateTextStats(true);
+    await scanLoadedContent(`已应用 ${selected.length} 个智能校对分块`);
+    aiProofRows = [];
+    aiProofBaseContent = "";
+    aiProofMessage = `已应用 ${selected.length} 个分块，原文已保存到历史版本`;
   }
 
   function escapeRegex(value: string) {
@@ -1080,7 +1262,7 @@
   {#if !hasLoadedText}
     <div class="import-shell">
       <header class="mobile-import-topbar">
-        <a href={appPath("/")} aria-label="返回">
+        <a href={appPath(libraryBookId ? "/toolbox/library" : "/")} aria-label="返回">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M15 6L9 12L15 18"></path>
           </svg>
@@ -1166,6 +1348,32 @@
         <button type="button" on:click={prepareEpubHandoff}>制作 EPUB</button>
         <button type="button" class="primary" on:click={downloadText}>导出 TXT</button>
       </div>
+
+      <section class="tool-section" class:collapsed={!historyPanelOpen}>
+        <button class="section-toggle" type="button" on:click={toggleHistoryPanel}>
+          <span>历史版本</span>
+          <small>{historyPanelOpen ? `${historyList.length} 个快照` : "浏览器本地"}</small>
+          <b>{historyPanelOpen ? "▾" : "▸"}</b>
+        </button>
+        {#if historyPanelOpen}
+          <div class="section-body">
+            <button type="button" class="primary" on:click={createHistorySnapshot}>创建当前快照</button>
+            <div class="history-list">
+              {#each historyList as snapshot (snapshot.id)}
+                <div class="history-row">
+                  <button type="button" class="history-restore" on:click={() => restoreHistorySnapshot(snapshot)}>
+                    <strong>{new Date(snapshot.timestamp).toLocaleString()}</strong>
+                    <small>{(snapshot.size / 1024).toFixed(1)} KB</small>
+                  </button>
+                  <button type="button" class="danger icon-button" title="删除快照" aria-label="删除快照" on:click={() => deleteHistorySnapshot(snapshot)}>×</button>
+                </div>
+              {:else}
+                <p>暂无历史快照。</p>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </section>
 
       <section class="tool-section" class:collapsed={!regexPanelOpen}>
         <button class="section-toggle" type="button" on:click={() => (regexPanelOpen = !regexPanelOpen)}>
@@ -1362,6 +1570,25 @@
               <button type="button" disabled={busy || !content} on:click={() => openConvertPreview("simplified-to-traditional")}>预览转繁</button>
               <button type="button" disabled={busy || !content} on:click={() => openConvertPreview("traditional-to-simplified")}>预览转简</button>
             </div>
+            <div class="ai-proof-actions">
+              <button type="button" class="primary" disabled={busy || !content || aiProofRunning} on:click={runAiProofing}>{aiProofRunning ? "校对中..." : "智能校对"}</button>
+              <span>{aiProofMessage || "使用工具箱设置中的文字模型"}</span>
+            </div>
+            {#if aiProofRows.length}
+              <div class="ai-proof-preview">
+                <div class="button-row">
+                  <button type="button" class="ghost" on:click={() => setAllAiProofRows(true)}>全选</button>
+                  <button type="button" class="ghost" on:click={() => setAllAiProofRows(false)}>全不选</button>
+                  <button type="button" class="primary" on:click={applyAiProofing}>应用选中</button>
+                </div>
+                {#each aiProofRows as row (row.id)}
+                  <label class="ai-proof-row">
+                    <input type="checkbox" checked={row.selected} on:change={() => toggleAiProofRow(row.id)} />
+                    <span><del>{row.original.slice(0, 160)}</del><ins>{row.replacement.slice(0, 160)}</ins></span>
+                  </label>
+                {/each}
+              </div>
+            {/if}
             {#if proofPreview.open}
               <div class="proof-preview">
                 <div class="preview-head">
@@ -1669,6 +1896,43 @@
 
   .side-actions button {
     width: 100%;
+  }
+
+  .history-list {
+    display: grid;
+    gap: 6px;
+  }
+
+  .history-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 34px;
+    gap: 6px;
+  }
+
+  .history-restore {
+    min-width: 0;
+    height: auto;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 9px;
+    text-align: left;
+  }
+
+  .history-restore strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+
+  .history-restore small {
+    flex: 0 0 auto;
+    color: #64748b;
+    font-size: 10px;
   }
 
   .tool-section {
@@ -2090,6 +2354,64 @@
     color: #64748b;
     font-size: 12px;
   }
+
+  .ai-proof-actions {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 9px;
+  }
+
+  .ai-proof-actions span {
+    min-width: 0;
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .ai-proof-preview {
+    max-height: 310px;
+    display: grid;
+    gap: 7px;
+    padding: 9px;
+    overflow: auto;
+    border: 1px solid #dbe4ec;
+    border-radius: 7px;
+    background: #f8fafc;
+  }
+
+  .ai-proof-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 7px;
+    padding: 7px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #fff;
+  }
+
+  .ai-proof-row input {
+    width: 16px;
+    height: 16px;
+  }
+
+  .ai-proof-row span {
+    min-width: 0;
+    display: grid;
+    gap: 5px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .ai-proof-row del,
+  .ai-proof-row ins {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .ai-proof-row del { color: #9b3d3d; }
+  .ai-proof-row ins { color: #176b48; text-decoration: none; }
 
   .proof-preview {
     display: grid;

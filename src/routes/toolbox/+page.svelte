@@ -98,8 +98,6 @@
   const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
   const TOOLBOX_WINDOW_WIDTH = 1200;
   const TOOLBOX_WINDOW_HEIGHT = 740;
-  const WEB_UNAVAILABLE_TEXT = "\u7f51\u9875\u7248\u6682\u672a\u5b9e\u88c5";
-  const WEB_UNAVAILABLE_ACTION = "\u6682\u4e0d\u53ef\u7528";
   const THEME_OPTIONS = [
     { value: "modern", label: "现代" },
     { value: "classic", label: "经典" },
@@ -232,7 +230,7 @@
     .map((group) => ({
       ...group,
       meta: platform.isWeb && group.id === "open" ? "Web 工具入口" : group.meta,
-      tools: group.tools.filter((tool) => !isHiddenWebTool(tool.id)),
+      tools: group.tools,
     }))
     .filter((group) => group.tools.length > 0);
 
@@ -446,11 +444,6 @@
       void goto(webToolHref(tool.id));
       return;
     }
-    if (isWebUnavailableTool(tool.id)) {
-      event.preventDefault();
-      statusText = `${tool.title} ${WEB_UNAVAILABLE_TEXT}`;
-      return;
-    }
     if (tool.id === "epub-style-library") {
       event.preventDefault();
       void openStyleLibrary();
@@ -461,24 +454,22 @@
   }
 
   function isWebRouteTool(id: ToolId) {
-    return id === "image-tools" || id === "txt-epub" || id === "epub-style-library" || id === "txt-edit" || id === "epub-edit" || id === "epub-read";
-  }
-
-  function isHiddenWebTool(id: ToolId) {
-    return platform.isWeb && id === "library";
-  }
-
-  function isWebUnavailableTool(id: ToolId) {
-    return platform.isWeb && !isWebRouteTool(id);
+    return id === "library" || id === "image-tools" || id === "txt-epub" || id === "epub-style-library" || id === "txt-edit" || id === "epub-edit" || id === "epub-read" || id === "epub-diagnose" || id === "font-encrypt" || id === "font-decrypt" || id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert";
   }
 
   function webToolHref(id: ToolId) {
+    if (id === "library") return appPath("/toolbox/library");
     if (id === "image-tools") return appPath("/toolbox/image-tools");
     if (id === "txt-epub") return appPath("/toolbox/make-epub");
     if (id === "epub-style-library") return appPath("/toolbox/epub-style-library");
     if (id === "txt-edit") return appPath("/toolbox/text-editor");
     if (id === "epub-edit") return appPath("/toolbox/epub-editor");
     if (id === "epub-read") return appPath("/toolbox/epub-editor?mode=reader");
+    if (id === "epub-diagnose") return appPath("/toolbox/epub-diagnose");
+    if (id === "font-encrypt" || id === "font-decrypt") return appPath(`/toolbox/font-process?tool=${id}`);
+    if (id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert") {
+      return appPath(`/toolbox/epub-process?tool=${id}`);
+    }
     return "#";
   }
 
@@ -1000,30 +991,29 @@
           {#each group.tools as tool}
             <div
               class="tool-card"
-              class:tool-card-disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
-              class:tool-card-web-unavailable={isWebUnavailableTool(tool.id)}
+              class:tool-card-disabled={busyTool !== ""}
               aria-label={tool.title}
             >
               <a
                 class="tool-main"
                 href={webToolHref(tool.id)}
-                aria-disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
+                aria-disabled={busyTool !== ""}
                 on:click={(event) => handleToolMainClick(event, tool)}
               >
               <span class="tool-icon">{tool.icon}</span>
               <span class="tool-copy">
                 <span class="tool-title">{tool.title}</span>
-                <span class="tool-detail">{busyTool === tool.id ? "处理中..." : isWebUnavailableTool(tool.id) ? WEB_UNAVAILABLE_TEXT : tool.detail}</span>
+                <span class="tool-detail">{busyTool === tool.id ? "处理中..." : tool.detail}</span>
               </span>
-              <span class="tool-action">{isWebUnavailableTool(tool.id) ? WEB_UNAVAILABLE_ACTION : tool.action}</span>
+              <span class="tool-action">{tool.action}</span>
               </a>
               {#if isBatchTool(tool.id)}
                 <button
                   class="tool-batch"
                   type="button"
-                  on:click={() => runBatchForFolder(tool)}
-                  disabled={busyTool !== "" || isWebUnavailableTool(tool.id)}
-                  title="选择文件夹批量处理"
+                  on:click={() => platform.isWeb ? goto(webToolHref(tool.id)) : runBatchForFolder(tool)}
+                  disabled={busyTool !== ""}
+                  title={platform.isWeb ? "选择多个文件批量处理" : "选择文件夹批量处理"}
                 >
                   批量
                 </button>
@@ -1666,16 +1656,6 @@
 
   .tool-card-disabled {
     opacity: 0.68;
-  }
-
-  .tool-card-web-unavailable .tool-main {
-    cursor: not-allowed;
-  }
-
-  .tool-card-web-unavailable .tool-action {
-    border-color: var(--color-border);
-    background: var(--color-hover);
-    color: var(--color-muted);
   }
 
   .tool-main {

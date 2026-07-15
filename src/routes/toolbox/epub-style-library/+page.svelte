@@ -98,6 +98,9 @@
   color: #c2181e;
 }`;
   let titleMessage = "";
+  let selectedPreviewDoc = "";
+  let draftStyle: EpubStyleModule | null = null;
+  let draftPreviewDoc = "";
 
   $: headerStyles = [...EPUB_HEADER_STYLES, ...savedStyles.filter((style) => style.kind === "header")];
   $: titleStyles = [...EPUB_TITLE_STYLES, ...savedStyles.filter((style) => style.kind === "title" && style.target === "chapter-title")];
@@ -112,31 +115,29 @@
     label: style.name,
     meta: style.sourceKind === "saved" ? "自定义" : "内置",
   }));
-  $: selectedPreviewDoc = (
-    selectedStyle,
-    titleStyles,
-    savedStyles,
-    selectedStyle ? buildPreviewDoc(selectedStyle) : ""
-  );
-  $: draftStyle = (
-    viewMode,
-    headerDraft,
-    headerName,
-    headerTitleStyleId,
-    titleCssError,
-    titleName,
-    titleInputMode,
-    titleLayout,
-    titleNumberCss,
-    titleNameCss,
-    titleFullCss,
-    buildDraftStyle()
-  );
-  $: draftPreviewDoc = (
-    draftStyle,
-    titleStyles,
-    draftStyle ? buildPreviewDoc(draftStyle) : ""
-  );
+  $: {
+    void titleStyles;
+    void savedStyles;
+    selectedPreviewDoc = selectedStyle ? buildPreviewDoc(selectedStyle) : "";
+  }
+  $: {
+    void viewMode;
+    void headerDraft;
+    void headerName;
+    void headerTitleStyleId;
+    void titleCssError;
+    void titleName;
+    void titleInputMode;
+    void titleLayout;
+    void titleNumberCss;
+    void titleNameCss;
+    void titleFullCss;
+    draftStyle = buildDraftStyle();
+  }
+  $: {
+    void titleStyles;
+    draftPreviewDoc = draftStyle ? buildPreviewDoc(draftStyle) : "";
+  }
   $: interfaceRows = Object.entries(EPUB_STYLE_INTERFACE).map(([slot, selector]) => ({
     slot,
     selector,

@@ -32,6 +32,56 @@ Main areas:
 
 ## Change History
 
+### 2026-07-16 04:54 +08:00
+
+Request: continue the Web migration until the toolbox workflows are available in the browser.
+
+Changes:
+
+- Added browser-local EPUB processing for file-name encryption/decryption, standard EPUB reformatting, and embedded image conversion, with multi-file routes from the Web toolbox.
+- Added browser-local EPUB font encryption/decryption using `fonteditor-core`, including TTF/OTF/WOFF/WOFF2 handling, saved PUA mappings, optional plaintext TXT alignment, and bundled WOFF2 WASM support.
+- Added an IndexedDB-backed Web library with EPUB/TXT import, cover and metadata editing, search/filter/sort, grid/list views, storage persistence status, download/removal, and direct read/edit navigation.
+- Connected Web library books to the TXT and EPUB editors so exported edits are written back to IndexedDB and editor back actions return to the library.
+- Added IndexedDB TXT history snapshots with automatic initial/export snapshots, manual snapshots, restore, deletion, and per-book cleanup.
+- Added shared Web text-model access with browser direct calls and a Node proxy fallback, then enabled library metadata matching and selectable chunk-based TXT AI proofreading previews.
+- Completed missing-cover replacement by adding a cover resource and OPF declarations when the EPUB did not already contain one.
+- Updated README and Docker documentation to describe the full Web toolbox, browser-local book storage, remaining browser-native system boundaries, and the `main`-branch deployment flow.
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed during implementation.
+- `node --check server/web-server.mjs` passed.
+- `git diff --check` passed.
+- `pnpm check` passed with 0 errors and the existing 51 warnings in 6 files.
+- `pnpm build:web` passed; the existing large-chunk warning remains.
+- Static preview returned HTTP 200 for the toolbox root and all 14 Web tool entry routes (15 tested URLs including reader mode).
+- The production Node server returned HTTP 200 for `/toolbox/library`; the new text-model proxy returned a structured HTTP 400 validation response for an intentionally incomplete request.
+
+### 2026-07-16 03:49 +08:00
+
+Request: remove the only branch other than `main`, continue the Web migration, and clear the repository-level `pnpm check` errors found during verification.
+
+Changes:
+
+- Removed `feature/web-deploy` locally and from `origin`; its only branch-exclusive content was a duplicate of the packaged EPUB preview CSP fix already present on `main`.
+- Added browser-local EPUB diagnostics in `src/lib/webEpubDiagnose.ts`:
+  - validates ZIP/container/OPF discovery,
+  - detects missing manifest resources and case-mismatched paths,
+  - reports resources that exist in the archive but are absent from the OPF manifest,
+  - scans HTML/XML/CSS/SVG/NCX references for missing or case-mismatched targets,
+  - formats downloadable plain-text diagnostic reports.
+- Added `src/routes/toolbox/epub-diagnose/+page.svelte` with multi-file selection and drag/drop, per-file summaries, error/warning filtering, responsive layouts, and report download.
+- Enabled the existing EPUB diagnostics card in the Web toolbox and routed it to `/toolbox/epub-diagnose`.
+- Replaced comma-operator dependency forcing in the EPUB style library with explicit reactive blocks, preserving preview invalidation while allowing `svelte-check` to pass.
+
+Verification:
+
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm check` passed with 0 errors and the existing 51 warnings.
+- `pnpm build:web` passed; existing accessibility and large-chunk warnings remain.
+- Static preview returned HTTP 200 for `/` and `/toolbox/epub-diagnose`.
+- `git diff --check` passed.
+
 ### 2026-07-07 17:35 +08:00
 
 Request: adjust the Web TXT editor layout after visual review: keep the TOC count inline with the TOC title, make the TOC and editor touch the top of the workspace, keep the right tool column offset under the top actions, and make the right tool column scroll vertically instead of compressing all tool blocks together.
