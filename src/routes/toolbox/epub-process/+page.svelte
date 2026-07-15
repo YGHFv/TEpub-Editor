@@ -44,9 +44,9 @@
     },
     "image-convert": {
       title: "图片转换",
-      kicker: "WEBP CONVERTER",
-      description: "把 EPUB 内的 WebP 图片转换为 PNG 或 JPEG，并同步更新资源路径与媒体类型。",
-      detail: "自动模式会为含透明通道的图片选择 PNG，其余图片选择 JPEG。",
+      kicker: "IMAGE CONVERTER",
+      description: "在 EPUB 内进行 WebP 与 PNG/JPEG 双向转换，并同步更新资源路径与媒体类型。",
+      detail: "自动模式把 WebP 按透明通道转为 PNG/JPEG；选择 WebP 时转换 PNG/JPEG。",
       output: "_transfer.epub",
     },
   };
@@ -162,11 +162,12 @@
 
     {#if action === "image-convert"}
       <section class="format-panel">
-        <div><strong>输出格式</strong><span>仅转换 EPUB 内的 WebP 图片</span></div>
+        <div><strong>输出格式</strong><span>自动/PNG/JPEG 处理 WebP；WebP 处理 PNG/JPEG</span></div>
         <div class="segments" aria-label="图片输出格式">
           <button class:active={imageFormat === "auto"} type="button" disabled={busy} on:click={() => { imageFormat = "auto"; }}>自动</button>
           <button class:active={imageFormat === "png"} type="button" disabled={busy} on:click={() => { imageFormat = "png"; }}>PNG</button>
           <button class:active={imageFormat === "jpeg"} type="button" disabled={busy} on:click={() => { imageFormat = "jpeg"; }}>JPEG</button>
+          <button class:active={imageFormat === "webp"} type="button" disabled={busy} on:click={() => { imageFormat = "webp"; }}>WebP</button>
         </div>
       </section>
     {/if}

@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 
 export type WebEpubProcessAction = "file-encrypt" | "file-decrypt" | "epub-reformat" | "image-convert";
-export type WebImageFormat = "auto" | "png" | "jpeg";
+export type WebImageFormat = "auto" | "png" | "jpeg" | "webp";
 
 export type WebEpubProcessOptions = {
   imageFormat?: WebImageFormat;
@@ -406,7 +406,7 @@ async function buildMappedBlob(
   return output.generateAsync({ type: "blob", mimeType: "application/epub+zip", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
 
-async function canvasConvertWebp(entry: JSZip.JSZipObject, requestedFormat: WebImageFormat) {
+async function canvasConvertImage(entry: JSZip.JSZipObject, requestedFormat: WebImageFormat) {
   const sourceBlob = await entry.async("blob");
   const bitmap = await createImageBitmap(sourceBlob);
   const canvas = document.createElement("canvas");
@@ -436,6 +436,10 @@ async function canvasConvertWebp(entry: JSZip.JSZipObject, requestedFormat: WebI
     flattenedContext.drawImage(canvas, 0, 0);
     const blob = await new Promise<Blob>((resolve, reject) => flattened.toBlob((value) => value ? resolve(value) : reject(new Error("JPEG 编码失败")), "image/jpeg", 0.9));
     return { bytes: new Uint8Array(await blob.arrayBuffer()), ext: "jpg", mediaType: "image/jpeg" };
+  }
+  if (format === "webp") {
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("WebP 编码失败")), "image/webp", 0.85));
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), ext: "webp", mediaType: "image/webp" };
   }
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("PNG 编码失败")), "image/png"));
   return { bytes: new Uint8Array(await blob.arrayBuffer()), ext: "png", mediaType: "image/png" };
@@ -526,13 +530,21 @@ async function processReformat(file: File, zip: JSZip, pkg: PackageInfo): Promis
 
 async function processImageConvert(file: File, zip: JSZip, pkg: PackageInfo, format: WebImageFormat): Promise<WebEpubProcessResult> {
   const entries = Object.keys(zip.files);
-  const webpPaths = entries.filter((path) => !zip.files[path].dir && path.toLowerCase().endsWith(".webp"));
-  if (!webpPaths.length) return { sourceName: file.name, outputName: outputName(file.name, "_transfer"), action: "image-convert", changed: false, message: "未发现需要转换的 WebP 图片", processedEntries: 0, blob: file };
-  const used = new Set(entries.filter((path) => !path.toLowerCase().endsWith(".webp")));
+  const sourcePaths = entries.filter((path) => {
+    if (zip.files[path].dir) return false;
+    const ext = extension(path);
+    return format === "webp" ? ext === "png" || ext === "jpg" || ext === "jpeg" : ext === "webp";
+  });
+  if (!sourcePaths.length) {
+    const expected = format === "webp" ? "JPEG/PNG" : "WebP";
+    return { sourceName: file.name, outputName: outputName(file.name, "_transfer"), action: "image-convert", changed: false, message: `未发现需要转换的 ${expected} 图片`, processedEntries: 0, blob: file };
+  }
+  const sources = new Set(sourcePaths);
+  const used = new Set(entries.filter((path) => !sources.has(path)));
   const pathMap = new Map(entries.map((path) => [path, path]));
   const conversions = new Map<string, ImageConversion>();
-  for (const path of webpPaths) {
-    const converted = await canvasConvertWebp(zip.files[path], format);
+  for (const path of sourcePaths) {
+    const converted = await canvasConvertImage(zip.files[path], format);
     const parent = parentPath(path);
     const target = `${parent ? `${parent}/` : ""}${fileStem(path)}.${converted.ext}`;
     const unique = ensureUniquePath(target, used);
@@ -540,7 +552,7 @@ async function processImageConvert(file: File, zip: JSZip, pkg: PackageInfo, for
     conversions.set(path, { newPath: unique, bytes: converted.bytes, mediaType: converted.mediaType });
   }
   const blob = await buildMappedBlob(zip, pathMap, { conversions, opfPath: pkg.opfPath });
-  return { sourceName: file.name, outputName: outputName(file.name, "_transfer"), action: "image-convert", changed: true, message: `图片转换完成，共转换 ${conversions.size} 张 WebP`, processedEntries: conversions.size, blob };
+  return { sourceName: file.name, outputName: outputName(file.name, "_transfer"), action: "image-convert", changed: true, message: `图片转换完成，共转换 ${conversions.size} 张图片`, processedEntries: conversions.size, blob };
 }
 
 export async function processWebEpub(file: File, action: WebEpubProcessAction, options: WebEpubProcessOptions = {}) {

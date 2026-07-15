@@ -41,7 +41,19 @@
     | "epub-reformat"
     | "image-convert"
     | "image-tools"
-    | "epub-diagnose";
+    | "epub-diagnose"
+    | "epub-to-txt"
+    | "epub-version"
+    | "epub-chinese"
+    | "epub-ad-clean"
+    | "epub-phonetic"
+    | "epub-footnote"
+    | "image-compress"
+    | "image-watermark"
+    | "epub-merge"
+    | "epub-split"
+    | "font-subset"
+    | "send-to-kindle";
 
   type Tool = {
     id: ToolId;
@@ -190,7 +202,7 @@
       id: "image-convert",
       icon: "IMG",
       title: "图片转换",
-      detail: "转换 EPUB 内 WebP",
+      detail: "WebP 与 PNG/JPEG 互转",
       action: "处理",
     },
     {
@@ -207,6 +219,18 @@
       detail: "检查 OPF、manifest 和内部引用",
       action: "诊断",
     },
+    { id: "epub-to-txt", icon: "TXT", title: "EPUB 转 TXT", detail: "按阅读顺序提取正文", action: "转换" },
+    { id: "epub-version", icon: "2/3", title: "EPUB 版本转换", detail: "EPUB 2.0 / 3.0 互转", action: "转换" },
+    { id: "epub-chinese", icon: "繁简", title: "EPUB 简繁转换", detail: "转换正文、目录和元数据", action: "转换" },
+    { id: "epub-ad-clean", icon: "CLEAN", title: "EPUB 广告清理", detail: "按正则清理广告段落", action: "清理" },
+    { id: "epub-phonetic", icon: "PIN", title: "EPUB 拼音标注", detail: "生成标准 ruby 注音", action: "标注" },
+    { id: "epub-footnote", icon: "NOTE", title: "批注与脚注", detail: "弹窗批注与 EPUB3 脚注转换", action: "转换" },
+    { id: "image-compress", icon: "ZIP", title: "图片压缩", detail: "压缩 EPUB 内嵌图片", action: "压缩" },
+    { id: "image-watermark", icon: "WM", title: "图片隐形水印", detail: "写入或读取图片文本水印", action: "处理" },
+    { id: "epub-merge", icon: "MERGE", title: "合并 EPUB", detail: "保留资源与阅读顺序", action: "合并" },
+    { id: "epub-split", icon: "SPLIT", title: "拆分 EPUB", detail: "按章节数生成多本 EPUB", action: "拆分" },
+    { id: "font-subset", icon: "FONT S", title: "字体子集化", detail: "移除正文未使用字形", action: "裁剪" },
+    { id: "send-to-kindle", icon: "KINDLE", title: "Send to Kindle", detail: "打开 Amazon 官方传书网页", action: "打开" },
   ];
 
   const toolGroups: ToolGroup[] = [
@@ -222,6 +246,13 @@
       title: "EPUB 处理",
       meta: "生成新文件",
       tools: tools.filter((tool) => tool.id === "font-encrypt" || tool.id === "font-decrypt" || tool.id === "file-encrypt" || tool.id === "file-decrypt" || tool.id === "epub-reformat" || tool.id === "image-convert" || tool.id === "image-tools" || tool.id === "epub-diagnose"),
+      gridClass: "process-grid",
+    },
+    {
+      id: "advanced",
+      title: "转换与整理",
+      meta: "安装版 / Web 共用内核",
+      tools: tools.filter((tool) => tool.id === "epub-to-txt" || tool.id === "epub-version" || tool.id === "epub-chinese" || tool.id === "epub-ad-clean" || tool.id === "epub-phonetic" || tool.id === "epub-footnote" || tool.id === "image-compress" || tool.id === "image-watermark" || tool.id === "epub-merge" || tool.id === "epub-split" || tool.id === "font-subset" || tool.id === "send-to-kindle"),
       gridClass: "process-grid",
     },
   ];
@@ -439,7 +470,7 @@
       event.preventDefault();
       return;
     }
-    if (platform.isWeb && isWebRouteTool(tool.id)) {
+    if (isSharedBrowserTool(tool.id) || (platform.isWeb && isWebRouteTool(tool.id))) {
       event.preventDefault();
       void goto(webToolHref(tool.id));
       return;
@@ -449,15 +480,26 @@
       void openStyleLibrary();
       return;
     }
+    if (tool.id === "send-to-kindle") {
+      event.preventDefault();
+      statusText = "正在打开 Send to Kindle";
+      void platform.openExternal("https://www.amazon.com/sendtokindle");
+      return;
+    }
     event.preventDefault();
     pickFile(tool);
   }
 
   function isWebRouteTool(id: ToolId) {
-    return id === "library" || id === "image-tools" || id === "txt-epub" || id === "epub-style-library" || id === "txt-edit" || id === "epub-edit" || id === "epub-read" || id === "epub-diagnose" || id === "font-encrypt" || id === "font-decrypt" || id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert";
+    return id === "library" || id === "image-tools" || id === "txt-epub" || id === "epub-style-library" || id === "txt-edit" || id === "epub-edit" || id === "epub-read" || id === "epub-diagnose" || id === "font-encrypt" || id === "font-decrypt" || id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert" || isSharedBrowserTool(id);
+  }
+
+  function isSharedBrowserTool(id: ToolId) {
+    return id === "image-convert" || id === "epub-to-txt" || id === "epub-version" || id === "epub-chinese" || id === "epub-ad-clean" || id === "epub-phonetic" || id === "epub-footnote" || id === "image-compress" || id === "image-watermark" || id === "epub-merge" || id === "epub-split" || id === "font-subset";
   }
 
   function webToolHref(id: ToolId) {
+    if (id === "send-to-kindle") return "https://www.amazon.com/sendtokindle";
     if (id === "library") return appPath("/toolbox/library");
     if (id === "image-tools") return appPath("/toolbox/image-tools");
     if (id === "txt-epub") return appPath("/toolbox/make-epub");
@@ -467,6 +509,10 @@
     if (id === "epub-read") return appPath("/toolbox/epub-editor?mode=reader");
     if (id === "epub-diagnose") return appPath("/toolbox/epub-diagnose");
     if (id === "font-encrypt" || id === "font-decrypt") return appPath(`/toolbox/font-process?tool=${id}`);
+    if (id === "font-subset") return appPath("/toolbox/font-process?tool=font-subset");
+    if (id === "epub-to-txt" || id === "epub-version" || id === "epub-chinese" || id === "epub-ad-clean" || id === "epub-phonetic" || id === "epub-footnote" || id === "image-compress" || id === "image-watermark" || id === "epub-merge" || id === "epub-split") {
+      return appPath(`/toolbox/epub-advanced?tool=${id}`);
+    }
     if (id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert") {
       return appPath(`/toolbox/epub-process?tool=${id}`);
     }
@@ -1011,7 +1057,7 @@
                 <button
                   class="tool-batch"
                   type="button"
-                  on:click={() => platform.isWeb ? goto(webToolHref(tool.id)) : runBatchForFolder(tool)}
+                  on:click={() => platform.isWeb || isSharedBrowserTool(tool.id) ? goto(webToolHref(tool.id)) : runBatchForFolder(tool)}
                   disabled={busyTool !== ""}
                   title={platform.isWeb ? "选择多个文件批量处理" : "选择文件夹批量处理"}
                 >

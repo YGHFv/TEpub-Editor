@@ -1,12 +1,11 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 
-// @ts-expect-error process is a nodejs global
+// Vite configuration runs in Node.js.
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }) => {
-  // @ts-expect-error process is a nodejs global
   const isWebMode = mode === "web" || process.env.TEPUB_TARGET === "web";
 
   return {

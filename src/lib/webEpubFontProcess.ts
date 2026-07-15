@@ -3,7 +3,7 @@ import { createFont, woff2, type TTF } from "fonteditor-core";
 import { deflate, inflate } from "pako";
 import { rewriteWebEpubTextLinks } from "$lib/webEpubProcess";
 
-export type WebEpubFontAction = "font-encrypt" | "font-decrypt";
+export type WebEpubFontAction = "font-encrypt" | "font-decrypt" | "font-subset";
 
 export type WebEpubFontProcessResult = {
   sourceName: string;
@@ -154,11 +154,12 @@ async function ensureWoff2() {
   await woff2Ready;
 }
 
-async function parseFont(path: string, bytes: ArrayBuffer): Promise<ParsedFont> {
+async function parseFont(path: string, bytes: ArrayBuffer, subset?: number[]): Promise<ParsedFont> {
   const ext = extension(path);
   if (!FONT_EXTENSIONS.has(ext)) throw new Error(`不支持的字体格式：${path}`);
   if (ext === "woff2") await ensureWoff2();
   const options: any = { type: ext, hinting: true, kerning: true, compound2simple: false };
+  if (subset?.length) options.subset = subset;
   if (ext === "woff") options.inflate = inflate;
   const font = createFont(bytes, options);
   return { path, type: ext as ParsedFont["type"], font, glyphs: font.get().glyf || [] };
@@ -474,9 +475,98 @@ async function decryptFonts(file: File, zip: JSZip, plainText?: string): Promise
   };
 }
 
+function collectSubsetCodePoints(source: string, output: Set<number>) {
+  let rawTag: "script" | "style" | null = null;
+  for (let index = 0; index < source.length;) {
+    if (source[index] === "<") {
+      const end = source.indexOf(">", index + 1);
+      if (end < 0) break;
+      const tag = source.slice(index, end + 1);
+      const match = tag.match(/^<\s*(\/?)\s*([\w:-]+)/);
+      const closing = match?.[1] === "/";
+      const name = match?.[2]?.toLowerCase();
+      if (name === "script" || name === "style") rawTag = closing ? null : name;
+      index = end + 1;
+      continue;
+    }
+    if (!rawTag && source[index] === "&") {
+      const end = source.indexOf(";", index + 1);
+      if (end > index && end - index < 16) { index = end + 1; continue; }
+    }
+    const code = source.codePointAt(index) || 0;
+    const character = String.fromCodePoint(code);
+    if (!rawTag && code >= 32) output.add(code);
+    index += character.length;
+  }
+}
+
+async function subsetFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessResult> {
+  const codePoints = new Set<number>();
+  for (let code = 32; code <= 126; code += 1) codePoints.add(code);
+  for (const path of Object.keys(zip.files).filter((name) => !zip.files[name].dir && HTML_EXTENSIONS.has(extension(name)))) {
+    collectSubsetCodePoints(await zip.files[path].async("text"), codePoints);
+  }
+  if (codePoints.size <= 95) throw new Error("EPUB 正文中没有可用于字体子集化的文字");
+
+  const subset = [...codePoints];
+  const fontPaths = Object.keys(zip.files).filter((path) => !zip.files[path].dir && FONT_EXTENSIONS.has(extension(path)));
+  if (!fontPaths.length) throw new Error("EPUB 内未找到 TTF、OTF、WOFF 或 WOFF2 字体");
+  const pathMap = new Map(Object.keys(zip.files).map((path) => [path, path]));
+  let changedFonts = 0;
+  let savedBytes = 0;
+  for (const path of fontPaths) {
+    try {
+      const source = await zip.files[path].async("arraybuffer");
+      const parsed = await parseFont(path, source, subset);
+      const written = writeFont(parsed);
+      if (written.bytes.byteLength >= source.byteLength && parsed.type !== "otf") continue;
+      let outputPath = path;
+      if (parsed.type === "otf") {
+        outputPath = path.replace(/\.otf$/i, ".ttf");
+        if (zip.file(outputPath) && outputPath !== path) outputPath = path.replace(/\.otf$/i, "-subset.ttf");
+        pathMap.set(path, outputPath);
+        zip.remove(path);
+      }
+      zip.file(outputPath, written.bytes);
+      savedBytes += Math.max(0, source.byteLength - written.bytes.byteLength);
+      changedFonts += 1;
+    } catch {
+      // Keep unsupported fonts unchanged and continue with the remaining embedded fonts.
+    }
+  }
+  if (!changedFonts) throw new Error("内嵌字体无需裁剪或当前字体格式无法子集化");
+
+  if ([...pathMap].some(([from, to]) => from !== to)) {
+    for (const path of Object.keys(zip.files).filter((name) => TEXT_EXTENSIONS.has(extension(name)))) {
+      const source = await zip.files[path].async("text");
+      zip.file(path, rewriteWebEpubTextLinks(source, path, path, pathMap));
+    }
+    const pkg = await packageInfo(zip);
+    for (const item of elementsByLocalName(pkg.opf, "item")) {
+      const href = percentDecode(item.getAttribute("href")?.split(/[?#]/, 1)[0] || "");
+      if (joinPath(pkg.opfDir, href).toLowerCase().endsWith(".ttf")) item.setAttribute("media-type", "font/ttf");
+    }
+    zip.file(pkg.opfPath, new XMLSerializer().serializeToString(pkg.opf));
+  }
+  const blob = await generateEpub(zip);
+  return {
+    sourceName: file.name,
+    outputName: sourceNameWithSuffix(file.name, "_font_subset"),
+    action: "font-subset",
+    changedFiles: 0,
+    mappedCharacters: codePoints.size,
+    changedFonts,
+    mode: "unicode-subset",
+    message: `字体子集化完成：裁剪 ${changedFonts} 个字体，保留 ${codePoints.size} 个码点，字体数据减少 ${(savedBytes / 1024 / 1024).toFixed(2)} MB`,
+    blob,
+  };
+}
+
 export async function processWebEpubFont(file: File, action: WebEpubFontAction, plainText?: string) {
   let zip: JSZip;
   try { zip = await JSZip.loadAsync(await file.arrayBuffer()); }
   catch (error) { throw new Error(`无法读取 EPUB：${String(error)}`); }
-  return action === "font-encrypt" ? encryptFonts(file, zip) : decryptFonts(file, zip, plainText);
+  if (action === "font-encrypt") return encryptFonts(file, zip);
+  if (action === "font-decrypt") return decryptFonts(file, zip, plainText);
+  return subsetFonts(file, zip);
 }

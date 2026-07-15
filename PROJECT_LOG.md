@@ -32,6 +32,58 @@ Main areas:
 
 ## Change History
 
+### 2026-07-16 05:36 +08:00
+
+Request: save all current fixes locally with detailed logs, compare TEpub Editor with `wangyyyqw/epub-toolkit`, and migrate missing features to both the installed desktop build and the Web build.
+
+Reference audit:
+
+- Saved the previous full Web toolbox migration as local commit `e073c0c Complete browser toolbox migration` before starting comparison work.
+- Audited `https://github.com/wangyyyqw/epub-toolkit` at `main` commit `f051b4a0ab4cb4a477b5c969cbd7d082a9c22278` (`1.0.9 - 2026-07-14`).
+- Recorded the full feature matrix, independent-implementation policy, migrated capabilities, and security/sample-based deferrals in `docs/epub-toolkit-feature-audit.md`.
+- The reference repository has no license file, so no Dart source, assets, or UI were copied; implementations below were written independently against EPUB/OCF standards and public behavior descriptions.
+
+Shared desktop/Web migration:
+
+- Added `src/lib/webEpubAdvanced.ts` as a browser-local processing core shared by the installed Tauri frontend and Web build.
+- Added EPUB-to-TXT export in spine reading order.
+- Added EPUB 2.0/3.0 conversion with OPF version updates and automatic NCX/NAV generation.
+- Added whole-book simplified/traditional conversion for XHTML, navigation, and OPF metadata.
+- Added regex-based EPUB advertisement paragraph cleanup with short-node safeguards.
+- Added standard XHTML ruby/pinyin annotation using `pinyin-pro`.
+- Added standard EPUB3 footnote popup-data enhancement and attribute-based popup annotation to EPUB3 footnote conversion.
+- Added raster image compression with quality/max-dimension controls and no-regression size checks.
+- Extended image conversion from one-way WebP decoding to PNG/JPEG and WebP bidirectional conversion.
+- Added checked LSB image watermark embedding/inspection using a TEpub-specific payload format.
+- Added resource-preserving EPUB merge and chapter-count split flows that rebuild manifest, spine, NAV, and NCX.
+- Added font subsetting for TTF/OTF/WOFF/WOFF2 based on code points actually used by EPUB content.
+- Added a safe Send to Kindle official-page launcher for both builds without collecting Amazon credentials.
+- Added `/toolbox/epub-advanced` and extended `/toolbox/font-process`; all migrated cards route to the same pages on desktop and Web.
+
+Testing and tooling:
+
+- Added Vitest and Happy DOM plus `pnpm test`.
+- Added `src/lib/webEpubAdvanced.test.ts`, which generates EPUB ZIP fixtures at runtime and currently covers 10 conversion, structure, content, watermark, merge/split reload, and real Windows TTF subset scenarios.
+- Replaced obsolete `@ts-expect-error` directives in `vite.config.js` after the test environment supplied Node globals directly.
+
+Verification:
+
+- `pnpm test` passed: 10 tests.
+- `pnpm exec tsc --noEmit --pretty false` passed.
+- `pnpm check` passed with 0 errors and the existing 51 warnings in 6 files.
+- `pnpm build` passed for the installed/Tauri frontend target.
+- `pnpm build:web` passed for the Web target; existing large-chunk warnings remain.
+- The first `pnpm tauri build` attempt stopped before compilation because the active shell did not include Cargo in `PATH`; after prepending the existing `%USERPROFILE%/.cargo/bin` toolchain, the full release build passed.
+- `pnpm tauri build` produced `src-tauri/target/release/TEpub-Editor.exe`, `src-tauri/target/release/bundle/msi/TEpub Editor_1.0.0_x64_zh-CN.msi`, and `src-tauri/target/release/bundle/nsis/TEpub Editor_1.0.0_x64-setup.exe`.
+- Production preview returned HTTP 200 for the toolbox root plus all 12 new/extended processing URLs (13 tested URLs total).
+- `git diff --check` passed after documentation updates.
+
+Known boundaries:
+
+- SMTP Kindle sending was not copied because the reference project marks it as not fully device-tested and Web deployment would require handling mailbox credentials; both builds instead open Amazon's official Send to Kindle page.
+- Network-image localization remains deferred until a hardened native/Web proxy can reject private-network DNS results and redirects, cap response sizes, and prevent EPUB-triggered SSRF.
+- Platform-private footnote dialects remain deferred pending real EPUB fixtures; this batch implements standard EPUB3 and generic attribute-based popup conversion rather than unverified regex guesses.
+
 ### 2026-07-16 04:54 +08:00
 
 Request: continue the Web migration until the toolbox workflows are available in the browser.

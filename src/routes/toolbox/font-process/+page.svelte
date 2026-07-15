@@ -15,12 +15,16 @@
   let errorText = "";
   let result: (WebEpubFontProcessResult & { url: string }) | null = null;
 
-  $: action = $page.url.searchParams.get("tool") === "font-decrypt" ? "font-decrypt" : "font-encrypt" as WebEpubFontAction;
+  $: rawAction = $page.url.searchParams.get("tool");
+  $: action = (rawAction === "font-decrypt" || rawAction === "font-subset" ? rawAction : "font-encrypt") as WebEpubFontAction;
   $: decryptMode = action === "font-decrypt";
-  $: title = decryptMode ? "字体解密" : "字体加密";
+  $: subsetMode = action === "font-subset";
+  $: title = decryptMode ? "字体解密" : subsetMode ? "字体子集化" : "字体加密";
   $: description = decryptMode
     ? "恢复 EPUB 中通过私用区字体映射混淆的正文；优先读取内置映射或字体 cmap，也可使用同版本明文 TXT 对齐。"
-    : "将正文汉字替换为私用区字符，并把对应 cmap 写入 EPUB 内嵌字体；映射随文件保存，可跨端恢复。";
+    : subsetMode
+      ? "扫描整本 EPUB 正文实际使用的 Unicode 码点，裁剪未使用字形以减小内嵌字体体积。"
+      : "将正文汉字替换为私用区字符，并把对应 cmap 写入 EPUB 内嵌字体；映射随文件保存，可跨端恢复。";
 
   function appPath(path: string) {
     return `${base}${path.startsWith("/") ? path : `/${path}`}`;
@@ -47,7 +51,7 @@
     clearResult();
     busy = true;
     errorText = "";
-    progress = decryptMode ? "正在分析字体映射并恢复正文…" : "正在分析正文与内嵌字体…";
+    progress = decryptMode ? "正在分析字体映射并恢复正文…" : subsetMode ? "正在收集正文码点并裁剪字体…" : "正在分析正文与内嵌字体…";
     try {
       const processed = await processWebEpubFont(file, action, await readPlainText());
       result = { ...processed, url: URL.createObjectURL(processed.blob) };
@@ -104,7 +108,7 @@
   <header class="topbar">
     <div class="heading">
       <a class="back" href={appPath("/")} aria-label="返回工具箱"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></a>
-      <div><span>FONT {decryptMode ? "RESTORE" : "OBFUSCATION"}</span><h1>{title}</h1></div>
+      <div><span>FONT {decryptMode ? "RESTORE" : subsetMode ? "SUBSET" : "OBFUSCATION"}</span><h1>{title}</h1></div>
     </div>
     <button class="primary" type="button" disabled={busy} on:click={() => epubInput?.click()}>{epubFile ? "重新选择" : "选择 EPUB"}</button>
   </header>
@@ -114,7 +118,7 @@
 
   <main class="content">
     <section class="intro-card">
-      <span class="font-mark">FONT{decryptMode ? "−" : "+"}</span>
+      <span class="font-mark">FONT{decryptMode ? "−" : subsetMode ? "S" : "+"}</span>
       <div><span class="kicker">BROWSER LOCAL FONT TOOL</span><h2>{title}</h2><p>{description}</p></div>
       <div class="privacy"><strong>本地处理</strong><span>EPUB 与字体不会上传</span></div>
     </section>
@@ -134,13 +138,13 @@
 
     {#if !epubFile && !busy}
       <button class="drop-zone" class:drag-active={dragActive} type="button" on:click={() => epubInput?.click()} on:dragenter={(event) => { event.preventDefault(); dragActive = true; }} on:dragover={(event) => event.preventDefault()} on:dragleave={() => { dragActive = false; }} on:drop={handleDrop}>
-        <span class="drop-icon">Aa</span><strong>选择或拖入 EPUB 文件</strong><span>{decryptMode ? "也可以同时拖入对应的明文 TXT" : "支持 TTF、OTF、WOFF 与 WOFF2 内嵌字体"}</span><span class="choose">选择文件</span>
+        <span class="drop-icon">Aa</span><strong>选择或拖入 EPUB 文件</strong><span>{decryptMode ? "也可以同时拖入对应的明文 TXT" : subsetMode ? "自动保留正文所需字形和基础 ASCII 字符" : "支持 TTF、OTF、WOFF 与 WOFF2 内嵌字体"}</span><span class="choose">选择文件</span>
       </button>
     {:else}
       <section class="status-card" class:error={Boolean(errorText)} class:success={Boolean(result)} aria-live="polite">
         {#if busy}<span class="spinner"></span>{:else if result}<span class="state">✓</span>{:else}<span class="state">×</span>{/if}
         <div class="status-copy"><span class="kicker">PROCESS STATUS</span><h3>{epubFile?.name || "EPUB"}</h3><p>{errorText || progress}</p>
-          {#if result}<small>{result.mappedCharacters} 个字符映射 · {result.changedFonts} 个字体 · {result.changedFiles} 个正文 · {result.mode}</small>{/if}
+          {#if result}<small>{result.mappedCharacters} 个{subsetMode ? "保留码点" : "字符映射"} · {result.changedFonts} 个字体 · {result.changedFiles} 个正文 · {result.mode}</small>{/if}
         </div>
         {#if result}<button class="download" type="button" on:click={download}>下载结果</button>{/if}
       </section>
@@ -150,8 +154,8 @@
     {/if}
 
     <section class="notes">
-      <article><b>01</b><div><strong>{decryptMode ? "优先自动恢复" : "正文映射"}</strong><p>{decryptMode ? "先读取 TEpub 映射，再检查字体 cmap，无需 TXT 时不会要求上传。" : "仅替换正文文本节点中的汉字，不修改标签、脚本、样式或 HTML 实体。"}</p></div></article>
-      <article><b>02</b><div><strong>{decryptMode ? "TXT 对齐兜底" : "字体写回"}</strong><p>{decryptMode ? "旧式第三方混淆无法从 cmap 反推时，以同版本 TXT 生成可靠映射。" : "将私用区编码追加到对应字形 cmap，保留原始编码以兼容阅读器。"}</p></div></article>
+      <article><b>01</b><div><strong>{decryptMode ? "优先自动恢复" : subsetMode ? "整书扫描" : "正文映射"}</strong><p>{decryptMode ? "先读取 TEpub 映射，再检查字体 cmap，无需 TXT 时不会要求上传。" : subsetMode ? "从 HTML/XHTML 正文收集码点，并额外保留基础 ASCII 字符。" : "仅替换正文文本节点中的汉字，不修改标签、脚本、样式或 HTML 实体。"}</p></div></article>
+      <article><b>02</b><div><strong>{decryptMode ? "TXT 对齐兜底" : subsetMode ? "仅在变小时写回" : "字体写回"}</strong><p>{decryptMode ? "旧式第三方混淆无法从 cmap 反推时，以同版本 TXT 生成可靠映射。" : subsetMode ? "裁剪结果不比原字体小时保持原文件，避免无意义增大 EPUB。" : "将私用区编码追加到对应字形 cmap，保留原始编码以兼容阅读器。"}</p></div></article>
       <article><b>03</b><div><strong>格式兼容</strong><p>支持 TTF、OTF、WOFF、WOFF2；OTF 修改后会转换为 TTF 并同步更新 EPUB 引用。</p></div></article>
     </section>
   </main>
