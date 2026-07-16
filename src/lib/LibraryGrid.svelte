@@ -14,8 +14,15 @@
   {#each books as book (book.id)}
     <div
       class="book-card"
+      role="button"
+      tabindex="0"
+      aria-label={`${book.title}${book.author ? `，${book.author}` : ""}`}
       class:selected={selectedBook?.id === book.id}
       on:click={() => dispatch("select", book)}
+      on:keydown={(event) => {
+        if (event.key === "Enter") dispatch("open", book);
+        else if (event.key === " ") { event.preventDefault(); dispatch("select", book); }
+      }}
       on:dblclick={() => dispatch("open", book)}
       on:contextmenu={(e) => dispatch("context", { event: e, book })}
       data-context-type="library-book"

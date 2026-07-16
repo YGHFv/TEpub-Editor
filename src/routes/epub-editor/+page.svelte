@@ -6111,27 +6111,6 @@
         box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
     }
 
-    .prompt-options {
-        margin-bottom: 20px;
-    }
-
-    .prompt-checkbox {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-size: 13px;
-        color: #555;
-        cursor: pointer;
-        user-select: none;
-    }
-
-    .prompt-checkbox input {
-        width: 16px;
-        height: 16px;
-        cursor: pointer;
-        margin: 0;
-    }
-
     .prompt-buttons {
         display: flex;
         justify-content: flex-end;
@@ -6610,8 +6589,7 @@
     }
 
     .dialog-content,
-    .prompt-message,
-    .prompt-checkbox {
+    .prompt-message {
         color: var(--color-text-soft) !important;
     }
 

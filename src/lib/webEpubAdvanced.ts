@@ -13,6 +13,7 @@ import {
   type WebEpubDocument,
 } from "$lib/webEpub";
 import { rewriteWebEpubTextLinks } from "$lib/webEpubProcess";
+import { embedImagePayloadInWorker, extractImagePayloadInWorker } from "$lib/webImageDataWorker";
 
 export type WebEpubAdvancedAction =
   | "epub-to-txt"
@@ -33,6 +34,8 @@ export type WebEpubAdvancedOptions = {
   maxImageDimension?: number;
   watermarkMode?: "embed" | "inspect";
   watermarkText?: string;
+  signal?: AbortSignal;
+  onProgress?: (completed: number, total: number) => void;
   outputTitle?: string;
   splitEvery?: number;
   adPatterns?: string;
@@ -236,7 +239,7 @@ async function convertVersion(file: File, targetVersion: "2" | "3"): Promise<Web
 
 async function chineseConverter(direction: "s2t" | "t2s") {
   const { default: OpenCC } = await import("opencc-js");
-  return direction === "s2t" ? OpenCC.Converter({ from: "cn", to: "tw" }) : OpenCC.Converter({ from: "hk", to: "cn" });
+  return direction === "s2t" ? OpenCC.Converter({ from: "cn", to: "tw" }) : OpenCC.Converter({ from: "tw", to: "cn" });
 }
 
 function transformDocumentText(source: string, label: string, convert: (value: string) => string) {
@@ -564,15 +567,22 @@ async function watermarkImages(file: File, options: WebEpubAdvancedOptions): Pro
   const reports: string[] = [];
   let changed = 0;
   if (mode === "inspect") {
-    for (const entry of doc.files.filter((item) => item.kind === "image" && RASTER_EXTENSIONS.has(extension(item.path)))) {
+    const entries = doc.files.filter((item) => item.kind === "image" && RASTER_EXTENSIONS.has(extension(item.path)));
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      options.signal?.throwIfAborted();
       try {
         const blob = await readWebEpubBlob(doc, entry.path, entry.mediaType);
         const { canvas, context } = await canvasEncode(blob, "image/png", 1, 0);
-        const text = extractPayload(context.getImageData(0, 0, canvas.width, canvas.height));
+        const image = context.getImageData(0, 0, canvas.width, canvas.height);
+        const workerText = await extractImagePayloadInWorker(image, options.signal);
+        const text = workerText === undefined ? extractPayload(image) : workerText;
         if (text !== null) reports.push(`${entry.path}: ${text}`);
-      } catch {
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
         // Ignore images the browser cannot decode.
       }
+      options.onProgress?.(index + 1, entries.length);
     }
     const report = reports.length ? reports.join("\n") : "未发现由 TEpub Editor 写入的图片水印。";
     return { sourceNames: [file.name], action: "image-watermark", changedEntries: reports.length, message: `找到 ${reports.length} 张带水印图片`, outputs: [], report };
@@ -580,13 +590,21 @@ async function watermarkImages(file: File, options: WebEpubAdvancedOptions): Pro
   const text = options.watermarkText?.trim() || "";
   if (!text) throw new Error("水印文本不能为空");
   const payload = watermarkPayload(text);
-  for (const entry of [...doc.files].filter((item) => item.kind === "image" && RASTER_EXTENSIONS.has(extension(item.path)))) {
+  const entries = [...doc.files].filter((item) => item.kind === "image" && RASTER_EXTENSIONS.has(extension(item.path)));
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    options.signal?.throwIfAborted();
     try {
       const original = await readWebEpubBlob(doc, entry.path, entry.mediaType);
       const { canvas, context } = await canvasEncode(original, "image/png", 1, 0);
       const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-      if (!embedPayload(pixels, payload)) continue;
-      context.putImageData(pixels, 0, 0);
+      const workerPixels = await embedImagePayloadInWorker(pixels, payload, options.signal);
+      if (workerPixels === false) continue;
+      if (workerPixels) context.putImageData(workerPixels, 0, 0);
+      else {
+        if (!embedPayload(pixels, payload)) continue;
+        context.putImageData(pixels, 0, 0);
+      }
       const watermarked = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error("PNG 编码失败")), "image/png"));
       const target = uniquePngPath(doc, entry.path);
       if (target !== entry.path) {
@@ -595,9 +613,11 @@ async function watermarkImages(file: File, options: WebEpubAdvancedOptions): Pro
       }
       await updateWebEpubBinary(doc, target, watermarked, "image/png");
       changed += 1;
-    } catch {
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
       // Keep unsupported images unchanged and continue processing the EPUB.
     }
+    options.onProgress?.(index + 1, entries.length);
   }
   if (!changed) throw new Error("没有图片能够容纳水印文本");
   const blob = await exportWebEpubBlob(doc);
@@ -611,6 +631,8 @@ type CollectionSelection = { doc: WebEpubDocument; indexes: number[]; sourceInde
 
 async function buildCollection(selections: CollectionSelection[], title: string) {
   const output = new JSZip();
+  output.file("mimetype", "application/epub+zip", { compression: "STORE", createFolders: false });
+  output.file("META-INF/container.xml", `<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
   const manifestRows: Array<{ id: string; href: string; mediaType: string; properties: string }> = [];
   const spineRows: Array<{ id: string; href: string; title: string }> = [];
   let resourceCounter = 0;
@@ -654,8 +676,6 @@ async function buildCollection(selections: CollectionSelection[], title: string)
 
   const identifier = `urn:uuid:${crypto.randomUUID()}`;
   const navChapters = spineRows.map((row) => ({ href: row.href, title: row.title }));
-  output.file("mimetype", "application/epub+zip", { compression: "STORE", createFolders: false });
-  output.file("META-INF/container.xml", `<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
   output.file("OEBPS/nav.xhtml", navDocument(title, navChapters));
   output.file("OEBPS/toc.ncx", ncxDocument(title, identifier, navChapters));
   const manifest = manifestRows.map((row) => `    <item id="${row.id}" href="${escapeXml(row.href)}" media-type="${escapeXml(row.mediaType)}"${row.properties ? ` properties="${row.properties}"` : ""}/>`).join("\n");

@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import { loadWebEpub } from "$lib/webEpub";
-import { processWebEpubFont } from "$lib/webEpubFontProcess";
+import { processWebEpubFont, webEpubFontProcessTesting } from "$lib/webEpubFontProcess";
 import { processWebEpubAdvanced, webEpubAdvancedTesting } from "$lib/webEpubAdvanced";
 
 type FixtureOptions = { title?: string; chapters?: string[]; chapterBodies?: string[]; fontBytes?: Uint8Array };
@@ -36,6 +36,13 @@ async function makeFixture(options: FixtureOptions = {}) {
   zip.file("OEBPS/content.opf", `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="BookId">urn:uuid:11111111-1111-4111-8111-111111111111</dc:identifier><dc:title>${title}</dc:title><dc:language>zh-CN</dc:language></metadata><manifest><item id="css" href="style.css" media-type="text/css"/>${manifestChapters.join("")}<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>${fontManifest}</manifest><spine toc="ncx">${spine.join("")}</spine></package>`);
   const blob = await zip.generateAsync({ type: "blob", mimeType: "application/epub+zip" });
   return new File([blob], `${title}.epub`, { type: "application/epub+zip" });
+}
+
+async function firstZipEntryName(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  expect([...bytes.slice(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
+  const nameLength = bytes[26] | (bytes[27] << 8);
+  return new TextDecoder().decode(bytes.slice(30, 30 + nameLength));
 }
 
 describe("shared EPUB advanced processing", () => {
@@ -102,6 +109,7 @@ describe("shared EPUB advanced processing", () => {
     expect(merged.spine).toHaveLength(3);
     expect(merged.zip.file("OEBPS/Books/book1/OEBPS/style.css")).toBeTruthy();
     expect(merged.zip.file("OEBPS/Books/book2/OEBPS/Text/chapter1.xhtml")).toBeTruthy();
+    expect(await firstZipEntryName(result.outputs[0].blob)).toBe("mimetype");
   });
 
   it("splits a book into independently loadable EPUB outputs", async () => {
@@ -123,6 +131,13 @@ describe("shared EPUB advanced processing", () => {
     expect(webEpubAdvancedTesting.extractPayload(image)).toBe("本地隐形水印 2026");
     image.data[0] ^= 1;
     expect(webEpubAdvancedTesting.extractPayload(image)).toBeNull();
+  });
+
+  it("keeps code points referenced through numeric XHTML entities when subsetting fonts", () => {
+    const codePoints = new Set<number>();
+    webEpubFontProcessTesting.collectSubsetCodePoints("<p>&#x6C49;&#35821; ABC</p>", codePoints);
+    expect(codePoints).toContain(0x6c49);
+    expect(codePoints).toContain(35821);
   });
 
   const windowsFont = "C:\\Windows\\Fonts\\Deng.ttf";

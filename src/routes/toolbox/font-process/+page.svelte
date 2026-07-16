@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { base } from "$app/paths";
   import { page } from "$app/stores";
   import { onDestroy } from "svelte";
+  import CustomSelect from "$lib/CustomSelect.svelte";
   import { processWebEpubFont, type WebEpubFontAction, type WebEpubFontProcessResult } from "$lib/webEpubFontProcess";
 
   let epubInput: HTMLInputElement | null = null;
@@ -19,16 +19,12 @@
   $: action = (rawAction === "font-decrypt" || rawAction === "font-subset" ? rawAction : "font-encrypt") as WebEpubFontAction;
   $: decryptMode = action === "font-decrypt";
   $: subsetMode = action === "font-subset";
-  $: title = decryptMode ? "字体解密" : subsetMode ? "字体子集化" : "字体加密";
+  $: title = decryptMode ? "EPUB 字体解密" : subsetMode ? "EPUB 字体精简" : "EPUB 字体加密";
   $: description = decryptMode
     ? "恢复 EPUB 中通过私用区字体映射混淆的正文；优先读取内置映射或字体 cmap，也可使用同版本明文 TXT 对齐。"
     : subsetMode
       ? "扫描整本 EPUB 正文实际使用的 Unicode 码点，裁剪未使用字形以减小内嵌字体体积。"
       : "将正文汉字替换为私用区字符，并把对应 cmap 写入 EPUB 内嵌字体；映射随文件保存，可跨端恢复。";
-
-  function appPath(path: string) {
-    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
-  }
 
   function clearResult() {
     if (result) URL.revokeObjectURL(result.url);
@@ -105,14 +101,6 @@
 </svelte:head>
 
 <div class="font-page">
-  <header class="topbar">
-    <div class="heading">
-      <a class="back" href={appPath("/")} aria-label="返回工具箱"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></a>
-      <div><span>FONT {decryptMode ? "RESTORE" : subsetMode ? "SUBSET" : "OBFUSCATION"}</span><h1>{title}</h1></div>
-    </div>
-    <button class="primary" type="button" disabled={busy} on:click={() => epubInput?.click()}>{epubFile ? "重新选择" : "选择 EPUB"}</button>
-  </header>
-
   <input bind:this={epubInput} class="file-input" type="file" accept=".epub,application/epub+zip" on:change={handleEpubChange} />
   <input bind:this={txtInput} class="file-input" type="file" accept=".txt,text/plain" on:change={handleTxtChange} />
 
@@ -127,9 +115,12 @@
       <section class="txt-assist">
         <div><strong>明文 TXT 辅助对齐</strong><span>仅在 EPUB 没有映射且字体 cmap 无法直接恢复时需要</span></div>
         <div class="txt-controls">
-          <select bind:value={txtEncoding} aria-label="TXT 编码">
-            <option value="auto">自动识别</option><option value="utf-8">UTF-8</option><option value="gb18030">GB18030</option><option value="big5">Big5</option>
-          </select>
+          <CustomSelect
+            value={txtEncoding}
+            options={[{ value: "auto", label: "自动识别" }, { value: "utf-8", label: "UTF-8" }, { value: "gb18030", label: "GB18030" }, { value: "big5", label: "Big5" }]}
+            ariaLabel="TXT 编码"
+            on:change={(event) => (txtEncoding = event.detail)}
+          />
           <button type="button" disabled={busy} on:click={() => txtInput?.click()}>{plainTxtFile ? plainTxtFile.name : "选择 TXT"}</button>
           {#if plainTxtFile}<button class="clear" type="button" disabled={busy} title="移除 TXT" on:click={() => { plainTxtFile = null; }}>×</button>{/if}
         </div>
@@ -163,16 +154,10 @@
 
 <style>
   :global(body) { margin: 0; background: #edf1f5; color: #172033; font-family: Inter, "Microsoft YaHei", sans-serif; }
-  button, select, a { font: inherit; }
+  button { font: inherit; }
   button { color: inherit; }
   .font-page { min-height: 100dvh; }
-  .topbar { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 24px; border-bottom: 1px solid #d8e0e9; background: rgba(255,255,255,.96); }
-  .heading { display: flex; align-items: center; gap: 12px; }
-  .back { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid #d6dee8; border-radius: 8px; color: #43536b; background: #fff; }
-  .back svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
-  .heading span, .kicker { color: #7b899d; font-size: 9px; font-weight: 800; letter-spacing: .15em; }
-  .heading h1 { margin: 2px 0 0; font-size: 18px; }
-  .primary { min-height: 36px; padding: 0 16px; border: 1px solid #17699a; border-radius: 7px; background: #17699a; color: #fff; font-size: 12px; font-weight: 800; cursor: pointer; }
+  .kicker { color: #7b899d; font-size: 9px; font-weight: 800; letter-spacing: .15em; }
   button:disabled { cursor: wait; opacity: .6; }
   .file-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .content { width: min(960px, calc(100% - 36px)); margin: 26px auto; display: grid; gap: 14px; }
@@ -188,7 +173,9 @@
   .txt-assist strong { font-size: 12px; }
   .txt-assist span { color: #7e8c9f; font-size: 10px; }
   .txt-controls { display: flex; gap: 6px; min-width: 0; }
-  .txt-controls select, .txt-controls button { min-height: 34px; padding: 0 10px; border: 1px solid #d1dbe6; border-radius: 6px; background: #fff; font-size: 10px; }
+  .txt-controls :global(.custom-select) { width: 132px; flex: 0 0 132px; }
+  .txt-controls :global(.custom-select-trigger), .txt-controls button { min-height: 34px; border: 1px solid #d1dbe6; border-radius: 6px; background: #fff; font-size: 10px; }
+  .txt-controls button { padding: 0 10px; }
   .txt-controls button { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
   .txt-controls .clear { width: 34px; padding: 0; color: #a33; }
   .drop-zone { min-height: 285px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 1px dashed #9eafc4; border-radius: 12px; background: rgba(255,255,255,.8); cursor: pointer; transition: .18s ease; }
@@ -215,7 +202,6 @@
   .notes article { display: grid; grid-template-columns: 28px 1fr; gap: 8px; padding: 13px; border: 1px solid #dbe3ec; border-radius: 8px; background: rgba(255,255,255,.72); }
   .notes b { color: #4059a1; font-size: 10px; }.notes strong { font-size: 11px; }.notes p { margin: 4px 0 0; color: #758398; font-size: 9px; line-height: 1.5; }
   @media (max-width: 700px) {
-    .topbar { min-height: 62px; padding: 0 13px; }.heading span { display: none; }.heading h1 { font-size: 16px; }
     .content { width: calc(100% - 24px); margin: 14px auto 28px; }
     .intro-card { grid-template-columns: 52px minmax(0, 1fr); padding: 16px; gap: 12px; }.font-mark { width: 50px; height: 50px; }.intro-card h2 { font-size: 18px; }
     .privacy { grid-column: 1 / -1; padding: 10px 0 0; border-left: 0; border-top: 1px solid #e0e6ed; }

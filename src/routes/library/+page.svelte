@@ -1771,10 +1771,11 @@
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div
       class="context-overlay"
+      role="presentation"
       on:click={closeContextMenu}
       on:contextmenu={(e) => { e.preventDefault(); closeContextMenu(); }}
     >
-      <div class="context-menu" style="left: {contextMenuPos.x}px; top: {contextMenuPos.y}px;">
+      <div class="context-menu" role="menu" aria-label="图书操作" style="left: {contextMenuPos.x}px; top: {contextMenuPos.y}px;">
         <button class="ctx-item" on:click={() => { openReader(selectedBook!); closeContextMenu(); }}>阅读</button>
         <button class="ctx-item" on:click={() => { openBook(selectedBook!); closeContextMenu(); }}>编辑文件</button>
         <button class="ctx-item" on:click={() => { openEditMetadata(selectedBook!); closeContextMenu(); }}>编辑元数据</button>
@@ -1791,7 +1792,7 @@
   {#if showSettings}
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-    <div class="settings-overlay" on:click={(e) => { if (e.target === e.currentTarget) showSettings = false; }}>
+    <div class="settings-overlay" role="presentation" on:click={(e) => { if (e.target === e.currentTarget) showSettings = false; }}>
       <SettingsShell
         title="书库设置"
         tabs={librarySettingsTabs}
@@ -1807,12 +1808,12 @@
           <section class="settings-section">
             <div class="section-title">文件存储</div>
             <div class="set-row">
-              <label class="set-label">存储方式</label>
-              <CustomSelect className="set-control" value={libraryConfig.storageMode} options={storageModeOptions} on:change={(e) => setStorageMode(e.detail)} />
+              <span class="set-label">存储方式</span>
+              <CustomSelect className="set-control" ariaLabel="存储方式" value={libraryConfig.storageMode} options={storageModeOptions} on:change={(e) => setStorageMode(e.detail)} />
             </div>
             {#if libraryConfig.storageMode === "copy_custom"}
               <div class="set-row">
-                <label class="set-label">工作目录</label>
+                <span class="set-label">工作目录</span>
                 <span class="custom-dir-display" title={libraryConfig.customWorkDir}>{libraryConfig.customWorkDir || "未选择"}</span>
                 <button class="tb-btn" on:click={pickCustomWorkDir}>更改</button>
               </div>
@@ -1822,23 +1823,24 @@
               <input type="checkbox" bind:checked={libraryConfig.updateModifiedOnEdit} on:change={saveLibraryConfig} />
             </label>
             <div class="set-row">
-              <label class="set-label">入库命名方式</label>
-              <CustomSelect className="set-control" value={libraryConfig.namingMode || "template"} options={NAMING_MODE_OPTIONS} on:change={(e) => setNamingMode(e.detail)} />
+              <span class="set-label">入库命名方式</span>
+              <CustomSelect className="set-control" ariaLabel="入库命名方式" value={libraryConfig.namingMode || "template"} options={NAMING_MODE_OPTIONS} on:change={(e) => setNamingMode(e.detail)} />
             </div>
             {#if libraryConfig.namingMode === "template"}
               <div class="set-row">
-                <label class="set-label">命名模板</label>
-                <CustomSelect className="set-control" value={namingPresetSel} options={namingPresetOptions} on:change={(e) => onNamingPresetChange(e.detail)} />
+                <span class="set-label">命名模板</span>
+                <CustomSelect className="set-control" ariaLabel="命名模板" value={namingPresetSel} options={namingPresetOptions} on:change={(e) => onNamingPresetChange(e.detail)} />
               </div>
               {#if namingPresetSel === "custom"}
                 <div class="set-row">
-                  <label class="set-label" style="visibility: hidden;">_</label>
+                  <span class="set-label" aria-hidden="true"></span>
                   <input
                     type="text"
                     class="set-control"
                     bind:value={libraryConfig.namingTemplate}
                     on:change={onNamingChanged}
                     placeholder="例如: {`{title}-{author}`}"
+                    aria-label="自定义命名模板"
                   />
                 </div>
               {/if}
@@ -1854,9 +1856,10 @@
             <div class="section-title">智能匹配</div>
             <p class="section-hint">用于自动匹配书库图书的标签和简介，不再和 TXT 编辑器智能校对共用用途设置。</p>
             <div class="set-row" style="align-items: flex-start;">
-              <label class="set-label">匹配 API</label>
+              <span class="set-label">匹配 API</span>
               <CustomSelect
                 className="set-control"
+                ariaLabel="匹配 API"
                 value={libraryConfig.libraryAiMatch?.providerId || ""}
                 options={libraryAiProviderOptions}
                 disabled={textAiProviders.length === 0}
@@ -1864,13 +1867,14 @@
               />
             </div>
             <div class="set-row" style="align-items: flex-start;">
-              <label class="set-label">额外要求</label>
+              <span class="set-label">额外要求</span>
               <textarea
                 class="set-control"
                 rows="3"
                 bind:value={libraryConfig.libraryAiMatch!.extraPrompt}
                 on:change={saveLibraryConfig}
                 placeholder="例如：标签优先使用书库现有分类；简介不要剧透。"
+                aria-label="智能匹配额外要求"
               ></textarea>
             </div>
           </section>
@@ -1887,16 +1891,16 @@
               <input type="checkbox" bind:checked={shelfSettings.gridShowAuthor} on:change={saveShelfSettings} />
             </label>
             <div class="set-row">
-              <label class="set-label">预览区显示</label>
-              <CustomSelect className="set-control" value={shelfSettings.previewMode} options={SHELF_PREVIEW_OPTIONS} on:change={(e) => setShelfPreviewMode(e.detail)} />
+              <span class="set-label">预览区显示</span>
+              <CustomSelect className="set-control" ariaLabel="预览区显示" value={shelfSettings.previewMode} options={SHELF_PREVIEW_OPTIONS} on:change={(e) => setShelfPreviewMode(e.detail)} />
             </div>
             <div class="set-row">
-              <label class="set-label">双击图书时</label>
-              <CustomSelect className="set-control" value={shelfSettings.dblClickAction} options={DBL_CLICK_OPTIONS} on:change={(e) => setShelfDblClickAction(e.detail)} />
+              <span class="set-label">双击图书时</span>
+              <CustomSelect className="set-control" ariaLabel="双击图书时" value={shelfSettings.dblClickAction} options={DBL_CLICK_OPTIONS} on:change={(e) => setShelfDblClickAction(e.detail)} />
             </div>
             <div class="set-row">
-              <label class="set-label">新书排序</label>
-              <CustomSelect className="set-control" value={shelfSettings.newBookFirst ? "first" : "last"} options={NEW_BOOK_ORDER_OPTIONS} on:change={(e) => setNewBookOrder(e.detail)} />
+              <span class="set-label">新书排序</span>
+              <CustomSelect className="set-control" ariaLabel="新书排序" value={shelfSettings.newBookFirst ? "first" : "last"} options={NEW_BOOK_ORDER_OPTIONS} on:change={(e) => setNewBookOrder(e.detail)} />
             </div>
           </section>
           {/if}
@@ -1906,8 +1910,8 @@
 
   <!-- 首次启动：选择书库存放目录 -->
   {#if firstLaunchOpen}
-    <div class="settings-overlay first-launch-overlay">
-      <div class="settings-panel first-launch-panel">
+    <div class="settings-overlay first-launch-overlay" role="presentation">
+      <div class="settings-panel first-launch-panel" role="dialog" aria-modal="true" aria-label="选择书库目录">
         <div class="settings-header">
           <h3>选择书库存放目录</h3>
         </div>
@@ -1920,13 +1924,14 @@
             {/if}
           </p>
           <div class="set-row">
-            <label class="set-label">书库目录</label>
+            <span class="set-label">书库目录</span>
             <input
               class="set-control"
               type="text"
               bind:value={firstLaunchInput}
               placeholder={appMode?.isPortable ? appMode.suggestedLibraryDir : "点击右侧选择目录..."}
               disabled={firstLaunchSaving}
+              aria-label="书库目录"
             />
             <button class="tb-btn" on:click={browseFirstLaunchDir} disabled={firstLaunchSaving}>浏览...</button>
           </div>
@@ -1952,8 +1957,8 @@
   {#if collisionPrompt.open}
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-    <div class="settings-overlay" on:click={(e) => { if (e.target === e.currentTarget) cancelCollisionPrompt(); }}>
-      <div class="settings-panel" style="max-width: 480px;">
+    <div class="settings-overlay" role="presentation" on:click={(e) => { if (e.target === e.currentTarget) cancelCollisionPrompt(); }}>
+      <div class="settings-panel" role="dialog" aria-modal="true" aria-label="文件名冲突" style="max-width: 480px;">
         <div class="settings-header">
           <h3>同名文件已存在</h3>
           <button class="settings-close" on:click={cancelCollisionPrompt} title="取消">×</button>
@@ -1987,8 +1992,8 @@
   {#if renamePrompt.open}
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-    <div class="settings-overlay" on:click={(e) => { if (e.target === e.currentTarget) cancelRenameBook(); }}>
-      <div class="settings-panel" style="max-width: 480px;">
+    <div class="settings-overlay" role="presentation" on:click={(e) => { if (e.target === e.currentTarget) cancelRenameBook(); }}>
+      <div class="settings-panel" role="dialog" aria-modal="true" aria-label="重命名图书" style="max-width: 480px;">
         <div class="settings-header">
           <h3>重命名本地文件</h3>
           <button class="settings-close" on:click={cancelRenameBook} title="取消">×</button>
@@ -2025,8 +2030,8 @@
   {#if showMetaEditor && selectedBook}
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-    <div class="settings-overlay" on:click={(e) => { if (e.target === e.currentTarget && !savingMetadata) showMetaEditor = false; }}>
-      <div class="settings-panel meta-editor-panel">
+    <div class="settings-overlay" role="presentation" on:click={(e) => { if (e.target === e.currentTarget && !savingMetadata) showMetaEditor = false; }}>
+      <div class="settings-panel meta-editor-panel" role="dialog" aria-modal="true" aria-label="编辑图书元数据">
         <div class="settings-header">
           <h3>编辑元数据 <span class="meta-title-hint">— {selectedBook.title}</span></h3>
           <button class="settings-close" on:click={() => showMetaEditor = false} title="关闭" disabled={savingMetadata}>×</button>
@@ -2039,18 +2044,18 @@
               <div class="meta-section">
                 <div class="meta-section-head"><span>基本</span></div>
                 <div class="set-row">
-                  <label>书名</label>
-                  <input type="text" bind:value={metaForm.title} />
+                  <span>书名</span>
+                  <input type="text" aria-label="书名" bind:value={metaForm.title} />
                 </div>
 
                 {#if subtitleShown}
                   <div class="set-row">
-                    <label>副标题</label>
+                    <span>副标题</span>
                     <input
                       type="text"
+                      aria-label="副标题"
                       bind:value={metaForm.subtitle}
                       placeholder="可选"
-                      autofocus
                     />
                     <button
                       class="meta-inline-btn"
@@ -2060,17 +2065,17 @@
                   </div>
                 {:else}
                   <div class="set-row meta-add-row">
-                    <label></label>
+                    <span aria-hidden="true"></span>
                     <button class="meta-add-link" on:click={() => subtitleShown = true}>+ 添加副标题</button>
                   </div>
                 {/if}
 
                 <div class="set-row">
-                  <label>作者</label>
-                  <input type="text" bind:value={metaForm.author} />
+                  <span>作者</span>
+                  <input type="text" aria-label="作者" bind:value={metaForm.author} />
                 </div>
                 <div class="set-row tags-row">
-                  <label>标签</label>
+                  <span>标签</span>
                   <!-- svelte-ignore a11y-no-static-element-interactions -->
                   <div
                     class="tags-editor"
@@ -2196,7 +2201,7 @@
                   </div>
                 </div>
                 <div class="set-row meta-ai-match-row">
-                  <label></label>
+                  <span aria-hidden="true"></span>
                   <div class="meta-ai-match-actions">
                     <button class="tb-btn" type="button" disabled={aiMatchRunning} on:click={runLibraryAutoMatch}>
                       {aiMatchRunning ? "匹配中..." : "AI 自动匹配标签/简介"}
@@ -2207,33 +2212,36 @@
                   </div>
                 </div>
                 <div class="set-row meta-textarea-row">
-                  <label>简介</label>
+                  <span>简介</span>
                   <textarea
                     class="meta-description"
+                    aria-label="简介"
                     bind:value={metaForm.description}
                     placeholder="本书简介..."
                     rows="4"
                   ></textarea>
                 </div>
                 <div class="set-row">
-                  <label>文件名</label>
+                  <span>文件名</span>
                   <input
                     class="meta-readonly"
                     type="text"
                     value={selectedBook.filename || "-"}
                     readonly
                     title={selectedBook.filename}
+                    aria-label="文件名"
                   />
                 </div>
                 {#if selectedBook.fileType === "epub"}
                   <div class="set-row">
-                    <label>UUID</label>
+                    <span>UUID</span>
                     <input
                       class="meta-uuid-inline"
                       type="text"
                       bind:value={metaForm.epubUuid}
                       placeholder="urn:uuid:... 或留空"
                       title={metaForm.epubUuid || "可手动编辑或点击 ↻ 自动提取"}
+                      aria-label="EPUB UUID"
                     />
                     <button
                       class="meta-icon-btn"
@@ -2272,29 +2280,31 @@
                 {#if productionExpanded}
                   <div class="meta-section-body">
                     <div class="set-row">
-                      <label>制作者</label>
-                      <input type="text" bind:value={metaForm.maker} placeholder="可选" />
+                      <span>制作者</span>
+                      <input type="text" aria-label="制作者" bind:value={metaForm.maker} placeholder="可选" />
                     </div>
                     <div class="set-row">
-                      <label>制作系列</label>
-                      <input type="text" bind:value={metaForm.series} placeholder="可选" />
+                      <span>制作系列</span>
+                      <input type="text" aria-label="制作系列" bind:value={metaForm.series} placeholder="可选" />
                     </div>
                     <div class="set-row">
-                      <label>制作时间</label>
+                      <span>制作时间</span>
                       <input
                         class="meta-readonly"
                         type="text"
                         value={formatDateTime(selectedBook.createdAt)}
                         readonly
+                        aria-label="制作时间"
                       />
                     </div>
                     <div class="set-row">
-                      <label>修改时间</label>
+                      <span>修改时间</span>
                       <input
                         class="meta-readonly"
                         type="text"
                         value={formatDateTime(selectedBook.modifiedAt)}
                         readonly
+                        aria-label="修改时间"
                       />
                     </div>
                   </div>
@@ -2954,7 +2964,7 @@
     align-items: flex-start !important;
   }
 
-  .tags-row > label {
+  .tags-row > span:first-child {
     /* 让 label 与 chips 第一行水平居中 */
     margin-top: 6px;
   }
@@ -3182,7 +3192,7 @@
     align-items: center;
   }
 
-  .meta-fields .set-row label {
+  .meta-fields .set-row > span:first-child {
     width: 64px;
     flex-shrink: 0;
     text-align: right;
@@ -3228,7 +3238,7 @@
   }
 
   /* 简介 label 顶部下移一点，与 textarea 第一行水平对齐 */
-  .meta-textarea-row > label {
+  .meta-textarea-row > span:first-child {
     margin-top: 6px;
   }
 
@@ -3372,10 +3382,5 @@
     font-size: 12px;
     line-height: 1.5;
     max-width: 780px;
-  }
-  .toggle-row .set-label small {
-    color: var(--color-muted);
-    font-size: 11px;
-    margin-left: 4px;
   }
 </style>

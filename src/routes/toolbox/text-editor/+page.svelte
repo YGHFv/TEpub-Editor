@@ -1,7 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { base } from "$app/paths";
-  import { page } from "$app/stores";
   import { onMount, tick } from "svelte";
   import {
     DEFAULT_TOC_REGEX_RULES,
@@ -12,15 +11,15 @@
   } from "$lib/appSettings";
   import { platform } from "$lib/platform";
   import {
-    getWebLibraryBook,
     listWebTextHistory,
     removeWebTextHistorySnapshot,
-    replaceWebLibraryBookBlob,
     saveWebTextHistorySnapshot,
     type WebTextHistorySnapshot,
-  } from "$lib/webLibrary";
+  } from "$lib/webTextHistory";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import TxtCodeEditor from "$lib/TxtCodeEditor.svelte";
+  import ToolImportPage from "$lib/ToolImportPage.svelte";
+  import { hasUnsavedTextChanges } from "$lib/unsavedChanges";
   import {
     applyBuiltinRegexPreview,
     applyChineseConvertPreview,
@@ -139,6 +138,7 @@
   let tocListEl: HTMLDivElement | null = null;
   let sourceBytes: Uint8Array | null = null;
   let content = "";
+  let savedContent = "";
   let fileName = "untitled.txt";
   let encoding: EncodingOption = "utf-8";
   let status = "就绪";
@@ -179,7 +179,6 @@
   let charCount = 0;
   let wordCount = 0;
   let byteCount = 0;
-  let libraryBookId = "";
   let historyList: WebTextHistorySnapshot[] = [];
   let aiProofRunning = false;
   let aiProofMessage = "";
@@ -194,19 +193,16 @@
   $: visibleReorderRows = reorderPreviewRows.filter((row) => row.kind !== "chapter" || !reorderCollapsedVolumeKeys.has(row.volumeKey));
   $: selectedProofCount = proofPreview.selectedIds.size;
   $: hasLoadedText = Boolean(sourceBytes || content.trim());
+  $: hasUnsavedChanges = hasUnsavedTextChanges(hasLoadedText, content, savedContent);
+
+  function handleBeforeUnload(event: BeforeUnloadEvent) {
+    syncContentFromEditor();
+    if (!hasUnsavedChanges && content === savedContent) return;
+    event.preventDefault();
+    event.returnValue = "";
+  }
 
   onMount(() => {
-    const requestedLibraryBook = $page.url.searchParams.get("library") || "";
-    if (requestedLibraryBook) {
-      libraryBookId = requestedLibraryBook;
-      void getWebLibraryBook(requestedLibraryBook).then((book) => {
-        if (!book || book.kind !== "txt") throw new Error("书库中找不到该 TXT");
-        return loadTextFile(new File([book.blob], book.fileName, { type: "text/plain", lastModified: book.modifiedAt }));
-      }).catch((error) => {
-        status = `从书库载入失败：${error instanceof Error ? error.message : String(error)}`;
-      });
-      return;
-    }
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft) {
       try {
@@ -339,6 +335,7 @@
       const decoded = decodeSourceBytesAuto(sourceBytes);
       encoding = decoded.encoding;
       resetEditorContent(decoded.text);
+      savedContent = decoded.text;
       currentMatchIndex = -1;
       tocLineOffsets = new Map();
       markSearchDirty();
@@ -361,8 +358,12 @@
     const file = input.files?.[0];
     input.value = "";
     if (!file) return;
-    libraryBookId = "";
     await loadTextFile(file);
+  }
+
+  function handleImportFiles(event: CustomEvent<File[]>) {
+    const file = event.detail[0];
+    if (file) void loadTextFile(file);
   }
 
   function decodeSourceBytesAuto(bytes: Uint8Array): { encoding: EncodingOption; text: string } {
@@ -413,16 +414,14 @@
     if (!selected) return;
     await saveWebTextHistorySnapshot(historySourceKey(), fileName, content);
     const bytes = new TextEncoder().encode(content);
-    if (libraryBookId) await replaceWebLibraryBookBlob(libraryBookId, new Blob([bytes], { type: "text/plain;charset=utf-8" }));
     await platform.writeFile(selected, Array.from(bytes));
-    status = libraryBookId
-      ? `已保存到 Web 书库并导出 ${selected.split(/[\\/]/).pop() || selected}`
-      : `已导出 ${selected.split(/[\\/]/).pop() || selected}`;
+    savedContent = content;
+    status = `已导出 ${selected.split(/[\\/]/).pop() || selected}`;
     if (historyPanelOpen) await refreshHistory();
   }
 
   function historySourceKey() {
-    return libraryBookId ? `library:${libraryBookId}` : `file:${fileName.trim().toLowerCase() || "untitled.txt"}`;
+    return `file:${fileName.trim().toLowerCase() || "untitled.txt"}`;
   }
 
   async function refreshHistory() {
@@ -1256,28 +1255,33 @@
   <title>TXT 编辑器 - TEpub Editor</title>
 </svelte:head>
 
+<svelte:window on:beforeunload={handleBeforeUnload} />
+
 <div class="text-editor-page">
   <input bind:this={fileInput} class="file-input" type="file" accept=".txt,.md,.html,.htm,text/*" on:change={onFileChange} />
 
   {#if !hasLoadedText}
     <div class="import-shell">
-      <header class="mobile-import-topbar">
-        <a href={appPath(libraryBookId ? "/toolbox/library" : "/")} aria-label="返回">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M15 6L9 12L15 18"></path>
-          </svg>
-        </a>
-        <h1>TXT 编辑器</h1>
-      </header>
-      <main class="empty-state">
-        <section class="import-card">
-          <h1>选择 TXT 文件开始编辑</h1>
-          <p>支持 TXT、Markdown 和 HTML 文件，导入后可识别目录、查找替换并校对文本。</p>
-          <div class="import-actions">
-            <button type="button" class="primary" on:click={pickFile} disabled={busy}>选择 TXT 文件</button>
-          </div>
-        </section>
-      </main>
+      <ToolImportPage
+        mark="EDIT"
+        kicker="TEXT EDITOR"
+        title="TXT 编辑器"
+        description="导入 TXT、Markdown 或 HTML 文件，进行目录识别、查找替换与文本校对。"
+        privacy="文件仅在当前设备中读取，导入后继续使用原有编辑器页面。"
+        outputValue="TXT / MD / HTML"
+        features={[
+          { title: "目录识别", detail: "按规则扫描卷、章与正文结构" },
+          { title: "查找替换", detail: "支持文本与正则批量处理" },
+          { title: "校对整理", detail: "检查文本并衔接 EPUB 制作" },
+        ]}
+        prompt="选择或拖入文本文件"
+        hint="支持 TXT、Markdown 和 HTML 文件"
+        actionLabel="选择文本文件"
+        accept=".txt,.md,.html,.htm,text/*"
+        {busy}
+        on:select={pickFile}
+        on:files={handleImportFiles}
+      />
     </div>
   {:else}
   <main class="workspace">
@@ -1650,23 +1654,13 @@
     overflow: hidden;
   }
 
-  .mobile-import-topbar {
-    display: none;
-  }
-
   .file-input {
     display: none;
   }
 
-  h1,
   h2,
   p {
     margin: 0;
-  }
-
-  h1 {
-    font-size: 18px;
-    line-height: 1.3;
   }
 
   h2 {
@@ -1732,47 +1726,6 @@
     padding: 14px;
     box-sizing: border-box;
     overflow: hidden;
-  }
-
-  .empty-state {
-    display: grid;
-    align-items: start;
-    justify-items: center;
-    padding: 36px 128px;
-    box-sizing: border-box;
-  }
-
-  .import-card {
-    width: min(100%, 1792px);
-    min-height: 342px;
-    display: grid;
-    align-content: center;
-    justify-items: center;
-    gap: 16px;
-    border: 1px solid rgba(23, 27, 36, 0.08);
-    border-radius: 8px;
-    background: #ffffff;
-    padding: 48px 24px;
-    box-sizing: border-box;
-    text-align: center;
-  }
-
-  .import-card h1 {
-    font-size: 22px;
-    line-height: 1.3;
-  }
-
-  .import-card p {
-    max-width: 520px;
-    color: #64748b;
-    font-size: 14px;
-    line-height: 1.6;
-  }
-
-  .import-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
   }
 
   .toc-sidebar,
@@ -2538,44 +2491,9 @@
 
   :global(:root[data-tepub-client="web-mobile"]) .import-shell {
     height: 100dvh;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     background: #f4f5f8;
     overflow: auto;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar {
-    display: grid;
-    grid-template-columns: 38px minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    min-height: 52px;
-    padding: max(10px, env(safe-area-inset-top)) 14px 0;
-    box-sizing: border-box;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar a {
-    width: 34px;
-    height: 34px;
-    display: grid;
-    place-items: center;
-    color: inherit;
-    text-decoration: none;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar svg {
-    width: 20px;
-    height: 20px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2.2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar h1 {
-    font-size: 22px;
-    line-height: 1.2;
-    font-weight: 900;
   }
 
   :global(:root[data-tepub-client="web-mobile"]) .workspace {
@@ -2607,12 +2525,4 @@
     overflow: auto;
   }
 
-  :global(:root[data-tepub-client="web-mobile"]) .empty-state {
-    padding: 18px 10px;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .import-card {
-    min-height: min(360px, calc(100dvh - 36px));
-    padding: 30px 18px;
-  }
 </style>

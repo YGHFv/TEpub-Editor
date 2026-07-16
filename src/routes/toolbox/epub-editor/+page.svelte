@@ -7,7 +7,8 @@
   import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
   import FileTreeItem from "$lib/FileTreeItem.svelte";
   import TocNode from "$lib/TocNode.svelte";
-  import { getWebLibraryBook, replaceWebLibraryBookBlob } from "$lib/webLibrary";
+  import ToolImportPage from "$lib/ToolImportPage.svelte";
+  import { hasUnsavedEpubChanges } from "$lib/unsavedChanges";
   import {
     addWebEpubResource,
     deleteWebEpubResource,
@@ -81,6 +82,7 @@
   let epubCodeEditorComponent: EpubCodeEditor | null = null;
   let metadataDraft: WebEpubMetadata = emptyMetadata();
   let metadataDirty = false;
+  let documentDirty = false;
   let busy = false;
   let status = "选择 EPUB 文件后在浏览器内解包，编辑文本资源并导出新文件。";
   let activeTab: "files" | "metadata" = "files";
@@ -108,8 +110,6 @@
   let previewBuildId = 0;
   let readerPreviewFontSize = 18;
   let readerTocCollapsed = false;
-  let libraryBookId = "";
-
   $: readerMode = $page.url.searchParams.get("mode") === "reader";
   $: headTitle = readerMode ? "Web EPUB 阅读器 - TEpub Editor" : "Web EPUB 编辑器 - TEpub Editor";
   $: importHeading = readerMode ? "选择 EPUB 文件开始阅读" : "选择 EPUB 文件开始编辑";
@@ -122,6 +122,7 @@
     : (doc?.metadata.title || doc?.fileName || "未选择章节");
 
   $: dirty = editorText !== savedEditorText;
+  $: hasUnsavedChanges = hasUnsavedEpubChanges(readerMode, Boolean(doc), dirty, metadataDirty, documentDirty);
   $: editableFiles = doc?.files.filter((file) => file.editable) ?? [];
   $: imageFiles = doc?.files.filter((file) => file.kind === "image") ?? [];
   $: imageCount = doc?.files.filter((file) => file.kind === "image").length ?? 0;
@@ -139,6 +140,12 @@
   function fileByPath(path: string | undefined) {
     if (!doc || !path) return null;
     return doc.files.find((file) => file.path === path) || null;
+  }
+
+  function handleBeforeUnload(event: BeforeUnloadEvent) {
+    if (!hasUnsavedChanges) return;
+    event.preventDefault();
+    event.returnValue = "";
   }
 
   function isEditablePath(path: string | undefined) {
@@ -438,16 +445,6 @@
       document.body.style.overflow = bodyOverflow;
       document.documentElement.style.overflow = htmlOverflow;
     };
-    const requestedLibraryBook = $page.url.searchParams.get("library") || "";
-    if (requestedLibraryBook) {
-      libraryBookId = requestedLibraryBook;
-      void getWebLibraryBook(requestedLibraryBook).then((book) => {
-        if (!book || book.kind !== "epub") throw new Error("书库中找不到该 EPUB");
-        return loadEpubFile(new File([book.blob], book.fileName, { type: "application/epub+zip", lastModified: book.modifiedAt }));
-      }).catch((error) => {
-        status = `从书库载入失败：${error instanceof Error ? error.message : String(error)}`;
-      });
-    }
   });
 
   onDestroy(() => {
@@ -474,6 +471,7 @@
 
     try {
       doc = await loadWebEpub(file);
+      documentDirty = false;
       expandedFolders = defaultExpandedFolders(doc.files);
       resetMetadataDraft();
       await loadFileTitles();
@@ -501,8 +499,12 @@
   async function onFileChange(event: Event) {
     const file = (event.currentTarget as HTMLInputElement).files?.[0];
     if (!file) return;
-    libraryBookId = "";
     await loadEpubFile(file);
+  }
+
+  function handleImportFiles(event: CustomEvent<File[]>) {
+    const file = event.detail[0];
+    if (file) void loadEpubFile(file);
   }
 
   function persistCurrentFile(options: { refreshPreview?: boolean } = {}) {
@@ -511,6 +513,7 @@
     const content = currentEditorContent();
     editorText = content;
     updateWebEpubText(doc, selectedFile.path, content);
+    documentDirty = true;
     savedEditorText = content;
     if (options.refreshPreview && selectedFile.kind === "xhtml") {
       void refreshPreviewFromEditor();
@@ -751,6 +754,7 @@
         lastEntry = entry;
       }
       doc = doc;
+      documentDirty = true;
       await loadCoverPreview();
       await loadFileTitles();
       if (lastEntry && files.length === 1) {
@@ -804,6 +808,7 @@
     try {
       await deleteWebEpubResource(doc, currentPath);
       doc = doc;
+      documentDirty = true;
       if (selectedFile?.path === currentPath) {
         selectedFile = null;
         editorText = "";
@@ -852,6 +857,7 @@
     try {
       const renamed = await renameWebEpubResource(doc, path, nextPath);
       doc = doc;
+      documentDirty = true;
       if (selectedFile?.path === path) {
         selectedFile = renamed || fileByPath(nextPath);
         selectedTreePath = nextPath;
@@ -884,6 +890,7 @@
     status = "正在写入 OPF 元数据...";
     try {
       const saved = await updateWebEpubMetadata(doc, metadataDraft);
+      documentDirty = true;
       metadataDraft = { ...saved };
       metadataDirty = false;
       if (selectedFile?.path === doc.opfPath) {
@@ -907,14 +914,14 @@
     status = "正在重新打包 EPUB...";
     try {
       const blob = await exportWebEpubBlob(doc);
-      if (libraryBookId) await replaceWebLibraryBookBlob(libraryBookId, blob);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = outputFileName();
       anchor.click();
       URL.revokeObjectURL(url);
-      status = libraryBookId ? `已保存到 Web 书库并导出 ${anchor.download}` : `已导出 ${anchor.download}`;
+      documentDirty = false;
+      status = `已导出 ${anchor.download}`;
     } catch (error) {
       status = `导出失败：${String(error)}`;
     } finally {
@@ -1420,6 +1427,7 @@
         if (replaced.count === 0) continue;
         total += replaced.count;
         updateWebEpubText(doc, file.path, replaced.content);
+        documentDirty = true;
         if (selectedFile?.path === file.path) {
           editorText = replaced.content;
           savedEditorText = replaced.content;
@@ -1463,7 +1471,7 @@
   <title>{headTitle}</title>
 </svelte:head>
 
-<svelte:window on:click={closeFileMenu} />
+<svelte:window on:click={closeFileMenu} on:beforeunload={handleBeforeUnload} />
 
 <div class="web-epub-page">
   <input bind:this={fileInput} class="file-input" type="file" accept=".epub,application/epub+zip" on:change={onFileChange} />
@@ -1471,23 +1479,31 @@
 
   {#if !doc}
     <div class="import-shell">
-      <header class="mobile-import-topbar">
-        <a href={appPath(libraryBookId ? "/toolbox/library" : "/")} aria-label="返回">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M15 6L9 12L15 18"></path>
-          </svg>
-        </a>
-        <h1>{readerMode ? "EPUB 阅读器" : "EPUB 编辑器"}</h1>
-      </header>
-      <main class="empty-state">
-        <section class="import-card">
-          <h1>{importHeading}</h1>
-          <p>{importDescription}</p>
-          <div class="import-actions">
-            <button type="button" class="primary" on:click={pickFile} disabled={busy}>{importAction}</button>
-          </div>
-        </section>
-      </main>
+      <ToolImportPage
+        mark={readerMode ? "READ" : "EPUB"}
+        kicker={readerMode ? "EPUB READER" : "EPUB EDITOR"}
+        title={readerMode ? "EPUB 阅读器" : "EPUB 编辑器"}
+        description={importDescription}
+        privacy={`文件仅在当前设备中读取，选择后继续进入原有${readerMode ? "阅读" : "编辑"}页面。`}
+        outputLabel={readerMode ? "阅读格式" : "编辑格式"}
+        outputValue="EPUB"
+        features={readerMode ? [
+          { title: "目录导航", detail: "读取 NAV 与 NCX 章节目录" },
+          { title: "正文预览", detail: "按阅读顺序打开 EPUB 内容" },
+          { title: "本地阅读", detail: "文件不会上传到服务器" },
+        ] : [
+          { title: "文件结构", detail: "浏览并管理 EPUB 内部资源" },
+          { title: "内容编辑", detail: "编辑 XHTML、CSS 与元数据" },
+          { title: "重新导出", detail: "处理完成后生成新的 EPUB" },
+        ]}
+        prompt={importHeading}
+        hint={readerMode ? "选择 EPUB 后进入原有阅读器" : "选择 EPUB 后进入原有编辑器"}
+        actionLabel={importAction}
+        accept=".epub,application/epub+zip"
+        {busy}
+        on:select={pickFile}
+        on:files={handleImportFiles}
+      />
     </div>
   {:else}
     <main class="workspace" class:reader-workspace={readerMode} class:reader-toc-collapsed={readerMode && readerTocCollapsed}>
@@ -1825,23 +1841,13 @@
     overflow: hidden;
   }
 
-  .mobile-import-topbar {
-    display: none;
-  }
-
   .file-input {
     display: none;
   }
 
-  h1,
   h2,
   p {
     margin: 0;
-  }
-
-  h1 {
-    font-size: 18px;
-    line-height: 1.3;
   }
 
   h2 {
@@ -1892,47 +1898,6 @@
     background: var(--color-accent-soft);
     color: var(--color-accent-deep);
     font-weight: 800;
-  }
-
-  .empty-state {
-    display: grid;
-    align-items: start;
-    justify-items: center;
-    padding: 36px 128px;
-    box-sizing: border-box;
-  }
-
-  .import-card {
-    width: min(100%, 1792px);
-    min-height: 342px;
-    display: grid;
-    align-content: center;
-    justify-items: center;
-    gap: 16px;
-    border: 1px solid rgba(23, 27, 36, 0.08);
-    border-radius: 8px;
-    background: #ffffff;
-    padding: 48px 24px;
-    box-sizing: border-box;
-    text-align: center;
-  }
-
-  .import-card h1 {
-    font-size: 22px;
-    line-height: 1.3;
-  }
-
-  .import-card p {
-    max-width: 520px;
-    color: #64748b;
-    font-size: 14px;
-    line-height: 1.6;
-  }
-
-  .import-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
   }
 
   .workspace {
@@ -2755,14 +2720,6 @@
       flex-direction: column;
     }
 
-    .empty-state {
-      padding: 18px;
-    }
-
-    .import-card {
-      min-height: 260px;
-    }
-
     .editor-actions {
       width: 100%;
       justify-content: stretch;
@@ -2808,53 +2765,9 @@
 
   :global(:root[data-tepub-client="web-mobile"]) .import-shell {
     height: 100dvh;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     background: #f4f5f8;
     overflow: auto;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar {
-    display: grid;
-    grid-template-columns: 38px minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    min-height: 52px;
-    padding: max(10px, env(safe-area-inset-top)) 14px 0;
-    box-sizing: border-box;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar a {
-    width: 34px;
-    height: 34px;
-    display: grid;
-    place-items: center;
-    color: inherit;
-    text-decoration: none;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar svg {
-    width: 20px;
-    height: 20px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2.2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .mobile-import-topbar h1 {
-    font-size: 22px;
-    line-height: 1.2;
-    font-weight: 900;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .empty-state {
-    padding: 18px 10px;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .import-card {
-    min-height: min(360px, calc(100dvh - 36px));
-    padding: 30px 18px;
   }
 
   :global(:root[data-tepub-client="web-mobile"]) .workspace {

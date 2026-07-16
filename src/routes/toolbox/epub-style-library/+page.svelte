@@ -679,7 +679,7 @@
 </script>
 
 <svelte:head>
-  <title>EPUB 样式库 - TEpub Editor</title>
+  <title>EPUB 样式预览 - TEpub Editor</title>
 </svelte:head>
 
 <div class="style-library-page">

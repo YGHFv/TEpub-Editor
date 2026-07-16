@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { base } from "$app/paths";
   import { page } from "$app/stores";
   import { onDestroy } from "svelte";
   import {
@@ -22,28 +21,28 @@
 
   const CONFIGS: Record<WebEpubProcessAction, ToolConfig> = {
     "file-encrypt": {
-      title: "文件加密",
+      title: "EPUB 文件加密",
       kicker: "FILE OBFUSCATION",
       description: "混淆 EPUB manifest 资源文件名，并同步改写 OPF、HTML 与 CSS 引用。",
       detail: "此功能用于降低 EPUB 内部资源的直接可读性，不属于密码学加密。",
       output: "_encrypt.epub",
     },
     "file-decrypt": {
-      title: "文件解密",
+      title: "EPUB 文件解密",
       kicker: "FILE RESTORE",
       description: "依据 OPF manifest ID 恢复混淆文件名，并修复内部资源引用。",
       detail: "同时清理 Windows 不兼容字符，便于后续编辑和解压。",
       output: "_decrypt.epub",
     },
     "epub-reformat": {
-      title: "EPUB 重构",
+      title: "EPUB 结构重构",
       kicker: "PACKAGE REFORMAT",
       description: "将 EPUB 整理为标准 OEBPS 目录结构，并补登记未写入 manifest 的资源。",
       detail: "文本、样式、图片、字体、音视频会归入对应目录，所有引用同步更新。",
       output: "_reformat.epub",
     },
     "image-convert": {
-      title: "图片转换",
+      title: "图片格式转换",
       kicker: "IMAGE CONVERTER",
       description: "在 EPUB 内进行 WebP 与 PNG/JPEG 双向转换，并同步更新资源路径与媒体类型。",
       detail: "自动模式把 WebP 按透明通道转为 PNG/JPEG；选择 WebP 时转换 PNG/JPEG。",
@@ -64,10 +63,6 @@
   $: rawAction = $page.url.searchParams.get("tool") as WebEpubProcessAction | null;
   $: action = rawAction && ACTIONS.has(rawAction) ? rawAction : "epub-reformat";
   $: config = CONFIGS[action];
-
-  function appPath(path: string) {
-    return `${base}${path.startsWith("/") ? path : `/${path}`}`;
-  }
 
   function clearResults() {
     for (const result of results) URL.revokeObjectURL(result.url);
@@ -138,19 +133,6 @@
 </svelte:head>
 
 <div class="process-page">
-  <header class="topbar">
-    <div class="heading">
-      <a class="back" href={appPath("/")} aria-label="返回工具箱">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
-      </a>
-      <div><span>{config.kicker}</span><h1>{config.title}</h1></div>
-    </div>
-    <div class="head-actions">
-      {#if results.length > 1}<button class="secondary" type="button" on:click={downloadAll}>下载全部</button>{/if}
-      <button class="primary" type="button" disabled={busy} on:click={() => fileInput?.click()}>{results.length || failures.length ? "重新选择" : "选择 EPUB"}</button>
-    </div>
-  </header>
-
   <input bind:this={fileInput} class="file-input" type="file" accept=".epub,application/epub+zip" multiple on:change={handleFileChange} />
 
   <main class="content">
@@ -210,17 +192,11 @@
 
 <style>
   :global(body) { margin: 0; background: #edf1f5; color: #172033; font-family: Inter, "Microsoft YaHei", sans-serif; }
-  button, a { font: inherit; }
+  button { font: inherit; }
   button { color: inherit; }
   .process-page { min-height: 100dvh; }
-  .topbar { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 24px; border-bottom: 1px solid #d8e0e9; background: rgba(255,255,255,.96); }
-  .heading, .head-actions { display: flex; align-items: center; gap: 12px; }
-  .back { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid #d6dee8; border-radius: 8px; color: #43536b; background: #fff; }
-  .back svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
-  .heading span, .kicker { color: #7b899d; font-size: 9px; font-weight: 800; letter-spacing: .15em; }
-  .heading h1 { margin: 2px 0 0; font-size: 18px; }
-  .primary, .secondary { min-height: 36px; padding: 0 16px; border-radius: 7px; font-size: 12px; font-weight: 800; cursor: pointer; }
-  .primary { border: 1px solid #17699a; background: #17699a; color: #fff; }
+  .kicker { color: #7b899d; font-size: 9px; font-weight: 800; letter-spacing: .15em; }
+  .secondary { min-height: 36px; padding: 0 16px; border-radius: 7px; font-size: 12px; font-weight: 800; cursor: pointer; }
   .secondary { border: 1px solid #d1dae5; background: #fff; }
   button:disabled { cursor: wait; opacity: .6; }
   .file-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
@@ -266,10 +242,6 @@
   .result-copy small { color: #8693a4; font-size: 9px; overflow-wrap: anywhere; }
   .result-list article > button { min-height: 32px; padding: 0 12px; border: 1px solid #b9cfdd; border-radius: 6px; background: #fff; color: #17699a; font-size: 10px; font-weight: 800; cursor: pointer; }
   @media (max-width: 700px) {
-    .topbar { min-height: 62px; padding: 0 13px; }
-    .heading span { display: none; }
-    .heading h1 { font-size: 16px; }
-    .head-actions .secondary { display: none; }
     .content { width: calc(100% - 24px); margin: 14px auto 28px; }
     .intro-card { grid-template-columns: 52px minmax(0, 1fr); padding: 16px; gap: 12px; }
     .tool-mark { width: 50px; height: 50px; border-radius: 11px; }

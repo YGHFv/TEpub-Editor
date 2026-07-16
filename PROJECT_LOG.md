@@ -32,6 +32,42 @@ Main areas:
 
 ## Change History
 
+### 2026-07-16 20:48 +08:00
+
+Request: fix the Web toolbox home scroll again, replace every native dropdown with the project control, remove toolbox home title rows, and re-audit the features migrated from `wangyyyqw/epub-toolkit`.
+
+Scroll and home layout:
+
+- Identified the remaining scroll root cause in `src/app.css`: Web client rules applied `overflow-x` to both `html` and `body`, which makes both elements computed vertical scroll containers under CSS overflow rules.
+- Kept horizontal/vertical viewport scrolling only on the root element and made Web `body` overflow visible, leaving a single document scroll surface for mouse-wheel input.
+- Removed the toolbox home “工具箱 / 常用工具” title row and all per-group heading rows; settings/status actions remain in a compact action strip and tool groups retain accessible labels.
+
+Custom dropdown migration:
+
+- Replaced all 19 remaining native `<select>` controls across EPUB metadata, reader, desktop TXT editor, mobile EPUB editor, Web advanced EPUB processing, font processing, and Web library routes.
+- Extended `CustomSelect` with associated button IDs/ARIA labels, disabled options, selected markers, outside/Escape close behavior, and Arrow/Home/End keyboard navigation.
+- Removed the global native-select appearance/picker theme rules and updated route-specific layout rules for the shared custom control.
+- Static repository scan now reports zero `<select>` elements under `src`.
+
+Reference-feature re-audit and fixes:
+
+- Fixed merged/split EPUB OCF output so the uncompressed `mimetype` file is inserted as the first ZIP entry.
+- Fixed font subsetting to preserve Unicode code points referenced through hexadecimal or decimal XHTML numeric entities.
+- Corrected traditional-to-simplified conversion to use the Taiwan-traditional source profile paired with the existing simplified-to-Taiwan conversion.
+- Extended the migration audit document with the findings, regression coverage, and unchanged real-sample boundary for platform-private footnotes.
+
+Verification:
+
+- `pnpm test` passed: 11 tests, including new OCF first-entry and numeric-entity subset regressions.
+- `pnpm check` passed with 0 errors; after removal of the final stale native-select selectors, remaining warnings match the existing accessibility/unused-style baseline.
+- `pnpm build:web` and `pnpm build` passed; the existing large-chunk warning remains.
+- Toolbox home, Web library, font subset, and all ten advanced EPUB action URLs returned HTTP 200 from `http://127.0.0.1:5233`.
+- In-app browser automation was not exposed in this session; scroll correctness was verified from the single-root overflow model and the live route, but no synthetic wheel event was available.
+
+Remaining boundary:
+
+- Canvas image compression/watermark encoding still requires a real browser runtime, and private vendor footnote conversions still require representative EPUB fixtures before adding format-specific transforms.
+
 ### 2026-07-16 20:12 +08:00
 
 Request: fix the Web toolbox home page repeatedly refreshing and not responding to mouse-wheel scrolling.
@@ -3739,3 +3775,17 @@ Verification:
 Caveats:
 
 - Android packaging still emits the existing Gradle deprecation warning and `libtepub_editor_lib.so` strip warning, but the release APK builds and installs successfully.
+### 2026-07-17 Web 工具公共入口与基础优化
+
+- 新增 `ToolImportPage.svelte`，统一 TXT 编辑器、EPUB 编辑器/阅读器、TXT 转 EPUB 与结构诊断的介绍卡、功能说明、拖放、忙碌态、格式错误和移动端布局。
+- TXT、EPUB 编辑器及 TXT 转 EPUB 增加未保存/未导出离开保护。
+- 新增 Web 工具设计变量，清理已迁移页面中的重复中转页 CSS。
+- 新增 `webFileWorkflow.ts`，集中处理文件验证、对象 URL 生命周期和浏览器下载；结构诊断已接入。
+- OpenCC、拼音与字体处理核心改为按需动态加载。
+- 新增 `webFileWorkflow.test.ts`，当前前端测试由 11 项增加到 14 项。
+- 验证：`pnpm exec tsc --noEmit --pretty false`、`pnpm test -- --reporter=dot`、`pnpm build` 均通过。
+- 完成书架、列表、阅读器、工具箱和元数据/设置弹窗的键盘操作、标签与弹窗语义修复；`svelte-check` 收敛为 0 错误、0 警告。
+- 新增工具路由、设置持久化与未保存判断测试，并将图片隐形水印的像素位写入/读取迁移到 Web Worker，支持按图片进度和 `AbortSignal` 取消。
+- 修复 Worker 读取端仍使用旧 `TEPUBWM1` 标识导致浏览器 Worker 路径无法读取当前 `TEPUBWM2` 水印的问题，并增加 Worker 消息处理器往返测试。
+- 最终验证：`pnpm check`、22 项 `pnpm test -- --reporter=dot`、`pnpm build` 均通过；生产构建仅保留大体积共享 chunk 提示，未再出现 Svelte 无障碍或未使用样式诊断。
+- 工具箱暂时隐藏“发送到 Kindle”入口；保留工具定义、官方链接和打开逻辑，后续可通过移除临时隐藏列表快速恢复。

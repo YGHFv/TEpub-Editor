@@ -6,6 +6,7 @@
   import { platform, type PlatformWindowHandle } from "$lib/platform";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
+  import { isSharedWebTool, isWebRouteToolId, webToolRoute } from "$lib/webToolRoutes";
   import {
     applyTheme,
     DEFAULT_TOC_REGEX_RULES,
@@ -60,15 +61,14 @@
     icon: string;
     title: string;
     detail: string;
-    action: string;
   };
 
+  type ToolGroupFilter = "all" | "edit" | "convert" | "security" | "optimize";
+
   type ToolGroup = {
-    id: string;
+    id: Exclude<ToolGroupFilter, "all">;
     title: string;
-    meta: string;
     tools: Tool[];
-    gridClass: string;
   };
 
   type ToolboxResult = {
@@ -126,143 +126,139 @@
       icon: "LIB",
       title: "书库",
       detail: "管理图书与元数据",
-      action: "进入",
     },
     {
       id: "txt-epub",
       icon: "TXT",
-      title: "TXT 制作 EPUB",
-      detail: "选择 TXT 文件",
-      action: "打开",
+      title: "TXT 转 EPUB",
+      detail: "将 TXT 制作为标准 EPUB",
     },
     {
       id: "epub-style-library",
       icon: "CSS",
-      title: "EPUB 样式库",
+      title: "EPUB 样式预览",
       detail: "预览头图与标题样式",
-      action: "预览",
     },
     {
       id: "txt-edit",
       icon: "EDIT",
       title: "TXT 编辑器",
       detail: "导入、校对、查找替换",
-      action: "编辑",
     },
     {
       id: "epub-edit",
       icon: "EPUB",
       title: "EPUB 编辑器",
-      detail: "选择 EPUB 文件",
-      action: "编辑",
+      detail: "编辑结构、资源与元数据",
     },
     {
       id: "epub-read",
       icon: "READ",
       title: "EPUB 阅读器",
-      detail: "选择 EPUB 文件",
-      action: "阅读",
+      detail: "打开 EPUB 进行阅读预览",
     },
     {
       id: "font-encrypt",
       icon: "FONT+",
-      title: "字体加密",
-      detail: "选择 EPUB 文件",
-      action: "处理",
+      title: "EPUB 字体加密",
+      detail: "加密 EPUB 内嵌字体",
     },
     {
       id: "font-decrypt",
       icon: "FONT-",
-      title: "字体解密",
-      detail: "选择 EPUB 和对应 TXT",
-      action: "处理",
+      title: "EPUB 字体解密",
+      detail: "使用对应 TXT 还原字体",
     },
     {
       id: "file-encrypt",
       icon: "LOCK",
-      title: "文件加密",
-      detail: "选择 EPUB 文件",
-      action: "处理",
+      title: "EPUB 文件加密",
+      detail: "加密 EPUB 正文文件",
     },
     {
       id: "file-decrypt",
       icon: "OPEN",
-      title: "文件解密",
-      detail: "选择 EPUB 文件",
-      action: "处理",
+      title: "EPUB 文件解密",
+      detail: "还原 EPUB 正文文件",
     },
     {
       id: "epub-reformat",
       icon: "REFIT",
-      title: "EPUB 重构",
+      title: "EPUB 结构重构",
       detail: "整理目录与引用",
-      action: "处理",
     },
     {
       id: "image-convert",
       icon: "IMG",
-      title: "图片转换",
+      title: "图片格式转换",
       detail: "WebP 与 PNG/JPEG 互转",
-      action: "处理",
     },
     {
       id: "image-tools",
       icon: "COVER",
-      title: "图片处理",
+      title: "封面与横幅",
       detail: "制作全屏封面与阅微横幅",
-      action: "打开",
     },
     {
       id: "epub-diagnose",
       icon: "CHK",
-      title: "EPUB 诊断",
+      title: "EPUB 结构诊断",
       detail: "检查 OPF、manifest 和内部引用",
-      action: "诊断",
     },
-    { id: "epub-to-txt", icon: "TXT", title: "EPUB 转 TXT", detail: "按阅读顺序提取正文", action: "转换" },
-    { id: "epub-version", icon: "2/3", title: "EPUB 版本转换", detail: "EPUB 2.0 / 3.0 互转", action: "转换" },
-    { id: "epub-chinese", icon: "繁简", title: "EPUB 简繁转换", detail: "转换正文、目录和元数据", action: "转换" },
-    { id: "epub-ad-clean", icon: "CLEAN", title: "EPUB 广告清理", detail: "按正则清理广告段落", action: "清理" },
-    { id: "epub-phonetic", icon: "PIN", title: "EPUB 拼音标注", detail: "生成标准 ruby 注音", action: "标注" },
-    { id: "epub-footnote", icon: "NOTE", title: "批注与脚注", detail: "弹窗批注与 EPUB3 脚注转换", action: "转换" },
-    { id: "image-compress", icon: "ZIP", title: "图片压缩", detail: "压缩 EPUB 内嵌图片", action: "压缩" },
-    { id: "image-watermark", icon: "WM", title: "图片隐形水印", detail: "写入或读取图片文本水印", action: "处理" },
-    { id: "epub-merge", icon: "MERGE", title: "合并 EPUB", detail: "保留资源与阅读顺序", action: "合并" },
-    { id: "epub-split", icon: "SPLIT", title: "拆分 EPUB", detail: "按章节数生成多本 EPUB", action: "拆分" },
-    { id: "font-subset", icon: "FONT S", title: "字体子集化", detail: "移除正文未使用字形", action: "裁剪" },
-    { id: "send-to-kindle", icon: "KINDLE", title: "Send to Kindle", detail: "打开 Amazon 官方传书网页", action: "打开" },
+    { id: "epub-to-txt", icon: "TXT", title: "EPUB 转 TXT", detail: "按阅读顺序提取正文" },
+    { id: "epub-version", icon: "2/3", title: "EPUB 版本互转", detail: "EPUB 2.0 与 3.0 互转" },
+    { id: "epub-chinese", icon: "繁简", title: "EPUB 简繁互转", detail: "转换正文、目录与元数据" },
+    { id: "epub-ad-clean", icon: "CLEAN", title: "EPUB 广告清理", detail: "按规则清理广告段落" },
+    { id: "epub-phonetic", icon: "PIN", title: "EPUB 拼音标注", detail: "生成标准 ruby 注音" },
+    { id: "epub-footnote", icon: "NOTE", title: "EPUB 批注与脚注", detail: "批注与 EPUB3 脚注互转" },
+    { id: "image-compress", icon: "ZIP", title: "EPUB 图片压缩", detail: "压缩 EPUB 内嵌图片" },
+    { id: "image-watermark", icon: "WM", title: "EPUB 图片水印", detail: "写入或读取隐形文本水印" },
+    { id: "epub-merge", icon: "MERGE", title: "EPUB 合并", detail: "保留资源与阅读顺序" },
+    { id: "epub-split", icon: "SPLIT", title: "EPUB 拆分", detail: "按章节数拆分为多本 EPUB" },
+    { id: "font-subset", icon: "FONT S", title: "EPUB 字体精简", detail: "移除正文未使用字形" },
+    { id: "send-to-kindle", icon: "KINDLE", title: "发送到 Kindle", detail: "打开 Amazon 官方传书页面" },
   ];
+
+  const toolById = new Map(tools.map((tool) => [tool.id, tool]));
+  const selectTools = (...ids: ToolId[]) => ids.map((id) => toolById.get(id)).filter((tool): tool is Tool => Boolean(tool));
+  const temporarilyHiddenToolIds = new Set<ToolId>(["send-to-kindle"]);
 
   const toolGroups: ToolGroup[] = [
     {
-      id: "open",
-      title: "常用入口",
-      meta: "书库 / 新窗口",
-      tools: tools.filter((tool) => tool.id === "library" || tool.id === "txt-epub" || tool.id === "epub-style-library" || tool.id === "txt-edit" || tool.id === "epub-edit" || tool.id === "epub-read"),
-      gridClass: "open-grid",
+      id: "edit",
+      title: "编辑阅读",
+      tools: selectTools("library", "txt-edit", "epub-edit", "epub-read", "epub-style-library", "image-tools", "send-to-kindle"),
     },
     {
-      id: "process",
-      title: "EPUB 处理",
-      meta: "生成新文件",
-      tools: tools.filter((tool) => tool.id === "font-encrypt" || tool.id === "font-decrypt" || tool.id === "file-encrypt" || tool.id === "file-decrypt" || tool.id === "epub-reformat" || tool.id === "image-convert" || tool.id === "image-tools" || tool.id === "epub-diagnose"),
-      gridClass: "process-grid",
+      id: "convert",
+      title: "格式转换",
+      tools: selectTools("txt-epub", "epub-to-txt", "epub-version", "epub-chinese", "image-convert", "epub-footnote"),
     },
     {
-      id: "advanced",
-      title: "转换与整理",
-      meta: "安装版 / Web 共用内核",
-      tools: tools.filter((tool) => tool.id === "epub-to-txt" || tool.id === "epub-version" || tool.id === "epub-chinese" || tool.id === "epub-ad-clean" || tool.id === "epub-phonetic" || tool.id === "epub-footnote" || tool.id === "image-compress" || tool.id === "image-watermark" || tool.id === "epub-merge" || tool.id === "epub-split" || tool.id === "font-subset" || tool.id === "send-to-kindle"),
-      gridClass: "process-grid",
+      id: "security",
+      title: "加密解密",
+      tools: selectTools("font-encrypt", "font-decrypt", "file-encrypt", "file-decrypt"),
+    },
+    {
+      id: "optimize",
+      title: "整理优化",
+      tools: selectTools("epub-diagnose", "epub-reformat", "epub-ad-clean", "epub-phonetic", "image-compress", "image-watermark", "font-subset", "epub-merge", "epub-split"),
     },
   ];
 
+  let activeToolGroup: ToolGroupFilter = "all";
+  let toolSearch = "";
+  $: normalizedToolSearch = toolSearch.trim().toLocaleLowerCase("zh-CN");
   $: visibleToolGroups = toolGroups
     .map((group) => ({
       ...group,
-      meta: platform.isWeb && group.id === "open" ? "Web 工具入口" : group.meta,
-      tools: group.tools,
+      tools: group.tools.filter((tool) => (
+        !temporarilyHiddenToolIds.has(tool.id)
+        && (!platform.isWeb || tool.id !== "library")
+        && (!normalizedToolSearch || `${tool.title} ${tool.detail}`.toLocaleLowerCase("zh-CN").includes(normalizedToolSearch))
+      )),
     }))
+    .filter((group) => activeToolGroup === "all" || group.id === activeToolGroup)
     .filter((group) => group.tools.length > 0);
 
   let busyTool: ToolId | "" = "";
@@ -404,7 +400,7 @@
       }
       if (tool.id === "image-tools") {
         await openImageTools();
-        statusText = "图片处理窗口已打开";
+        statusText = "封面与横幅工具已打开";
         return;
       }
 
@@ -491,32 +487,16 @@
   }
 
   function isWebRouteTool(id: ToolId) {
-    return id === "library" || id === "image-tools" || id === "txt-epub" || id === "epub-style-library" || id === "txt-edit" || id === "epub-edit" || id === "epub-read" || id === "epub-diagnose" || id === "font-encrypt" || id === "font-decrypt" || id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert" || isSharedBrowserTool(id);
+    return isWebRouteToolId(id);
   }
 
   function isSharedBrowserTool(id: ToolId) {
-    return id === "image-convert" || id === "epub-to-txt" || id === "epub-version" || id === "epub-chinese" || id === "epub-ad-clean" || id === "epub-phonetic" || id === "epub-footnote" || id === "image-compress" || id === "image-watermark" || id === "epub-merge" || id === "epub-split" || id === "font-subset";
+    return isSharedWebTool(id);
   }
 
   function webToolHref(id: ToolId) {
-    if (id === "send-to-kindle") return "https://www.amazon.com/sendtokindle";
-    if (id === "library") return appPath("/toolbox/library");
-    if (id === "image-tools") return appPath("/toolbox/image-tools");
-    if (id === "txt-epub") return appPath("/toolbox/make-epub");
-    if (id === "epub-style-library") return appPath("/toolbox/epub-style-library");
-    if (id === "txt-edit") return appPath("/toolbox/text-editor");
-    if (id === "epub-edit") return appPath("/toolbox/epub-editor");
-    if (id === "epub-read") return appPath("/toolbox/epub-editor?mode=reader");
-    if (id === "epub-diagnose") return appPath("/toolbox/epub-diagnose");
-    if (id === "font-encrypt" || id === "font-decrypt") return appPath(`/toolbox/font-process?tool=${id}`);
-    if (id === "font-subset") return appPath("/toolbox/font-process?tool=font-subset");
-    if (id === "epub-to-txt" || id === "epub-version" || id === "epub-chinese" || id === "epub-ad-clean" || id === "epub-phonetic" || id === "epub-footnote" || id === "image-compress" || id === "image-watermark" || id === "epub-merge" || id === "epub-split") {
-      return appPath(`/toolbox/epub-advanced?tool=${id}`);
-    }
-    if (id === "file-encrypt" || id === "file-decrypt" || id === "epub-reformat" || id === "image-convert") {
-      return appPath(`/toolbox/epub-process?tool=${id}`);
-    }
-    return "#";
+    const route = webToolRoute(id);
+    return /^https?:\/\//.test(route) || route === "#" ? route : appPath(route);
   }
 
   function isRootToolbox() {
@@ -571,7 +551,7 @@
 
     const win = await createToolWindow(windowLabel("image-tools"), {
       url: appPath("/toolbox/image-tools"),
-      title: "TEpub-Editor-图片处理",
+      title: "TEpub-Editor-封面与横幅",
       width: TOOLBOX_WINDOW_WIDTH,
       height: TOOLBOX_WINDOW_HEIGHT,
       minWidth: TOOLBOX_WINDOW_WIDTH,
@@ -584,7 +564,7 @@
 
   async function openStyleLibrary() {
     busyTool = "epub-style-library";
-    statusText = "正在打开 EPUB 样式库...";
+    statusText = "正在打开 EPUB 样式预览...";
     try {
       const win = await createToolWindow(windowLabel("epub-style-library"), {
         url: appPath("/toolbox/epub-style-library"),
@@ -597,11 +577,11 @@
         center: true,
       });
       await hideToolboxHomeWhileOpen(win);
-      statusText = "EPUB 样式库已打开";
+      statusText = "EPUB 样式预览已打开";
     } catch (e: any) {
-      console.error("打开 EPUB 样式库失败:", e);
-      statusText = "打开 EPUB 样式库失败";
-      await platform.message(`打开 EPUB 样式库失败: ${e}`, { title: "错误", kind: "error" });
+      console.error("打开 EPUB 样式预览失败:", e);
+      statusText = "打开 EPUB 样式预览失败";
+      await platform.message(`打开 EPUB 样式预览失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       busyTool = "";
     }
@@ -1002,40 +982,39 @@
 
 <main class="toolbox-app" class:desktop-view={webDesktopViewEnabled}>
   <section class="toolbox-content" aria-label="工具列表">
-    <div class="toolbox-title-row">
-      <div>
-        <h1>工具箱</h1>
-        <div class="toolbox-subtitle">常用工具</div>
+    <div class="toolbox-commandbar">
+      <div class="toolbox-filter-tabs" role="tablist" aria-label="工具分类">
+        <button type="button" class:active={activeToolGroup === "all"} on:click={() => (activeToolGroup = "all")}>全部</button>
+        {#each toolGroups as group}
+          <button type="button" class:active={activeToolGroup === group.id} on:click={() => (activeToolGroup = group.id as ToolGroupFilter)}>{group.title}</button>
+        {/each}
       </div>
-      <div class="toolbox-title-actions">
-        {#if statusText}
-          <span class="toolbox-inline-status" aria-live="polite">{statusText}</span>
-        {/if}
+      <label class="toolbox-search">
+        <span aria-hidden="true">⌕</span>
+        <input type="search" bind:value={toolSearch} placeholder="搜索工具" aria-label="搜索工具" />
+      </label>
+      <div class="toolbox-home-actions">
         {#if platform.isWeb}
           <button
             class="toolbox-settings-btn"
             class:active={webDesktopViewEnabled}
             type="button"
             on:click={toggleWebDesktopView}
-            title={webDesktopViewEnabled ? "恢复自动页面" : "切换电脑页面"}
             aria-label={webDesktopViewEnabled ? "恢复自动页面" : "切换电脑页面"}
             aria-pressed={webDesktopViewEnabled}
-          >PC</button>
+          ><span class="desktop-view-icon" aria-hidden="true"></span></button>
         {/if}
         <button class="toolbox-settings-btn" type="button" on:click={openSettings} title="设置" aria-label="设置">⚙</button>
       </div>
     </div>
+    {#if statusText}<span class="toolbox-status-announcer" aria-live="polite">{statusText}</span>{/if}
 
-    {#each visibleToolGroups as group}
-      <section class="tool-section" aria-labelledby={`toolbox-section-${group.id}`}>
-        <div class="section-head">
-          <h2 id={`toolbox-section-${group.id}`}>{group.title}</h2>
-          <span>{group.meta}</span>
-        </div>
-        <div class={`tool-grid ${group.gridClass}`}>
+    {#if visibleToolGroups.length}
+      <div class="tool-directory">
+        {#each visibleToolGroups as group}
           {#each group.tools as tool}
             <div
-              class="tool-card"
+              class="tool-card tool-card-{group.id}"
               class:tool-card-disabled={busyTool !== ""}
               aria-label={tool.title}
             >
@@ -1050,9 +1029,8 @@
                 <span class="tool-title">{tool.title}</span>
                 <span class="tool-detail">{busyTool === tool.id ? "处理中..." : tool.detail}</span>
               </span>
-              <span class="tool-action">{tool.action}</span>
               </a>
-              {#if isBatchTool(tool.id)}
+              {#if isBatchTool(tool.id) && !platform.isWeb}
                 <button
                   class="tool-batch"
                   type="button"
@@ -1065,9 +1043,11 @@
               {/if}
             </div>
           {/each}
-        </div>
-      </section>
-    {/each}
+        {/each}
+      </div>
+    {:else}
+      <div class="toolbox-empty">没有匹配的工具</div>
+    {/if}
 
     {#if platform.isWeb}
       <footer class="web-toolbox-footer" aria-label="版权信息">
@@ -1289,7 +1269,7 @@
 <style>
   :global(body) {
     margin: 0;
-    overflow: auto;
+    overflow: visible;
     background: var(--color-canvas);
   }
 
@@ -1305,21 +1285,14 @@
     font-family: var(--font-ui);
   }
 
-  .toolbox-title-row {
-    min-height: 50px;
+  .toolbox-home-actions {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 20px;
-    margin-bottom: 28px;
-  }
-
-  .toolbox-title-actions {
-    display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: flex-end;
-    gap: 10px;
+    gap: 8px;
     min-width: 0;
+    min-height: 36px;
+    margin: 0;
   }
 
   .toolbox-settings-btn,
@@ -1337,12 +1310,44 @@
   }
 
   .toolbox-settings-btn {
-    width: 34px;
+    width: 36px;
+    height: 36px;
     padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    border-color: var(--color-border);
+    border-radius: 8px;
+    background: var(--color-surface);
+    font-size: 17px;
+    transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+  }
+
+  .toolbox-settings-btn:hover,
+  .toolbox-settings-btn.active {
+    border-color: var(--color-border);
+    background: var(--color-hover);
+    color: var(--color-accent-deep);
+  }
+
+  .desktop-view-icon {
+    position: relative;
+    width: 16px;
+    height: 11px;
+    box-sizing: border-box;
+    border: 1.7px solid currentColor;
+    border-radius: 2px;
+  }
+
+  .desktop-view-icon::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -4px;
+    width: 7px;
+    height: 3px;
+    border-bottom: 1.7px solid currentColor;
+    transform: translateX(-50%);
   }
 
   .toolbox-mini-btn {
@@ -1369,30 +1374,16 @@
     color: #ffffff;
   }
 
-  .toolbox-title-row h1 {
-    margin: 0;
-    font-size: 22px;
-    line-height: 1.2;
-    font-weight: 800;
-    letter-spacing: 0;
-  }
-
-  .toolbox-subtitle {
-    margin-top: 4px;
-    color: var(--color-muted);
-    font-size: 12px;
-    line-height: 1.2;
-  }
-
-  .toolbox-inline-status {
-    flex-shrink: 0;
-    max-width: min(420px, 42vw);
-    margin-top: 4px;
-    color: var(--color-muted);
-    font-size: 12px;
-    line-height: 1.4;
-    text-align: right;
-    overflow-wrap: anywhere;
+  .toolbox-status-announcer {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .toolbox-settings-overlay {
@@ -1628,76 +1619,131 @@
 
   .toolbox-content {
     box-sizing: border-box;
-    width: min(1100px, calc(100% - 48px));
+    width: min(1240px, calc(100% - 48px));
     flex: 1 0 auto;
     min-height: auto;
     margin: 0 auto;
-    padding: 30px 0 34px;
+    padding: 18px 0 30px;
     display: flex;
     flex-direction: column;
     overflow: visible;
   }
 
-  .tool-section + .tool-section {
-    margin-top: 26px;
+  .toolbox-commandbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 280px) auto;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 8px 0 10px;
+    margin-bottom: 6px;
+    background: color-mix(in srgb, var(--color-canvas) 92%, transparent);
+    backdrop-filter: blur(12px);
   }
 
-  .section-head {
-    height: 24px;
-    margin-bottom: 10px;
+  .toolbox-filter-tabs {
+    min-width: 0;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
-  .section-head h2 {
-    margin: 0;
-    color: var(--color-text);
-    font-size: 14px;
-    line-height: 1.3;
-    font-weight: 800;
-    letter-spacing: 0;
+  .toolbox-filter-tabs::-webkit-scrollbar {
+    display: none;
   }
 
-  .section-head span {
+  .toolbox-filter-tabs button {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
     color: var(--color-muted);
+    cursor: pointer;
+    font: inherit;
     font-size: 12px;
-    line-height: 1.2;
-    white-space: nowrap;
+    font-weight: 700;
+    transition: color var(--transition-fast), background var(--transition-fast);
   }
 
-  .tool-grid {
+  .toolbox-filter-tabs button:hover {
+    background: var(--color-hover);
+    color: var(--color-text);
+  }
+
+  .toolbox-filter-tabs button.active {
+    background: var(--color-surface);
+    color: var(--color-accent-deep);
+    box-shadow: inset 0 0 0 1px var(--color-border), var(--shadow-xs);
+  }
+
+  .toolbox-filter-tabs button:focus-visible,
+  .toolbox-search:focus-within,
+  .toolbox-settings-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  .toolbox-search {
+    min-width: 0;
+    min-height: 36px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 10px;
+    border: 1px solid var(--color-border);
+    border-radius: 7px;
+    background: var(--color-surface);
+    color: var(--color-muted);
+  }
+
+  .toolbox-search input {
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+    font-size: 13px;
+  }
+
+  .toolbox-search input::placeholder {
+    color: var(--color-muted);
+  }
+
+  .tool-directory {
     display: grid;
-    gap: 12px;
-  }
-
-  .open-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .process-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px 14px;
+    padding: 8px 0;
   }
 
   .tool-card {
     position: relative;
-    min-height: 104px;
+    min-height: 0;
     box-sizing: border-box;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
     color: var(--color-text);
     text-align: left;
-    box-shadow: var(--shadow-xs);
-    overflow: hidden;
-    transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+    box-shadow: none;
+    overflow: visible;
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
   }
 
   .tool-card:hover:not(.tool-card-disabled) {
-    border-color: var(--color-border-strong);
-    background: var(--color-hover);
-    box-shadow: var(--shadow-sm);
+    background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-border) 72%, transparent);
   }
 
   .tool-card-disabled {
@@ -1706,13 +1752,13 @@
 
   .tool-main {
     width: 100%;
-    min-height: 104px;
+    min-height: 62px;
     box-sizing: border-box;
     display: grid;
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 36px minmax(0, 1fr);
     align-items: center;
-    gap: 12px;
-    padding: 16px 18px;
+    gap: 10px;
+    padding: 8px 10px;
     border: 0;
     background: transparent;
     color: inherit;
@@ -1735,30 +1781,48 @@
   }
 
   .tool-icon {
-    width: 48px;
-    height: 48px;
+    width: 36px;
+    height: 36px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-sm);
     background: var(--color-accent-quiet);
     color: var(--color-accent-deep);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     letter-spacing: 0;
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 10%, transparent);
+  }
+
+  .tool-card-convert .tool-icon {
+    background: color-mix(in srgb, #2f8f65 12%, var(--color-surface));
+    color: #24724f;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #2f8f65 18%, transparent);
+  }
+
+  .tool-card-security .tool-icon {
+    background: color-mix(in srgb, #c07a20 13%, var(--color-surface));
+    color: #9a5e12;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #c07a20 20%, transparent);
+  }
+
+  .tool-card-optimize .tool-icon {
+    background: color-mix(in srgb, #7a6aa8 12%, var(--color-surface));
+    color: #62538e;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #7a6aa8 18%, transparent);
   }
 
   .tool-copy {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding-right: 58px;
+    gap: 3px;
+    padding-right: 0;
   }
 
   .tool-title {
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 800;
     line-height: 1.35;
     overflow-wrap: anywhere;
@@ -1766,50 +1830,42 @@
 
   .tool-detail {
     color: var(--color-muted);
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: 11px;
+    line-height: 1.4;
     overflow-wrap: anywhere;
   }
 
-  .tool-action {
-    position: absolute;
-    top: 14px;
-    right: 14px;
-    min-width: 40px;
-    box-sizing: border-box;
-    padding: 3px 8px;
-    border: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
-    border-radius: 999px;
-    background: var(--color-accent-quiet);
-    color: var(--color-accent-deep);
-    font-size: 12px;
-    font-weight: 800;
-    line-height: 1.25;
-    text-align: center;
+  .tool-card:has(.tool-batch) .tool-main {
+    padding-right: 50px;
   }
 
   .tool-batch {
     position: absolute;
-    right: 14px;
-    bottom: 12px;
-    min-width: 40px;
+    right: 13px;
+    bottom: 7px;
+    min-width: 34px;
     box-sizing: border-box;
-    padding: 3px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    background: var(--color-surface);
+    padding: 1px 5px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
     color: var(--color-muted);
     font: inherit;
-    font-size: 12px;
-    font-weight: 800;
+    font-size: 10px;
+    font-weight: 700;
     line-height: 1.25;
     cursor: pointer;
   }
 
   .tool-batch:hover:not(:disabled) {
-    border-color: var(--color-border-strong);
-    color: var(--color-text);
-    background: var(--color-hover);
+    color: var(--color-accent-deep);
+    background: var(--color-accent-quiet);
+  }
+
+  .toolbox-empty {
+    padding: 64px 16px;
+    color: var(--color-muted);
+    text-align: center;
   }
 
   .web-toolbox-footer {
@@ -1870,121 +1926,92 @@
     width: calc(100% - 20px);
     flex: 0 0 auto;
     min-height: auto;
-    padding: max(14px, env(safe-area-inset-top)) 0 max(18px, env(safe-area-inset-bottom));
+    padding: max(10px, env(safe-area-inset-top)) 0 max(18px, env(safe-area-inset-bottom));
     overflow: visible;
   }
 
-  :global(:root[data-tepub-client="web-mobile"]) .toolbox-title-row {
-    min-height: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 10px;
-    margin-bottom: 18px;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .toolbox-title-actions {
-    width: auto;
-    justify-self: end;
-    justify-content: flex-end;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .toolbox-inline-status {
-    max-width: 100%;
-    text-align: left;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .open-grid,
-  :global(:root[data-tepub-client="web-mobile"]) .process-grid {
+  :global(:root[data-tepub-client="web-mobile"]) .tool-directory {
     grid-template-columns: 1fr;
   }
 
   :global(:root[data-tepub-client="web-mobile"]) .tool-main {
-    grid-template-columns: 44px minmax(0, 1fr);
-    min-height: 88px;
-    padding: 14px;
+    min-height: 70px;
   }
 
-  :global(:root[data-tepub-client="web-mobile"]) .tool-icon {
-    width: 44px;
-    height: 44px;
+  :global(:root[data-tepub-client="web-mobile"]) .toolbox-commandbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
   }
 
-  :global(:root[data-tepub-client="web-mobile"]) .tool-action {
-    position: static;
-    grid-column: 2;
-    justify-self: start;
-    margin-top: -2px;
-  }
-
-  :global(:root[data-tepub-client="web-mobile"]) .tool-copy {
-    padding-right: 0;
+  :global(:root[data-tepub-client="web-mobile"]) .toolbox-filter-tabs {
+    grid-column: 1 / -1;
+    grid-row: 1;
   }
 
   @media (max-width: 980px) {
-    .open-grid,
-    .process-grid {
+    .tool-directory {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .toolbox-commandbar {
+      grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) auto;
     }
   }
 
   @media (max-width: 640px) {
     .toolbox-content {
-      width: calc(100% - 24px);
-      padding: 16px 0 20px;
+      width: calc(100% - 20px);
+      padding: 10px 0 20px;
     }
 
-    .toolbox-title-row {
-      min-height: 0;
-      flex-direction: column;
+    .toolbox-commandbar {
+      grid-template-columns: minmax(0, 1fr) 68px;
       gap: 8px;
-      margin-bottom: 18px;
+      padding-top: 4px;
     }
 
-    .toolbox-inline-status {
-      max-width: 100%;
-      text-align: left;
+    .toolbox-filter-tabs {
+      grid-column: 1 / -1;
+      grid-row: 1;
     }
 
-    .toolbox-title-actions {
-      width: 100%;
-      justify-content: space-between;
+    .toolbox-search {
+      grid-column: 1;
+      grid-row: 2;
     }
 
-    .open-grid,
-    .process-grid {
+    .toolbox-home-actions {
+      grid-column: 2;
+      grid-row: 2;
+      justify-self: end;
+    }
+
+    .tool-directory {
       grid-template-columns: 1fr;
     }
 
     .tool-card {
-      min-height: 88px;
+      min-height: 0;
     }
 
     .tool-main {
-      grid-template-columns: 44px minmax(0, 1fr);
-      min-height: 88px;
-      padding: 14px;
+      grid-template-columns: 38px minmax(0, 1fr);
+      min-height: 66px;
+      padding: 9px 11px;
     }
 
     .tool-icon {
-      width: 44px;
-      height: 44px;
-    }
-
-    .tool-action {
-      position: static;
-      grid-column: 2;
-      justify-self: start;
-      margin-top: -2px;
+      width: 38px;
+      height: 38px;
     }
 
     .tool-copy {
-      padding-right: 52px;
+      padding-right: 0;
     }
 
     .tool-batch {
-      right: 14px;
-      bottom: 12px;
+      right: 11px;
+      bottom: 5px;
     }
 
     .web-toolbox-footer {
@@ -2037,11 +2064,6 @@
     }
   }
 
-  :global(:root[data-tepub-client="web-desktop"] body) {
-    min-width: 1200px;
-    overflow-x: auto;
-  }
-
   .toolbox-app.desktop-view,
   :global(:root[data-tepub-client="web-desktop"]) .toolbox-app {
     min-width: 1200px;
@@ -2052,81 +2074,11 @@
 
   .toolbox-app.desktop-view .toolbox-content,
   :global(:root[data-tepub-client="web-desktop"]) .toolbox-content {
-    width: min(1100px, calc(100% - 48px));
+    width: min(1240px, calc(100% - 48px));
     flex: 1 0 auto;
     min-height: auto;
-    padding: 30px 0 34px;
+    padding: 18px 0 30px;
     overflow: visible;
-  }
-
-  .toolbox-app.desktop-view .toolbox-title-row,
-  :global(:root[data-tepub-client="web-desktop"]) .toolbox-title-row {
-    min-height: 50px;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 20px;
-    margin-bottom: 28px;
-  }
-
-  .toolbox-app.desktop-view .toolbox-title-actions,
-  :global(:root[data-tepub-client="web-desktop"]) .toolbox-title-actions {
-    width: auto;
-    align-items: flex-start;
-    justify-content: flex-end;
-    gap: 10px;
-  }
-
-  .toolbox-app.desktop-view .toolbox-inline-status,
-  :global(:root[data-tepub-client="web-desktop"]) .toolbox-inline-status {
-    max-width: min(420px, 42vw);
-    text-align: right;
-  }
-
-  .toolbox-app.desktop-view .open-grid,
-  .toolbox-app.desktop-view .process-grid,
-  :global(:root[data-tepub-client="web-desktop"]) .open-grid,
-  :global(:root[data-tepub-client="web-desktop"]) .process-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .toolbox-app.desktop-view .tool-card,
-  :global(:root[data-tepub-client="web-desktop"]) .tool-card {
-    min-height: 104px;
-  }
-
-  .toolbox-app.desktop-view .tool-main,
-  :global(:root[data-tepub-client="web-desktop"]) .tool-main {
-    grid-template-columns: 48px minmax(0, 1fr);
-    min-height: 104px;
-    padding: 16px 18px;
-  }
-
-  .toolbox-app.desktop-view .tool-icon,
-  :global(:root[data-tepub-client="web-desktop"]) .tool-icon {
-    width: 48px;
-    height: 48px;
-  }
-
-  .toolbox-app.desktop-view .tool-copy,
-  :global(:root[data-tepub-client="web-desktop"]) .tool-copy {
-    padding-right: 58px;
-  }
-
-  .toolbox-app.desktop-view .tool-action,
-  :global(:root[data-tepub-client="web-desktop"]) .tool-action {
-    position: absolute;
-    top: 14px;
-    right: 14px;
-    grid-column: auto;
-    justify-self: auto;
-    margin-top: 0;
-  }
-
-  .toolbox-app.desktop-view .tool-batch,
-  :global(:root[data-tepub-client="web-desktop"]) .tool-batch {
-    right: 14px;
-    bottom: 12px;
   }
 
   .toolbox-app.desktop-view .web-toolbox-footer,

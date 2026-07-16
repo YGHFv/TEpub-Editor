@@ -10,6 +10,7 @@
     import ContextMenu from "$lib/ContextMenu.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
+    import CustomSelect from "$lib/CustomSelect.svelte";
     import {
         loadAppSettings as loadGlobalAppSettings,
         saveAppSettings as saveGlobalAppSettings,
@@ -4901,13 +4902,13 @@
                         <div class="proof-section proof-toc-controls">
                             <div class="proof-row">
                                 <label for="proof-title-scope">范围</label>
-                                <select id="proof-title-scope" bind:value={proofTitleScope}>
-                                    <option value="all">卷和章</option>
-                                    <option value="chapters">只排章节</option>
-                                    <option value="volumes">只排卷部</option>
-                                    <option value="numbers-only">只转数字</option>
-                                    <option value="regex">正则选取</option>
-                                </select>
+                                <CustomSelect id="proof-title-scope" value={proofTitleScope} options={[
+                                    { value: "all", label: "卷和章" },
+                                    { value: "chapters", label: "只排章节" },
+                                    { value: "volumes", label: "只排卷部" },
+                                    { value: "numbers-only", label: "只转数字" },
+                                    { value: "regex", label: "正则选取" },
+                                ]} on:change={(event) => (proofTitleScope = event.detail as ProofTitleScope)} />
                             </div>
                             {#if proofTitleScope === "regex"}
                                 <div class="proof-row vertical">
@@ -4922,19 +4923,13 @@
                             {#if proofTitleScope === "all" || proofTitleScope === "volumes" || proofTitleScope === "regex" || proofTitleScope === "numbers-only"}
                                 <div class="proof-row">
                                     <label for="proof-volume-number-style">卷数字</label>
-                                    <select id="proof-volume-number-style" bind:value={proofVolumeNumberStyle}>
-                                        <option value="chinese">一二三四</option>
-                                        <option value="arabic">1234</option>
-                                    </select>
+                                    <CustomSelect id="proof-volume-number-style" value={proofVolumeNumberStyle} options={[{ value: "chinese", label: "一二三四" }, { value: "arabic", label: "1234" }]} on:change={(event) => (proofVolumeNumberStyle = event.detail as ProofNumberStyle)} />
                                 </div>
                             {/if}
                             {#if proofTitleScope === "all" || proofTitleScope === "chapters" || proofTitleScope === "regex" || proofTitleScope === "numbers-only"}
                                 <div class="proof-row">
                                     <label for="proof-chapter-number-style">章数字</label>
-                                    <select id="proof-chapter-number-style" bind:value={proofChapterNumberStyle}>
-                                        <option value="chinese">一二三四</option>
-                                        <option value="arabic">1234</option>
-                                    </select>
+                                    <CustomSelect id="proof-chapter-number-style" value={proofChapterNumberStyle} options={[{ value: "chinese", label: "一二三四" }, { value: "arabic", label: "1234" }]} on:change={(event) => (proofChapterNumberStyle = event.detail as ProofNumberStyle)} />
                                 </div>
                             {/if}
                             <label class="proof-check">
@@ -4991,27 +4986,22 @@
                         <div class="proof-section proof-regex-controls">
                             <div class="proof-row">
                                 <label for="proof-text-tool">类型</label>
-                                <select
+                                <CustomSelect
                                     id="proof-text-tool"
-                                    bind:value={proofTextTool}
-                                    on:change={() => {
+                                    value={proofTextTool}
+                                    options={[{ value: "builtin", label: "内置规则" }, { value: "convert", label: "繁简转换" }]}
+                                    on:change={(event) => {
+                                        proofTextTool = event.detail as typeof proofTextTool;
                                         proofRegexSelectedIds = new Set();
                                         proofConvertPreviewRows = [];
                                         proofConvertSelectedIds = new Set();
                                     }}
-                                >
-                                    <option value="builtin">内置规则</option>
-                                    <option value="convert">繁简转换</option>
-                                </select>
+                                />
                             </div>
                             {#if proofTextTool === "builtin"}
                             <div class="proof-row">
                                 <label for="proof-builtin-rule">规则</label>
-                                <select id="proof-builtin-rule" bind:value={proofBuiltinRule}>
-                                    {#each PROOF_BUILTIN_REGEX_RULES as rule}
-                                        <option value={rule.id}>{rule.name}</option>
-                                    {/each}
-                                </select>
+                                <CustomSelect id="proof-builtin-rule" value={proofBuiltinRule} options={PROOF_BUILTIN_REGEX_RULES.map((rule) => ({ value: rule.id, label: rule.name }))} on:change={(event) => (proofBuiltinRule = event.detail as ProofBuiltinRuleId)} />
                             </div>
                             <div class="proof-rule-note">
                                 {PROOF_BUILTIN_REGEX_RULES.find((rule) => rule.id === proofBuiltinRule)?.description}
@@ -5033,17 +5023,16 @@
                             {:else}
                             <div class="proof-row">
                                 <label for="proof-convert-direction">方向</label>
-                                <select
+                                <CustomSelect
                                     id="proof-convert-direction"
-                                    bind:value={proofConvertDirection}
-                                    on:change={() => {
+                                    value={proofConvertDirection}
+                                    options={[{ value: "traditional-to-simplified", label: "繁体转简体" }, { value: "simplified-to-traditional", label: "简体转繁体" }]}
+                                    on:change={(event) => {
+                                        proofConvertDirection = event.detail as ProofConvertDirection;
                                         proofConvertPreviewRows = [];
                                         proofConvertSelectedIds = new Set();
                                     }}
-                                >
-                                    <option value="traditional-to-simplified">繁体转简体</option>
-                                    <option value="simplified-to-traditional">简体转繁体</option>
-                                </select>
+                                />
                             </div>
                             <div class="proof-actions-row proof-convert-actions">
                                 <button class="proof-primary inline" on:click={runProofConvertPreview}>
@@ -5253,13 +5242,11 @@
                         <div class="proof-section">
                             <div class="proof-row">
                                 <label for="ai-proof-scope">范围</label>
-                <select id="ai-proof-scope" bind:value={aiProofingScope} disabled={aiProofingRunning}>
-                    <option value="current">当前章</option>
-                    {#if hasProofVolumeScope}
-                    <option value="volume">当前卷</option>
-                    {/if}
-                    <option value="all">全书逐章</option>
-                </select>
+                <CustomSelect id="ai-proof-scope" value={aiProofingScope} disabled={aiProofingRunning} options={[
+                    { value: "current", label: "当前章" },
+                    ...(hasProofVolumeScope ? [{ value: "volume", label: "当前卷" }] : []),
+                    { value: "all", label: "全书逐章" },
+                ]} on:change={(event) => (aiProofingScope = event.detail as AiProofingScope)} />
                             </div>
                             <div class="proof-actions-row proof-convert-actions proof-ai-actions">
                                 <button
@@ -5646,13 +5633,12 @@
                                                                 <span class="prop-name">{prop.name}</span>
                                                             </span>
                                                             {#if prop.options}
-                                                                <select
+                                                                <CustomSelect
                                                                     value={prop.value}
-                                                                    on:change={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === activeStyleBlock.id), styleBlocks.find((item) => item.id === activeStyleBlock.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.currentTarget.value)}>
-                                                                    {#each (prop.name === "font-family" ? fontFamilyOptions : prop.options) as option}
-                                                                        <option value={option.value}>{option.label}</option>
-                                                                    {/each}
-                                                                </select>
+                                                                    options={(prop.name === "font-family" ? fontFamilyOptions : prop.options).map((option) => ({ value: option.value, label: option.label }))}
+                                                                    ariaLabel={prop.label}
+                                                                    on:change={(event) => updateToolbarStyleBlock(styleBlocks.findIndex((item) => item.id === activeStyleBlock.id), styleBlocks.find((item) => item.id === activeStyleBlock.id)?.properties.findIndex((item) => item.name === prop.name) ?? -1, event.detail)}
+                                                                />
                                                             {:else if prop.color}
                                                                 {@const parsedColor = parseCssColorValue(prop.value)}
                                                                 <span class="color-value-control">
@@ -5689,13 +5675,7 @@
                     {:else if settingsActiveTab === 'toc'}
                         <div class="rules-header">正则表达式</div>
                         <div class="rule-helper-row">
-                            <select class="rule-type rule-type-helper" bind:value={tocPrefixLevel}>
-                                <option value={1}>层级 1</option>
-                                <option value={2}>层级 2</option>
-                                <option value={3}>层级 3</option>
-                                <option value={4}>层级 4</option>
-                                <option value={5}>层级 5</option>
-                            </select>
+                            <CustomSelect className="rule-type rule-type-helper" value={String(tocPrefixLevel)} options={[1, 2, 3, 4, 5].map((level) => ({ value: String(level), label: `层级 ${level}` }))} ariaLabel="前缀层级" on:change={(event) => (tocPrefixLevel = Number(event.detail))} />
                             <input
                                 class="rule-prefix-input"
                                 bind:value={tocPrefixText}
@@ -5719,13 +5699,7 @@
                         <div class="rules-list">
                             {#each appSettings.customRegexRules as rule, idx}
                                 <div class="rule-item" style="gap: 8px; align-items: center;">
-                                    <select class="rule-type" bind:value={rule.level} style="width: 112px; flex-shrink: 0;">
-                                        <option value={1}>层级 1</option>
-                                        <option value={2}>层级 2</option>
-                                        <option value={3}>层级 3</option>
-                                        <option value={4}>层级 4</option>
-                                        <option value={5}>层级 5</option>
-                                    </select>
+                                    <CustomSelect className="rule-type" value={String(rule.level)} options={[1, 2, 3, 4, 5].map((level) => ({ value: String(level), label: `层级 ${level}` }))} ariaLabel="目录层级" on:change={(event) => (rule.level = Number(event.detail))} />
 
                                     <div class="rule-input-group">
                                         <input
@@ -5734,22 +5708,14 @@
                                             bind:value={rule.pattern}
                                             placeholder="输入正则表达式"
                                         />
-                                        <div class="rule-arrow-visual">▼</div>
-                                        <select
-                                            class="rule-hidden-select"
-                                            on:change={(e) => {
-                                                const val = e.currentTarget.value;
-                                                if(val) rule.pattern = val;
-                                                e.currentTarget.value = "";
-                                            }}
-                                        >
-                                            <option value="">选择预设正则</option>
-                                            {#each REGEX_PRESETS as preset}
-                                                {#if preset.value}
-                                                    <option value={preset.value}>{preset.value}</option>
-                                                {/if}
-                                            {/each}
-                                        </select>
+                                        <CustomSelect
+                                            className="rule-preset-select"
+                                            value=""
+                                            placeholder="预设"
+                                            options={REGEX_PRESETS.filter((preset) => preset.value).map((preset) => ({ value: preset.value, label: preset.value }))}
+                                            ariaLabel="选择预设正则"
+                                            on:change={(event) => { if (event.detail) rule.pattern = event.detail; }}
+                                        />
                                     </div>
 
                                     <button class="rule-btn remove" on:click={() => {
@@ -5854,19 +5820,11 @@
                             {/if}
                             <div class="set-row">
                                 <label for="aiProofProvider">校对 API:</label>
-                                <select id="aiProofProvider" bind:value={txtAiProofingConfig.providerId} on:change={() => (aiProofingConfig = proofingConfigForProvider(txtAiProofingConfig.providerId))}>
-                                    {#each aiProviders as provider}
-                                        <option value={provider.id}>{provider.name || provider.model}</option>
-                                    {/each}
-                                </select>
+                                <CustomSelect id="aiProofProvider" value={txtAiProofingConfig.providerId} options={aiProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.model }))} on:change={(event) => { txtAiProofingConfig.providerId = event.detail; aiProofingConfig = proofingConfigForProvider(event.detail); }} />
                             </div>
                             <div class="set-row">
                                 <label for="aiApprovalProvider">审批 API:</label>
-                                <select id="aiApprovalProvider" bind:value={txtAiProofingConfig.approvalProviderId}>
-                                    {#each aiProviders as provider}
-                                        <option value={provider.id}>{provider.name || provider.model}</option>
-                                    {/each}
-                                </select>
+                                <CustomSelect id="aiApprovalProvider" value={txtAiProofingConfig.approvalProviderId} options={aiProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.model }))} on:change={(event) => (txtAiProofingConfig.approvalProviderId = event.detail)} />
                             </div>
                             <div class="set-row">
                                 <label for="aiMaxChars">单章上限:</label>
@@ -5982,7 +5940,7 @@
                                     ></textarea>
                                 </div>
                                 <div class="set-row compact align-start">
-                                    <label>标签:</label>
+                                    <span class="set-label">标签:</span>
                                     <TagsEditor bind:tags={epubMeta.tags} suggestions={[]} />
                                 </div>
                             </div>
@@ -6720,8 +6678,7 @@
         line-height: 1.2;
     }
 
-    .style-prop-row input,
-    .style-prop-row select {
+    .style-prop-row input {
         width: 100%;
         min-width: 0;
         max-width: 100%;
@@ -6735,8 +6692,7 @@
         padding: 7px 10px;
     }
 
-    .style-prop-row input:focus,
-    .style-prop-row select:focus {
+    .style-prop-row input:focus {
         outline: none;
         border-color: #1677b8;
         box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.16);
@@ -7033,7 +6989,6 @@
     }
 
     .ai-settings-form .set-row input:not([type="checkbox"]),
-    .ai-settings-form .set-row select,
     .ai-settings-form .set-row textarea {
         flex: 1 1 auto;
         min-width: 0;
@@ -7370,8 +7325,7 @@
         width: auto;
     }
 
-    .proof-row input,
-    .proof-row select {
+    .proof-row input {
         min-width: 0;
         flex: 1;
         box-sizing: border-box;
@@ -7387,32 +7341,7 @@
         background: #fff;
     }
 
-    .proof-row select,
-    .set-row select,
-    .rule-type {
-        min-height: var(--control-height);
-        padding: 7px 38px 7px 12px;
-        background-color: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
-        background-image:
-            linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
-            linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(241, 248, 253, 0.82));
-        background-position:
-            calc(100% - 20px) 50%,
-            calc(100% - 14px) 50%,
-            0 0;
-        background-size:
-            6px 6px,
-            6px 6px,
-            100% 100%;
-        background-repeat: no-repeat;
-        appearance: none;
-        -webkit-appearance: none;
-        box-shadow: var(--shadow-xs);
-    }
-
-    .proof-row input:focus,
-    .proof-row select:focus {
+    .proof-row input:focus {
         border-color: #0066b8;
         box-shadow: 0 0 0 2px rgba(0, 102, 184, 0.18);
     }
@@ -8040,13 +7969,6 @@
         align-items: center;
         gap: 10px;
     }
-    .rule-type {
-        width: 112px;
-        height: 32px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        font-size: 13px;
-    }
     .rule-input-group {
         display: flex;
         flex: 1;
@@ -8064,32 +7986,6 @@
         background: #fff;
         min-width: 0;
         z-index: 1;
-    }
-    .rule-arrow-visual {
-        width: 32px;
-        height: 32px;
-        border: 1px solid #ccc;
-        border-radius: 0 6px 6px 0;
-        background: #f9f9f9;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #666;
-        font-size: 10px;
-        flex-shrink: 0;
-    }
-    .rule-hidden-select {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        opacity: 0;
-        appearance: none;
-        -webkit-appearance: none;
-        cursor: pointer;
-        z-index: 2;
-        clip-path: inset(0 0 0 calc(100% - 32px));
     }
     .rule-btn {
         width: 32px;
@@ -8125,10 +8021,6 @@
         gap: 8px;
         align-items: center;
         margin-bottom: 8px;
-    }
-    .rule-type-helper {
-        width: 112px;
-        flex-shrink: 0;
     }
     .rule-prefix-input {
         flex: 1;
@@ -8725,7 +8617,6 @@
     }
 
     .proof-row input,
-    .proof-row select,
     .proof-preview,
     .proof-regex-preview,
     .proof-rule-note {
@@ -8735,8 +8626,7 @@
         border-radius: var(--radius-sm);
     }
 
-    .proof-row input:focus,
-    .proof-row select:focus {
+    .proof-row input:focus {
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
     }
@@ -8935,11 +8825,9 @@
     }
 
     .set-row input,
-    .set-row select,
     .set-row textarea,
     .epub-input-small,
     .epub-textarea,
-    .rule-type,
     .rule-input {
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
@@ -8952,11 +8840,9 @@
     }
 
     .set-row input:focus,
-    .set-row select:focus,
     .set-row textarea:focus,
     .epub-input-small:focus,
     .epub-textarea:focus,
-    .rule-type:focus,
     .rule-input:focus {
         outline: none;
         border-color: var(--color-accent);
@@ -8968,12 +8854,6 @@
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
         background: #fff;
-    }
-
-    .rule-arrow-visual {
-        border-color: var(--color-border);
-        background: var(--color-surface-soft);
-        color: var(--color-muted);
     }
 
     .rule-btn:hover {
@@ -9074,6 +8954,45 @@
     .indent {
         margin-left: 14px;
         padding-left: 24px;
+    }
+
+    .proof-row :global(.custom-select),
+    .set-row :global(.custom-select),
+    .style-prop-row :global(.custom-select) {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .style-prop-row :global(.custom-select-trigger) {
+        min-height: 34px;
+        background: rgba(255, 255, 255, 0.78);
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    .rule-item :global(.rule-type),
+    .rule-helper-row :global(.rule-type-helper) {
+        width: 112px;
+        flex: 0 0 112px;
+    }
+
+    .rule-item :global(.rule-type .custom-select-trigger),
+    .rule-helper-row :global(.rule-type-helper .custom-select-trigger) {
+        min-height: 32px;
+        padding-block: 5px;
+        font-weight: 600;
+    }
+
+    .rule-input-group :global(.rule-preset-select) {
+        width: 112px;
+        flex: 0 0 112px;
+    }
+
+    .rule-input-group :global(.rule-preset-select .custom-select-trigger) {
+        min-height: 32px;
+        border-radius: 0 6px 6px 0;
+        font-size: 12px;
+        font-weight: 600;
     }
 
     @media (max-width: 768px) {

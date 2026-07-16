@@ -1,6 +1,8 @@
 <script lang="ts">
     import { base } from "$app/paths";
     import { onDestroy, onMount, tick } from "svelte";
+    import ToolImportPage from "$lib/ToolImportPage.svelte";
+    import { hasUnsavedMakeChanges as shouldWarnUnsavedMake } from "$lib/unsavedChanges";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import { isWebMobileClient } from "$lib/clientProfile";
     import { platform } from "$lib/platform";
@@ -847,12 +849,7 @@ p.te-divider-line {
         }
     }
 
-    async function onFileChange(event: Event) {
-        const input = event.currentTarget as HTMLInputElement;
-        const file = input.files?.[0];
-        input.value = "";
-        if (!file) return;
-
+    async function loadSelectedTextFile(file: File) {
         try {
             if (platform.isWeb) {
                 busy = true;
@@ -894,6 +891,31 @@ p.te-divider-line {
         } catch (err) {
             await platform.message(`封面导入失败：${err}`, { title: "制作 EPUB", kind: "error" });
         }
+    }
+
+    async function onFileChange(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+        input.value = "";
+        if (file) await loadSelectedTextFile(file);
+    }
+
+    function handleImportFiles(event: CustomEvent<File[]>) {
+        const file = event.detail[0];
+        if (file) void loadSelectedTextFile(file);
+    }
+
+    $: hasUnsavedMakeChanges = shouldWarnUnsavedMake(selectedPath, exportPath);
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+        if (!hasUnsavedMakeChanges) return;
+        event.preventDefault();
+        event.returnValue = "";
+    }
+
+    function handleBackClick(event: MouseEvent) {
+        if (!hasUnsavedMakeChanges) return;
+        if (!window.confirm("当前 EPUB 制作内容尚未导出，确定离开吗？")) event.preventDefault();
     }
 
     async function onFullCoverChange(event: Event) {
@@ -2176,6 +2198,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     });
 </script>
 
+<svelte:window on:beforeunload={handleBeforeUnload} />
+
 <svelte:head>
     <title>TEpub-Editor</title>
 </svelte:head>
@@ -2197,7 +2221,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
     {#if !((platform.isWeb && webMakeStep === "style") || desktopStylePageActive)}
         <header class="topbar">
-            <a href={backHref} aria-label="返回">
+            <a href={backHref} aria-label="返回" on:click={handleBackClick}>
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M15 6L9 12L15 18"></path>
                 </svg>
@@ -2207,17 +2231,27 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     {/if}
 
     {#if !selectedPath}
-        <section
-            class="empty-panel"
-            class:web-import-panel={platform.isWeb && desktopMode}
-            class:desktop-import-panel={desktopStyleWorkflowEnabled}
-        >
-            <div>
-                <h2>选择文本文件开始制作</h2>
-                <p>支持 TXT、Markdown 和 HTML 文件，导入后可扫描目录、调整规则并生成 EPUB。</p>
-            </div>
-            <button type="button" on:click={openPicker} disabled={busy}>选择文本文件</button>
-        </section>
+        <ToolImportPage
+            mark="TXT"
+            kicker="TXT TO EPUB"
+            title="TXT 转 EPUB"
+            description="导入 TXT、Markdown 或 HTML 文件，扫描目录并制作标准 EPUB。"
+            privacy="选择文件后继续进入原有的目录规则、元数据与样式制作页面。"
+            outputLabel="输出格式"
+            outputValue="EPUB"
+            features={[
+                { title: "扫描目录", detail: "识别卷、章与正文层级" },
+                { title: "编辑信息", detail: "调整规则、书名与作者信息" },
+                { title: "生成 EPUB", detail: "配置封面与样式后导出" },
+            ]}
+            prompt="选择或拖入文本文件"
+            hint="支持 TXT、Markdown 和 HTML 文件"
+            actionLabel="选择文本文件"
+            accept=".txt,.md,.html,.htm"
+            {busy}
+            on:select={openPicker}
+            on:files={handleImportFiles}
+        />
     {:else if (platform.isWeb && webMakeStep === "style") || desktopStylePageActive}
         <section class="web-style-page">
             <div class="web-style-grid">
@@ -2708,7 +2742,6 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .toc-panel,
     .check-panel,
     .reorder-panel,
-    .empty-panel,
     .web-style-panel,
     .bottom-actions {
         margin-top: 10px;
@@ -2718,33 +2751,6 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         padding: 12px;
     }
 
-    .empty-panel {
-        display: grid;
-        gap: 14px;
-        min-height: 220px;
-        align-content: center;
-        justify-items: center;
-        text-align: center;
-    }
-
-    .empty-panel h2 {
-        margin: 0;
-        font-size: 20px;
-        line-height: 1.25;
-    }
-
-    .empty-panel p {
-        max-width: 520px;
-        margin-top: 8px;
-        color: #626a78;
-        font-size: 14px;
-        line-height: 1.6;
-    }
-
-    .empty-panel button {
-        min-width: 150px;
-        padding: 0 18px;
-    }
 
     .web-style-page {
         display: grid;
@@ -3607,10 +3613,10 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
         .page.desktop-page.web-import-page,
         .page.desktop-page.desktop-import-page {
-            width: auto;
+            width: min(1040px, calc(100vw - 36px));
             min-height: 100vh;
             grid-template-columns: minmax(0, 1fr);
-            padding: 36px 128px;
+            padding: 26px 0 40px;
             box-sizing: border-box;
         }
 
@@ -3636,48 +3642,6 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         .desktop-page .right-column.noIssues,
         .desktop-page .right-column.checkCollapsed {
             grid-template-rows: auto auto minmax(0, 1fr);
-        }
-
-        .desktop-page .empty-panel {
-            grid-column: 1 / -1;
-        }
-
-        .desktop-page .empty-panel.web-import-panel,
-        .desktop-page .empty-panel.desktop-import-panel {
-            width: min(100%, 1792px);
-            min-height: 342px;
-            margin: 0 auto;
-            align-content: center;
-            gap: 16px;
-            border: 1px solid rgba(23, 27, 36, 0.08);
-            border-radius: 8px;
-            padding: 48px 24px;
-            box-sizing: border-box;
-        }
-
-        .desktop-page .empty-panel.web-import-panel h2,
-        .desktop-page .empty-panel.desktop-import-panel h2 {
-            font-size: 22px;
-            line-height: 1.3;
-        }
-
-        .desktop-page .empty-panel.web-import-panel p,
-        .desktop-page .empty-panel.desktop-import-panel p {
-            margin-top: 0;
-            color: #64748b;
-        }
-
-        .desktop-page .empty-panel.web-import-panel button,
-        .desktop-page .empty-panel.desktop-import-panel button {
-            height: 34px;
-            min-height: 34px;
-            min-width: 0;
-            padding: 0 12px;
-            border: 1px solid #1677b8;
-            border-radius: 6px;
-            background: #1677b8;
-            color: #ffffff;
-            font-weight: 800;
         }
 
         .desktop-page .topbar {

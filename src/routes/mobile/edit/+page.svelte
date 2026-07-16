@@ -5,6 +5,7 @@
     import { message } from "@tauri-apps/plugin-dialog";
     import { buildMobileRoute, cacheBrowserFileStable, readMobileSelection, selectionName } from "$lib/mobileFlow";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
+    import CustomSelect from "$lib/CustomSelect.svelte";
 
     interface EpubFileNode {
         name: string;
@@ -1366,11 +1367,17 @@
                                 <button type="button" on:click={replaceBatchMatches} disabled={busy || !findPattern}>替换全部</button>
                             </div>
                             <div class="replace-options">
-                                <select bind:value={replaceScope} aria-label="查找范围" disabled={replaceOnlyText}>
-                                    <option value="current">当前文件</option>
-                                    <option value="html">HTML章节</option>
-                                    <option value="all">所有文本</option>
-                                </select>
+                                <CustomSelect
+                                    value={replaceScope}
+                                    options={[
+                                        { value: "current", label: "当前文件" },
+                                        { value: "html", label: "HTML章节" },
+                                        { value: "all", label: "所有文本" },
+                                    ]}
+                                    disabled={replaceOnlyText}
+                                    ariaLabel="查找范围"
+                                    on:change={(event) => (replaceScope = event.detail as typeof replaceScope)}
+                                />
                                 <label class="replace-check">
                                     <input type="checkbox" bind:checked={replaceIsRegex} />
                                     <span>正则</span>
@@ -1623,8 +1630,7 @@
         font-weight: 800;
     }
 
-    .replace-panel input,
-    .replace-panel select {
+    .replace-panel input {
         width: 100%;
         min-width: 0;
         box-sizing: border-box;
@@ -1636,6 +1642,11 @@
         padding: 7px 8px;
         font: inherit;
         font-size: 12px;
+    }
+
+    .replace-panel :global(.custom-select) {
+        width: 100%;
+        min-width: 0;
     }
 
     .replace-options {

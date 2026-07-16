@@ -3,6 +3,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { listen, emit } from "@tauri-apps/api/event";
     import { getCurrentWindow } from "@tauri-apps/api/window";
+    import CustomSelect from "$lib/CustomSelect.svelte";
 
     let activeTab = "meta";
 
@@ -361,12 +362,13 @@
                         <button class="mini-btn" on:click={addTemplateRepository} disabled={templateRepoBusy}>添加</button>
                     </div>
                     <div class="repo-actions">
-                        <select bind:value={selectedRepositoryId} disabled={templateRepoBusy || !templateRepositories.length}>
-                            <option value="">选择模板仓库</option>
-                            {#each templateRepositories as repo}
-                                <option value={repo.id}>{repo.name} / {repo.branch}</option>
-                            {/each}
-                        </select>
+                        <CustomSelect
+                            value={selectedRepositoryId}
+                            options={[{ value: "", label: "选择模板仓库" }, ...templateRepositories.map((repo) => ({ value: repo.id, label: `${repo.name} / ${repo.branch}` }))]}
+                            disabled={templateRepoBusy || !templateRepositories.length}
+                            ariaLabel="模板仓库"
+                            on:change={(event) => (selectedRepositoryId = event.detail)}
+                        />
                         <button class="mini-btn" on:click={syncTemplateRepository} disabled={templateRepoBusy || !selectedRepositoryId}>同步索引</button>
                     </div>
                     {#if templateRepoMessage}
@@ -650,8 +652,7 @@
         grid-template-columns: minmax(0, 1fr) auto;
     }
 
-    .repo-form input,
-    .repo-actions select {
+    .repo-form input {
         min-width: 0;
         padding: 8px 10px;
         border: 1px solid var(--color-border, #d8e0e8);
@@ -705,6 +706,10 @@
         white-space: nowrap;
         color: #2c3e50;
         margin-right: 10px;
+    }
+
+    .repo-actions :global(.custom-select) {
+        min-width: 0;
     }
 
     .file-name em {

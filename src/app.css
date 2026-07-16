@@ -49,6 +49,27 @@
     --transition-normal: 180ms ease;
 }
 
+:root {
+    --web-tool-canvas: #eef2f7;
+    --web-tool-surface: #ffffff;
+    --web-tool-surface-translucent: rgba(255, 255, 255, 0.78);
+    --web-tool-text: #172033;
+    --web-tool-text-soft: #46566c;
+    --web-tool-muted: #718096;
+    --web-tool-border: #d8e1eb;
+    --web-tool-border-strong: #9eb1c7;
+    --web-tool-accent: #17699a;
+    --web-tool-accent-soft: #e4f1f8;
+    --web-tool-error: #b42323;
+    --web-tool-error-bg: #fff1f1;
+    --web-tool-error-border: #efb3b3;
+    --web-tool-content-width: 1040px;
+    --web-tool-gap: 14px;
+    --web-tool-radius-sm: 7px;
+    --web-tool-radius-md: 12px;
+    --web-tool-control-height: 36px;
+}
+
 html,
 body {
     margin: 0;
@@ -64,61 +85,36 @@ body {
     overscroll-behavior: none;
 }
 
-:root[data-tepub-client="web-mobile"],
-:root[data-tepub-client="web-mobile"] body {
+:root[data-tepub-client="web-mobile"] {
     min-width: 0;
     overflow-x: hidden;
+    overflow-y: auto;
 }
 
 :root[data-tepub-client="web-mobile"] body {
+    min-width: 0;
+    overflow: visible;
     overscroll-behavior-y: auto;
     touch-action: manipulation;
 }
 
-:root[data-tepub-client="web-desktop"],
-:root[data-tepub-client="web-desktop"] body {
+:root[data-tepub-client="web-desktop"] {
     min-width: 1200px;
     overflow-x: auto;
+    overflow-y: auto;
 }
 
 :root[data-tepub-client="web-desktop"] body {
+    min-width: 1200px;
+    overflow: visible;
     overscroll-behavior: none;
     touch-action: auto;
 }
 
 button,
 input,
-textarea,
-select {
+textarea {
     font: inherit;
-}
-
-.set-control:is(select),
-.set-row select,
-.proof-row select,
-.fr-select,
-.rule-type,
-.repo-actions select,
-.rd-font-picker select,
-.replace-panel select {
-    min-height: var(--control-height);
-    padding: 7px 38px 7px 12px;
-    background-color: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
-    background-image:
-        linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
-        linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(241, 248, 253, 0.82));
-    background-position:
-        calc(100% - 20px) 50%,
-        calc(100% - 14px) 50%,
-        0 0;
-    background-size:
-        6px 6px,
-        6px 6px,
-        100% 100%;
-    background-repeat: no-repeat;
-    appearance: none;
-    -webkit-appearance: none;
 }
 
 button {
@@ -410,8 +406,7 @@ button {
 
 .settings-shell .set-control,
 .settings-shell .set-row input,
-.settings-shell .set-row textarea,
-.settings-shell .set-row select {
+.settings-shell .set-row textarea {
     flex: 1;
     min-width: 0;
     border: 1px solid var(--color-border);
@@ -441,8 +436,7 @@ button {
 
 .settings-shell .set-control:focus,
 .settings-shell .set-row input:focus,
-.settings-shell .set-row textarea:focus,
-.settings-shell .set-row select:focus {
+.settings-shell .set-row textarea:focus {
     outline: none;
     border-color: var(--color-accent);
     box-shadow: var(--focus-ring);
@@ -542,103 +536,10 @@ button {
     cursor: pointer;
 }
 
-select {
-    min-height: var(--control-height);
-    box-sizing: border-box;
-    padding: 7px 38px 7px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background-color: color-mix(in srgb, var(--color-surface) 94%, var(--color-accent-quiet));
-    background-image:
-        linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
-        linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(241, 248, 253, 0.82));
-    background-position:
-        calc(100% - 20px) 50%,
-        calc(100% - 14px) 50%,
-        0 0;
-    background-size:
-        6px 6px,
-        6px 6px,
-        100% 100%;
-    background-repeat: no-repeat;
-    color: var(--color-text);
-    box-shadow: var(--shadow-xs);
-    cursor: pointer;
-    appearance: none;
-    -webkit-appearance: none;
-    transition:
-        border-color var(--transition-fast),
-        box-shadow var(--transition-fast),
-        background-color var(--transition-fast);
-}
-
-select:hover {
-    border-color: var(--color-border-strong);
-    background-color: var(--color-surface);
-}
-
-select:focus,
-select:focus-visible {
-    outline: none;
-    border-color: var(--color-accent);
-    box-shadow: var(--focus-ring), var(--shadow-xs);
-}
-
-select option {
-    background: var(--color-surface);
-    color: var(--color-text);
-}
-
-select option:hover,
-select option:focus {
-    background: var(--color-accent-quiet);
-    color: var(--color-accent-deep);
-}
-
-select option:checked {
-    background-color: var(--color-accent) !important;
-    background-image: linear-gradient(var(--color-accent), var(--color-accent)) !important;
-    color: var(--color-accent-contrast, #fff);
-    box-shadow: 0 0 0 100vmax var(--color-accent) inset;
-}
-
-@supports selector(::picker(select)) {
-    select {
-        appearance: base-select;
-        -webkit-appearance: base-select;
-    }
-
-    select::picker(select) {
-        border: 1px solid var(--color-border-strong);
-        border-radius: var(--radius-sm);
-        background: var(--color-surface);
-        box-shadow: var(--shadow-pop);
-        color: var(--color-text);
-    }
-
-    select option {
-        padding: 8px 12px;
-        border-radius: var(--radius-xs);
-        background: var(--color-surface);
-    }
-
-    select option:hover,
-    select option:focus {
-        background: var(--color-hover);
-    }
-}
-
 button:disabled,
 input:disabled,
-textarea:disabled,
-select:disabled {
+textarea:disabled {
     cursor: not-allowed;
-}
-
-select:disabled {
-    opacity: 0.62;
-    background-color: var(--color-surface-soft);
 }
 
 *:focus-visible {
@@ -984,31 +885,6 @@ select:disabled {
     color: var(--color-text) !important;
 }
 
-:root[data-theme="dark"] select,
-:root[data-theme="dark"] .set-row select,
-:root[data-theme="dark"] .fr-select,
-:root[data-theme="dark"] .rule-type {
-    background-color: #151b24 !important;
-    background-image:
-        linear-gradient(45deg, transparent 50%, var(--color-text-soft) 50%),
-        linear-gradient(135deg, var(--color-text-soft) 50%, transparent 50%),
-        linear-gradient(180deg, rgba(30, 36, 48, 0.96), rgba(21, 27, 36, 0.96)) !important;
-    border-color: var(--color-border) !important;
-    color: var(--color-text) !important;
-}
-
-:root[data-theme="dark"] select option {
-    background: var(--color-surface);
-    color: var(--color-text);
-}
-
-:root[data-theme="dark"] select option:checked {
-    background-color: var(--color-accent) !important;
-    background-image: linear-gradient(var(--color-accent), var(--color-accent)) !important;
-    color: var(--color-accent-contrast, #fff);
-    box-shadow: 0 0 0 100vmax var(--color-accent) inset;
-}
-
 :root[data-theme="dark"] input::placeholder,
 :root[data-theme="dark"] textarea::placeholder {
     color: var(--color-muted) !important;
@@ -1073,4 +949,70 @@ select:disabled {
     background: var(--color-surface-soft) !important;
     border-color: var(--color-border) !important;
     color: var(--color-muted) !important;
+}
+
+/* Web 工具默认作为应用界面操作，避免拖动卡片和按钮时误选中文字。 */
+.toolbox-app,
+.process-page,
+.advanced-page,
+.font-page,
+.diagnose-page,
+.text-editor-page,
+.web-epub-page,
+.image-tool-app {
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* 输入、正文编辑、代码、报告和结果信息仍需支持选择与复制。 */
+.toolbox-app input,
+.toolbox-app textarea,
+.toolbox-app [contenteditable="true"],
+.process-page pre,
+.process-page code,
+.process-page .result-copy,
+.advanced-page pre,
+.advanced-page code,
+.advanced-page .outputs,
+.font-page pre,
+.font-page code,
+.font-page .result,
+.diagnose-page pre,
+.diagnose-page code,
+.diagnose-page .report-panel,
+.text-editor-page input,
+.text-editor-page textarea,
+.text-editor-page [contenteditable="true"],
+.text-editor-page .cm-content,
+.web-epub-page input,
+.web-epub-page textarea,
+.web-epub-page [contenteditable="true"],
+.web-epub-page .cm-content,
+.web-epub-page pre,
+.web-epub-page code,
+.image-tool-app input,
+.image-tool-app textarea,
+.image-tool-app [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.toolbox-app button,
+.toolbox-app a,
+.process-page button,
+.process-page a,
+.advanced-page button,
+.advanced-page a,
+.font-page button,
+.font-page a,
+.diagnose-page button,
+.diagnose-page a,
+.text-editor-page button,
+.text-editor-page a,
+.web-epub-page button,
+.web-epub-page a,
+.image-tool-app button,
+.image-tool-app a {
+    -webkit-user-select: none;
+    user-select: none;
 }

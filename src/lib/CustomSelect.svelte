@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, tick } from "svelte";
 
   type CustomSelectOption = {
     value: string;
@@ -13,16 +13,42 @@
   export let placeholder = "请选择";
   export let disabled = false;
   export let className = "";
+  export let id = "";
+  export let ariaLabel = "";
 
   const dispatch = createEventDispatcher<{ change: string }>();
   let open = false;
+  let menuElement: HTMLDivElement | null = null;
+  let activeIndex = -1;
 
   $: selectedOption = options.find((option) => option.value === value);
   $: displayLabel = selectedOption?.label || placeholder;
+  $: if (open) activeIndex = Math.max(0, options.findIndex((option) => option.value === value && !option.disabled));
+
+  function enabledIndexes() {
+    return options.map((option, index) => option.disabled ? -1 : index).filter((index) => index >= 0);
+  }
+
+  async function focusOption(index: number) {
+    activeIndex = index;
+    await tick();
+    menuElement?.querySelectorAll<HTMLButtonElement>("[role='option']")[index]?.focus();
+  }
+
+  async function showMenu(preferred: "selected" | "first" | "last" = "selected") {
+    if (disabled || options.length === 0) return;
+    open = true;
+    const indexes = enabledIndexes();
+    if (!indexes.length) return;
+    const selectedIndex = options.findIndex((option) => option.value === value && !option.disabled);
+    const index = preferred === "first" ? indexes[0] : preferred === "last" ? indexes[indexes.length - 1] : selectedIndex >= 0 ? selectedIndex : indexes[0];
+    await focusOption(index);
+  }
 
   function toggle() {
     if (disabled) return;
-    open = !open;
+    if (open) open = false;
+    else void showMenu();
   }
 
   function choose(option: CustomSelectOption) {
@@ -34,6 +60,26 @@
 
   function closeOnEscape(event: KeyboardEvent) {
     if (event.key === "Escape") open = false;
+  }
+
+  function onTriggerKeydown(event: KeyboardEvent) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      void showMenu(event.key === "ArrowUp" || event.key === "End" ? "last" : "first");
+    }
+  }
+
+  function onOptionKeydown(event: KeyboardEvent, index: number) {
+    const indexes = enabledIndexes();
+    const position = indexes.indexOf(index);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      void focusOption(indexes[(position + offset + indexes.length) % indexes.length]);
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      void focusOption(event.key === "Home" ? indexes[0] : indexes[indexes.length - 1]);
+    }
   }
 </script>
 
@@ -49,18 +95,21 @@
 >
   <button
     class="custom-select-trigger"
+    {id}
     type="button"
     disabled={disabled}
     aria-haspopup="listbox"
     aria-expanded={open}
+    aria-label={ariaLabel || undefined}
     on:click={toggle}
+    on:keydown={onTriggerKeydown}
   >
     <span>{displayLabel}</span>
     <span class="select-caret" aria-hidden="true"></span>
   </button>
   {#if open}
-    <div class="custom-select-menu" role="listbox">
-      {#each options as option}
+    <div class="custom-select-menu" role="listbox" bind:this={menuElement} aria-label={ariaLabel || undefined}>
+      {#each options as option, index}
         <button
           type="button"
           role="option"
@@ -68,8 +117,9 @@
           class:active={value === option.value}
           disabled={option.disabled}
           on:click={() => choose(option)}
+          on:keydown={(event) => onOptionKeydown(event, index)}
         >
-          <span>{option.label}</span>
+          <span class="option-label"><span>{option.label}</span>{#if value === option.value}<b aria-hidden="true">✓</b>{/if}</span>
           {#if option.meta}
             <small>{option.meta}</small>
           {/if}
@@ -173,6 +223,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .custom-select-menu .option-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .custom-select-menu .option-label span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .custom-select-menu .option-label b {
+    flex: 0 0 auto;
+    font-size: 12px;
   }
 
   .custom-select-menu button small {

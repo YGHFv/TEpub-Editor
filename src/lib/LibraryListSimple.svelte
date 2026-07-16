@@ -199,6 +199,13 @@
     onSort(col);
   }
 
+  function onResizeKeydown(event: KeyboardEvent, col: string) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const current = colWidths[col] || Number.parseInt(DEFAULT_WIDTHS[col] || "80", 10) || 80;
+    colWidths = { ...colWidths, [col]: Math.max(36, current + (event.key === "ArrowRight" ? 10 : -10)) };
+  }
+
   // --- 标签单元格：拖动揭露 + 点击筛选 ---
   // 鼠标进入时检测是否溢出并切换 grab 光标
   function onTagsCellEnter(e: MouseEvent) {
@@ -259,6 +266,8 @@
 <div class="book-list-simple">
   <div
     class="list-header"
+    role="group"
+    aria-label="图书列表列标题"
     style="grid-template-columns: {gridCols}"
     on:contextmenu={handleHeaderContextMenu}
   >
@@ -266,6 +275,9 @@
     {#each columns as col, i}
       <span
         class="col-hdr"
+        role="button"
+        aria-label={`按${columnLabel(col)}排序`}
+        tabindex="0"
         data-col={col}
         class:sorted={sortColumn === col}
         class:drag-over={dragOverIndex === i && dragSrcIndex !== i}
@@ -274,14 +286,18 @@
         class:col-center={CENTER_ALIGN_COLS.has(col)}
         on:mousedown={(e) => onHeaderMouseDown(e, i)}
         on:click={() => onHeaderClick(col)}
+        on:keydown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onHeaderClick(col); } }}
       >
         <span class="col-label">{columnLabel(col)}</span>
         {#if sortColumn === col}<span class="sort-arrow">{sortAsc ? "▲" : "▼"}</span>{/if}
-        <span
+        <button
+          type="button"
           class="col-resize-handle"
+          aria-label={`调整${columnLabel(col)}列宽`}
           on:mousedown={(e) => onResizeMouseDown(e, col)}
           on:click|stopPropagation
-        ></span>
+          on:keydown={(event) => onResizeKeydown(event, col)}
+        ></button>
       </span>
     {/each}
   </div>
@@ -289,10 +305,17 @@
   {#each books as book (book.id)}
     <div
       class="book-row"
+      role="button"
+      tabindex="0"
+      aria-label={`${book.title}${book.author ? `，${book.author}` : ""}`}
       class:selected={selectedBook?.id === book.id}
       class:has-cover={showCover}
       style="grid-template-columns: {gridCols}"
       on:click={() => dispatch("select", book)}
+      on:keydown={(event) => {
+        if (event.key === "Enter") dispatch("open", book);
+        else if (event.key === " ") { event.preventDefault(); dispatch("select", book); }
+      }}
       on:dblclick={() => dispatch("open", book)}
       on:contextmenu={(e) => dispatch("context", { event: e, book })}
       data-context-type="library-book"
@@ -308,8 +331,11 @@
       {/if}
       {#each columns as col}
         {#if col === "tags"}
+          <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
           <span
             class="col-cell col-tags-cell"
+            role="group"
+            aria-label="图书标签"
             on:mouseenter={onTagsCellEnter}
             on:mousedown={onTagsCellMouseDown}
           >
@@ -341,9 +367,12 @@
 
 {#if headerMenuVisible}
   <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <div class="header-menu-overlay" on:click={closeHeaderMenu}>
+  <div class="header-menu-overlay" role="presentation" on:click={closeHeaderMenu}>
     <div
       class="header-menu"
+      role="dialog"
+      aria-label="选择显示列"
+      tabindex="-1"
       style="left: {headerMenuPos.x}px; top: {headerMenuPos.y}px;"
       on:click|stopPropagation
       on:contextmenu|stopPropagation
@@ -430,6 +459,9 @@
     top: 2px;
     bottom: 2px;
     width: 10px;
+    padding: 0;
+    border: 0;
+    background: transparent;
     cursor: col-resize;
     z-index: 3;
     border-radius: 3px;

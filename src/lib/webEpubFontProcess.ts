@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { createFont, woff2, type TTF } from "fonteditor-core";
+import type { TTF } from "fonteditor-core";
 import { deflate, inflate } from "pako";
 import { rewriteWebEpubTextLinks } from "$lib/webEpubProcess";
 
@@ -20,7 +20,7 @@ export type WebEpubFontProcessResult = {
 type ParsedFont = {
   path: string;
   type: "ttf" | "otf" | "woff" | "woff2";
-  font: ReturnType<typeof createFont>;
+  font: any;
   glyphs: TTF.Glyph[];
 };
 
@@ -30,6 +30,12 @@ const HTML_EXTENSIONS = new Set(["xhtml", "html", "htm"]);
 const TEXT_EXTENSIONS = new Set(["xhtml", "html", "htm", "xml", "opf", "ncx", "css", "svg"]);
 const WOFF2_WASM_URL = new URL("../../node_modules/fonteditor-core/woff2/woff2.wasm", import.meta.url).href;
 let woff2Ready: Promise<unknown> | null = null;
+let fontRuntime: Promise<typeof import("fonteditor-core")> | null = null;
+
+function loadFontRuntime() {
+  fontRuntime ||= import("fonteditor-core");
+  return fontRuntime;
+}
 
 function extension(path: string) {
   return path.split(".").pop()?.toLowerCase() || "";
@@ -150,6 +156,7 @@ function sourceNameWithSuffix(sourceName: string, suffix: string) {
 }
 
 async function ensureWoff2() {
+  const { woff2 } = await loadFontRuntime();
   if (!woff2Ready) woff2Ready = woff2.init(WOFF2_WASM_URL);
   await woff2Ready;
 }
@@ -161,6 +168,7 @@ async function parseFont(path: string, bytes: ArrayBuffer, subset?: number[]): P
   const options: any = { type: ext, hinting: true, kerning: true, compound2simple: false };
   if (subset?.length) options.subset = subset;
   if (ext === "woff") options.inflate = inflate;
+  const { createFont } = await loadFontRuntime();
   const font = createFont(bytes, options);
   return { path, type: ext as ParsedFont["type"], font, glyphs: font.get().glyf || [] };
 }
@@ -491,7 +499,16 @@ function collectSubsetCodePoints(source: string, output: Set<number>) {
     }
     if (!rawTag && source[index] === "&") {
       const end = source.indexOf(";", index + 1);
-      if (end > index && end - index < 16) { index = end + 1; continue; }
+      if (end > index && end - index < 16) {
+        const entity = source.slice(index, end + 1);
+        const numeric = entity.match(/^&#(?:x([0-9a-f]+)|(\d+));$/i);
+        if (numeric) {
+          const code = Number.parseInt(numeric[1] || numeric[2], numeric[1] ? 16 : 10);
+          if (code >= 32 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)) output.add(code);
+        }
+        index = end + 1;
+        continue;
+      }
     }
     const code = source.codePointAt(index) || 0;
     const character = String.fromCodePoint(code);
@@ -570,3 +587,5 @@ export async function processWebEpubFont(file: File, action: WebEpubFontAction, 
   if (action === "font-decrypt") return decryptFonts(file, zip, plainText);
   return subsetFonts(file, zip);
 }
+
+export const webEpubFontProcessTesting = { collectSubsetCodePoints };

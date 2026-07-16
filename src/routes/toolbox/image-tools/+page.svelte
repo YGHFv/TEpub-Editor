@@ -1038,7 +1038,7 @@
 <main class="image-tool-app">
   <header class="tool-head">
     <div>
-      <h1>图片处理</h1>
+      <h1>封面与横幅</h1>
       <p>{status || "选择封面图后开始处理"}</p>
     </div>
     <div class="tool-head-actions">

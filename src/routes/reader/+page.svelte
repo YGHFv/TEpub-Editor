@@ -5,6 +5,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { page } from "$app/stores";
   import ReaderTocNode from "$lib/ReaderTocNode.svelte";
+  import CustomSelect from "$lib/CustomSelect.svelte";
 
   // ===== EPUB 数据结构 =====
   interface SpineEntry {
@@ -1855,6 +1856,20 @@
     }
   }
 
+  function onFrameKeydown(event: KeyboardEvent) {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (pageMode === "scroll") scrollPrev(); else prevSpread();
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (pageMode === "scroll") scrollNext(); else nextSpread();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      activePanel = activePanel ? "" : "menu";
+    }
+  }
+
   function onResize() {
     if (loading) return;
     const meta = (pageEl as any).__rd;
@@ -1916,11 +1931,6 @@
 
   function noop() {}
 
-  function onFontFamilyChange(e: Event) {
-    const target = e.currentTarget as HTMLSelectElement;
-    setUserFontFamily(target.value);
-  }
-
   // 滚动模式下，监听 viewport 滚动以保存进度（节流）
   let scrollSaveTimer: any = null;
   function onViewportScroll() {
@@ -1977,7 +1987,9 @@
   <!-- ===== 主阅读区 ===== -->
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <main class="rd-frame" bind:this={frameEl} on:click={onFrameClick}>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="rd-frame" bind:this={frameEl} role="application" aria-label="EPUB 阅读区域" tabindex="0" on:click={onFrameClick} on:keydown={onFrameKeydown}>
     {#if loading}
       <div class="rd-loading">{loadingMsg}</div>
     {:else if errorMsg}
@@ -1994,13 +2006,16 @@
       章节没自带背景时 style 为空字符串，div 仍然存在但不可见 —— 这样切换
       章节时 div 不会被销毁重建，只是 background-image 切换，无闪烁。
     -->
+    {#if currentChapterBg}
+      <div class="rd-chapter-bg" style={currentChapterBg} aria-hidden="true"></div>
+    {/if}
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="rd-viewport" bind:this={viewportEl} on:scroll={onViewportScroll}>
       <div class="rd-page" bind:this={pageEl}>
         {@html combinedHtml}
       </div>
     </div>
-  </main>
+  </div>
 
   <!-- ===== 4 个角的常驻信息（始终显示，不随工具栏开关） ===== -->
   <!--
@@ -2168,16 +2183,21 @@
           <div class="rd-set-row">
             <span class="rd-set-label">字体</span>
             <div class="rd-segctrl rd-font-picker">
-              <select value={userFontFamily} on:change={onFontFamilyChange}>
-                <option value="">默认（衬线）</option>
-                <option value="Source Han Sans SC">思源黑体</option>
-                <option value="Microsoft YaHei">微软雅黑</option>
-                <option value="PingFang SC">苹方</option>
-                <option value="SimSun">宋体</option>
-                <option value="KaiTi">楷体</option>
-                <option value="FangSong">仿宋</option>
-                <option value="Source Han Serif SC">思源宋体</option>
-              </select>
+              <CustomSelect
+                value={userFontFamily}
+                options={[
+                  { value: "", label: "默认（衬线）" },
+                  { value: "Source Han Sans SC", label: "思源黑体" },
+                  { value: "Microsoft YaHei", label: "微软雅黑" },
+                  { value: "PingFang SC", label: "苹方" },
+                  { value: "SimSun", label: "宋体" },
+                  { value: "KaiTi", label: "楷体" },
+                  { value: "FangSong", label: "仿宋" },
+                  { value: "Source Han Serif SC", label: "思源宋体" },
+                ]}
+                ariaLabel="阅读字体"
+                on:change={(event) => setUserFontFamily(event.detail)}
+              />
             </div>
           </div>
 
@@ -2309,10 +2329,6 @@
     --rd-border: rgba(198, 150, 88, 0.24);
     --rd-tools-bg: rgba(28, 28, 28, 0.96);
   }
-  .rd-app[data-theme="custom"] {
-    /* 自定义背景图保留默认文字色，但允许背景图透出 */
-  }
-
   .rd-app {
     position: fixed;
     inset: 0;
@@ -2721,15 +2737,15 @@
     min-width: 48px; text-align: center;
     font-variant-numeric: tabular-nums;
   }
-  .rd-font-picker select {
+  .rd-font-picker :global(.custom-select) {
     flex: 1;
+    min-width: 0;
+  }
+  .rd-font-picker :global(.custom-select-trigger) {
     background: var(--rd-bg-soft);
     color: var(--rd-text);
     border: 1px solid var(--rd-border);
-    border-radius: 6px;
-    padding: 6px 10px;
     font-size: 13px;
-    cursor: pointer;
   }
 
   .rd-row {
