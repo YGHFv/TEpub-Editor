@@ -21,10 +21,10 @@
   $: subsetMode = action === "font-subset";
   $: title = decryptMode ? "EPUB 字体解密" : subsetMode ? "EPUB 字体精简" : "EPUB 字体加密";
   $: description = decryptMode
-    ? "恢复 EPUB 中通过私用区字体映射混淆的正文；优先读取内置映射或字体 cmap，也可使用同版本明文 TXT 对齐。"
+    ? "恢复 EPUB 中经过字体映射混淆的正文；旧式私用区加密可自动识别，新式正文字形置换需使用同版本明文 TXT 对齐。"
     : subsetMode
       ? "扫描整本 EPUB 正文实际使用的 Unicode 码点，裁剪未使用字形以减小内嵌字体体积。"
-      : "将正文汉字替换为私用区字符，并把对应 cmap 写入 EPUB 内嵌字体；映射随文件保存，可跨端恢复。";
+      : "按段落实际使用的正文字体分别随机打乱汉字映射；标点、标题和字体不支持的文字保持原样，加密前自动精简全部内嵌字体。";
 
   function clearResult() {
     if (result) URL.revokeObjectURL(result.url);
@@ -113,7 +113,7 @@
 
     {#if decryptMode}
       <section class="txt-assist">
-        <div><strong>明文 TXT 辅助对齐</strong><span>仅在 EPUB 没有映射且字体 cmap 无法直接恢复时需要</span></div>
+        <div><strong>明文 TXT 辅助对齐</strong><span>新式正文字形随机置换需要同版本 TXT；旧式私用区文件仍会优先尝试自动恢复</span></div>
         <div class="txt-controls">
           <CustomSelect
             value={txtEncoding}
@@ -145,8 +145,8 @@
     {/if}
 
     <section class="notes">
-      <article><b>01</b><div><strong>{decryptMode ? "优先自动恢复" : subsetMode ? "整书扫描" : "正文映射"}</strong><p>{decryptMode ? "先读取 TEpub 映射，再检查字体 cmap，无需 TXT 时不会要求上传。" : subsetMode ? "从 HTML/XHTML 正文收集码点，并额外保留基础 ASCII 字符。" : "仅替换正文文本节点中的汉字，不修改标签、脚本、样式或 HTML 实体。"}</p></div></article>
-      <article><b>02</b><div><strong>{decryptMode ? "TXT 对齐兜底" : subsetMode ? "仅在变小时写回" : "字体写回"}</strong><p>{decryptMode ? "旧式第三方混淆无法从 cmap 反推时，以同版本 TXT 生成可靠映射。" : subsetMode ? "裁剪结果不比原字体小时保持原文件，避免无意义增大 EPUB。" : "将私用区编码追加到对应字形 cmap，保留原始编码以兼容阅读器。"}</p></div></article>
+      <article><b>01</b><div><strong>{decryptMode ? "兼容两种方案" : subsetMode ? "整书扫描" : "仅处理正文"}</strong><p>{decryptMode ? "旧式私用区文件先尝试自动恢复；新式置换文件根据标记只恢复正文段落。" : subsetMode ? "从 HTML/XHTML 正文收集码点，并额外保留基础 ASCII 字符。" : "仅随机替换正文段落中的汉字；标题、标点、脚本、样式和无对应字形的文本保持原样。"}</p></div></article>
+      <article><b>02</b><div><strong>{decryptMode ? "TXT 对齐恢复" : subsetMode ? "仅在变小时写回" : "各字体独立置换"}</strong><p>{decryptMode ? "新式随机置换不保存明文映射，需以同版本 TXT 生成恢复表。" : subsetMode ? "裁剪结果不比原字体小时保持原文件，避免无意义增大 EPUB。" : "每套正文字体只随机置换自己实际使用且拥有字形的汉字；缺失字形直接跳过，字体之间不共用映射表。"}</p></div></article>
       <article><b>03</b><div><strong>格式兼容</strong><p>支持 TTF、OTF、WOFF、WOFF2；OTF 修改后会转换为 TTF 并同步更新 EPUB 引用。</p></div></article>
     </section>
   </main>

@@ -4255,21 +4255,154 @@ def private_chars(count, excluded=None):
         return available[:count]
     raise RuntimeError("可用私用区字符不足")
 
-def collect_supported_chars(font_items):
+def collect_font_chars(font_items):
     from fontTools.ttLib import TTFont
 
     supported = set()
-    for _name, font_data in font_items:
+    occupied_private = set()
+    coverage_by_name = {}
+    for name, font_data in font_items:
         try:
             font = TTFont(BytesIO(font_data))
             best = font.getBestCmap() or {}
+            covered = set()
             for code in best.keys():
                 ch = chr(code)
                 if should_map_char(ch):
                     supported.add(ch)
+                    covered.add(ch)
+                if is_private_use_char(ch):
+                    occupied_private.add(ch)
+            coverage_by_name[name.lower()] = len(covered)
         except Exception:
             continue
-    return supported
+    return supported, occupied_private, coverage_by_name
+
+def split_font_families(value):
+    families = []
+    current = []
+    quote = None
+    for ch in value:
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            current.append(ch)
+        elif ch == ",":
+            item = "".join(current).strip()
+            if item:
+                families.append(item)
+            current = []
+        else:
+            current.append(ch)
+    item = "".join(current).strip()
+    if item:
+        families.append(item)
+    return families
+
+def unquote_font_family(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1]
+    return value
+
+def normalize_font_family(value):
+    return unquote_font_family(value).lower()
+
+def css_font_family(value):
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+def append_font_fallbacks(value, fallback_families):
+    important = ""
+    important_match = re.search(r"\s*!important\s*$", value, flags=re.I)
+    if important_match:
+        important = important_match.group(0)
+        value = value[:important_match.start()]
+    families = split_font_families(value)
+    existing = {normalize_font_family(family) for family in families}
+    additions = [css_font_family(family) for family in fallback_families if family.lower() not in existing]
+    if not additions:
+        return value + important
+    generics = {
+        "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-serif",
+        "ui-sans-serif", "ui-monospace", "ui-rounded", "emoji", "math", "fangsong"
+    }
+    insert_at = next((index for index, family in enumerate(families) if normalize_font_family(family) in generics), len(families))
+    families[insert_at:insert_at] = additions
+    return ", ".join(families) + important
+
+def rewrite_css_font_fallbacks(source, fallback_families):
+    if not fallback_families:
+        return source
+    font_faces = []
+    def mask_face(match):
+        marker = "__TEPUB_FONT_FACE_{}__".format(len(font_faces))
+        font_faces.append(match.group(0))
+        return marker
+    masked = re.sub(r"(?is)@font-face\s*\{[^{}]*\}", mask_face, source)
+    rewritten = re.sub(
+        r"(?is)(font-family\s*:\s*)([^;}{]+)",
+        lambda match: match.group(1) + append_font_fallbacks(match.group(2), fallback_families),
+        masked,
+    )
+    return re.sub(
+        r"__TEPUB_FONT_FACE_(\d+)__",
+        lambda match: font_faces[int(match.group(1))] if int(match.group(1)) < len(font_faces) else "",
+        rewritten,
+    )
+
+def rewrite_inline_font_fallbacks(source, fallback_families):
+    if not fallback_families:
+        return source
+    def rewrite_style(match):
+        style = re.sub(
+            r"(?is)(font-family\s*:\s*)([^;]+)",
+            lambda declaration: declaration.group(1) + append_font_fallbacks(declaration.group(2), fallback_families),
+            match.group(3),
+        )
+        return match.group(1) + match.group(2) + style + match.group(2)
+    return re.sub(r"(?is)(style\s*=\s*)(['\"])(.*?)\2", rewrite_style, source)
+
+def inject_obfuscated_text_compatibility(source, fallback_families):
+    if re.search(r"data-tepub-font-obfuscation\s*=", source, flags=re.I):
+        return source
+    default_family = ""
+    if fallback_families:
+        default_family = "html { font-family: " + ", ".join(css_font_family(family) for family in fallback_families) + ", serif; }\n"
+    style = '<style type="text/css" data-tepub-font-obfuscation="1">' + default_family + 'html, body { overflow-wrap: anywhere; word-break: break-all; }</style>'
+    if re.search(r"</head\s*>", source, flags=re.I):
+        return re.sub(r"</head\s*>", lambda _match: style + "</head>", source, count=1, flags=re.I)
+    return style + source
+
+def collect_embedded_font_families(infos, contents, coverage_by_name):
+    ranked = []
+    seen = set()
+    for info in infos:
+        name = info.filename
+        if not name.lower().endswith(".css") or name.endswith("/"):
+            continue
+        source = decode_text(contents.get(name, b""))
+        for face in re.finditer(r"(?is)@font-face\s*\{([^{}]*)\}", source):
+            body = face.group(1)
+            family_match = re.search(r"(?is)font-family\s*:\s*([^;}{]+)", body)
+            if not family_match:
+                continue
+            family = unquote_font_family(family_match.group(1))
+            family_key = family.lower()
+            if not family or family_key in seen:
+                continue
+            scores = []
+            for url_match in re.finditer(r"(?is)url\(\s*(['\"]?)(.*?)\1\s*\)", body):
+                target = zip_join(zip_parent(name), url_match.group(2))
+                if target.lower() in coverage_by_name:
+                    scores.append(coverage_by_name[target.lower()])
+            if scores:
+                seen.add(family_key)
+                ranked.append((family, max(scores), len(ranked)))
+    ranked.sort(key=lambda item: (-item[1], item[2]))
+    return [family for family, _score, _order in ranked]
 
 def add_private_cmap(font_data, mapping):
     from fontTools.ttLib import TTFont
@@ -4320,6 +4453,264 @@ def write_entries(output_path, infos, contents, extra_map=None, skip_map=False):
             zi.compress_type = zipfile.ZIP_DEFLATED
             zout.writestr(zi, json.dumps(extra_map, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
+BODY_ENCRYPTION_CLASS = "tepub-font-encrypted-body"
+BODY_ENCRYPTION_FAMILY = "TEpubEncryptedBodyFont"
+
+def update_body_tag_class(tag, add):
+    match = re.search(r"\bclass\s*=\s*(['\"])(.*?)\1", tag, flags=re.I | re.S)
+    if match:
+        classes = [name for name in match.group(2).split() if name != BODY_ENCRYPTION_CLASS]
+        if add:
+            classes.append(BODY_ENCRYPTION_CLASS)
+        if not classes:
+            return tag[:match.start()] + tag[match.end():]
+        replacement = "class=" + match.group(1) + " ".join(classes) + match.group(1)
+        return tag[:match.start()] + replacement + tag[match.end():]
+    if not add:
+        return tag
+    return re.sub(r"\s*(/?)>$", ' class="' + BODY_ENCRYPTION_CLASS + r'"\1>', tag)
+
+def is_title_like_tag(tag, name):
+    if re.fullmatch(r"h[1-6]", name or "") or name in ("title", "header", "nav"):
+        return True
+    attrs = parse_attrs(tag)
+    marker = (attrs.get("class", "") + " " + attrs.get("id", "")).lower()
+    return bool(re.search(r"(^|[\s_-])(title|subtitle|heading|headline|chapter|volume|part|section-number|chapter-number)([\s_-]|$)", marker))
+
+def transform_body_paragraphs(source, mapping, mode="encrypt"):
+    out = []
+    paragraph_depth = 0
+    title_depth = 0
+    element_stack = []
+    raw_tag = None
+    i = 0
+    while i < len(source):
+        if source[i] == "<":
+            end = source.find(">", i + 1)
+            if end < 0:
+                out.append(source[i:])
+                break
+            tag = source[i:end + 1]
+            closing, name = tag_identity(tag)
+            self_closing = bool(re.search(r"/\s*>$", tag))
+            class_match = re.search(r"\bclass\s*=\s*(['\"])(.*?)\1", tag, flags=re.I | re.S)
+            marked = bool(class_match and BODY_ENCRYPTION_CLASS in class_match.group(2).split())
+            if closing:
+                while element_stack:
+                    popped_name, popped_paragraph, popped_title = element_stack.pop()
+                    paragraph_depth -= int(popped_paragraph)
+                    title_depth -= int(popped_title)
+                    if popped_name == name:
+                        break
+            if not closing and not self_closing:
+                title_like = is_title_like_tag(tag, name)
+                target = (name == "p" and title_depth == 0 and not title_like) if mode == "encrypt" else marked
+                if target:
+                    paragraph_depth += 1
+                    tag = update_body_tag_class(tag, mode == "encrypt")
+                if title_like:
+                    title_depth += 1
+                element_stack.append((name, target, title_like))
+            if name in ("script", "style"):
+                raw_tag = None if closing else name
+            out.append(tag)
+            i = end + 1
+            continue
+        if not raw_tag and source[i] == "&":
+            end = source.find(";", i + 1, i + 16)
+            if end >= 0:
+                out.append(source[i:end + 1])
+                i = end + 1
+                continue
+        ch = source[i]
+        out.append(mapping.get(ch, ch) if not raw_tag and paragraph_depth > 0 else ch)
+        i += 1
+    return "".join(out)
+
+def collect_body_and_protected_chars(source):
+    body_chars = []
+    protected_chars = []
+    paragraph_depth = 0
+    title_depth = 0
+    element_stack = []
+    raw_tag = None
+    i = 0
+    while i < len(source):
+        if source[i] == "<":
+            end = source.find(">", i + 1)
+            if end < 0:
+                break
+            tag = source[i:end + 1]
+            closing, name = tag_identity(tag)
+            self_closing = bool(re.search(r"/\s*>$", tag))
+            if closing:
+                while element_stack:
+                    popped_name, popped_paragraph, popped_title = element_stack.pop()
+                    paragraph_depth -= int(popped_paragraph)
+                    title_depth -= int(popped_title)
+                    if popped_name == name:
+                        break
+            elif not self_closing:
+                title_like = is_title_like_tag(tag, name)
+                paragraph = name == "p" and title_depth == 0 and not title_like
+                paragraph_depth += int(paragraph)
+                title_depth += int(title_like)
+                element_stack.append((name, paragraph, title_like))
+            if name in ("script", "style"):
+                raw_tag = None if closing else name
+            i = end + 1
+            continue
+        if not raw_tag and source[i] == "&":
+            end = source.find(";", i + 1, i + 16)
+            if end >= 0:
+                i = end + 1
+                continue
+        ch = source[i]
+        if not raw_tag and should_map_char(ch):
+            if paragraph_depth > 0 and title_depth == 0:
+                body_chars.append(ch)
+            else:
+                protected_chars.append(ch)
+        i += 1
+    return body_chars, protected_chars
+
+def collect_spine_html_names(infos, contents):
+    names = {info.filename for info in infos}
+    for info in infos:
+        opf_path = info.filename
+        if not opf_path.lower().endswith(".opf"):
+            continue
+        opf = decode_text(contents.get(opf_path, b""))
+        opf_dir = zip_parent(opf_path)
+        manifest = {}
+        for item in re.finditer(r"(?is)<item\b([^>]*)>", opf):
+            attrs = parse_attrs(item.group(1))
+            if attrs.get("id") and attrs.get("href"):
+                manifest[attrs["id"]] = zip_join(opf_dir, attrs["href"])
+        spine = []
+        for itemref in re.finditer(r"(?is)<itemref\b([^>]*)>", opf):
+            target = manifest.get(parse_attrs(itemref.group(1)).get("idref", ""), "")
+            if target in names and is_html_name(target):
+                spine.append(target)
+        if spine:
+            return spine
+    return [info.filename for info in infos if is_html_name(info.filename)]
+
+def relative_zip_path(from_file, target):
+    source_parts = [part for part in zip_parent(from_file).split("/") if part]
+    target_parts = [part for part in target.replace("\\", "/").split("/") if part]
+    while source_parts and target_parts and source_parts[0].lower() == target_parts[0].lower():
+        source_parts.pop(0)
+        target_parts.pop(0)
+    return "/".join([".."] * len(source_parts) + target_parts)
+
+def inject_body_font_style(source, html_path, font_path):
+    source = re.sub(
+        r"(?is)<style[^>]*data-tepub-body-font-encryption\s*=\s*(['\"])1\1[^>]*>.*?</style>",
+        "",
+        source,
+    )
+    font_url = relative_zip_path(html_path, font_path).replace('"', "%22")
+    style = (
+        '<style type="text/css" data-tepub-body-font-encryption="1">'
+        '@font-face { font-family: "' + BODY_ENCRYPTION_FAMILY + '"; src: url("' + font_url + '"); } '
+        '.' + BODY_ENCRYPTION_CLASS + ', .' + BODY_ENCRYPTION_CLASS + ' * { font-family: "' + BODY_ENCRYPTION_FAMILY + '" !important; }'
+        '</style>'
+    )
+    if re.search(r"</head\s*>", source, flags=re.I):
+        return re.sub(r"</head\s*>", lambda _match: style + "</head>", source, count=1, flags=re.I)
+    return style + source
+
+def random_derangement(chars):
+    shuffled = list(chars)
+    random_source = random.SystemRandom()
+    for index in range(len(shuffled) - 1, 0, -1):
+        target = random_source.randrange(index)
+        shuffled[index], shuffled[target] = shuffled[target], shuffled[index]
+    return shuffled
+
+def permute_font_cmap(font_data, mapping):
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(BytesIO(font_data))
+    best = font.getBestCmap() or {}
+    if "cmap" not in font:
+        return font_data
+    plain_codes = {ord(ch) for ch in mapping}
+    changed = 0
+    for table in font["cmap"].tables:
+        if not table.isUnicode():
+            continue
+        for code in plain_codes:
+            table.cmap.pop(code, None)
+        for plain, cipher in mapping.items():
+            glyph = best.get(ord(plain))
+            cipher_code = ord(cipher)
+            if glyph and (table.format != 4 or cipher_code <= 0xFFFF):
+                table.cmap[cipher_code] = glyph
+                changed += 1
+    if not changed:
+        return font_data
+    out = BytesIO()
+    font.save(out)
+    return out.getvalue()
+
+def encrypt_epub_body_permutation(input_path, output_path):
+    from fontTools.ttLib import TTFont
+
+    with zipfile.ZipFile(input_path, "r") as zin:
+        infos = zin.infolist()
+        contents = {info.filename: zin.read(info.filename) for info in infos if not info.filename.endswith("/")}
+        for info in infos:
+            if info.filename.endswith("/"):
+                contents[info.filename] = b""
+        font_names = [info.filename for info in infos if is_font_name(info.filename)]
+        html_names = collect_spine_html_names(infos, contents)
+        if not font_names:
+            raise RuntimeError("EPUB 内未找到字体文件")
+        if not html_names:
+            raise RuntimeError("EPUB 内未找到正文 HTML/XHTML 文件")
+        html_sources = {name: decode_text(contents[name]) for name in html_names}
+        body_chars = set()
+        protected_chars = set()
+        for source in html_sources.values():
+            body, protected = collect_body_and_protected_chars(source)
+            body_chars.update(body)
+            protected_chars.update(protected)
+        body_chars.difference_update(protected_chars)
+        if len(body_chars) < 2:
+            raise RuntimeError("未找到可加密的正文段落汉字")
+        candidates = []
+        for name in font_names:
+            try:
+                font = TTFont(BytesIO(contents[name]))
+                supported = {chr(code) for code in (font.getBestCmap() or {}) if is_cjk_ideograph(chr(code))}
+                chars = [ch for ch in body_chars if ch in supported]
+                candidates.append((len(chars), name, chars))
+            except Exception:
+                continue
+        if not candidates:
+            raise RuntimeError("正文字体中未找到可加密汉字")
+        _score, selected_font, chars = max(candidates, key=lambda item: item[0])
+        if len(chars) < 2:
+            raise RuntimeError("正文字体中未找到足够的可加密汉字")
+        chars = sorted(chars)
+        mapping = dict(zip(chars, random_derangement(chars)))
+        changed_files = 0
+        for name, source in html_sources.items():
+            transformed = transform_body_paragraphs(source, mapping, "encrypt")
+            if transformed != source:
+                contents[name] = inject_body_font_style(transformed, name, selected_font).encode("utf-8")
+                changed_files += 1
+        if not changed_files:
+            raise RuntimeError("未发现可加密的正文段落")
+        new_font = permute_font_cmap(contents[selected_font], mapping)
+        if new_font == contents[selected_font]:
+            raise RuntimeError("正文字体 cmap 未能完成随机置换")
+        contents[selected_font] = new_font
+        write_entries(output_path, infos, contents, extra_map=None, skip_map=True)
+        return len(mapping), 1
+
 def encrypt_epub(input_path, output_path):
     with zipfile.ZipFile(input_path, "r") as zin:
         infos = zin.infolist()
@@ -4333,12 +4724,14 @@ def encrypt_epub(input_path, output_path):
             raise RuntimeError("EPUB 内未找到字体文件")
         if not html_names:
             raise RuntimeError("EPUB 内未找到 HTML/XHTML 文件")
-        supported_chars = collect_supported_chars((name, contents[name]) for name in font_names)
+        supported_chars, existing_private_chars, coverage_by_name = collect_font_chars(
+            (name, contents[name]) for name in font_names
+        )
+        fallback_families = collect_embedded_font_families(infos, contents, coverage_by_name)
         if not supported_chars:
             raise RuntimeError("内嵌字体未发现可加密汉字")
         chars = []
         seen = set()
-        existing_private_chars = set()
         for name in html_names:
             html = decode_text(contents[name])
             existing_private_chars.update(ch for ch in html if is_private_use_char(ch))
@@ -4351,7 +4744,16 @@ def encrypt_epub(input_path, output_path):
         shadows = private_chars(len(chars), existing_private_chars)
         mapping = dict(zip(chars, shadows))
         for name in html_names:
-            contents[name] = transform_text(decode_text(contents[name]), mapping).encode("utf-8")
+            transformed = transform_text(decode_text(contents[name]), mapping)
+            transformed = rewrite_inline_font_fallbacks(transformed, fallback_families)
+            transformed = inject_obfuscated_text_compatibility(transformed, fallback_families)
+            contents[name] = transformed.encode("utf-8")
+        for info in infos:
+            name = info.filename
+            if name.lower().endswith(".css") and not name.endswith("/"):
+                contents[name] = rewrite_css_font_fallbacks(
+                    decode_text(contents[name]), fallback_families
+                ).encode("utf-8")
         changed_fonts = 0
         for name in font_names:
             new_data = add_private_cmap(contents[name], mapping)
@@ -4459,7 +4861,7 @@ def main():
     mode, input_path, output_path = sys.argv[1:4]
     txt_path = sys.argv[4] if len(sys.argv) == 5 else None
     if mode == "encrypt":
-        chars, fonts = encrypt_epub(input_path, output_path)
+        chars, fonts = encrypt_epub_body_permutation(input_path, output_path)
         print(json.dumps({"chars": chars, "fonts": fonts}, ensure_ascii=False))
     elif mode == "decrypt":
         result = decrypt_epub(input_path, output_path, txt_path)

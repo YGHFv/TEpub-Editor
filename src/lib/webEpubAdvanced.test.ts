@@ -15,7 +15,9 @@ async function makeFixture(options: FixtureOptions = {}) {
   const zip = new JSZip();
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
   zip.file("META-INF/container.xml", `<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
-  zip.file("OEBPS/style.css", "body { line-height: 1.7; }");
+  zip.file("OEBPS/style.css", options.fontBytes
+    ? '@font-face { font-family: "BookFont"; src: url("Fonts/book.ttf"); } body { line-height: 1.7; font-family: "BookFont"; }'
+    : "body { line-height: 1.7; }");
   const manifestChapters: string[] = [];
   const spine: string[] = [];
   const nav: string[] = [];
@@ -140,6 +142,55 @@ describe("shared EPUB advanced processing", () => {
     expect(codePoints).toContain(35821);
   });
 
+  it("does not reuse private code points already occupied by an embedded font", () => {
+    const fonts = [{ glyphs: [{ unicode: [0x63a9] }, { unicode: [0xee01] }] }];
+    const occupied = webEpubFontProcessTesting.collectFontPrivateCodePoints(fonts as never);
+    const generated = webEpubFontProcessTesting.privateCharacters(4236, occupied)
+      .map((character) => character.codePointAt(0));
+    expect(occupied).toContain(0xee01);
+    expect(generated).toHaveLength(4236);
+    expect(generated).not.toContain(0xee01);
+  });
+
+  it("adds embedded font fallbacks before generic families without changing font-face names", () => {
+    const css = '@font-face { font-family: "AS"; src: url("book.ttf"); } .title { font-family: "楷体", sans-serif; }';
+    const rewritten = webEpubFontProcessTesting.rewriteCssFontFallbacks(css, ["AS", "Title"]);
+    expect(rewritten).toContain('@font-face { font-family: "AS";');
+    expect(rewritten).toContain('font-family: "楷体", "AS", "Title", sans-serif;');
+  });
+
+  it("injects line-breaking compatibility for private-use text", () => {
+    const html = '<html><head><title>Book</title></head><body><p>text</p></body></html>';
+    const rewritten = webEpubFontProcessTesting.injectObfuscatedTextCompatibility(html, ["AS"]);
+    expect(rewritten).toContain('data-tepub-font-obfuscation="1"');
+    expect(rewritten).toContain('word-break: break-all');
+    expect(rewritten).toContain('font-family: "AS", serif');
+  });
+
+  it("randomly permutes normal CJK code points without fixed mappings", () => {
+    const source = ["中", "文", "测", "试"];
+    const shuffled = webEpubFontProcessTesting.randomDerangement(source);
+    expect([...shuffled].sort()).toEqual([...source].sort());
+    expect(shuffled.every((character, index) => character !== source[index])).toBe(true);
+  });
+
+  it("encrypts paragraph text only and leaves headings and punctuation unchanged", () => {
+    const html = '<html><head></head><body><h1>标题</h1><p class="body">正文，测试。</p></body></html>';
+    const mapping = new Map([["正", "测"], ["文", "试"], ["测", "正"], ["试", "文"]]);
+    const rewritten = webEpubFontProcessTesting.transformBodyText(html, mapping, "encrypt");
+    expect(rewritten).toContain("<h1>标题</h1>");
+    expect(rewritten).toContain('class="body tepub-font-encrypted-body"');
+    expect(rewritten).toContain("测试，正文。");
+  });
+
+  it("forces encrypted paragraphs to use only the selected body font", () => {
+    const html = '<html><head></head><body><p>正文</p></body></html>';
+    const rewritten = webEpubFontProcessTesting.injectBodyFontStyle(html, "OEBPS/Text/chapter.xhtml", "OEBPS/Fonts/body.ttf");
+    expect(rewritten).toContain('data-tepub-body-font-encryption="1"');
+    expect(rewritten).toContain('url("../Fonts/body.ttf")');
+    expect(rewritten).not.toContain("word-break");
+  });
+
   const windowsFont = "C:\\Windows\\Fonts\\Deng.ttf";
   const fontTest = existsSync(windowsFont) ? it : it.skip;
   fontTest("subsets a real embedded Chinese TTF", async () => {
@@ -149,4 +200,93 @@ describe("shared EPUB advanced processing", () => {
     expect(result.changedFonts).toBe(1);
     expect(result.blob.size).toBeLessThan(file.size);
   }, 60_000);
+
+  fontTest("subsets all fonts and independently encrypts multiple body fonts", async () => {
+    const bytes = new Uint8Array(readFileSync(windowsFont));
+    const base = await makeFixture({
+      fontBytes: bytes,
+      chapterBodies: ['<p class="font-a">第一套正文字体测试。</p><p class="font-b">第二套正文字体测试。</p>'],
+    });
+    const zip = await JSZip.loadAsync(await base.arrayBuffer());
+    zip.file("OEBPS/Fonts/second.ttf", bytes);
+    zip.file("OEBPS/style.css", '@font-face { font-family: "BodyA"; src: url("Fonts/book.ttf"); } @font-face { font-family: "BodyB"; src: url("Fonts/second.ttf"); } p.font-a { font-family: "BodyA"; } p.font-b { font-family: "BodyB"; }');
+    const opf = await zip.file("OEBPS/content.opf")!.async("text");
+    zip.file("OEBPS/content.opf", opf.replace("</manifest>", '<item id="font2" href="Fonts/second.ttf" media-type="font/ttf"/></manifest>'));
+    const input = new File([await zip.generateAsync({ type: "blob" })], "two-body-fonts.epub", { type: "application/epub+zip" });
+    const result = await processWebEpubFont(input, "font-encrypt");
+    const output = await JSZip.loadAsync(await result.blob.arrayBuffer());
+    const chapter = await output.file("OEBPS/Text/chapter1.xhtml")!.async("text");
+    expect(result.changedFonts).toBe(2);
+    expect(result.mode).toBe("independent-body-font-permutation");
+    expect(chapter).toContain("tepub-font-encrypted-body-1");
+    expect(chapter).toContain("tepub-font-encrypted-body-2");
+  }, 120_000);
+
+  fontTest("subsets each font from only the text rendered with that font", async () => {
+    const bytes = new Uint8Array(readFileSync(windowsFont));
+    const base = await makeFixture({ fontBytes: bytes, chapterBodies: ["<h1>标题</h1><p>正文独有汉字</p>"] });
+    const zip = await JSZip.loadAsync(await base.arrayBuffer());
+    zip.file("OEBPS/Fonts/title.ttf", bytes);
+    zip.file("OEBPS/style.css", '@font-face { font-family: "BodyFont"; src: url("Fonts/book.ttf"); } @font-face { font-family: "TitleFont"; src: url("Fonts/title.ttf"); } body { font-family: "BodyFont"; } /* Chapter Title */ h1 { font-family: "TitleFont"; }');
+    const opf = await zip.file("OEBPS/content.opf")!.async("text");
+    zip.file("OEBPS/content.opf", opf.replace("</manifest>", '<item id="title-font" href="Fonts/title.ttf" media-type="font/ttf"/></manifest>'));
+    const input = new File([await zip.generateAsync({ type: "blob" })], "font-aware-subset.epub", { type: "application/epub+zip" });
+    const result = await processWebEpubFont(input, "font-subset");
+    const output = await JSZip.loadAsync(await result.blob.arrayBuffer());
+    const { createFont } = await import("fonteditor-core");
+    const body = createFont(await output.file("OEBPS/Fonts/book.ttf")!.async("arraybuffer"), { type: "ttf" }).get().glyf || [];
+    const title = createFont(await output.file("OEBPS/Fonts/title.ttf")!.async("arraybuffer"), { type: "ttf" }).get().glyf || [];
+    const bodyCodes = new Set(body.flatMap((glyph) => glyph.unicode || []));
+    const titleCodes = new Set(title.flatMap((glyph) => glyph.unicode || []));
+    expect(bodyCodes).toContain("正".codePointAt(0));
+    expect(titleCodes).toContain("标".codePointAt(0));
+    expect(titleCodes).not.toContain("正".codePointAt(0));
+  }, 120_000);
+
+  fontTest("does not permute body-font characters that are also used outside paragraphs", async () => {
+    const bytes = new Uint8Array(readFileSync(windowsFont));
+    const base = await makeFixture({ fontBytes: bytes, chapterBodies: ['<h3><span class="num">第1章</span></h3><p>第一章正文测试。</p>'] });
+    const zip = await JSZip.loadAsync(await base.arrayBuffer());
+    zip.file("OEBPS/style.css", '@font-face { font-family: "BodyFont"; src: url("Fonts/book.ttf"); } body { font-family: "BodyFont"; } span.num { font-family: "BodyFont"; }');
+    const input = new File([await zip.generateAsync({ type: "blob" })], "protected-heading-text.epub", { type: "application/epub+zip" });
+    const result = await processWebEpubFont(input, "font-encrypt");
+    const output = await JSZip.loadAsync(await result.blob.arrayBuffer());
+    const chapter = await output.file("OEBPS/Text/chapter1.xhtml")!.async("text");
+    expect(chapter).toContain('<span class="num">第1章</span>');
+    expect(chapter).toContain('tepub-font-encrypted-body-1');
+    expect(chapter).toMatch(/<p[^>]*>第/);
+  }, 120_000);
+
+  fontTest("treats title-like paragraphs as protected text even when they use the body font", async () => {
+    const bytes = new Uint8Array(readFileSync(windowsFont));
+    const base = await makeFixture({
+      fontBytes: bytes,
+      chapterBodies: ['<p class="te-chapter-title"><span class="te-chapter-number">第3章</span> 标题</p><p><span style="font-family: serif">标题</span>正文测试。</p>'],
+    });
+    const result = await processWebEpubFont(base, "font-encrypt");
+    const output = await JSZip.loadAsync(await result.blob.arrayBuffer());
+    const chapter = await output.file("OEBPS/Text/chapter1.xhtml")!.async("text");
+    expect(chapter).toContain('<p class="te-chapter-title"><span class="te-chapter-number">第3章</span> 标题</p>');
+    expect(chapter).not.toMatch(/te-chapter-title[^>]*tepub-font-encrypted-body/);
+    expect(chapter).toContain("tepub-font-encrypted-body-1");
+    expect(chapter).toContain("tepub-font-encrypted-body-1 *");
+  }, 120_000);
+
+  fontTest("includes heading characters selected by an embedded style block when subsetting", async () => {
+    const bytes = new Uint8Array(readFileSync(windowsFont));
+    const base = await makeFixture({ fontBytes: bytes, chapterBodies: ['<style>h1 { font-family: "TitleFont" !important; }</style><h1>嵌入标题</h1><p>正文</p>'] });
+    const zip = await JSZip.loadAsync(await base.arrayBuffer());
+    zip.file("OEBPS/Fonts/title.ttf", bytes);
+    zip.file("OEBPS/style.css", '@font-face { font-family: "BodyFont"; src: url("Fonts/book.ttf"); } @font-face { font-family: "TitleFont"; src: url("Fonts/title.ttf"); } body { font-family: "BodyFont"; }');
+    const opf = await zip.file("OEBPS/content.opf")!.async("text");
+    zip.file("OEBPS/content.opf", opf.replace("</manifest>", '<item id="title-font-inline" href="Fonts/title.ttf" media-type="font/ttf"/></manifest>'));
+    const input = new File([await zip.generateAsync({ type: "blob" })], "embedded-title-style.epub", { type: "application/epub+zip" });
+    const result = await processWebEpubFont(input, "font-subset");
+    const output = await JSZip.loadAsync(await result.blob.arrayBuffer());
+    const { createFont } = await import("fonteditor-core");
+    const title = createFont(await output.file("OEBPS/Fonts/title.ttf")!.async("arraybuffer"), { type: "ttf" }).get().glyf || [];
+    const titleCodes = new Set(title.flatMap((glyph) => glyph.unicode || []));
+    expect(titleCodes).toContain("嵌".codePointAt(0));
+    expect(titleCodes).toContain("题".codePointAt(0));
+  }, 120_000);
 });
