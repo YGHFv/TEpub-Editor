@@ -4,6 +4,32 @@ import { sveltekit } from "@sveltejs/kit/vite";
 // Vite configuration runs in Node.js.
 const host = process.env.TAURI_DEV_HOST;
 
+const optimizedDependencies = [
+  "@codemirror/commands",
+  "@codemirror/lang-css",
+  "@codemirror/lang-html",
+  "@codemirror/lang-xml",
+  "@codemirror/language",
+  "@codemirror/search",
+  "@codemirror/state",
+  "@codemirror/theme-one-dark",
+  "@codemirror/view",
+  "@tauri-apps/api/core",
+  "@tauri-apps/api/event",
+  "@tauri-apps/api/path",
+  "@tauri-apps/api/webviewWindow",
+  "@tauri-apps/api/window",
+  "@tauri-apps/plugin-dialog",
+  "@tauri-apps/plugin-fs",
+  "@tauri-apps/plugin-opener",
+  "codemirror",
+  "fonteditor-core",
+  "jszip",
+  "opencc-js",
+  "pako",
+  "pinyin-pro",
+];
+
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }) => {
   const isWebMode = mode === "web" || process.env.TEPUB_TARGET === "web";
@@ -28,9 +54,13 @@ export default defineConfig(async ({ mode }) => {
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. generated native and static build output must not reload the Web dev page
+      ignored: ["**/src-tauri/**", "**/build/**"],
     },
+  },
+  optimizeDeps: {
+    // Scan every toolbox dependency up front instead of reloading once per first-used route.
+    include: optimizedDependencies,
   },
   build: {
     chunkSizeWarningLimit: 900,

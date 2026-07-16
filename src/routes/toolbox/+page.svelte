@@ -944,7 +944,6 @@
     setWebClientViewOverride(nextDesktop ? "desktop" : "");
     webDesktopViewEnabled = nextDesktop;
     statusText = nextDesktop ? "已切换为电脑页面" : "已恢复自动页面";
-    window.location.reload();
   }
 
   function setToolboxSettingsTab(tabId: string) {
@@ -1300,6 +1299,7 @@
     min-height: 100dvh;
     display: flex;
     flex-direction: column;
+    overflow: visible;
     background: var(--color-canvas);
     color: var(--color-text);
     font-family: var(--font-ui);
@@ -1629,13 +1629,13 @@
   .toolbox-content {
     box-sizing: border-box;
     width: min(1100px, calc(100% - 48px));
-    flex: 1;
-    min-height: 0;
+    flex: 1 0 auto;
+    min-height: auto;
     margin: 0 auto;
     padding: 30px 0 34px;
     display: flex;
     flex-direction: column;
-    overflow: auto;
+    overflow: visible;
   }
 
   .tool-section + .tool-section {
@@ -2047,16 +2047,16 @@
     min-width: 1200px;
     min-height: 100vh;
     height: auto;
-    overflow: auto;
+    overflow: visible;
   }
 
   .toolbox-app.desktop-view .toolbox-content,
   :global(:root[data-tepub-client="web-desktop"]) .toolbox-content {
     width: min(1100px, calc(100% - 48px));
-    flex: 1;
-    min-height: 0;
+    flex: 1 0 auto;
+    min-height: auto;
     padding: 30px 0 34px;
-    overflow: auto;
+    overflow: visible;
   }
 
   .toolbox-app.desktop-view .toolbox-title-row,

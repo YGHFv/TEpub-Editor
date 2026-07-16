@@ -32,6 +32,38 @@ Main areas:
 
 ## Change History
 
+### 2026-07-16 20:12 +08:00
+
+Request: fix the Web toolbox home page repeatedly refreshing and not responding to mouse-wheel scrolling.
+
+Root cause:
+
+- Vite discovered large toolbox dependencies only when their routes were first loaded, then re-optimized them in four groups and reloaded the page after each group.
+- The Web development server watched the static `build` directory, so Web/desktop validation builds caused additional full-page reloads through `build/index.html` updates.
+- The desktop toolbox profile made both the document and `.toolbox-content` independent `overflow: auto` containers; after the toolbox gained more rows, wheel events could target the inner container while the visible page remained on the outer scroll position.
+- The Web desktop-view toggle also called `window.location.reload()` even though the client-profile event already applies the new viewport and profile immediately.
+
+Changes:
+
+- Added explicit Vite pre-optimization entries for CodeMirror, Tauri bridge modules, JSZip, OpenCC, pinyin, font, and compression dependencies used across toolbox routes.
+- Excluded the generated `build` directory from the development watcher while preserving normal source HMR.
+- Removed the redundant full-page reload from the Web desktop-view toggle.
+- Replaced the nested toolbox scroll containers with one document-level scroll surface in automatic, desktop, and mobile profiles.
+
+Verification:
+
+- `pnpm check` passed with 0 errors and the existing 51 warnings in 6 files.
+- `pnpm test` passed: 10 tests.
+- `pnpm build:web` passed.
+- `pnpm build` passed for the installed/Tauri frontend target.
+- `http://127.0.0.1:5233/toolbox` returned HTTP 200 after a clean development-server start.
+- The same Vite process and established connection count remained stable across idle observation and a Web build, confirming that generated `build` output no longer restarts or reconnects the page.
+- In-app browser automation was unavailable in this session, so wheel movement itself was verified through removal of the inner scroll surface rather than a synthetic wheel event.
+
+Known caveat:
+
+- Existing Svelte accessibility and unused-selector warnings remain unchanged; production builds also retain the existing large-chunk warning.
+
 ### 2026-07-16 05:36 +08:00
 
 Request: save all current fixes locally with detailed logs, compare TEpub Editor with `wangyyyqw/epub-toolkit`, and migrate missing features to both the installed desktop build and the Web build.
