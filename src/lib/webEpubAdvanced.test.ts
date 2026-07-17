@@ -244,10 +244,10 @@ describe("shared EPUB advanced processing", () => {
       chapterBodies: ['<p class="font-a">第一套正文字体测试。</p><p class="font-b">第二套正文字体测试。</p>'],
     });
     const zip = await JSZip.loadAsync(await base.arrayBuffer());
-    zip.file("OEBPS/Fonts/second.ttf", bytes);
-    zip.file("OEBPS/style.css", '@font-face { font-family: "BodyA"; src: url("Fonts/book.ttf"); } @font-face { font-family: "BodyB"; src: url("Fonts/second.ttf"); } p.font-a { font-family: "BodyA"; } p.font-b { font-family: "BodyB"; }');
+    zip.file("OEBPS/Fonts/第二 正文.ttf", bytes);
+    zip.file("OEBPS/style.css", '@font-face { font-family: "BodyA"; src: url("Fonts/book.ttf"); } @font-face { font-family: "BodyB"; src: url("Fonts/第二 正文.ttf"); } p.font-a { font-family: "BodyA"; } p.font-b { font-family: "BodyB"; }');
     const opf = await zip.file("OEBPS/content.opf")!.async("text");
-    zip.file("OEBPS/content.opf", opf.replace("</manifest>", '<item id="font2" href="Fonts/second.ttf" media-type="font/ttf"/></manifest>'));
+    zip.file("OEBPS/content.opf", opf.replace("</manifest>", '<item id="font2" href="Fonts/第二 正文.ttf" media-type="font/ttf"/></manifest>'));
     const input = new File([await zip.generateAsync({ type: "blob" })], "two-body-fonts.epub", { type: "application/epub+zip" });
     const result = await processWebEpubFont(input, "font-encrypt");
     const output = await JSZip.loadAsync(await result.blob.arrayBuffer());
@@ -256,6 +256,17 @@ describe("shared EPUB advanced processing", () => {
     expect(result.mode).toBe("independent-body-font-permutation");
     expect(chapter).toContain("tepub-font-encrypted-body-1");
     expect(chapter).toContain("tepub-font-encrypted-body-2");
+    expect(chapter).toContain('data-tepub-body-font-encryption="1"');
+    expect(chapter).toContain('href="../Styles/tepub-font-encryption.css"');
+    const compatibilityCss = await output.file("OEBPS/Styles/tepub-font-encryption.css")!.async("text");
+    expect(compatibilityCss).toContain('format("truetype")');
+    expect(compatibilityCss).toContain("%E7%AC%AC%E4%BA%8C%20%E6%AD%A3%E6%96%87.ttf");
+    const updatedOpf = await output.file("OEBPS/content.opf")!.async("text");
+    expect(updatedOpf).toContain("tepub-font-encryption.css");
+    const { createFont } = await import("fonteditor-core");
+    const encryptedFont = createFont(await output.file("OEBPS/Fonts/第二 正文.ttf")!.async("arraybuffer"), { type: "ttf" }).get();
+    expect(encryptedFont.name.fontFamily).toBe("TEpub Encrypted Font 2");
+    expect(encryptedFont.name.postScriptName).toBe("TEpubEncryptedFont2");
   }, 120_000);
 
   fontTest("subsets each font from only the text rendered with that font", async () => {
