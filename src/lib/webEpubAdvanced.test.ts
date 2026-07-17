@@ -183,6 +183,15 @@ describe("shared EPUB advanced processing", () => {
     expect(rewritten).toContain("测试，正文。");
   });
 
+  it("decrypts numbered body-font markers without touching following headings", () => {
+    const html = '<body><div class="calibre tepub-font-encrypted-body-2"><span>密文</span></div><h2>密文标题</h2></body>';
+    const mapping = new Map([["密", "正"], ["文", "文"]]);
+    const rewritten = webEpubFontProcessTesting.transformBodyText(html, mapping, "decrypt");
+    expect(rewritten).toContain('<div class="calibre"><span>正文</span></div>');
+    expect(rewritten).toContain("<h2>密文标题</h2>");
+    expect(rewritten).not.toContain("tepub-font-encrypted-body-2");
+  });
+
   it("forces encrypted paragraphs to use only the selected body font", () => {
     const html = '<html><head></head><body><p>正文</p></body></html>';
     const rewritten = webEpubFontProcessTesting.injectBodyFontStyle(html, "OEBPS/Text/chapter.xhtml", "OEBPS/Fonts/body.ttf");
@@ -288,5 +297,27 @@ describe("shared EPUB advanced processing", () => {
     const titleCodes = new Set(title.flatMap((glyph) => glyph.unicode || []));
     expect(titleCodes).toContain("嵌".codePointAt(0));
     expect(titleCodes).toContain("题".codePointAt(0));
+  }, 120_000);
+
+  fontTest("encrypts div-based body text in an EPUB that was already subsetted", async () => {
+    const bytes = new Uint8Array(readFileSync(windowsFont));
+    const paragraphText = "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄".repeat(3);
+    const originalBase = await makeFixture({
+      fontBytes: bytes,
+      chapterBodies: [`<h1>第一章</h1><div class="calibre1"><span>${paragraphText}</span></div>`],
+    });
+    const originalZip = await JSZip.loadAsync(await originalBase.arrayBuffer());
+    const originalChapter = await originalZip.file("OEBPS/Text/chapter1.xhtml")!.async("text");
+    originalZip.file("OEBPS/Text/chapter1.xhtml", originalChapter.replace("<body>", '<body class="te-chapter-page">'));
+    const original = new File([await originalZip.generateAsync({ type: "blob" })], originalBase.name, { type: "application/epub+zip" });
+    const subset = await processWebEpubFont(original, "font-subset");
+    const subsetFile = new File([subset.blob], subset.outputName, { type: "application/epub+zip" });
+    const encrypted = await processWebEpubFont(subsetFile, "font-encrypt");
+    expect(encrypted.mappedCharacters).toBeGreaterThan(80);
+    expect(encrypted.message).toContain("无需重复子集化");
+    const encryptedZip = await JSZip.loadAsync(await encrypted.blob.arrayBuffer());
+    const encryptedChapter = await encryptedZip.file("OEBPS/Text/chapter1.xhtml")!.async("text");
+    expect(encryptedChapter).toContain("tepub-font-encrypted-body-1");
+    expect(encryptedChapter).not.toContain(paragraphText);
   }, 120_000);
 });

@@ -339,9 +339,10 @@ function tagClass(tag: string) {
 function updateTagClass(tag: string, add: boolean) {
   const classMatch = tag.match(/\bclass\s*=\s*(['"])(.*?)\1/i);
   if (classMatch) {
-    const classes = classMatch[2].split(/\s+/).filter(Boolean).filter((name) => name !== BODY_ENCRYPTION_CLASS);
+    const classes = classMatch[2].split(/\s+/).filter(Boolean)
+      .filter((name) => name !== BODY_ENCRYPTION_CLASS && !name.startsWith(`${BODY_ENCRYPTION_CLASS}-`));
     if (add) classes.push(BODY_ENCRYPTION_CLASS);
-    if (!classes.length) return tag.replace(classMatch[0], "");
+    if (!classes.length) return tag.replace(classMatch[0], "").replace(/\s+([/>])/g, "$1");
     return tag.replace(classMatch[0], `class=${classMatch[1]}${classes.join(" ")}${classMatch[1]}`);
   }
   if (!add) return tag;
@@ -351,6 +352,7 @@ function updateTagClass(tag: string, add: boolean) {
 function transformBodyText(source: string, mapping: Map<string, string>, mode: "encrypt" | "decrypt") {
   let output = "";
   let paragraphDepth = 0;
+  const markedStack: string[] = [];
   let rawTag: "script" | "style" | null = null;
   for (let index = 0; index < source.length;) {
     if (source[index] === "<") {
@@ -361,12 +363,21 @@ function transformBodyText(source: string, mapping: Map<string, string>, mode: "
       const closing = match?.[1] === "/";
       const name = match?.[2]?.toLowerCase() || "";
       const selfClosing = /\/\s*>$/.test(tag);
-      const marked = tagClass(tag).split(/\s+/).includes(BODY_ENCRYPTION_CLASS);
-      if (closing && name === "p" && paragraphDepth > 0) paragraphDepth -= 1;
+      const marked = tagClass(tag).split(/\s+/)
+        .some((className) => className === BODY_ENCRYPTION_CLASS || className.startsWith(`${BODY_ENCRYPTION_CLASS}-`));
+      if (closing) {
+        const matchIndex = markedStack.lastIndexOf(name);
+        while (matchIndex >= 0 && markedStack.length > matchIndex) {
+          const markedName = markedStack.pop()!;
+          paragraphDepth -= 1;
+          if (markedName === name) break;
+        }
+      }
       if (!closing && !selfClosing) {
-        const target = mode === "encrypt" ? name === "p" : marked;
+        const target = mode === "encrypt" ? BODY_BLOCK_TAGS.has(name) : marked;
         if (target) {
           paragraphDepth += 1;
+          markedStack.push(name);
           tag = updateTagClass(tag, mode === "encrypt");
         }
       }
@@ -605,13 +616,30 @@ function isTitleLikeElement(element: Element | null) {
     const tag = current.localName?.toLowerCase() || "";
     if (/^h[1-6]$/.test(tag) || tag === "title" || tag === "header" || tag === "nav") return true;
     const marker = `${current.getAttribute("class") || ""} ${current.getAttribute("id") || ""}`.toLowerCase();
-    if (/(^|[\s_-])(title|subtitle|heading|headline|chapter|volume|part|section-number|chapter-number)([\s_-]|$)/.test(marker)) return true;
+    if (/(^|[\s_-])(title|subtitle|heading|headline)([\s_-]|$)/.test(marker)
+      || /(^|[\s_-])(chapter|volume|part|section)[\s_-]*(title|subtitle|number|name)([\s_-]|$)/.test(marker)) return true;
   }
   return false;
 }
 
 function isEncryptableParagraph(element: Element) {
-  return element.localName?.toLowerCase() === "p" && !isTitleLikeElement(element);
+  return isEncryptableTextBlock(element);
+}
+
+const BODY_BLOCK_SELECTOR = "p, div, li, blockquote, dd, dt";
+const BODY_BLOCK_TAGS = new Set(BODY_BLOCK_SELECTOR.split(", "));
+
+function isEncryptableTextBlock(element: Element) {
+  const tag = element.localName?.toLowerCase() || "";
+  if (!BODY_BLOCK_TAGS.has(tag) || isTitleLikeElement(element)) return false;
+  if (Array.from(element.querySelectorAll("*")).some((child) => isTitleLikeElement(child))) return false;
+  if (![...(element.textContent || "")].some(shouldMapCharacter)) return false;
+  return !Array.from(element.querySelectorAll(BODY_BLOCK_SELECTOR))
+    .some((child) => child !== element && !isTitleLikeElement(child) && [...(child.textContent || "")].some(shouldMapCharacter));
+}
+
+function bodyBlockElements(document: Document) {
+  return Array.from(document.querySelectorAll(BODY_BLOCK_SELECTOR));
 }
 
 function cleanCssForFontRules(source: string) {
@@ -722,7 +750,7 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
         });
       }
     }
-    const root = document.querySelector("body") || document.documentElement;
+    const root = elementsByLocalName(document, "body")[0] || document.documentElement;
     const visit = (node: Node) => {
       if (node.nodeType === 3) {
         const text = node.nodeValue || "";
@@ -730,8 +758,8 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
         let element = node.parentElement;
         if (outsideParagraphsOnly) {
           let ancestor = element;
-          while (ancestor && ancestor.localName?.toLowerCase() !== "p") ancestor = ancestor.parentElement;
-          if (ancestor && isEncryptableParagraph(ancestor)) return;
+          while (ancestor && !BODY_BLOCK_TAGS.has(ancestor.localName?.toLowerCase() || "")) ancestor = ancestor.parentElement;
+          if (ancestor && isEncryptableTextBlock(ancestor)) return;
         }
         let families: string[] = [];
         while (element && !families.length) {
@@ -854,8 +882,8 @@ async function resolveParagraphFonts(zip: JSZip, fonts: ParsedFont[], htmlSource
       }
     }
     const paragraphFonts: Array<ParsedFont | null> = [];
-    for (const paragraph of Array.from(document.querySelectorAll("p"))) {
-      if (!isEncryptableParagraph(paragraph)) {
+    for (const paragraph of bodyBlockElements(document)) {
+      if (!isEncryptableTextBlock(paragraph)) {
         paragraphFonts.push(null);
         continue;
       }
@@ -888,6 +916,7 @@ function transformParagraphsByFont(
   let output = "";
   let paragraphIndex = 0;
   let activeMapping: Map<string, string> | null = null;
+  const blockStack: Array<{ name: string; previous: Map<string, string> | null }> = [];
   let rawTag: "script" | "style" | null = null;
   for (let index = 0; index < source.length;) {
     if (source[index] === "<") {
@@ -897,9 +926,11 @@ function transformParagraphsByFont(
       const match = tag.match(/^<\s*(\/?)\s*([\w:-]+)/);
       const closing = match?.[1] === "/";
       const name = match?.[2]?.toLowerCase() || "";
-      if (!closing && name === "p") {
+      if (!closing && BODY_BLOCK_TAGS.has(name)) {
+        const previous = activeMapping;
         const font = paragraphFonts[paragraphIndex++] || null;
         activeMapping = font ? mappings.get(font) || null : null;
+        blockStack.push({ name, previous });
         if (font && activeMapping?.size) {
           const className = `${BODY_ENCRYPTION_CLASS}-${(fontIndexes.get(font) || 0) + 1}`;
           const classMatch = tag.match(/\bclass\s*=\s*(['"])(.*?)\1/i);
@@ -907,8 +938,12 @@ function transformParagraphsByFont(
             ? tag.replace(classMatch[0], `class=${classMatch[1]}${classMatch[2]} ${className}${classMatch[1]}`)
             : tag.replace(/\s*(\/?)>$/, ` class="${className}"$1>`);
         }
-      } else if (closing && name === "p") {
-        activeMapping = null;
+      } else if (closing && BODY_BLOCK_TAGS.has(name)) {
+        while (blockStack.length) {
+          const block = blockStack.pop()!;
+          activeMapping = block.previous;
+          if (block.name === name) break;
+        }
       }
       if (name === "script" || name === "style") rawTag = closing ? null : name;
       output += tag;
@@ -1144,7 +1179,7 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
   for (const [path, source] of htmlSources) {
     const document = new DOMParser().parseFromString(source.replace(/<link\b[^>]*>/gi, ""), "application/xml");
     const paragraphFonts = assignments.get(path) || [];
-    Array.from(document.querySelectorAll("p")).forEach((paragraph, index) => {
+    bodyBlockElements(document).forEach((paragraph, index) => {
       const font = paragraphFonts[index];
       if (!font) return;
       const supported = supportedByFont.get(font) || new Set<number>();
@@ -1222,7 +1257,7 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
     mappedCharacters,
     changedFonts: encryptedFonts.length,
     mode: "independent-body-font-permutation",
-    message: `字体加密完成：${encryptedFonts.length} 个正文字体分别随机映射 ${mappedCharacters} 个汉字；加密前自动精简 ${subsettedFonts} 个字体`,
+    message: `字体加密完成：${encryptedFonts.length} 个正文字体分别随机映射 ${mappedCharacters} 个汉字；${subsettedFonts ? `加密前自动精简 ${subsettedFonts} 个字体` : "内嵌字体已是精简状态，无需重复子集化"}`,
     blob,
   };
 }
@@ -1281,7 +1316,9 @@ function mappingFromPlainText(cipherText: string, plainText: string) {
       if (Math.abs(offset) <= 2400) offsets.set(offset, (offsets.get(offset) || 0) + 1);
     }
   });
-  const bestOffset = [...offsets].sort((a, b) => b[1] - a[1])[0]?.[0] || 0;
+  const bestOffset = cipher.length === plain.length
+    ? 0
+    : [...offsets].sort((a, b) => b[1] - a[1] || Math.abs(a[0]) - Math.abs(b[0]))[0]?.[0] || 0;
   const counts = new Map<string, Map<string, number>>();
   for (let cipherIndex = 0; cipherIndex < cipher.length; cipherIndex += 1) {
     const plainIndex = cipherIndex + bestOffset;
@@ -1309,7 +1346,15 @@ async function orderedCipherText(zip: JSZip) {
     ? pkg.spinePaths.filter((path) => zip.file(path) && HTML_EXTENSIONS.has(extension(path)))
     : Object.keys(zip.files).filter((path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)));
   const chunks: string[] = [];
-  for (const path of paths) chunks.push(await zip.files[path].async("text"));
+  for (const path of paths) {
+    const source = await zip.files[path].async("text");
+    const bodySource = source.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] || source;
+    const visibleSource = bodySource
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "");
+    const document = new DOMParser().parseFromString(`<body>${visibleSource}</body>`, "text/html");
+    chunks.push(document.body?.textContent || "");
+  }
   return chunks.join("\n");
 }
 

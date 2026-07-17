@@ -4475,7 +4475,10 @@ def is_title_like_tag(tag, name):
         return True
     attrs = parse_attrs(tag)
     marker = (attrs.get("class", "") + " " + attrs.get("id", "")).lower()
-    return bool(re.search(r"(^|[\s_-])(title|subtitle|heading|headline|chapter|volume|part|section-number|chapter-number)([\s_-]|$)", marker))
+    return bool(
+        re.search(r"(^|[\s_-])(title|subtitle|heading|headline)([\s_-]|$)", marker)
+        or re.search(r"(^|[\s_-])(chapter|volume|part|section)[\s_-]*(title|subtitle|number|name)([\s_-]|$)", marker)
+    )
 
 def transform_body_paragraphs(source, mapping, mode="encrypt"):
     out = []
