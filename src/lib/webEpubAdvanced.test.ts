@@ -210,6 +210,33 @@ describe("shared EPUB advanced processing", () => {
     expect(result.blob.size).toBeLessThan(file.size);
   }, 60_000);
 
+  fontTest("repairs missing font names and impossible global glyph bounds", async () => {
+    const bytes = readFileSync(windowsFont);
+    const { createFont } = await import("fonteditor-core");
+    const font = createFont(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), { type: "ttf" });
+    const data = font.get();
+    data.name = {} as never;
+    data.head.xMax = data.head.unitsPerEm * 40;
+    data.head.yMax = data.head.unitsPerEm * 30;
+    const parsed = { path: "OEBPS/Fonts/broken.ttf", type: "ttf", font, glyphs: data.glyf || [] };
+    expect(webEpubFontProcessTesting.normalizeFontCompatibility(parsed as never)).toBe(true);
+    const repaired = createFont(font.write({ type: "ttf", hinting: true, kerning: true }), { type: "ttf" }).get();
+    expect(repaired.name.fontFamily).toBe("TEpub broken");
+    expect(repaired.name.postScriptName).toBe("TEpubSubset-broken");
+    expect(repaired.head.xMax).toBeLessThan(data.head.unitsPerEm * 4);
+    expect(repaired.head.yMax).toBeLessThan(data.head.unitsPerEm * 4);
+  }, 60_000);
+
+  fontTest("rejects misleading partial encryption when the body font is not embedded", async () => {
+    const bytes = new Uint8Array(readFileSync(windowsFont));
+    const bodyText = "正文没有嵌入字体，因此装饰标题字体不能代替完整正文字体执行整书加密。".repeat(20);
+    const base = await makeFixture({ fontBytes: bytes, chapterBodies: [`<h1>装饰标题</h1><p>${bodyText}</p>`] });
+    const zip = await JSZip.loadAsync(await base.arrayBuffer());
+    zip.file("OEBPS/style.css", '@font-face { font-family: "TitleFont"; src: url("Fonts/book.ttf"); } body, p { font-family: "MissingBodyFont", serif; } h1 { font-family: "TitleFont"; }');
+    const input = new File([await zip.generateAsync({ type: "blob" })], "missing-body-font.epub", { type: "application/epub+zip" });
+    await expect(processWebEpubFont(input, "font-encrypt")).rejects.toThrow("未嵌入的系统字体");
+  }, 120_000);
+
   fontTest("subsets all fonts and independently encrypts multiple body fonts", async () => {
     const bytes = new Uint8Array(readFileSync(windowsFont));
     const base = await makeFixture({

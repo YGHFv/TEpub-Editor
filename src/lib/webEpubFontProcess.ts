@@ -180,6 +180,39 @@ function writeFont(parsed: ParsedFont) {
   return { bytes: parsed.font.write(options) as ArrayBuffer, outputType };
 }
 
+function normalizeFontCompatibility(parsed: ParsedFont) {
+  const data = parsed.font.get();
+  let changed = false;
+  const stem = parsed.path.split("/").pop()?.replace(/\.[^.]+$/, "") || "EmbeddedFont";
+  const safeStem = stem.replace(/[^A-Za-z0-9]+/g, "") || "EmbeddedFont";
+  data.name ||= {};
+  const defaults: Record<string, string> = {
+    fontFamily: `TEpub ${stem}`,
+    fontSubFamily: "Regular",
+    uniqueSubFamily: `TEpubSubset-${safeStem}`,
+    fullName: `TEpub ${stem} Regular`,
+    version: "Version 1.0; TEpub compatible subset",
+    postScriptName: `TEpubSubset-${safeStem}`.slice(0, 63),
+  };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!String(data.name[key] || "").trim()) {
+      data.name[key] = value;
+      changed = true;
+    }
+  }
+  const unitsPerEm = Number(data.head?.unitsPerEm) || 1000;
+  const glyphs = data.glyf || [];
+  const bounds = {
+    xMin: Math.min(0, ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.xMin) || 0)),
+    yMin: Math.min(0, ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.yMin) || 0)),
+    xMax: Math.max(0, ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.xMax) || 0)),
+    yMax: Math.max(0, ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.yMax) || 0)),
+  };
+  const head = data.head || {};
+  if (["xMin", "yMin", "xMax", "yMax"].some((key) => Math.abs(Number(head[key]) - bounds[key as keyof typeof bounds]) > unitsPerEm * 4)) changed = true;
+  return changed;
+}
+
 function collectFontPlainCodePoints(fonts: ParsedFont[]) {
   const supported = new Set<number>();
   for (const parsed of fonts) {
@@ -515,8 +548,9 @@ async function subsetAllFontsForEncryption(zip: JSZip) {
     try {
       const source = await zip.files[path].async("arraybuffer");
       const parsed = await parseFont(path, source, [...codePoints]);
+      const compatibilityRepaired = normalizeFontCompatibility(parsed);
       const written = writeFont(parsed);
-      if (written.bytes.byteLength >= source.byteLength && parsed.type !== "otf") continue;
+      if (!compatibilityRepaired && written.bytes.byteLength >= source.byteLength && parsed.type !== "otf") continue;
       let outputPath = path;
       if (parsed.type === "otf") {
         outputPath = path.replace(/\.otf$/i, ".ttf");
@@ -1176,21 +1210,33 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
   const { assignments, supportedByFont } = await resolveParagraphFonts(zip, fonts, htmlSources);
   const protectedByFont = await collectUsedCodePointsByFont(zip, fonts, true);
   const charactersByFont = new Map<ParsedFont, Set<string>>();
+  let bodyCharacterCount = 0;
+  let encryptableCharacterCount = 0;
   for (const [path, source] of htmlSources) {
     const document = new DOMParser().parseFromString(source.replace(/<link\b[^>]*>/gi, ""), "application/xml");
     const paragraphFonts = assignments.get(path) || [];
     bodyBlockElements(document).forEach((paragraph, index) => {
+      if (!isEncryptableTextBlock(paragraph)) return;
       const font = paragraphFonts[index];
+      const bodyCharacters = [...(paragraph.textContent || "")].filter(shouldMapCharacter);
+      bodyCharacterCount += bodyCharacters.length;
       if (!font) return;
       const supported = supportedByFont.get(font) || new Set<number>();
       const protectedCodePoints = protectedByFont.get(font) || new Set<number>();
       const characters = charactersByFont.get(font) || new Set<string>();
-      for (const character of paragraph.textContent || "") {
+      for (const character of bodyCharacters) {
         const code = character.codePointAt(0) || 0;
-        if (shouldMapCharacter(character) && supported.has(code) && !protectedCodePoints.has(code)) characters.add(character);
+        if (supported.has(code) && !protectedCodePoints.has(code)) {
+          characters.add(character);
+          encryptableCharacterCount += 1;
+        }
       }
       charactersByFont.set(font, characters);
     });
+  }
+
+  if (bodyCharacterCount >= 100 && encryptableCharacterCount / bodyCharacterCount < 0.25) {
+    throw new Error(`正文共 ${bodyCharacterCount} 个汉字，但内嵌字体仅覆盖 ${encryptableCharacterCount} 个；该 EPUB 的正文主要使用未嵌入的系统字体，无法安全完成整书字体加密。请先嵌入完整正文字体后重试。`);
   }
 
   const mappings = new Map<ParsedFont, Map<string, string>>();
@@ -1222,6 +1268,7 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
         return cipher ? cipher.codePointAt(0) || code : code;
       }))];
     }
+    normalizeFontCompatibility(font);
     const written = writeFont(font);
     let outputPath = font.path;
     if (font.type === "otf") {
@@ -1464,8 +1511,9 @@ async function subsetFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessRe
     try {
       const source = await zip.files[path].async("arraybuffer");
       const parsed = await parseFont(path, source, [...codePoints]);
+      const compatibilityRepaired = normalizeFontCompatibility(parsed);
       const written = writeFont(parsed);
-      if (written.bytes.byteLength >= source.byteLength && parsed.type !== "otf") continue;
+      if (!compatibilityRepaired && written.bytes.byteLength >= source.byteLength && parsed.type !== "otf") continue;
       let outputPath = path;
       if (parsed.type === "otf") {
         outputPath = path.replace(/\.otf$/i, ".ttf");
@@ -1523,6 +1571,7 @@ export const webEpubFontProcessTesting = {
   collectSubsetCodePoints,
   injectBodyFontStyle,
   injectObfuscatedTextCompatibility,
+  normalizeFontCompatibility,
   privateCharacters,
   randomDerangement,
   rewriteCssFontFallbacks,
