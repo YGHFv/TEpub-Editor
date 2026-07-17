@@ -66,18 +66,6 @@
     </div>
   </section>
 
-  {#if features.length}
-    <section class="tool-import-features" aria-label="功能说明">
-      {#each features as feature, index}
-        <article>
-          <b>{String(index + 1).padStart(2, "0")}</b>
-          <strong>{feature.title}</strong>
-          <span>{feature.detail}</span>
-        </article>
-      {/each}
-    </section>
-  {/if}
-
   <button
     class:drag-active={dragActive}
     class="tool-import-drop"
@@ -99,6 +87,18 @@
     {#if hint}<span class="tool-import-hint">{hint}</span>{/if}
     <span class="tool-import-action">{busy ? "处理中…" : actionLabel}</span>
   </button>
+
+  {#if features.length}
+    <section class="tool-import-features" aria-label="功能说明">
+      {#each features as feature, index}
+        <article>
+          <b>{String(index + 1).padStart(2, "0")}</b>
+          <strong>{feature.title}</strong>
+          <span>{feature.detail}</span>
+        </article>
+      {/each}
+    </section>
+  {/if}
 
   {#if errorText || internalError}
     <p class="tool-import-error" role="alert">{errorText || internalError}</p>

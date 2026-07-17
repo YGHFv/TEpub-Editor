@@ -131,6 +131,11 @@
       <button class="drop-zone" class:drag-active={dragActive} type="button" on:click={() => epubInput?.click()} on:dragenter={(event) => { event.preventDefault(); dragActive = true; }} on:dragover={(event) => event.preventDefault()} on:dragleave={() => { dragActive = false; }} on:drop={handleDrop}>
         <span class="drop-icon">Aa</span><strong>选择或拖入 EPUB 文件</strong><span>{decryptMode ? "也可以同时拖入对应的明文 TXT" : subsetMode ? "自动保留正文所需字形和基础 ASCII 字符" : "支持 TTF、OTF、WOFF 与 WOFF2 内嵌字体"}</span><span class="choose">选择文件</span>
       </button>
+      <section class="notes" aria-label="功能说明">
+        <article><b>01</b><div><strong>{decryptMode ? "兼容两种方案" : subsetMode ? "整书扫描" : "仅处理正文"}</strong><p>{decryptMode ? "旧式私用区文件先尝试自动恢复；新式置换文件根据标记只恢复正文段落。" : subsetMode ? "从 HTML/XHTML 正文收集码点，并额外保留基础 ASCII 字符。" : "仅随机替换正文段落中的汉字；标题、标点、脚本、样式和无对应字形的文本保持原样。"}</p></div></article>
+        <article><b>02</b><div><strong>{decryptMode ? "TXT 对齐恢复" : subsetMode ? "仅在变小时写回" : "各字体独立置换"}</strong><p>{decryptMode ? "新式随机置换不保存明文映射，需以同版本 TXT 生成恢复表。" : subsetMode ? "裁剪结果不比原字体小时保持原文件，避免无意义增大 EPUB。" : "每套正文字体只随机置换自己实际使用且拥有字形的汉字；缺失字形直接跳过，字体之间不共用映射表。"}</p></div></article>
+        <article><b>03</b><div><strong>格式兼容</strong><p>支持 TTF、OTF、WOFF、WOFF2；OTF 修改后会转换为 TTF 并同步更新 EPUB 引用。</p></div></article>
+      </section>
     {:else}
       <section class="status-card" class:error={Boolean(errorText)} class:success={Boolean(result)} aria-live="polite">
         {#if busy}<span class="spinner"></span>{:else if result}<span class="state">✓</span>{:else}<span class="state">×</span>{/if}
@@ -144,11 +149,6 @@
       {/if}
     {/if}
 
-    <section class="notes">
-      <article><b>01</b><div><strong>{decryptMode ? "兼容两种方案" : subsetMode ? "整书扫描" : "仅处理正文"}</strong><p>{decryptMode ? "旧式私用区文件先尝试自动恢复；新式置换文件根据标记只恢复正文段落。" : subsetMode ? "从 HTML/XHTML 正文收集码点，并额外保留基础 ASCII 字符。" : "仅随机替换正文段落中的汉字；标题、标点、脚本、样式和无对应字形的文本保持原样。"}</p></div></article>
-      <article><b>02</b><div><strong>{decryptMode ? "TXT 对齐恢复" : subsetMode ? "仅在变小时写回" : "各字体独立置换"}</strong><p>{decryptMode ? "新式随机置换不保存明文映射，需以同版本 TXT 生成恢复表。" : subsetMode ? "裁剪结果不比原字体小时保持原文件，避免无意义增大 EPUB。" : "每套正文字体只随机置换自己实际使用且拥有字形的汉字；缺失字形直接跳过，字体之间不共用映射表。"}</p></div></article>
-      <article><b>03</b><div><strong>格式兼容</strong><p>支持 TTF、OTF、WOFF、WOFF2；OTF 修改后会转换为 TTF 并同步更新 EPUB 引用。</p></div></article>
-    </section>
   </main>
 </div>
 
@@ -198,9 +198,11 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .txt-callout { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 17px; border: 1px solid #e1c78f; border-radius: 8px; background: #fff9e9; color: #805b13; cursor: pointer; }
   .txt-callout strong { font-size: 11px; }.txt-callout span { font-size: 9px; }
-  .notes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
-  .notes article { display: grid; grid-template-columns: 28px 1fr; gap: 8px; padding: 13px; border: 1px solid #dbe3ec; border-radius: 8px; background: rgba(255,255,255,.72); }
-  .notes b { color: #4059a1; font-size: 10px; }.notes strong { font-size: 11px; }.notes p { margin: 4px 0 0; color: #758398; font-size: 9px; line-height: 1.5; }
+  .notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .notes article { min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 2px 10px; padding: 14px 18px; border: 1px solid #d8e1eb; border-radius: 9px; background: #fff; }
+  .notes b { grid-row: 1 / 3; color: #4059a1; font-size: 11px; }
+  .notes strong { font-size: 13px; }
+  .notes p { margin: 0; color: #758398; font-size: 11px; line-height: 1.45; }
   @media (max-width: 700px) {
     .content { width: calc(100% - 24px); margin: 14px auto 28px; }
     .intro-card { grid-template-columns: 52px minmax(0, 1fr); padding: 16px; gap: 12px; }.font-mark { width: 50px; height: 50px; }.intro-card h2 { font-size: 18px; }
