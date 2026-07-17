@@ -12,11 +12,13 @@ use std::path::{Path, PathBuf};
 use std::process; // 引入进程控制
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tauri::Emitter;
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     utils::config::Color,
-    Emitter, Manager, WindowEvent,
+    Manager, WindowEvent,
 };
 use tempfile::TempDir;
 use walkdir::WalkDir;
@@ -70,14 +72,18 @@ fn read_epub_bytes(source: &Path) -> Result<Vec<u8>, String> {
 }
 
 fn hidden_process_command(program: &str) -> process::Command {
-    let mut command = process::Command::new(program);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let mut command = process::Command::new(program);
         command.creation_flags(CREATE_NO_WINDOW);
+        command
     }
-    command
+    #[cfg(not(windows))]
+    {
+        process::Command::new(program)
+    }
 }
 
 // --- 静态资源: 整理后的 CSS ---
@@ -13307,6 +13313,7 @@ mod toolbox_tests {
     }
 }
 
+#[cfg(desktop)]
 fn restore_primary_window(app: &tauri::AppHandle) {
     for label in ["toolbox", "main"] {
         if let Some(window) = app.get_webview_window(label) {
@@ -13317,16 +13324,13 @@ fn restore_primary_window(app: &tauri::AppHandle) {
         }
     }
 
-    if let Ok(window) = tauri::WebviewWindowBuilder::new(
-        app,
-        "main",
-        tauri::WebviewUrl::App("/".into()),
-    )
-    .title("TEpub Editor")
-    .inner_size(1200.0, 740.0)
-    .min_inner_size(1200.0, 740.0)
-    .center()
-    .build()
+    if let Ok(window) =
+        tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
+            .title("TEpub Editor")
+            .inner_size(1200.0, 740.0)
+            .min_inner_size(1200.0, 740.0)
+            .center()
+            .build()
     {
         let _ = window.show();
         let _ = window.set_focus();
@@ -13340,54 +13344,64 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            let app_bg = Some(Color(238, 244, 248, 255));
-            for window in app.webview_windows().values() {
-                let _ = window.set_background_color(app_bg);
+            #[cfg(desktop)]
+            {
+                let app_bg = Some(Color(238, 244, 248, 255));
+                for window in app.webview_windows().values() {
+                    let _ = window.set_background_color(app_bg);
+                }
+                let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+                let icon = app
+                    .default_window_icon()
+                    .cloned()
+                    .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
+                TrayIconBuilder::new()
+                    .tooltip("TEpub-Editor")
+                    .icon(icon)
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => {
+                            restore_primary_window(app);
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            restore_primary_window(tray.app_handle());
+                        }
+                    })
+                    .build(app)?;
             }
-            let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-            let icon = app
-                .default_window_icon()
-                .cloned()
-                .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
-            TrayIconBuilder::new()
-                .tooltip("TEpub-Editor")
-                .icon(icon)
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        restore_primary_window(app);
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        restore_primary_window(tray.app_handle());
-                    }
-                })
-                .build(app)?;
+            #[cfg(mobile)]
+            let _ = app;
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "toolbox" {
-                    api.prevent_close();
-                    window.app_handle().exit(0);
-                } else if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
+            #[cfg(desktop)]
+            {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    if window.label() == "toolbox" {
+                        api.prevent_close();
+                        window.app_handle().exit(0);
+                    } else if window.label() == "main" {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
             }
+            #[cfg(mobile)]
+            let _ = (window, event);
         })
         .invoke_handler(tauri::generate_handler![
             read_text_file,

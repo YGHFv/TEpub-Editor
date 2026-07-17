@@ -3799,3 +3799,9 @@ Caveats:
 - 服务端和桌面端下载均限制 HTTP/HTTPS、重定向、支持的栅格格式、32 MB 大小及本机/私有网络地址。
 - 修复字体加密处理对正文样式与字体资源的兼容问题，并补充相关回归测试。
 - 版本号更新为 `1.0.1`，准备通过 `v1.0.1` 标签触发 GitHub Release 构建。
+
+### 2026-07-18 v1.0.1 Android 发布构建修复
+
+- 将系统托盘、桌面窗口恢复、背景色设置及关闭时隐藏逻辑限定为 Tauri 桌面目标，避免 Android 编译不存在的 `menu`、`tray` 和桌面窗口 API。
+- 验证 `cargo check`、Android `aarch64-linux-android` 交叉检查、`pnpm check` 和 51 项前端测试通过。
+- 本地 Android release Rust 动态库编译成功；APK 封装仅受本机 JDK 证书库无法下载 Gradle 影响，代码编译阶段已完整通过。
