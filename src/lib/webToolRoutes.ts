@@ -8,6 +8,7 @@ const DIRECT_ROUTES: Record<string, string> = {
   "image-tools": "/toolbox/image-tools",
   "txt-epub": "/toolbox/make-epub",
   "epub-style-library": "/toolbox/epub-style-library",
+  "online-image-download": "/toolbox/online-image-download",
   "txt-edit": "/toolbox/text-editor",
   "epub-edit": "/toolbox/epub-editor",
   "epub-read": "/toolbox/epub-editor?mode=reader",

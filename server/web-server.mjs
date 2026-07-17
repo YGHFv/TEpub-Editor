@@ -2,6 +2,8 @@ import { createServer } from "node:http";
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 const port = Number(process.env.PORT || 5233);
 const root = resolve(process.env.TEPUB_WEB_ROOT || "build");
@@ -10,6 +12,8 @@ const usersFile = join(dataDir, "users.json");
 const maxAiImageResponseBytes = 64 * 1024 * 1024;
 const maxAiImageInputBytes = 20 * 1024 * 1024;
 const aiImageUserAgent = "TEpub-Editor/web-image-tools";
+const maxRemoteImageBytes = 32 * 1024 * 1024;
+const remoteImageUserAgent = "Mozilla/5.0 (compatible; TEpub-Editor/1.0; +https://github.com/YGHFv/TEpub-Editor)";
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -413,6 +417,108 @@ function formatAiImageResult(bytes, title, target, prompt, size) {
   };
 }
 
+function strictRasterMimeFromBytes(bytes) {
+  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (bytes.length >= 6 && ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"))) return "image/gif";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  return "";
+}
+
+function blockedIpv4(address) {
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 198 && (b === 18 || b === 19))
+    || a >= 224;
+}
+
+function blockedIpAddress(address) {
+  const normalized = String(address || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (isIP(normalized) === 4) return blockedIpv4(normalized);
+  if (isIP(normalized) !== 6) return true;
+  if (normalized === "::" || normalized === "::1") return true;
+  if (/^(?:fc|fd)/.test(normalized) || /^fe[89ab]/.test(normalized)) return true;
+  const mapped = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+  return mapped ? blockedIpv4(mapped) : false;
+}
+
+async function validateRemoteImageUrl(value) {
+  let parsed;
+  try {
+    parsed = new URL(String(value || "").trim());
+  } catch (error) {
+    throw new Error(`图片地址无效：${error.message}`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("仅支持 HTTP 或 HTTPS 图片地址");
+  if (parsed.username || parsed.password) throw new Error("图片地址不能包含用户名或密码");
+  const host = parsed.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
+    throw new Error("不允许下载本机或局域网图片地址");
+  }
+  const addresses = isIP(host) ? [{ address: host }] : await lookup(host, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some((item) => blockedIpAddress(item.address))) {
+    throw new Error("不允许下载本机、私有网络或链路本地图片地址");
+  }
+  return parsed;
+}
+
+async function readLimitedResponse(response) {
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (declaredLength > maxRemoteImageBytes) throw new Error("图片超过 32 MB 限制");
+  if (!response.body) throw new Error("图片响应为空");
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of response.body) {
+    total += chunk.length;
+    if (total > maxRemoteImageBytes) throw new Error("图片超过 32 MB 限制");
+    chunks.push(Buffer.from(chunk));
+  }
+  if (!total) throw new Error("图片响应为空");
+  return Buffer.concat(chunks, total);
+}
+
+async function downloadRemoteImageCommand(payload) {
+  let current = await validateRemoteImageUrl(payload?.url);
+  for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
+    current = await validateRemoteImageUrl(current.toString());
+    const origin = `${current.protocol}//${current.host}/`;
+    const response = await fetch(current, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8,*/*;q=0.5",
+        referer: origin,
+        "user-agent": remoteImageUserAgent,
+      },
+    });
+    if (response.status >= 300 && response.status < 400) {
+      if (redirectCount === 5) throw new Error("图片地址重定向次数超过 5 次");
+      const location = response.headers.get("location");
+      if (!location) throw new Error(`图片服务器返回了无目标的重定向 ${response.status}`);
+      current = new URL(location, current);
+      continue;
+    }
+    if (!response.ok) throw new Error(`图片服务器返回 ${response.status}`);
+    const bytes = await readLimitedResponse(response);
+    const contentType = strictRasterMimeFromBytes(bytes);
+    if (!contentType) throw new Error("响应不是支持的 JPG、PNG、WebP 或 GIF 图片");
+    return {
+      dataBase64: bytes.toString("base64"),
+      contentType,
+      finalUrl: response.url || current.toString(),
+    };
+  }
+  throw new Error("图片下载失败");
+}
+
 async function runAiProofingCommand(payload) {
   const request = payload?.request || {};
   const config = request.config || {};
@@ -462,6 +568,9 @@ async function handleCommand(req, res, command) {
     }
     if (req.method === "POST" && command === "run_ai_proofing") {
       return json(res, 200, await runAiProofingCommand(body));
+    }
+    if (req.method === "POST" && command === "download_remote_image") {
+      return json(res, 200, await downloadRemoteImageCommand(body));
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {

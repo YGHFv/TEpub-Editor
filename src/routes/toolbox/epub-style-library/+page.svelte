@@ -4,9 +4,11 @@
   import {
     EPUB_HEADER_STYLES,
     EPUB_HEADER_PREVIEW_TITLE_CSS,
+    EPUB_ILLUSTRATION_STYLES,
     EPUB_STYLE_INTERFACE,
     EPUB_STYLE_INTERFACE_NOTES,
     EPUB_TITLE_STYLES,
+    EPUB_TRANSITION_STYLES,
     type EpubStyleKind,
     type EpubStyleModule,
     type EpubTitleLayout,
@@ -15,6 +17,7 @@
   type ViewMode = EpubStyleKind | "interface";
   type PanelMode = "browse" | "create";
   type TitleInputMode = "parts" | "full";
+  type TransitionDraftMode = "text" | "css" | "image";
   type HeaderDraft = {
     fileName: string;
     sampleDataUrl: string;
@@ -28,6 +31,7 @@
   const HEADER_TEMPLATE_LONG_EDGE = 1080;
   const DEFAULT_HEADER_TITLE_STYLE_ID = "title-purple-red-emphasis";
   const FIXED_HEADER_PREVIEW_URL = new URL("../../../lib/assets/epub-style-library/fixed-preview-header.png", import.meta.url).href;
+  const DEFAULT_CONTENT_PREVIEW_URL = EPUB_ILLUSTRATION_STYLES[0]?.previewHtml.match(/<img\b[^>]*\bsrc="([^"]+)"/i)?.[1] || "";
   const SAFE_CLASS_NAMES = new Set([
     "te-book-body",
     "te-chapter-page",
@@ -98,18 +102,35 @@
   color: #c2181e;
 }`;
   let titleMessage = "";
+  let contentInput: HTMLInputElement | null = null;
+  let contentName = "";
+  let contentCss = "";
+  let contentMarkup = "";
+  let contentPreviewDataUrl = "";
+  let contentPreviewFileName = "";
+  let contentMessage = "";
+  let transitionDraftMode: TransitionDraftMode = "text";
   let selectedPreviewDoc = "";
   let draftStyle: EpubStyleModule | null = null;
   let draftPreviewDoc = "";
 
   $: headerStyles = [...EPUB_HEADER_STYLES, ...savedStyles.filter((style) => style.kind === "header")];
   $: titleStyles = [...EPUB_TITLE_STYLES, ...savedStyles.filter((style) => style.kind === "title" && style.target === "chapter-title")];
-  $: currentStyles = viewMode === "title" ? titleStyles : headerStyles;
+  $: illustrationStyles = [...EPUB_ILLUSTRATION_STYLES, ...savedStyles.filter((style) => style.kind === "illustration")];
+  $: transitionStyles = [...EPUB_TRANSITION_STYLES, ...savedStyles.filter((style) => style.kind === "transition")];
+  $: currentStyles = viewMode === "title"
+    ? titleStyles
+    : viewMode === "illustration"
+      ? illustrationStyles
+      : viewMode === "transition"
+        ? transitionStyles
+        : headerStyles;
   $: if (viewMode !== "interface" && panelMode === "browse" && !currentStyles.some((style) => style.id === selectedStyleId)) {
     selectedStyleId = currentStyles[0]?.id || "";
   }
   $: selectedStyle = currentStyles.find((style) => style.id === selectedStyleId) || currentStyles[0];
   $: titleCssError = validateTitleCssOnly();
+  $: contentStyleError = validateContentStyle(false);
   $: titleStyleOptions = titleStyles.map((style) => ({
     value: style.id,
     label: style.name,
@@ -132,6 +153,11 @@
     void titleNumberCss;
     void titleNameCss;
     void titleFullCss;
+    void contentName;
+    void contentCss;
+    void contentMarkup;
+    void contentPreviewDataUrl;
+    void transitionDraftMode;
     draftStyle = buildDraftStyle();
   }
   $: {
@@ -153,6 +179,8 @@
     panelMode = "browse";
     if (mode === "header") selectedStyleId = headerStyles[0]?.id || EPUB_HEADER_STYLES[0]?.id || "";
     if (mode === "title") selectedStyleId = titleStyles[0]?.id || EPUB_TITLE_STYLES[0]?.id || "";
+    if (mode === "illustration") selectedStyleId = illustrationStyles[0]?.id || EPUB_ILLUSTRATION_STYLES[0]?.id || "";
+    if (mode === "transition") selectedStyleId = transitionStyles[0]?.id || EPUB_TRANSITION_STYLES[0]?.id || "";
   }
 
   function startCreate(kind: EpubStyleKind) {
@@ -161,6 +189,19 @@
     copyMessage = "";
     if (kind === "header" && !titleStyles.some((style) => style.id === headerTitleStyleId)) {
       headerTitleStyleId = titleStyles[0]?.id || "";
+    }
+    if (kind === "illustration") {
+      const template = illustrationStyles.find((style) => style.id === selectedStyleId) || EPUB_ILLUSTRATION_STYLES[0];
+      applyContentTemplate(template);
+    }
+    if (kind === "transition") {
+      const template = transitionStyles.find((style) => style.id === selectedStyleId) || EPUB_TRANSITION_STYLES[0];
+      transitionDraftMode = template?.markup?.includes("te-divider-img")
+        ? "image"
+        : template?.markup?.includes("te-transition-text") || template?.id === "transition-fg1-stars"
+          ? "text"
+          : "css";
+      applyContentTemplate(template);
     }
   }
 
@@ -182,7 +223,7 @@
   }
 
   function normalizeSavedStyle(style: EpubStyleModule) {
-    if (style.kind === "header") {
+    if (style.kind !== "title") {
       return { ...style } satisfies EpubStyleModule;
     }
     const legacyNumberCss = style.titleCssA || "";
@@ -202,6 +243,51 @@
 
   function makeStyleId(prefix: string) {
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  }
+
+  function applyContentTemplate(style: EpubStyleModule | undefined) {
+    if (!style) return;
+    contentName = `${style.name}（自定义）`;
+    contentCss = style.css;
+    contentMarkup = style.markup || "";
+    contentPreviewDataUrl = style.sampleDataUrl || style.previewHtml.match(/<img\b[^>]*\bsrc="([^"]+)"/i)?.[1] || "";
+    contentPreviewFileName = "";
+    contentMessage = "";
+  }
+
+  function applyTransitionDraftMode(mode: TransitionDraftMode) {
+    transitionDraftMode = mode;
+    const styleId = mode === "text"
+      ? "transition-text-label"
+      : mode === "image"
+        ? "transition-image-divider"
+        : "transition-css-diamond";
+    applyContentTemplate(EPUB_TRANSITION_STYLES.find((style) => style.id === styleId));
+  }
+
+  function contentSelectors(css: string, markup: string) {
+    const names = Array.from(`${css}\n${markup}`.matchAll(/class\s*=\s*["'][^"']*["']|\.([A-Za-z_][\w-]*)/g))
+      .flatMap((match) => {
+        if (match[1]) return [match[1]];
+        return Array.from(match[0].matchAll(/\b([A-Za-z_][\w-]*)\b/g)).map((part) => part[1])
+          .filter((name) => name.startsWith("te-") || name === "fg1");
+      });
+    return Array.from(new Set(names)).map((name) => `.${name}`).slice(0, 12);
+  }
+
+  function previewContentMarkup(markup: string, dataUrl: string) {
+    const previewUrl = dataUrl || DEFAULT_CONTENT_PREVIEW_URL;
+    if (!previewUrl) return markup;
+    return markup.replace(/(<img\b[^>]*\bsrc\s*=\s*)(["']).*?\2/i, `$1$2${previewUrl}$2`);
+  }
+
+  function contentPreviewHtml(kind: "illustration" | "transition", markup: string, dataUrl: string) {
+    const hydratedMarkup = previewContentMarkup(markup, dataUrl);
+    return `<main class="te-preview-page">
+      <p class="te-paragraph">夜色沉入城市边缘，风从旧站台吹过。</p>
+      ${hydratedMarkup}
+      <p class="te-paragraph">片刻之后，她重新踏上了通往远方的路。</p>
+    </main>`;
   }
 
   function resolveTitleStyle(id: string | undefined) {
@@ -236,14 +322,14 @@
       .te-chapter-title {
         margin-bottom: 2.15em;
       }`
-      : `.te-chapter-title {
+      : style.kind === "title" ? `.te-chapter-title {
         margin-top: 2.65em;
         margin-bottom: 2.45em;
       }
 
       p.te-paragraph:first-of-type {
         margin-top: 0;
-      }`;
+      }` : "";
     const baseCss = `
       html, body {
         width: 100%;
@@ -265,7 +351,7 @@
         height: 100%;
         box-sizing: border-box;
         padding: ${hasHeaderPreview ? "0 24px 42px" : "46px 24px 42px"};
-        overflow: hidden;
+        overflow: ${style.kind === "illustration" ? "auto" : "hidden"};
         background: #fffdf8;
       }
 
@@ -457,6 +543,29 @@
         titleNameCss: titleInputMode === "parts" ? titleNameCss.trim() : "",
       };
     }
+    if (viewMode === "illustration" || viewMode === "transition") {
+      if (validateContentStyle(false)) return null;
+      const kind = viewMode;
+      const markup = contentMarkup.trim();
+      const annotation = kind === "illustration" && /te-annotation-(?:toggle|popup|trigger)/.test(`${contentCss}\n${markup}`);
+      return {
+        id: `${kind}-draft`,
+        kind,
+        target: kind === "transition" ? "transition" : annotation ? "annotation-illustration" : "illustration",
+        sourceKind: "saved",
+        name: contentName.trim() || (kind === "transition" ? "未命名转场样式" : "未命名插图样式"),
+        description: kind === "transition" ? "自定义转场 CSS 与 XHTML。" : "自定义插图 CSS 与 XHTML。",
+        selectors: contentSelectors(contentCss, markup),
+        usage: kind === "transition"
+          ? "默认用于替换前后都有正文的单段孤立省略号。"
+          : "将图片路径、替代文字和图注替换为实际内容后插入正文。",
+        css: contentCss.trim(),
+        markup,
+        previewHtml: contentPreviewHtml(kind, markup, contentPreviewDataUrl),
+        sampleDataUrl: contentPreviewDataUrl || undefined,
+        replacementMode: kind === "transition" ? "isolated-ellipsis" : undefined,
+      };
+    }
     return null;
   }
 
@@ -464,6 +573,19 @@
     if (/<\/?\s*script/i.test(css)) return "CSS 中不能包含 script。";
     if (/@import/i.test(css)) return "CSS 中暂不允许 @import。";
     if (/javascript\s*:/i.test(css)) return "CSS 中不能包含 javascript: URL。";
+    return "";
+  }
+
+  function validateContentStyle(requireName: boolean) {
+    if (viewMode !== "illustration" && viewMode !== "transition") return "";
+    if (requireName && !contentName.trim()) return "请填写样式名称。";
+    if (!contentCss.trim()) return "CSS 不能为空。";
+    const cssError = validateUnsafeCss(contentCss);
+    if (cssError) return cssError;
+    if (!contentMarkup.trim()) return "XHTML 结构不能为空。";
+    if (/<\/?\s*script/i.test(contentMarkup) || /\bon\w+\s*=/i.test(contentMarkup) || /javascript\s*:/i.test(contentMarkup)) {
+      return "XHTML 中不能包含脚本、事件属性或 javascript: URL。";
+    }
     return "";
   }
 
@@ -531,6 +653,26 @@
     const drawX = (width - drawWidth) / 2;
     const drawY = (height - drawHeight) / 2;
     ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+  }
+
+  async function importContentPreviewImage(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      contentMessage = "请选择图片文件。";
+      input.value = "";
+      return;
+    }
+    try {
+      contentPreviewDataUrl = await readFileAsDataUrl(file);
+      contentPreviewFileName = file.name;
+      contentMessage = "预览图片已更新；XHTML 中仍保留 EPUB 内部相对路径。";
+    } catch (error) {
+      contentMessage = `读取图片失败：${String(error)}`;
+    } finally {
+      input.value = "";
+    }
   }
 
   async function importHeaderSample(event: Event) {
@@ -656,6 +798,31 @@
     titleMessage = "已保存到样式库。";
   }
 
+  function saveContentStyle() {
+    const error = validateContentStyle(true);
+    if (error) {
+      contentMessage = error;
+      return;
+    }
+    const draft = buildDraftStyle();
+    if (!draft || (draft.kind !== "illustration" && draft.kind !== "transition")) {
+      contentMessage = "请先确认样式预览无误。";
+      return;
+    }
+    const style: EpubStyleModule = {
+      ...draft,
+      id: makeStyleId(draft.kind),
+      name: contentName.trim(),
+      sourceKind: "saved",
+    };
+    const nextStyles = [style, ...savedStyles];
+    savedStyles = nextStyles;
+    persistSavedStyles(nextStyles);
+    selectedStyleId = style.id;
+    panelMode = "browse";
+    contentMessage = "已保存到样式库。";
+  }
+
   function deleteSelectedStyle() {
     if (!selectedStyle || selectedStyle.sourceKind !== "saved") return;
     const nextStyles = savedStyles.filter((style) => style.id !== selectedStyle.id);
@@ -664,11 +831,10 @@
     selectedStyleId = currentStyles.find((style) => style.sourceKind !== "saved")?.id || currentStyles[0]?.id || "";
   }
 
-  async function copyCss() {
-    if (!selectedStyle) return;
+  async function copyStyleText(value: string, successMessage: string) {
     try {
-      await navigator.clipboard.writeText(selectedStyle.css);
-      copyMessage = "已复制 CSS";
+      await navigator.clipboard.writeText(value);
+      copyMessage = successMessage;
     } catch (error) {
       copyMessage = `复制失败：${String(error)}`;
     }
@@ -676,10 +842,20 @@
       copyMessage = "";
     }, 1800);
   }
+
+  async function copyCss() {
+    if (!selectedStyle) return;
+    await copyStyleText(selectedStyle.css, "已复制 CSS");
+  }
+
+  async function copyMarkup() {
+    if (!selectedStyle?.markup) return;
+    await copyStyleText(selectedStyle.markup, "已复制 XHTML");
+  }
 </script>
 
 <svelte:head>
-  <title>EPUB 样式预览 - TEpub Editor</title>
+  <title>EPUB 样式库 - TEpub Editor</title>
 </svelte:head>
 
 <div class="style-library-page">
@@ -688,6 +864,8 @@
       <div class="mode-tabs" aria-label="样式分类">
         <button type="button" class:active={viewMode === "header"} on:click={() => setMode("header")}>头图样式</button>
         <button type="button" class:active={viewMode === "title"} on:click={() => setMode("title")}>标题样式</button>
+        <button type="button" class:active={viewMode === "illustration"} on:click={() => setMode("illustration")}>插图样式</button>
+        <button type="button" class:active={viewMode === "transition"} on:click={() => setMode("transition")}>转场样式</button>
         <button type="button" class:active={viewMode === "interface"} on:click={() => setMode("interface")}>接口</button>
       </div>
 
@@ -733,7 +911,7 @@
       {#if viewMode === "interface"}
         <div class="interface-preview">
           <h2>后续接入方式</h2>
-          <p>头图样式保存生成后的透明样板图；标题样式保存自动生成 CSS 或完整 CSS。制作 EPUB 时只需要按标准 class 输出结构。</p>
+          <p>头图与标题样式用于制作模板；插图和转场样式同时提供标准 CSS 与 XHTML 结构。制作 EPUB 时按标准 class 输出即可。</p>
           <pre>{JSON.stringify(EPUB_STYLE_INTERFACE, null, 2)}</pre>
         </div>
       {:else if panelMode === "create" && viewMode === "header"}
@@ -833,6 +1011,52 @@
             {/if}
           </div>
         </div>
+      {:else if panelMode === "create" && (viewMode === "illustration" || viewMode === "transition")}
+        <div class="preview-head">
+          <div>
+            <h2>新增{viewMode === "illustration" ? "插图" : "转场"}样式</h2>
+            <p>编辑可复用的 CSS 与 XHTML；导入图片只用于样式库预览，不会改写 XHTML 中的 EPUB 相对路径。</p>
+          </div>
+          <button type="button" on:click={saveContentStyle} disabled={!!contentStyleError}>确认保存</button>
+        </div>
+        <div class="create-grid">
+          <form class="create-form content-form" on:submit|preventDefault={saveContentStyle}>
+            {#if viewMode === "transition"}
+              <div class="segmented three-way" aria-label="转场类型">
+                <button type="button" class:active={transitionDraftMode === "text"} on:click={() => applyTransitionDraftMode("text")}>文本</button>
+                <button type="button" class:active={transitionDraftMode === "css"} on:click={() => applyTransitionDraftMode("css")}>纯 CSS</button>
+                <button type="button" class:active={transitionDraftMode === "image"} on:click={() => applyTransitionDraftMode("image")}>图片</button>
+              </div>
+            {/if}
+            <label>
+              <span>样式名称</span>
+              <input type="text" bind:value={contentName} placeholder={viewMode === "illustration" ? "例如：档案卡片插图" : "例如：章节菱形转场"} />
+            </label>
+            <label>
+              <span>完整 CSS</span>
+              <textarea rows="12" bind:value={contentCss} placeholder=".te-illustration &#123; ... &#125;"></textarea>
+            </label>
+            <label>
+              <span>XHTML 结构</span>
+              <textarea rows="8" bind:value={contentMarkup} placeholder="&lt;figure class=&quot;te-illustration&quot;&gt;...&lt;/figure&gt;"></textarea>
+            </label>
+            <div class="file-row">
+              <input bind:this={contentInput} class="file-input" type="file" accept="image/*" on:change={importContentPreviewImage} />
+              <button type="button" on:click={() => contentInput?.click()}>导入预览图片</button>
+              <span>{contentPreviewFileName || "使用内置普通插图预览"}</span>
+            </div>
+            {#if contentStyleError || contentMessage}
+              <p class:error={!!contentStyleError} class="form-message">{contentStyleError || contentMessage}</p>
+            {/if}
+          </form>
+          <div class="live-preview">
+            {#if draftPreviewDoc}
+              <iframe title={`新增${viewMode === "illustration" ? "插图" : "转场"}样式预览`} srcdoc={draftPreviewDoc}></iframe>
+            {:else}
+              <div class="preview-empty">填写有效的 CSS 与 XHTML 后在这里实时预览。</div>
+            {/if}
+          </div>
+        </div>
       {:else if selectedStyle}
         <div class="preview-head">
           <div>
@@ -842,6 +1066,9 @@
           <div class="preview-actions">
             {#if selectedStyle.sourceKind === "saved"}
               <button type="button" class="danger" on:click={deleteSelectedStyle}>删除</button>
+            {/if}
+            {#if selectedStyle.markup}
+              <button type="button" on:click={copyMarkup}>复制 XHTML</button>
             {/if}
             <button type="button" on:click={copyCss}>复制 CSS</button>
           </div>
@@ -882,6 +1109,18 @@
                 {:else}
                   <div class="readonly-binding">{resolveHeaderTitleStyle(selectedStyle)?.name || "默认标题样式"}</div>
                 {/if}
+              </section>
+            {/if}
+            {#if selectedStyle.replacementMode === "isolated-ellipsis"}
+              <section>
+                <h3>默认替换规则</h3>
+                <div class="readonly-binding">替换前后都有正文的单段孤立省略号</div>
+              </section>
+            {/if}
+            {#if selectedStyle.markup}
+              <section>
+                <h3>XHTML</h3>
+                <pre>{selectedStyle.markup}</pre>
               </section>
             {/if}
             <section>
@@ -950,9 +1189,13 @@
   }
 
   .mode-tabs {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     padding: 12px;
     border-bottom: 1px solid #e2e8f0;
+  }
+
+  .mode-tabs button:last-child {
+    grid-column: 1 / -1;
   }
 
   .sidebar-actions {
@@ -963,6 +1206,10 @@
 
   .segmented {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .segmented.three-way {
+    grid-template-columns: repeat(3, 1fr);
   }
 
   button {

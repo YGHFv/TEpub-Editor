@@ -1,11 +1,14 @@
-export type EpubStyleKind = "header" | "title";
+export type EpubStyleKind = "header" | "title" | "illustration" | "transition";
 export type EpubTitleLayout = "single" | "split";
 
 export type EpubStyleTarget =
   | "header-image"
   | "intro-title"
   | "volume-title"
-  | "chapter-title";
+  | "chapter-title"
+  | "illustration"
+  | "annotation-illustration"
+  | "transition";
 
 export interface EpubStyleModule {
   /** 样式唯一 ID，保存到本地样式库后保持稳定。 */
@@ -26,6 +29,10 @@ export interface EpubStyleModule {
   css: string;
   /** 样式库预览用的 XHTML 片段。 */
   previewHtml: string;
+  /** 可复制到 EPUB 正文中的标准 XHTML 结构。 */
+  markup?: string;
+  /** 转场样式默认替换方式。 */
+  replacementMode?: "isolated-ellipsis";
   /** 来源：内置样式或用户保存的样式。 */
   sourceKind?: "built-in" | "saved";
   /** 标题结构：single 为单行标题，split 为 number/name 双行标题。 */
@@ -65,6 +72,14 @@ export const EPUB_STYLE_INTERFACE = {
   chapterNumber: ".te-chapter-number",
   chapterName: ".te-chapter-name",
   paragraph: "p.te-paragraph",
+  illustrationFigure: ".te-illustration",
+  illustrationImage: ".te-illustration-image",
+  illustrationCaption: ".te-illustration-caption",
+  annotationTrigger: ".te-annotation-trigger",
+  annotationPopup: ".te-annotation-popup",
+  transition: ".te-transition, p.te-divider-line, p.fg1",
+  transitionText: ".te-transition-text",
+  transitionImage: ".te-divider-image, .te-divider-img",
 } as const;
 
 export type EpubStyleInterfaceSlot = keyof typeof EPUB_STYLE_INTERFACE;
@@ -80,6 +95,14 @@ export const EPUB_STYLE_INTERFACE_NOTES: Record<EpubStyleInterfaceSlot, string> 
   chapterNumber: "双行章节标题的章节序号部分，例如“第三章”。",
   chapterName: "双行章节标题的章节名称部分，例如“计划不如变化”。",
   paragraph: "正文段落接口，预览用来观察标题和头图与正文的间距。",
+  illustrationFigure: "正文插图容器，控制居中、出血、卡片和上下间距。",
+  illustrationImage: "正文插图图片本体，实际制作时替换 src 和 alt。",
+  illustrationCaption: "插图说明文字；没有图注时可省略 figcaption。",
+  annotationTrigger: "正文中的注释或文字触发入口，链接到对应弹出插图 ID。",
+  annotationPopup: "注释插图弹层，使用 CSS :target 实现无脚本打开和关闭。",
+  transition: "章节内转场容器；制作时默认替换前后都有正文的单段孤立省略号。",
+  transitionText: "带文字的转场内容，例如“与此同时”或时间地点提示。",
+  transitionImage: "图片转场容器与图片本体，对应制作模板的 dividerImage 资源位。",
 };
 
 const sampleParagraphs = `
@@ -1238,7 +1261,451 @@ font-weight: 700;`,
   },
 ];
 
+const illustrationPreviewImage = svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600">
+  <rect width="900" height="600" fill="#dcecf4"/>
+  <rect y="365" width="900" height="235" fill="#8eb5a2"/>
+  <circle cx="720" cy="120" r="54" fill="#fff4c7"/>
+  <path d="M0 390L170 220l120 110 145-190 180 210 130-120 155 160v210H0z" fill="#5f7f78"/>
+  <path d="M0 430c160-48 250-24 390 18 140 41 269 39 510-14v166H0z" fill="#b7d5c5"/>
+  <path d="M110 470h680v18H110z" fill="#51483e"/>
+  <path d="M180 398h210v72H180z" fill="#9b5e46"/>
+  <path d="M160 398l125-82 125 82z" fill="#6e3f35"/>
+  <rect x="215" y="422" width="44" height="48" fill="#f6d787"/>
+  <rect x="302" y="422" width="44" height="48" fill="#f6d787"/>
+  <path d="M545 488c24-80 72-118 142-118s118 38 142 118" fill="none" stroke="#fffdf7" stroke-width="14"/>
+</svg>`);
+const illustrationWidePreviewImage = svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520">
+  <rect width="1200" height="520" fill="#cadde9"/>
+  <circle cx="940" cy="118" r="62" fill="#fff1b8"/>
+  <path d="M0 350L165 210l125 90 170-188 168 196 135-118 177 142 130-95 120 113v170H0z" fill="#6f8792"/>
+  <path d="M0 392c196-55 342-31 520 18 170 47 362 48 680-8v118H0z" fill="#8db5aa"/>
+  <path d="M0 455h1200v65H0z" fill="#547a70"/>
+  <path d="M90 420h1020" stroke="#f6edd8" stroke-width="8" stroke-dasharray="24 16"/>
+</svg>`);
+const transitionDividerPreview = svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 90">
+  <g fill="none" stroke="#8a6a3d" stroke-width="2">
+    <path d="M35 45h205M360 45h205"/>
+    <path d="M262 45l18-18 18 18-18 18zM302 45l18-18 18 18-18 18z"/>
+  </g>
+  <circle cx="300" cy="45" r="5" fill="#a32020"/>
+</svg>`);
+
+function illustrationPreview(markup: string) {
+  return `<main class="te-preview-page">
+    <p class="te-paragraph">夜色沉入城市边缘，她在旧站台旁停下脚步。</p>
+    ${markup}
+    <p class="te-paragraph">风从长街另一端吹来，照片里的灯火仍像从前一样明亮。</p>
+  </main>`;
+}
+
+function transitionPreview(markup: string) {
+  return `<main class="te-preview-page">
+    <p class="te-paragraph">雨声渐渐远去，站台上的人群也散了。</p>
+    ${markup}
+    <p class="te-paragraph">三天后，她在另一座城市收到了那封迟来的信。</p>
+  </main>`;
+}
+
+export const EPUB_ILLUSTRATION_STYLES: EpubStyleModule[] = [
+  {
+    id: "illustration-centered-caption",
+    kind: "illustration",
+    target: "illustration",
+    name: "居中图注插图",
+    description: "常见的正文居中插图，限制宽度并在下方显示简洁图注。",
+    selectors: [
+      EPUB_STYLE_INTERFACE.illustrationFigure,
+      EPUB_STYLE_INTERFACE.illustrationImage,
+      EPUB_STYLE_INTERFACE.illustrationCaption,
+    ],
+    usage: "将 XHTML 中的图片路径、替代文字和图注替换为实际内容，适合人物、场景和资料图。",
+    css: `.te-illustration {
+  width: 86%;
+  margin: 1.6em auto;
+  padding: 0;
+  text-align: center;
+  text-indent: 0;
+  duokan-text-indent: 0;
+  page-break-inside: avoid;
+}
+
+.te-illustration-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border: 0;
+}
+
+.te-illustration-caption {
+  display: block;
+  margin-top: 0.65em;
+  color: #64748b;
+  font-size: 0.78em;
+  line-height: 1.5;
+  text-align: center;
+  text-indent: 0;
+}`,
+    markup: `<figure class="te-illustration">
+  <img class="te-illustration-image" src="../Images/illustration-01.jpg" alt="旧站台夜景" />
+  <figcaption class="te-illustration-caption">图 1　旧站台的最后一班列车</figcaption>
+</figure>`,
+    previewHtml: illustrationPreview(`<figure class="te-illustration">
+      <img class="te-illustration-image" src="${illustrationPreviewImage}" alt="旧站台夜景" />
+      <figcaption class="te-illustration-caption">图 1　旧站台的最后一班列车</figcaption>
+    </figure>`),
+  },
+  {
+    id: "illustration-paper-card",
+    kind: "illustration",
+    target: "illustration",
+    name: "纸张卡片插图",
+    description: "带留白、细边框和轻阴影的卡片式插图，适合信件、档案和回忆画面。",
+    selectors: [
+      EPUB_STYLE_INTERFACE.illustrationFigure,
+      EPUB_STYLE_INTERFACE.illustrationImage,
+      EPUB_STYLE_INTERFACE.illustrationCaption,
+    ],
+    usage: "插入标准 figure 结构并替换图片；电子墨水设备会自然退化为边框卡片。",
+    css: `.te-illustration {
+  width: 82%;
+  margin: 1.8em auto;
+  padding: 0.7em;
+  box-sizing: border-box;
+  border: 1px solid #d7c8ad;
+  background: #fffaf0;
+  box-shadow: 0 0.2em 0.8em rgba(72, 52, 34, 0.14);
+  text-align: center;
+  text-indent: 0;
+  page-break-inside: avoid;
+}
+
+.te-illustration-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 0;
+}
+
+.te-illustration-caption {
+  margin-top: 0.7em;
+  color: #6f5638;
+  font-size: 0.76em;
+  line-height: 1.5;
+  text-align: center;
+}`,
+    markup: `<figure class="te-illustration">
+  <img class="te-illustration-image" src="../Images/archive-photo.jpg" alt="档案照片" />
+  <figcaption class="te-illustration-caption">档案编号 A-17</figcaption>
+</figure>`,
+    previewHtml: illustrationPreview(`<figure class="te-illustration">
+      <img class="te-illustration-image" src="${illustrationPreviewImage}" alt="档案照片" />
+      <figcaption class="te-illustration-caption">档案编号 A-17</figcaption>
+    </figure>`),
+  },
+  {
+    id: "illustration-full-bleed",
+    kind: "illustration",
+    target: "illustration",
+    name: "通栏出血插图",
+    description: "横向铺满版心并向两侧出血，适合章节中段的大场景和地图。",
+    selectors: [EPUB_STYLE_INTERFACE.illustrationFigure, EPUB_STYLE_INTERFACE.illustrationImage],
+    usage: "使用横幅图片；部分阅读器不支持 duokan-bleed 时仍会按容器宽度正常显示。",
+    css: `.te-illustration {
+  margin: 1.8em -1.5em;
+  padding: 0;
+  line-height: 0;
+  text-align: center;
+  text-indent: 0;
+  duokan-text-indent: 0;
+  duokan-bleed: leftright;
+  page-break-inside: avoid;
+}
+
+.te-illustration-image {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  margin: 0;
+  border: 0;
+}`,
+    markup: `<figure class="te-illustration">
+  <img class="te-illustration-image" src="../Images/panorama-01.jpg" alt="城市全景" />
+</figure>`,
+    previewHtml: illustrationPreview(`<figure class="te-illustration">
+      <img class="te-illustration-image" src="${illustrationWidePreviewImage}" alt="城市全景" />
+    </figure>`),
+  },
+  {
+    id: "illustration-annotation-popup",
+    kind: "illustration",
+    target: "annotation-illustration",
+    name: "注释点击弹图",
+    description: "点击正文词语或注释链接，以无脚本弹层显示对应插图。",
+    selectors: [EPUB_STYLE_INTERFACE.annotationTrigger, EPUB_STYLE_INTERFACE.annotationPopup],
+    usage: "checkbox 的 id 必须与所有 label 的 for 一致；点击文字、注释、遮罩或关闭按钮即可打开或收起图片。",
+    css: `.te-annotation-trigger {
+  color: #17699a;
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+  cursor: pointer;
+}
+
+.te-annotation-toggle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.te-annotation-popup {
+  display: none;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 999;
+  align-items: center;
+  justify-content: center;
+  padding: 1.2em;
+  box-sizing: border-box;
+  text-indent: 0;
+}
+
+.te-annotation-toggle:checked ~ .te-annotation-popup {
+  display: flex;
+}
+
+.te-annotation-backdrop {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(15, 23, 42, 0.78);
+}
+
+.te-annotation-figure {
+  position: relative;
+  z-index: 1;
+  width: 90%;
+  max-width: 34em;
+  max-height: 88vh;
+  margin: 0;
+  padding: 0.8em;
+  box-sizing: border-box;
+  overflow: auto;
+  border-radius: 0.35em;
+  background: #fffdf8;
+  text-align: center;
+}
+
+.te-annotation-image {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+}
+
+.te-annotation-caption {
+  margin: 0.7em 2em 0;
+  color: #475569;
+  font-size: 0.78em;
+  line-height: 1.5;
+}
+
+.te-annotation-close {
+  position: absolute;
+  top: 0.35em;
+  right: 0.45em;
+  width: 1.8em;
+  height: 1.8em;
+  border-radius: 50%;
+  background: #172033;
+  color: #ffffff;
+  font: bold 1em/1.8 sans-serif;
+  text-align: center;
+  cursor: pointer;
+}`,
+    markup: `<input id="te-annotation-toggle-1" class="te-annotation-toggle" type="checkbox" />
+<p class="te-paragraph">她在<label class="te-annotation-trigger" for="te-annotation-toggle-1">旧站台</label>旁停下脚步<label class="te-annotation-trigger" for="te-annotation-toggle-1">〔查看插图〕</label>。</p>
+<aside class="te-annotation-popup">
+  <label class="te-annotation-backdrop" for="te-annotation-toggle-1" aria-label="关闭插图"></label>
+  <figure class="te-annotation-figure">
+    <label class="te-annotation-close" for="te-annotation-toggle-1" aria-label="关闭">×</label>
+    <img class="te-annotation-image" src="../Images/note-station.jpg" alt="旧站台" />
+    <figcaption class="te-annotation-caption">旧站台改造前的资料照片</figcaption>
+  </figure>
+</aside>`,
+    previewHtml: `<main class="te-preview-page">
+      <input id="te-annotation-toggle-1" class="te-annotation-toggle" type="checkbox" />
+      <p class="te-paragraph">她在<label class="te-annotation-trigger" for="te-annotation-toggle-1">旧站台</label>旁停下脚步，手中的车票已经褪色。<label class="te-annotation-trigger" for="te-annotation-toggle-1">〔查看插图〕</label></p>
+      <p class="te-paragraph">点击蓝色文字或注释即可查看图片。</p>
+      <aside class="te-annotation-popup">
+        <label class="te-annotation-backdrop" for="te-annotation-toggle-1" aria-label="关闭插图"></label>
+        <figure class="te-annotation-figure">
+          <label class="te-annotation-close" for="te-annotation-toggle-1" aria-label="关闭">×</label>
+          <img class="te-annotation-image" src="${illustrationPreviewImage}" alt="旧站台" />
+          <figcaption class="te-annotation-caption">旧站台改造前的资料照片</figcaption>
+        </figure>
+      </aside>
+    </main>`,
+  },
+];
+
+export const EPUB_TRANSITION_STYLES: EpubStyleModule[] = [
+  {
+    id: "transition-fg1-stars",
+    kind: "transition",
+    target: "transition",
+    name: "居中三星转场",
+    description: "制作功能内置的经典居中 ※※※，兼容旧 class fg1 与标准 te-divider-line。",
+    selectors: [EPUB_STYLE_INTERFACE.transition],
+    usage: "制作 EPUB 时默认用它替换前后都有正文的单段孤立省略号。",
+    replacementMode: "isolated-ellipsis",
+    css: `p.fg1,
+p.te-divider-line {
+  margin: 1.4em 0;
+  padding: 0;
+  color: #4b5563;
+  font-size: 0.9em;
+  line-height: 1.4;
+  letter-spacing: 0.6em;
+  text-align: center;
+  text-indent: 0;
+  duokan-text-indent: 0;
+}`,
+    markup: `<p class="fg1">※※※</p>`,
+    previewHtml: transitionPreview(`<p class="fg1">※※※</p>`),
+  },
+  {
+    id: "transition-css-diamond",
+    kind: "transition",
+    target: "transition",
+    name: "CSS 菱形转场",
+    description: "不使用文字和图片，仅用伪元素绘制三枚渐次菱形。",
+    selectors: [EPUB_STYLE_INTERFACE.transition],
+    usage: "纯 CSS 转场，可直接替换孤立省略号，黑白屏和电子墨水设备也能保持清晰。",
+    replacementMode: "isolated-ellipsis",
+    css: `.te-transition--diamond {
+  margin: 1.7em 0;
+  padding: 0;
+  height: 1em;
+  line-height: 1;
+  text-align: center;
+  text-indent: 0;
+}
+
+.te-transition--diamond::before {
+  content: "◆ ◇ ◆";
+  color: #8a6a3d;
+  font-size: 0.72em;
+  letter-spacing: 0.5em;
+}`,
+    markup: `<p class="te-transition te-transition--diamond" aria-label="场景转换"></p>`,
+    previewHtml: transitionPreview(`<p class="te-transition te-transition--diamond" aria-label="场景转换"></p>`),
+  },
+  {
+    id: "transition-text-label",
+    kind: "transition",
+    target: "transition",
+    name: "文字线条转场",
+    description: "在左右细线之间显示“与此同时”等短文本。",
+    selectors: [EPUB_STYLE_INTERFACE.transition, EPUB_STYLE_INTERFACE.transitionText],
+    usage: "替换 te-transition-text 的文字即可表达时间、地点或叙事视角转换。",
+    replacementMode: "isolated-ellipsis",
+    css: `.te-transition--text {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  margin: 1.8em 0;
+  color: #64748b;
+  font-size: 0.76em;
+  line-height: 1.4;
+  text-align: center;
+  text-indent: 0;
+}
+
+.te-transition--text::before,
+.te-transition--text::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #cbd5e1;
+}
+
+.te-transition-text {
+  white-space: nowrap;
+}`,
+    markup: `<p class="te-transition te-transition--text"><span class="te-transition-text">与此同时</span></p>`,
+    previewHtml: transitionPreview(`<p class="te-transition te-transition--text"><span class="te-transition-text">与此同时</span></p>`),
+  },
+  {
+    id: "transition-css-fade-line",
+    kind: "transition",
+    target: "transition",
+    name: "CSS 渐隐短线",
+    description: "无文本的轻量渐隐横线，适合现代、日常和长篇阅读。",
+    selectors: [EPUB_STYLE_INTERFACE.transition],
+    usage: "纯 CSS 样式，直接替换孤立省略号，不依赖额外资源。",
+    replacementMode: "isolated-ellipsis",
+    css: `.te-transition--fade-line {
+  width: 58%;
+  height: 1px;
+  margin: 1.9em auto;
+  padding: 0;
+  background: linear-gradient(90deg, transparent, #94a3b8 22%, #94a3b8 78%, transparent);
+  line-height: 0;
+  text-indent: 0;
+}`,
+    markup: `<p class="te-transition te-transition--fade-line" aria-label="场景转换"></p>`,
+    previewHtml: transitionPreview(`<p class="te-transition te-transition--fade-line" aria-label="场景转换"></p>`),
+  },
+  {
+    id: "transition-image-divider",
+    kind: "transition",
+    target: "transition",
+    name: "图片装饰转场",
+    description: "使用独立 PNG、JPG 或 SVG 小图替代孤立省略号。",
+    selectors: [EPUB_STYLE_INTERFACE.transitionImage],
+    usage: "把图片导入制作模板的 dividerImage 资源位，制作时会自动以该图片替换孤立省略号。",
+    replacementMode: "isolated-ellipsis",
+    css: `.te-divider-image {
+  margin: 1.6em 0;
+  padding: 0;
+  line-height: 1;
+  text-align: center;
+  text-indent: 0;
+  duokan-text-indent: 0;
+  page-break-inside: avoid;
+}
+
+.te-divider-img {
+  display: inline-block;
+  width: 12em;
+  max-width: 72%;
+  height: auto;
+  border: 0;
+  vertical-align: middle;
+}`,
+    markup: `<div class="te-divider-image">
+  <img class="te-divider-img" src="../Images/divider.png" alt="场景转换" />
+</div>`,
+    previewHtml: transitionPreview(`<div class="te-divider-image">
+      <img class="te-divider-img" src="${transitionDividerPreview}" alt="场景转换" />
+    </div>`),
+  },
+];
+
 export const EPUB_STYLE_MODULES: EpubStyleModule[] = [
   ...EPUB_HEADER_STYLES,
   ...EPUB_TITLE_STYLES,
+  ...EPUB_ILLUSTRATION_STYLES,
+  ...EPUB_TRANSITION_STYLES,
 ];

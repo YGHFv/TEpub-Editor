@@ -33,6 +33,7 @@
     | "txt-edit"
     | "txt-epub"
     | "epub-style-library"
+    | "online-image-download"
     | "epub-edit"
     | "epub-read"
     | "font-encrypt"
@@ -136,8 +137,14 @@
     {
       id: "epub-style-library",
       icon: "CSS",
-      title: "EPUB 样式预览",
-      detail: "预览头图与标题样式",
+      title: "EPUB 样式库",
+      detail: "浏览头图、标题、插图与转场样式",
+    },
+    {
+      id: "online-image-download",
+      icon: "IMG↓",
+      title: "EPUB 在线图片下载",
+      detail: "下载远程插图并写入 EPUB",
     },
     {
       id: "txt-edit",
@@ -242,7 +249,7 @@
     {
       id: "optimize",
       title: "整理优化",
-      tools: selectTools("epub-diagnose", "epub-reformat", "epub-ad-clean", "epub-phonetic", "image-compress", "image-watermark", "font-subset", "epub-merge", "epub-split"),
+      tools: selectTools("epub-diagnose", "epub-reformat", "epub-ad-clean", "epub-phonetic", "online-image-download", "image-compress", "image-watermark", "font-subset", "epub-merge", "epub-split"),
     },
   ];
 
@@ -476,6 +483,11 @@
       void openStyleLibrary();
       return;
     }
+    if (tool.id === "online-image-download") {
+      event.preventDefault();
+      void openOnlineImageDownload();
+      return;
+    }
     if (tool.id === "send-to-kindle") {
       event.preventDefault();
       statusText = "正在打开 Send to Kindle";
@@ -564,7 +576,7 @@
 
   async function openStyleLibrary() {
     busyTool = "epub-style-library";
-    statusText = "正在打开 EPUB 样式预览...";
+    statusText = "正在打开 EPUB 样式库...";
     try {
       const win = await createToolWindow(windowLabel("epub-style-library"), {
         url: appPath("/toolbox/epub-style-library"),
@@ -577,11 +589,36 @@
         center: true,
       });
       await hideToolboxHomeWhileOpen(win);
-      statusText = "EPUB 样式预览已打开";
+      statusText = "EPUB 样式库已打开";
     } catch (e: any) {
-      console.error("打开 EPUB 样式预览失败:", e);
-      statusText = "打开 EPUB 样式预览失败";
-      await platform.message(`打开 EPUB 样式预览失败: ${e}`, { title: "错误", kind: "error" });
+      console.error("打开 EPUB 样式库失败:", e);
+      statusText = "打开 EPUB 样式库失败";
+      await platform.message(`打开 EPUB 样式库失败: ${e}`, { title: "错误", kind: "error" });
+    } finally {
+      busyTool = "";
+    }
+  }
+
+  async function openOnlineImageDownload() {
+    busyTool = "online-image-download";
+    statusText = "正在打开 EPUB 在线图片下载...";
+    try {
+      const win = await createToolWindow(windowLabel("online-image-download"), {
+        url: appPath("/toolbox/online-image-download"),
+        title: "TEpub-Editor-EPUB-Online-Images",
+        width: TOOLBOX_WINDOW_WIDTH,
+        height: TOOLBOX_WINDOW_HEIGHT,
+        minWidth: 900,
+        minHeight: 620,
+        dragDropEnabled: true,
+        center: true,
+      });
+      await hideToolboxHomeWhileOpen(win);
+      statusText = "EPUB 在线图片下载已打开";
+    } catch (e: any) {
+      console.error("打开 EPUB 在线图片下载失败:", e);
+      statusText = "打开 EPUB 在线图片下载失败";
+      await platform.message(`打开 EPUB 在线图片下载失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       busyTool = "";
     }

@@ -200,6 +200,37 @@ describe("shared EPUB advanced processing", () => {
     expect(rewritten).not.toContain("word-break");
   });
 
+  it("formats the generated encryption stylesheet as readable CSS", () => {
+    const css = webEpubFontProcessTesting.encryptedFontCss(
+      [{ path: "OEBPS/Fonts/正文 Semibold.ttf" }],
+      "OEBPS/Styles/tepub-font-encryption.css",
+    );
+    expect(css).toContain(`@font-face {\n  font-family: "TEpubEncryptedBodyFont1";\n`);
+    expect(css).toContain(`\n.tepub-font-encrypted-body-1,\n.tepub-font-encrypted-body-1 * {\n`);
+    expect(css).toContain('url("../Fonts/%E6%AD%A3%E6%96%87%20Semibold.ttf")');
+    expect(css.endsWith("\n")).toBe(true);
+  });
+
+  it("replaces generated inline font CSS with one neatly indented external link", () => {
+    const html = [
+      "<html>",
+      "  <head>",
+      "    <title>正文</title>",
+      '    <style type="text/css" data-tepub-body-font-encryption="1">@font-face { font-family: old; }</style><link href="old.css" data-tepub-body-font-encryption="1" />',
+      "  </head>",
+      "  <body><p>正文</p></body>",
+      "</html>",
+    ].join("\r\n");
+    const rewritten = webEpubFontProcessTesting.injectEncryptionStylesheetLink(
+      html,
+      "OEBPS/Text/chapter.xhtml",
+      "OEBPS/Styles/tepub-font-encryption.css",
+    );
+    expect(rewritten).not.toContain("<style");
+    expect(rewritten.match(/data-tepub-body-font-encryption="1"/g)).toHaveLength(1);
+    expect(rewritten).toContain('\r\n    <link rel="stylesheet" type="text/css" href="../Styles/tepub-font-encryption.css" data-tepub-body-font-encryption="1" />\r\n  </head>');
+  });
+
   const windowsFont = "C:\\Windows\\Fonts\\Deng.ttf";
   const fontTest = existsSync(windowsFont) ? it : it.skip;
   fontTest("subsets a real embedded Chinese TTF", async () => {
@@ -316,7 +347,9 @@ describe("shared EPUB advanced processing", () => {
     expect(chapter).toContain('<p class="te-chapter-title"><span class="te-chapter-number">第3章</span> 标题</p>');
     expect(chapter).not.toMatch(/te-chapter-title[^>]*tepub-font-encrypted-body/);
     expect(chapter).toContain("tepub-font-encrypted-body-1");
-    expect(chapter).toContain("tepub-font-encrypted-body-1 *");
+    expect(chapter).not.toContain("<style");
+    const encryptionCss = await output.file("OEBPS/Styles/tepub-font-encryption.css")!.async("text");
+    expect(encryptionCss).toContain("tepub-font-encrypted-body-1 *");
   }, 120_000);
 
   fontTest("includes heading characters selected by an embedded style block when subsetting", async () => {

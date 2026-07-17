@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process; // 引入进程控制
 use std::sync::Mutex;
@@ -5307,6 +5308,160 @@ async fn download_ai_image_url(client: &reqwest::Client, url: &str) -> Result<Ve
     let bytes = bytes.to_vec();
     validate_ai_image_bytes(&bytes, "生成图片")?;
     Ok(bytes)
+}
+
+const REMOTE_IMAGE_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImageDownloadResponse {
+    data_base64: String,
+    content_type: String,
+    final_url: String,
+}
+
+fn validate_remote_image_url(url: &reqwest::Url) -> Result<(), String> {
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return Err("仅支持 HTTP 或 HTTPS 图片地址".to_string());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("图片地址不能包含用户名或密码".to_string());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "图片地址缺少主机名".to_string())?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+        return Err("不允许下载本机或局域网图片地址".to_string());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        let blocked = match ip {
+            IpAddr::V4(ip) => {
+                ip.is_private()
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_broadcast()
+                    || ip.is_documentation()
+                    || ip.is_unspecified()
+            }
+            IpAddr::V6(ip) => {
+                ip.is_loopback()
+                    || ip.is_unspecified()
+                    || (ip.segments()[0] & 0xfe00) == 0xfc00
+                    || (ip.segments()[0] & 0xffc0) == 0xfe80
+                    || ip.to_ipv4().map_or(false, |mapped| {
+                        mapped.is_private()
+                            || mapped.is_loopback()
+                            || mapped.is_link_local()
+                            || mapped.is_broadcast()
+                            || mapped.is_documentation()
+                            || mapped.is_unspecified()
+                    })
+            }
+        };
+        if blocked {
+            return Err("不允许下载本机、私有网络或链路本地图片地址".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn raster_image_content_type(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("image/jpeg");
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+        return Some("image/png");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("image/gif");
+    }
+    if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    None
+}
+
+#[tauri::command]
+async fn download_remote_image(url: String) -> Result<RemoteImageDownloadResponse, String> {
+    let mut current = reqwest::Url::parse(url.trim())
+        .map_err(|e| format!("图片地址无效: {}", e))?;
+    validate_remote_image_url(&current)?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) TEpub-Editor/1.0")
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("初始化图片下载失败: {}", e))?;
+
+    for redirect_count in 0..=5 {
+        validate_remote_image_url(&current)?;
+        let mut referer = current.clone();
+        referer.set_path("/");
+        referer.set_query(None);
+        referer.set_fragment(None);
+        let response = client
+            .get(current.clone())
+            .header(
+                reqwest::header::ACCEPT,
+                "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8,*/*;q=0.5",
+            )
+            .header(reqwest::header::REFERER, referer.as_str())
+            .send()
+            .await
+            .map_err(|e| format!("下载图片失败: {}", e))?;
+
+        if response.status().is_redirection() {
+            if redirect_count == 5 {
+                return Err("图片地址重定向次数超过 5 次".to_string());
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| format!("图片服务器返回了无目标的重定向 {}", response.status()))?;
+            current = current
+                .join(location)
+                .map_err(|e| format!("图片重定向地址无效: {}", e))?;
+            continue;
+        }
+
+        if !response.status().is_success() {
+            return Err(format!("图片服务器返回 {}", response.status()));
+        }
+        if response.content_length().unwrap_or(0) > REMOTE_IMAGE_MAX_BYTES as u64 {
+            return Err("图片超过 32 MB 限制".to_string());
+        }
+
+        let final_url = response.url().to_string();
+        let mut response = response;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| format!("读取图片响应失败: {}", e))?
+        {
+            if bytes.len() + chunk.len() > REMOTE_IMAGE_MAX_BYTES {
+                return Err("图片超过 32 MB 限制".to_string());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if bytes.is_empty() {
+            return Err("图片响应为空".to_string());
+        }
+        let content_type = raster_image_content_type(&bytes).ok_or_else(|| {
+            "响应不是支持的 JPG、PNG、WebP 或 GIF 图片".to_string()
+        })?;
+        return Ok(RemoteImageDownloadResponse {
+            data_base64: general_purpose::STANDARD.encode(bytes),
+            content_type: content_type.to_string(),
+            final_url,
+        });
+    }
+
+    Err("图片下载失败".to_string())
 }
 
 async fn extract_ai_image_bytes(
@@ -13240,6 +13395,7 @@ pub fn run() {
             read_binary_file,
             search_book_covers,
             download_cover_to_temp,
+            download_remote_image,
             save_history,
             get_history_list,
             calculate_md5,

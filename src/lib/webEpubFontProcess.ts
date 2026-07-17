@@ -504,21 +504,51 @@ function encodedZipUrl(path: string) {
 }
 
 function encryptedFontCss(fonts: Array<{ path: string }>, cssPath: string) {
-  return `/* TEpub external font encryption compatibility */\n${fonts.map((font, index) => {
+  const rules = fonts.map((font, index) => {
     const family = `${BODY_ENCRYPTION_FAMILY}${index + 1}`;
     const fontUrl = encodedZipUrl(relativeZipPath(cssPath, font.path));
     const format = extension(font.path) === "otf" ? "opentype" : extension(font.path) === "woff2" ? "woff2" : extension(font.path) === "woff" ? "woff" : "truetype";
-    return `@font-face { font-family: ${cssFontFamily(family)}; src: url("${fontUrl}") format("${format}"); font-style: normal; font-weight: normal; font-display: block; }\n.${BODY_ENCRYPTION_CLASS}-${index + 1}, .${BODY_ENCRYPTION_CLASS}-${index + 1} * { font-family: ${cssFontFamily(family)} !important; font-style: normal; }`;
-  }).join("\n")}`;
+    return `@font-face {
+  font-family: ${cssFontFamily(family)};
+  src: url("${fontUrl}") format("${format}");
+  font-style: normal;
+  font-weight: normal;
+  font-display: block;
+}
+
+.${BODY_ENCRYPTION_CLASS}-${index + 1},
+.${BODY_ENCRYPTION_CLASS}-${index + 1} * {
+  font-family: ${cssFontFamily(family)} !important;
+  font-style: normal;
+}`;
+  }).join("\n\n");
+  return `/* TEpub external font encryption compatibility */\n\n${rules}\n`;
+}
+
+function insertHeadChild(source: string, markup: string) {
+  const closingHead = /([ \t]*)(<\/head\s*>)/i;
+  const match = closingHead.exec(source);
+  if (!match) return `${markup}\n${source}`;
+
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const closingIndent = match[1];
+  const headSource = source.slice(0, match.index);
+  const existingChildIndent = headSource.match(/<head\b[^>]*>\s*\r?\n([ \t]+)\S/i)?.[1];
+  const childIndent = existingChildIndent || `${closingIndent}  `;
+  const separator = headSource.endsWith("\n") ? "" : newline;
+  return `${headSource}${separator}${childIndent}${markup}${newline}${closingIndent}${match[2]}${source.slice(match.index + match[0].length)}`;
 }
 
 function injectEncryptionStylesheetLink(source: string, htmlPath: string, cssPath: string) {
-  const pattern = /<link\b[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*\/?\s*>/gi;
-  const cleaned = source.replace(pattern, "");
+  const stylePattern = /<style[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*>.*?<\/style>/gis;
+  const linkPattern = /<link\b[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*\/?\s*>/gi;
+  const cleaned = source
+    .replace(stylePattern, "")
+    .replace(linkPattern, "")
+    .replace(/^[ \t]*\r?\n(?=[ \t]*<\/head\s*>)/im, "");
   const href = encodedZipUrl(relativeZipPath(htmlPath, cssPath)).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-  const link = `<link rel="stylesheet" type="text/css" href="${href}" data-tepub-body-font-encryption="1"/>`;
-  if (/<\/head\s*>/i.test(cleaned)) return cleaned.replace(/<\/head\s*>/i, `${link}</head>`);
-  return `${link}${cleaned}`;
+  const link = `<link rel="stylesheet" type="text/css" href="${href}" data-tepub-body-font-encryption="1" />`;
+  return insertHeadChild(cleaned, link);
 }
 
 async function installExternalEncryptionStylesheet(
@@ -1083,18 +1113,6 @@ function transformParagraphsByFont(
   return output;
 }
 
-function injectIndependentBodyFontStyle(source: string, htmlPath: string, fonts: ParsedFont[]) {
-  const faces = fonts.map((font, index) => {
-    const family = `${BODY_ENCRYPTION_FAMILY}${index + 1}`;
-    const fontUrl = encodedZipUrl(relativeZipPath(htmlPath, font.path));
-    const format = font.type === "otf" ? "opentype" : font.type === "woff2" ? "woff2" : font.type === "woff" ? "woff" : "truetype";
-    return `@font-face { font-family: ${cssFontFamily(family)}; src: url("${fontUrl}") format("${format}"); font-style: normal; font-weight: normal; } .${BODY_ENCRYPTION_CLASS}-${index + 1}, .${BODY_ENCRYPTION_CLASS}-${index + 1} * { font-family: ${cssFontFamily(family)} !important; }`;
-  });
-  const style = `<style type="text/css" data-tepub-body-font-encryption="1">${faces.join(" ")}</style>`;
-  if (/<\/head\s*>/i.test(source)) return source.replace(/<\/head\s*>/i, `${style}</head>`);
-  return `${style}${source}`;
-}
-
 async function encryptFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessResult> {
   const fonts = await loadFonts(zip);
   const fallbackFamilies = await collectEmbeddedFontFamilies(zip, fonts);
@@ -1343,7 +1361,7 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
   for (const [path, source] of htmlSources) {
     const encrypted = transformParagraphsByFont(source, assignments.get(path) || [], mappings, fontIndexes);
     if (encrypted !== source) {
-      zip.file(path, injectIndependentBodyFontStyle(encrypted, path, encryptedFonts));
+      zip.file(path, encrypted);
       changedFiles += 1;
       changedHtmlPaths.push(path);
     }
@@ -1665,7 +1683,9 @@ export const webEpubFontProcessTesting = {
   appendFontFallbacks,
   collectFontPrivateCodePoints,
   collectSubsetCodePoints,
+  encryptedFontCss,
   injectBodyFontStyle,
+  injectEncryptionStylesheetLink,
   injectObfuscatedTextCompatibility,
   normalizeFontCompatibility,
   privateCharacters,
