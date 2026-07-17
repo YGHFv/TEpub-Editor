@@ -1830,7 +1830,9 @@
     if (anchor) {
       e.preventDefault();
       const epubType = anchor.getAttribute("epub:type") || "";
-      const isNoteref = anchor.getAttribute("role") === "doc-noteref" || epubType.split(/\s+/).includes("noteref");
+      const isNoteref = anchor.getAttribute("role") === "doc-noteref"
+        || anchor.classList.contains("duokan-footnote")
+        || epubType.split(/\s+/).includes("noteref");
       const href = anchor.getAttribute("href") || "";
       if (isNoteref && href.startsWith("#")) {
         const note = document.getElementById(decodeURIComponent(href.slice(1)));
@@ -1867,6 +1869,15 @@
       // 切换底部工具栏
       activePanel = activePanel ? "" : "menu";
     }
+  }
+
+  function onFootnotePopupClick(e: MouseEvent) {
+    const target = e.target as HTMLElement | null;
+    const backLink = target?.closest<HTMLAnchorElement>("a.duokan-footnote-back");
+    if (!backLink) return;
+    e.preventDefault();
+    e.stopPropagation();
+    footnotePopupHtml = "";
   }
 
   function onFrameKeydown(event: KeyboardEvent) {
@@ -2036,7 +2047,7 @@
     <div class="rd-footnote-backdrop" on:click={() => footnotePopupHtml = ""}>
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div class="rd-footnote-popup" on:click|stopPropagation>
+      <div class="rd-footnote-popup" on:click|stopPropagation={onFootnotePopupClick}>
         <button class="rd-footnote-close" type="button" aria-label="关闭注释" on:click={() => footnotePopupHtml = ""}>×</button>
         {@html footnotePopupHtml}
       </div>

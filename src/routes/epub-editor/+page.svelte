@@ -230,8 +230,19 @@
         iframeDoc.documentElement.dataset.tepubFootnotesBound = "1";
         iframeDoc.addEventListener("click", (event) => {
             const clicked = event.target as Element | null;
-            const trigger = clicked?.closest<HTMLAnchorElement>('a[role="doc-noteref"]');
+            const trigger = clicked?.closest<HTMLAnchorElement>("a");
             if (!trigger) return;
+            if (trigger.classList.contains("duokan-footnote-back")) {
+                event.preventDefault();
+                event.stopPropagation();
+                trigger.closest(".footnote-popup-backdrop")?.remove();
+                return;
+            }
+            const epubType = trigger.getAttribute("epub:type") || "";
+            const isNoteref = trigger.getAttribute("role") === "doc-noteref"
+                || trigger.classList.contains("duokan-footnote")
+                || epubType.split(/\s+/).includes("noteref");
+            if (!isNoteref) return;
             const href = trigger.getAttribute("href") || "";
             if (!href.startsWith("#")) return;
             const note = iframeDoc.getElementById(decodeURIComponent(href.slice(1)));
@@ -2331,8 +2342,20 @@
         const syncScriptCode = `
 document.addEventListener("click", function (event) {
     var clicked = event.target;
-    var trigger = clicked && clicked.closest ? clicked.closest('a[role="doc-noteref"]') : null;
+    var trigger = clicked && clicked.closest ? clicked.closest("a") : null;
     if (!trigger) return;
+    if (trigger.classList.contains("duokan-footnote-back")) {
+      event.preventDefault();
+      event.stopPropagation();
+      var activeBackdrop = trigger.closest(".footnote-popup-backdrop");
+      if (activeBackdrop) activeBackdrop.remove();
+      return;
+    }
+    var epubType = trigger.getAttribute("epub:type") || "";
+    var isNoteref = trigger.getAttribute("role") === "doc-noteref"
+      || trigger.classList.contains("duokan-footnote")
+      || epubType.split(/\\s+/).indexOf("noteref") !== -1;
+    if (!isNoteref) return;
     var href = trigger.getAttribute("href") || "";
     if (href.charAt(0) !== "#") return;
     var note = document.getElementById(decodeURIComponent(href.slice(1)));

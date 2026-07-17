@@ -262,7 +262,7 @@
       ...group,
       tools: group.tools.filter((tool) => (
         !temporarilyHiddenToolIds.has(tool.id)
-        && (!isMobileClient || tool.id !== "library")
+        && ((!platform.isWeb && !isMobileClient) || tool.id !== "library")
         && (!normalizedToolSearch || `${tool.title} ${tool.detail}`.toLocaleLowerCase("zh-CN").includes(normalizedToolSearch))
       )),
     }))

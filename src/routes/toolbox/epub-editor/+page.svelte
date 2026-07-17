@@ -1065,8 +1065,20 @@
     script.textContent = `
       document.addEventListener("click", function (event) {
         var clicked = event.target;
-        var trigger = clicked && clicked.closest ? clicked.closest('a[role="doc-noteref"]') : null;
+        var trigger = clicked && clicked.closest ? clicked.closest("a") : null;
         if (!trigger) return;
+        if (trigger.classList.contains("duokan-footnote-back")) {
+          event.preventDefault();
+          event.stopPropagation();
+          var activeBackdrop = trigger.closest(".tepub-footnote-backdrop");
+          if (activeBackdrop) activeBackdrop.remove();
+          return;
+        }
+        var epubType = trigger.getAttribute("epub:type") || "";
+        var isNoteref = trigger.getAttribute("role") === "doc-noteref"
+          || trigger.classList.contains("duokan-footnote")
+          || epubType.split(/\\s+/).indexOf("noteref") !== -1;
+        if (!isNoteref) return;
         var href = trigger.getAttribute("href") || "";
         if (href.charAt(0) !== "#") return;
         var note = document.getElementById(decodeURIComponent(href.slice(1)));
