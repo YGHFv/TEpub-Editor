@@ -1534,20 +1534,21 @@ export const EPUB_ILLUSTRATION_STYLES: EpubStyleModule[] = [
   cursor: pointer;
 }`,
     markup: `<input id="te-annotation-toggle-1" class="te-annotation-toggle" type="checkbox" />
-<p class="te-paragraph">她在<label class="te-annotation-trigger" for="te-annotation-toggle-1">旧站台</label>旁停下脚步<label class="te-annotation-trigger" for="te-annotation-toggle-1">〔查看插图〕</label>。</p>
-<aside class="te-annotation-popup">
+<p class="te-paragraph">她在<label class="te-annotation-trigger" for="te-annotation-toggle-1">旧站台<a id="te-annotation-ref-1" class="duokan-footnote" href="#te-annotation-note-1" epub:type="noteref" role="doc-noteref" aria-controls="te-annotation-note-1">〔查看插图〕</a></label>旁停下脚步。</p>
+<aside id="te-annotation-note-1" class="te-annotation-popup duokan-footnote-item" epub:type="footnote" role="doc-footnote">
   <label class="te-annotation-backdrop" for="te-annotation-toggle-1" aria-label="关闭插图"></label>
   <figure class="te-annotation-figure">
     <label class="te-annotation-close" for="te-annotation-toggle-1" aria-label="关闭">×</label>
     <img class="te-annotation-image" src="../Images/note-station.jpg" alt="旧站台" />
     <figcaption class="te-annotation-caption">旧站台改造前的资料照片</figcaption>
+    <a class="duokan-footnote-back" href="#te-annotation-ref-1">返回</a>
   </figure>
 </aside>`,
     previewHtml: `<main class="te-preview-page">
       <input id="te-annotation-toggle-1" class="te-annotation-toggle" type="checkbox" />
-      <p class="te-paragraph">她在<label class="te-annotation-trigger" for="te-annotation-toggle-1">旧站台</label>旁停下脚步，手中的车票已经褪色。<label class="te-annotation-trigger" for="te-annotation-toggle-1">〔查看插图〕</label></p>
+      <p class="te-paragraph">她在<label class="te-annotation-trigger" for="te-annotation-toggle-1" epub:type="noteref" role="doc-noteref" aria-controls="te-annotation-note-1">旧站台</label>旁停下脚步，手中的车票已经褪色。<label class="te-annotation-trigger" for="te-annotation-toggle-1" epub:type="noteref" role="doc-noteref" aria-controls="te-annotation-note-1">〔查看插图〕</label></p>
       <p class="te-paragraph">点击蓝色文字或注释即可查看图片。</p>
-      <aside class="te-annotation-popup">
+      <aside id="te-annotation-note-1" class="te-annotation-popup" epub:type="footnote" role="doc-footnote">
         <label class="te-annotation-backdrop" for="te-annotation-toggle-1" aria-label="关闭插图"></label>
         <figure class="te-annotation-figure">
           <label class="te-annotation-close" for="te-annotation-toggle-1" aria-label="关闭">×</label>

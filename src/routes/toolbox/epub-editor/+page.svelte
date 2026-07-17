@@ -1055,8 +1055,39 @@
       html { overflow-x: hidden; }
       body { box-sizing: border-box; max-width: ${bodyMaxWidth}; margin: 0 auto; padding: ${bodyPadding}; font-size: ${bodyFontSize}; line-height: 1.8; overflow-x: hidden; }
       img, svg, video { max-width: 100%; height: auto; }
+      .tepub-footnote-backdrop { position: fixed; inset: 0; z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background: rgba(15, 23, 42, .72); }
+      .tepub-footnote-dialog { position: relative; width: min(90vw, 720px); max-height: 88vh; overflow: auto; padding: 16px; box-sizing: border-box; border-radius: 8px; background: #fff; box-shadow: 0 16px 48px rgba(0, 0, 0, .32); }
+      .tepub-footnote-dialog img { display: block; max-width: 100%; max-height: calc(88vh - 40px); width: auto; height: auto; margin: 0 auto; }
+      .tepub-footnote-dialog figure { margin: 0; }
     `;
     htmlDoc.head.prepend(style);
+    const script = htmlDoc.createElement("script");
+    script.textContent = `
+      document.addEventListener("click", function (event) {
+        var clicked = event.target;
+        var trigger = clicked && clicked.closest ? clicked.closest('a[role="doc-noteref"]') : null;
+        if (!trigger) return;
+        var href = trigger.getAttribute("href") || "";
+        if (href.charAt(0) !== "#") return;
+        var note = document.getElementById(decodeURIComponent(href.slice(1)));
+        if (!note) return;
+        event.preventDefault();
+        event.stopPropagation();
+        var old = document.querySelector(".tepub-footnote-backdrop");
+        if (old) old.remove();
+        var backdrop = document.createElement("div");
+        backdrop.className = "tepub-footnote-backdrop";
+        var dialog = document.createElement("div");
+        dialog.className = "tepub-footnote-dialog";
+        dialog.innerHTML = note.innerHTML;
+        backdrop.appendChild(dialog);
+        backdrop.addEventListener("click", function (closeEvent) {
+          if (closeEvent.target === backdrop) backdrop.remove();
+        });
+        document.body.appendChild(backdrop);
+      }, true);
+    `;
+    htmlDoc.head.appendChild(script);
     return `<!doctype html>${htmlDoc.documentElement.outerHTML}`;
   }
 

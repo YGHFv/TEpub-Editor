@@ -98,6 +98,10 @@ describe("shared EPUB advanced processing", () => {
     const zip = await JSZip.loadAsync(await result.outputs[0].blob.arrayBuffer());
     const chapter = await zip.file("OEBPS/Text/chapter1.xhtml")!.async("text");
     expect(chapter).toContain('data-tepub-note="脚注内容"');
+    expect(chapter).toContain("duokan-footnote");
+    expect(chapter).toContain("duokan-footnote-item");
+    expect(chapter).toContain('role="doc-noteref"');
+    expect(chapter).toContain('role="doc-footnote"');
     expect(chapter).toContain('id="fn1"');
     expect(chapter).toContain("脚注内容");
   });

@@ -96,6 +96,7 @@
   // 新版工具栏：屏幕底部弹出，5 个 tab：目录 / 书签 / 主题 / 排版 / 设置
   type Panel = "" | "menu" | "toc" | "bookmarks" | "theme" | "typography" | "settings";
   let activePanel: Panel = "";
+  let footnotePopupHtml = "";
   let toolbarOpen = false;       // 工具栏（5 tab 横条）是否显示
 
   // 派生：root 元素的 inline CSS 变量字符串。
@@ -1824,10 +1825,22 @@
   }
 
   function onFrameClick(e: MouseEvent) {
-    // 兜底：如果点中了章节内的 <a>，阻止默认行为
     const target = e.target as HTMLElement | null;
-    if (target && target.closest("a")) {
+    const anchor = target?.closest<HTMLAnchorElement>("a") || null;
+    if (anchor) {
       e.preventDefault();
+      const epubType = anchor.getAttribute("epub:type") || "";
+      const isNoteref = anchor.getAttribute("role") === "doc-noteref" || epubType.split(/\s+/).includes("noteref");
+      const href = anchor.getAttribute("href") || "";
+      if (isNoteref && href.startsWith("#")) {
+        const note = document.getElementById(decodeURIComponent(href.slice(1)));
+        if (note) {
+          e.stopPropagation();
+          footnotePopupHtml = note.innerHTML;
+          activePanel = "";
+          return;
+        }
+      }
     }
 
     // 工具栏 / 面板已开 → 任意点击关闭
@@ -2016,6 +2029,19 @@
       </div>
     </div>
   </div>
+
+  {#if footnotePopupHtml}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="rd-footnote-backdrop" on:click={() => footnotePopupHtml = ""}>
+      <!-- svelte-ignore a11y-click-events-have-key-events -->
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div class="rd-footnote-popup" on:click|stopPropagation>
+        <button class="rd-footnote-close" type="button" aria-label="关闭注释" on:click={() => footnotePopupHtml = ""}>×</button>
+        {@html footnotePopupHtml}
+      </div>
+    </div>
+  {/if}
 
   <!-- ===== 4 个角的常驻信息（始终显示，不随工具栏开关） ===== -->
   <!--
@@ -2394,6 +2420,53 @@
     background-repeat: no-repeat;
     pointer-events: none;
     z-index: 0;
+  }
+  .rd-footnote-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+    background: rgba(15, 23, 42, 0.76);
+  }
+  .rd-footnote-popup {
+    position: relative;
+    width: min(92vw, 760px);
+    max-height: 88vh;
+    overflow: auto;
+    padding: 18px;
+    box-sizing: border-box;
+    border-radius: 10px;
+    background: var(--rd-paper, #fffdf8);
+    color: var(--rd-text, #222);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
+  }
+  .rd-footnote-popup :global(img) {
+    display: block;
+    max-width: 100%;
+    max-height: calc(88vh - 48px);
+    width: auto;
+    height: auto;
+    margin: 0 auto;
+  }
+  .rd-footnote-popup :global(figure) { margin: 0; }
+  .rd-footnote-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 1;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(15, 23, 42, 0.86);
+    color: #fff;
+    font-size: 22px;
+    line-height: 32px;
+    cursor: pointer;
   }
   .rd-app[data-page-mode="scroll"] .rd-viewport {
     overflow-y: auto;

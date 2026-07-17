@@ -395,9 +395,12 @@ async function convertEpubFootnotes(file: File, mode: "standard-to-popup" | "pop
         const note = target.textContent?.replace(/\s+/g, " ").trim() || "";
         if (!note) continue;
         anchor.setAttributeNS(epubNamespace, "epub:type", "noteref");
+        anchor.setAttribute("role", "doc-noteref");
         anchor.setAttribute("data-tepub-note", note);
-        anchor.setAttribute("class", [...new Set(`${anchor.getAttribute("class") || ""} tepub-popup-note`.split(/\s+/).filter(Boolean))].join(" "));
+        anchor.setAttribute("class", [...new Set(`${anchor.getAttribute("class") || ""} tepub-popup-note duokan-footnote`.split(/\s+/).filter(Boolean))].join(" "));
         target.setAttributeNS(epubNamespace, "epub:type", "footnote");
+        target.setAttribute("role", "doc-footnote");
+        target.setAttribute("class", [...new Set(`${target.getAttribute("class") || ""} duokan-footnote-item`.split(/\s+/).filter(Boolean))].join(" "));
         changedEntries += 1;
       }
     } else {
@@ -410,11 +413,15 @@ async function convertEpubFootnotes(file: File, mode: "standard-to-popup" | "pop
         const anchor = xml.createElementNS(xhtmlNamespace, "a");
         anchor.setAttribute("href", `#${id}`);
         anchor.setAttributeNS(epubNamespace, "epub:type", "noteref");
+        anchor.setAttribute("role", "doc-noteref");
+        anchor.setAttribute("class", "duokan-footnote");
         anchor.textContent = span.textContent || "注";
         span.parentNode?.replaceChild(anchor, span);
         const aside = xml.createElementNS(xhtmlNamespace, "aside");
         aside.setAttribute("id", id);
         aside.setAttributeNS(epubNamespace, "epub:type", "footnote");
+        aside.setAttribute("role", "doc-footnote");
+        aside.setAttribute("class", "duokan-footnote-item");
         aside.textContent = note;
         body.appendChild(aside);
         changedEntries += 1;

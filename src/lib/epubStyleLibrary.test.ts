@@ -17,14 +17,16 @@ describe("EPUB style library", () => {
     );
   });
 
-  it("provides a script-free annotation illustration without navigable links", () => {
+  it("provides a script-free annotation illustration with EPUB3 and Yuewei-compatible footnote links", () => {
     const style = EPUB_ILLUSTRATION_STYLES.find((item) => item.id === "illustration-annotation-popup");
     expect(style?.target).toBe("annotation-illustration");
     expect(style?.css).toContain(".te-annotation-toggle:checked ~ .te-annotation-popup");
     expect(style?.markup).toContain('<input id="te-annotation-toggle-1"');
-    expect(style?.markup).toContain('for="te-annotation-toggle-1">旧站台</label>');
-    expect(style?.markup).toContain('for="te-annotation-toggle-1">〔查看插图〕</label>');
-    expect(style?.markup).not.toContain("href=");
+    expect(style?.markup).toContain('class="duokan-footnote"');
+    expect(style?.markup).toContain('epub:type="noteref" role="doc-noteref" aria-controls="te-annotation-note-1">〔查看插图〕</a>');
+    expect(style?.markup).toContain('href="#te-annotation-note-1"');
+    expect(style?.markup).toContain('id="te-annotation-note-1" class="te-annotation-popup duokan-footnote-item" epub:type="footnote" role="doc-footnote"');
+    expect(style?.markup).toContain('class="duokan-footnote-back"');
     expect(`${style?.css}${style?.markup}`).not.toMatch(/<script|javascript:/i);
   });
 

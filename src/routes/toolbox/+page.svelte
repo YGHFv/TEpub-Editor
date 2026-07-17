@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { base } from "$app/paths";
-  import { getWebClientViewOverride, setWebClientViewOverride } from "$lib/clientProfile";
+  import { getWebClientViewOverride, isMobileUserAgent, setWebClientViewOverride } from "$lib/clientProfile";
   import { platform, type PlatformWindowHandle } from "$lib/platform";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
@@ -255,13 +255,14 @@
 
   let activeToolGroup: ToolGroupFilter = "all";
   let toolSearch = "";
+  let isMobileClient = false;
   $: normalizedToolSearch = toolSearch.trim().toLocaleLowerCase("zh-CN");
   $: visibleToolGroups = toolGroups
     .map((group) => ({
       ...group,
       tools: group.tools.filter((tool) => (
         !temporarilyHiddenToolIds.has(tool.id)
-        && (!platform.isWeb || tool.id !== "library")
+        && (!isMobileClient || tool.id !== "library")
         && (!normalizedToolSearch || `${tool.title} ${tool.detail}`.toLocaleLowerCase("zh-CN").includes(normalizedToolSearch))
       )),
     }))
@@ -473,7 +474,7 @@
       event.preventDefault();
       return;
     }
-    if (isSharedBrowserTool(tool.id) || (platform.isWeb && isWebRouteTool(tool.id))) {
+    if (isSharedBrowserTool(tool.id) || ((platform.isWeb || isMobileClient) && isWebRouteTool(tool.id))) {
       event.preventDefault();
       void goto(webToolHref(tool.id));
       return;
@@ -1003,6 +1004,12 @@
   }
 
   onMount(() => {
+    const updateMobileClient = () => {
+      isMobileClient = isMobileUserAgent()
+        || window.matchMedia?.("(max-width: 760px)")?.matches
+        || window.matchMedia?.("(pointer: coarse)")?.matches;
+    };
+    updateMobileClient();
     loadGlobalSettingsWithLegacy();
     refreshWebClientViewState();
     openLaunchFiles();
@@ -1011,7 +1018,13 @@
       appSettings = loadAppSettings();
     };
     window.addEventListener("tepub-settings-updated", onSettingsUpdated);
-    return () => window.removeEventListener("tepub-settings-updated", onSettingsUpdated);
+    window.addEventListener("resize", updateMobileClient);
+    window.addEventListener("orientationchange", updateMobileClient);
+    return () => {
+      window.removeEventListener("tepub-settings-updated", onSettingsUpdated);
+      window.removeEventListener("resize", updateMobileClient);
+      window.removeEventListener("orientationchange", updateMobileClient);
+    };
   });
 </script>
 
@@ -1053,6 +1066,7 @@
             <div
               class="tool-card tool-card-{group.id}"
               class:tool-card-disabled={busyTool !== ""}
+              data-tool-id={tool.id}
               aria-label={tool.title}
             >
               <a
@@ -1067,17 +1081,6 @@
                 <span class="tool-detail">{busyTool === tool.id ? "处理中..." : tool.detail}</span>
               </span>
               </a>
-              {#if isBatchTool(tool.id) && !platform.isWeb}
-                <button
-                  class="tool-batch"
-                  type="button"
-                  on:click={() => platform.isWeb || isSharedBrowserTool(tool.id) ? goto(webToolHref(tool.id)) : runBatchForFolder(tool)}
-                  disabled={busyTool !== ""}
-                  title={platform.isWeb ? "选择多个文件批量处理" : "选择文件夹批量处理"}
-                >
-                  批量
-                </button>
-              {/if}
             </div>
           {/each}
         {/each}
@@ -1805,15 +1808,13 @@
     font: inherit;
   }
 
-  .tool-main:focus-visible,
-  .tool-batch:focus-visible {
+  .tool-main:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
   }
 
   .tool-main:disabled,
-  .tool-main[aria-disabled="true"],
-  .tool-batch:disabled {
+  .tool-main[aria-disabled="true"] {
     cursor: wait;
   }
 
@@ -1870,33 +1871,6 @@
     font-size: 11px;
     line-height: 1.4;
     overflow-wrap: anywhere;
-  }
-
-  .tool-card:has(.tool-batch) .tool-main {
-    padding-right: 50px;
-  }
-
-  .tool-batch {
-    position: absolute;
-    right: 13px;
-    bottom: 7px;
-    min-width: 34px;
-    box-sizing: border-box;
-    padding: 1px 5px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--color-muted);
-    font: inherit;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1.25;
-    cursor: pointer;
-  }
-
-  .tool-batch:hover:not(:disabled) {
-    color: var(--color-accent-deep);
-    background: var(--color-accent-quiet);
   }
 
   .toolbox-empty {
@@ -1963,7 +1937,7 @@
     width: calc(100% - 20px);
     flex: 0 0 auto;
     min-height: auto;
-    padding: max(10px, env(safe-area-inset-top)) 0 max(18px, env(safe-area-inset-bottom));
+    padding: max(52px, calc(env(safe-area-inset-top) + 18px)) 0 max(18px, env(safe-area-inset-bottom));
     overflow: visible;
   }
 
@@ -1998,7 +1972,7 @@
   @media (max-width: 640px) {
     .toolbox-content {
       width: calc(100% - 20px);
-      padding: 10px 0 20px;
+      padding: max(52px, calc(env(safe-area-inset-top) + 18px)) 0 20px;
     }
 
     .toolbox-commandbar {
@@ -2044,11 +2018,6 @@
 
     .tool-copy {
       padding-right: 0;
-    }
-
-    .tool-batch {
-      right: 11px;
-      bottom: 5px;
     }
 
     .web-toolbox-footer {
