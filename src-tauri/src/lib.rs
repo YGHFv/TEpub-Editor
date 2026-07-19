@@ -13,7 +13,10 @@ use std::process; // 引入进程控制
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
-#[cfg(desktop)]
+// Tauri's `desktop` cfg alias is not consistently available during the
+// Android Gradle/Cargo invocation, so use the target OS for APIs that are
+// unavailable on mobile platforms.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -13313,7 +13316,7 @@ mod toolbox_tests {
     }
 }
 
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn restore_primary_window(app: &tauri::AppHandle) {
     for label in ["toolbox", "main"] {
         if let Some(window) = app.get_webview_window(label) {
@@ -13344,7 +13347,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            #[cfg(desktop)]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let app_bg = Some(Color(238, 244, 248, 255));
                 for window in app.webview_windows().values() {
@@ -13383,12 +13386,12 @@ pub fn run() {
                     })
                     .build(app)?;
             }
-            #[cfg(mobile)]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             let _ = app;
             Ok(())
         })
         .on_window_event(|window, event| {
-            #[cfg(desktop)]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     if window.label() == "toolbox" {
@@ -13400,7 +13403,7 @@ pub fn run() {
                     }
                 }
             }
-            #[cfg(mobile)]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             let _ = (window, event);
         })
         .invoke_handler(tauri::generate_handler![
