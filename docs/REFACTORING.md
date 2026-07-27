@@ -39,29 +39,32 @@ src-tauri/src/
 
 从巨型组件里**先抽纯逻辑，不动 UI**，每块配套 vitest：
 
-1. ✅ 查找替换核心 → `src/lib/findReplace.ts`（21 个测试）。已切换 Web 版 `toolbox/epub-editor`（净 -39 行）。**剩余**：桌面 epub-editor、editor（后端 Rust 正则，语义不同需谨慎）、search-replace 窗口（有独占的 extended 转义模式）逐个切换；四套实现的行为差异清单见 findReplace.ts 注释与 2026-07 审查记录。
+1. ✅ 查找替换核心 → `src/lib/findReplace.ts`（31 个测试）。已切换：Web 版 toolbox/epub-editor、search-replace 窗口（extended 转义下沉、顺带修复 wholeWord 连字符正则非法的潜在 bug）、桌面 epub-editor（findNextMatchWrapped 保留历史语义；getFilesInScope 因桌面 open/selected/html 范围语义与共享版实质不同，有意保留待统一）。editor 走后端 Rust 正则（advanced_search），语义不同，按设计不切换。
 2. ✅ reader 的 container.xml/OPF/nav/NCX 手写解析（约 180 行）已删除，改用 `webEpub.ts` 导出的 `parseContainerRootfilePath` / `parseOpfPackage` / `parseNavDocument` / `parseNcxDocument`；`loadWebEpub` 同步改为复用同一实现。
 3. ✅ localStorage key 已集中到 `src/lib/storageKeys.ts`（21 个 key/前缀，动态 key 配生成函数），16 个使用文件全部改为常量导入；共享 key（`app-settings`、`epub-find/replace-history`、`tepub-epub-style-library-v1`、`tepub-editor-launch-files`、`tepub-editor-batch-task:` 等）在模块内注明共享方。webAccount.ts 私有账号 key 原地保留（storageKeys.ts 登记备查）；app.html 内联脚本无法 import，保留 `tepub-web-view-mode` 硬编码副本并两侧注释互指。
 4. ✅ 字体逻辑 → `src/lib/fontTools.ts`（17 个导出、26 个测试，epub-editor 净 -125 行）；DOM 遍历与 FontFace 注册等状态耦合部分按计划留在页面。
 
-### 第 3 期：桌面页面接入平台抽象（进行中：reader、library 已完成）
+### 第 3 期：桌面页面接入平台抽象 ✅ 已完成（2026-07-28）
 
-把 editor / epub-editor / library / reader 中的 `@tauri-apps/api` 直接调用替换为 `$lib/platform`（迁移规则见 `docs/web-deploy.md`）。桌面行为保持不变。完成后桌面与 Web 可逐步共享页面组件。
+四个桌面主页面的 `@tauri-apps/api` 直接调用已全部替换为 `$lib/platform`（迁移规则见 `docs/web-deploy.md`），静态导入清零，桌面行为不变，web 端各能力均有论证过的降级：
 
-- ✅ reader（2026-07-28）：8 处替换，静态导入清零；PlatformAdapter 新增 `listen`、`getFileSrcConverter`（异步取同步转换器，适配 CSS url() 同步替换）。
-- ✅ library（2026-07-28）：60 处替换，静态导入清零；新增 `onCurrentWindowFileDrop`、`setCurrentWindowTitle`；对话框走已有 openDialog/message/ask（web = 浏览器等价物）。
-- ⬜ editor（约 9000 行，直接依赖面最大，建议按工作流分多次：打开/保存 → 对话框 → 窗口管理）。
-- ⬜ epub-editor（建议与第 4 期拆组件交替进行，拆一块迁一块）。
+- ✅ reader：8 处替换；PlatformAdapter 新增 `listen`、`getFileSrcConverter`（异步取同步转换器，适配 CSS url() 同步替换）。
+- ✅ library：60 处替换；新增 `onCurrentWindowFileDrop`、`setCurrentWindowTitle`。
+- ✅ editor：62 处替换；新增 `emit`、`setCurrentWindowPosition/Size`、`onCurrentWindowMoved`、窗口句柄 `listen`（窗口作用域，可收 emitTo 定向事件，与全局 listen 不可互换）。
+- ✅ epub-editor：59 处替换；新增 `confirm`（OK/Cancel 双钮，与 ask/message 语义区分）。
 
-### 第 4 期：拆分巨型组件（进行中：FileTreePanel 已拆出）
+### 第 4 期：拆分巨型组件 ✅ 路线图刀次已完成（2026-07-28）
 
-前两期完成后组件已明显变薄，再按 UI 区域拆：
+全部新组件为 Svelte 5 runes 写法（$props/$bindable/$derived/$effect + 回调 props），业务 IO 一律留页面：
 
-- `epub-editor`：✅ 文件树面板 → `src/lib/epubEditor/FileTreePanel.svelte`（254 行，纯 runes，净 -191 行）。下一刀：TabsBar（openTabs/activeTabIndex/modifiedFiles 边界清晰），随后预览面板、查找替换面板（可顺带切换到 findReplace.ts）、字体预览。
-- `editor`：⬜ 工具栏、设置面板、批处理队列。
-- 注意事项（FileTreePanel 落地经验）：legacy 页面里 `set = set` 自赋值穿过 runes 组件 prop 会被引用相等短路，拆组件时须同步改为 `new Set()` 拷贝；共享 CSS 选择器要按归属拆分。
-
-拆出的新组件**直接用 Svelte 5 runes 写**；存量 legacy 代码不主动改写，随拆分自然消化。这就是 Svelte 5 迁移策略：新代码 runes、旧代码不动、不做一次性大迁移。
+- `epub-editor`（6764 → 4974 行，累计净 -1790）：FileTreePanel(254)、TabsBar(218)、FindReplacePanel(579，顺带切换共享 findReplace)、PreviewPane(278)、FontPreviewPanel(236)，另有 fileIcons.ts 纯函数模块。
+- `editor`（9032 → 7426 行，累计净 -1606）：ChapterSidebar(417)、EditorToolbar(216)、设置面板 8 个 tab 全部抽出——SettingsDisplayTab(70)、SettingsFontsTab(233)、SettingsTocTab(282)、SettingsApiTab(385)、SettingsAiTab(172)、SettingsProofLogsTab(217)、SettingsStylesTab(649)、SettingsHistoryTab(119)。批处理队列经核实该页不存在（原审查记录有误）。
+- 落地经验（拆组件必读）：
+  1. legacy `set = set` / `arr = [...arr]` 自赋值穿 runes prop 会被引用相等短路——Set 用 `new Set()`、数组项字段原地改用 `map + 新对象`；
+  2. keyed each 下仅浅拷贝数组不够，item 引用不变则 `{#if item.x}` 不重算；
+  3. 页面裸元素选择器（button、::-webkit-scrollbar、共享 .placeholder）经 Svelte hash 作用域后不穿组件边界，需组件内复制并注释；
+  4. 全局 app.css 的样式不受组件边界影响，无需迁移。
+- 可选后续（不在路线图承诺内）：editor 校对面板（~540 行，与检查/AI 状态纠缠最深）；ChapterSidebar 加 scrollToChapter 实例方法收编页面的 getElementById 滚动定位。
 
 ### 第 5 期：错误处理与通知统一 ✅ 已完成（2026-07-28）
 
