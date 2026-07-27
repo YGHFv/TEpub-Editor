@@ -47,6 +47,9 @@ export interface PlatformAdapter {
   getWindowByLabel(label: string): Promise<PlatformWindowHandle | null>;
   getCurrentWindow(): PlatformWindowHandle;
   onCurrentWindowCloseRequested(handler: (event: PlatformCloseEvent) => void | Promise<void>): Promise<PlatformUnlisten>;
+  // 系统级文件拖放：仅在文件真正落下（drop）时回调本地路径列表。
+  onCurrentWindowFileDrop(handler: (paths: string[]) => void): Promise<PlatformUnlisten>;
+  setCurrentWindowTitle(title: string): Promise<void>;
   closeCurrentWindow(): Promise<void>;
   createWebviewWindow(label: string, url: string, options?: Record<string, unknown>): Promise<PlatformWindowHandle>;
 }

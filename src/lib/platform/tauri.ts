@@ -136,6 +136,18 @@ export function createTauriPlatform(): PlatformAdapter {
       return await getCurrentWindow().onCloseRequested(handler);
     },
 
+    async onCurrentWindowFileDrop(handler) {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return await getCurrentWindow().onDragDropEvent((event) => {
+        if (event.payload.type === "drop") handler(event.payload.paths);
+      });
+    },
+
+    async setCurrentWindowTitle(title) {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().setTitle(title);
+    },
+
     async closeCurrentWindow() {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().close();

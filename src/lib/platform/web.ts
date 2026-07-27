@@ -152,6 +152,19 @@ export function createWebPlatform(): PlatformAdapter {
       return () => {};
     },
 
+    async onCurrentWindowFileDrop() {
+      // 浏览器沙箱拿不到拖入文件的本地路径（DataTransferItem 只给 File 内容），
+      // 而消费方（书库入库）需要把"本地路径"交给后端命令处理，语义在 web 端
+      // 不成立。监听器永不触发没有副作用（HTML5 拖放仍由页面自身的
+      // dragover/drop 处理器兜底），返回 no-op unlisten。
+      return () => {};
+    },
+
+    async setCurrentWindowTitle(title) {
+      // 浏览器等价物：改标签页标题。
+      if (typeof document !== "undefined") document.title = title;
+    },
+
     async closeCurrentWindow() {
       if (typeof window !== "undefined") window.close();
     },

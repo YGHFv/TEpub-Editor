@@ -1,9 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
-  import { open, message, ask } from "@tauri-apps/plugin-dialog";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import { platform } from "$lib/platform";
   import LibraryGrid from "$lib/LibraryGrid.svelte";
   import LibraryListSimple from "$lib/LibraryListSimple.svelte";
   import LibraryPreview from "$lib/LibraryPreview.svelte";
@@ -385,7 +382,7 @@
       try {
         beginBookIngest(filePath);
         try {
-          await invoke("add_book_to_library", {
+          await platform.invoke("add_book_to_library", {
             filePath,
             config: libraryConfig,
             overrideFilename,
@@ -439,7 +436,7 @@
       return;
     }
     try {
-      await invoke("rename_book_file", {
+      await platform.invoke("rename_book_file", {
         bookId: renamePrompt.bookId,
         newFilename: v,
       });
@@ -461,9 +458,9 @@
   // 在系统资源管理器中打开并选中
   async function openFileLocation(book: BookEntry) {
     try {
-      await invoke("reveal_in_explorer", { path: book.filePath });
+      await platform.revealPath(book.filePath);
     } catch (e: any) {
-      await message(`打开文件位置失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`打开文件位置失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
   // 简洁列表列配置
@@ -581,7 +578,7 @@
   // 启动入口：先确认应用模式 + 是否首次启动
   async function bootLibrary() {
     try {
-      appMode = await invoke<AppModeInfo>("get_app_mode_info");
+      appMode = await platform.invoke<AppModeInfo>("get_app_mode_info");
     } catch (e) {
       console.error("获取应用模式失败:", e);
       // 取不到也别卡死，按"已配置"流程走
@@ -598,7 +595,7 @@
 
   async function browseFirstLaunchDir() {
     try {
-      const selected = await open({ directory: true, multiple: false });
+      const selected = await platform.openDialog({ directory: true, multiple: false });
       if (typeof selected === "string") {
         firstLaunchInput = selected;
       }
@@ -611,7 +608,7 @@
   async function confirmFirstLaunchDir() {
     const trimmed = firstLaunchInput.trim();
     if (!trimmed) {
-      await message("请选择书库存放目录", { title: "需要选择目录", kind: "warning" });
+      await platform.message("请选择书库存放目录", { title: "需要选择目录", kind: "warning" });
       return;
     }
     if (firstLaunchSaving) return;
@@ -633,14 +630,14 @@
       ensureAiProviderSelections();
       syncGlobalAppSettingsFromLibrary();
       // 写一份空 library.json 到该目录，建立 pointer
-      await invoke("save_library", { data: { config: libraryConfig, books: [] } });
+      await platform.invoke("save_library", { data: { config: libraryConfig, books: [] } });
       firstLaunchOpen = false;
       isLoading = true;
       await loadLibrary();
-      try { appMode = await invoke<AppModeInfo>("get_app_mode_info"); } catch {}
+      try { appMode = await platform.invoke<AppModeInfo>("get_app_mode_info"); } catch {}
     } catch (e: any) {
       console.error("保存书库目录失败:", e);
-      await message(`保存失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`保存失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       firstLaunchSaving = false;
     }
@@ -648,7 +645,7 @@
 
   async function loadLibrary() {
     try {
-      const data = await invoke<LibraryData>("load_library");
+      const data = await platform.invoke<LibraryData>("load_library");
       books = (data.books || []).map(b => {
         if (!b.filename && b.filePath) {
           const segs = b.filePath.replace(/\\/g, "/").split("/");
@@ -698,7 +695,7 @@
   async function loadCover(book: BookEntry) {
     if (!book.coverPath || coverCache.has(book.id)) return;
     try {
-      const data = await invoke<number[]>("get_library_cover_data", { coverPath: book.coverPath });
+      const data = await platform.invoke<number[]>("get_library_cover_data", { coverPath: book.coverPath });
       // 按 coverPath 扩展名推断 MIME，否则默认 jpeg
       const lower = book.coverPath.toLowerCase();
       let mime = "image/jpeg";
@@ -716,7 +713,7 @@
   async function addBook() {
     let selected: string | string[] | null = null;
     try {
-      selected = await open({
+      selected = await platform.openDialog({
         filters: [{ name: "图书文件", extensions: ["epub", "txt"] }],
         multiple: true,
       });
@@ -745,7 +742,7 @@
       const head = added > 0
         ? `成功添加 ${added} 本，${failures.length} 本失败:\n`
         : `添加失败 (${failures.length}):\n`;
-      await message(head + failures.join("\n"), {
+      await platform.message(head + failures.join("\n"), {
         title: "添加图书",
         kind: added > 0 ? "warning" : "error",
       });
@@ -756,7 +753,7 @@
   async function openExternalFiles() {
     let selected: string | string[] | null = null;
     try {
-      selected = await open({
+      selected = await platform.openDialog({
         filters: [{ name: "图书文件", extensions: ["epub", "txt"] }],
         multiple: true,
       });
@@ -783,12 +780,12 @@
   async function openToolbox() {
     appSettings = loadAppSettings();
     try {
-      let toolboxWin = await WebviewWindow.getByLabel("toolbox");
+      let toolboxWin = await platform.getWindowByLabel("toolbox");
       if (toolboxWin) {
         await toolboxWin.show();
         await toolboxWin.setFocus();
         if (appSettings.closeLibraryOnToolboxOpen !== false) {
-          const appWindow = getCurrentWindow();
+          const appWindow = platform.getCurrentWindow();
           await appWindow.hide();
           toolboxWin.once("tauri://destroyed", async () => {
             await appWindow.show();
@@ -798,8 +795,7 @@
         return;
       }
 
-      toolboxWin = new WebviewWindow("toolbox", {
-        url: "/toolbox",
+      toolboxWin = await platform.createWebviewWindow("toolbox", "/toolbox", {
         title: "TEpub-Editor 工具箱",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -812,7 +808,7 @@
       });
 
       if (appSettings.closeLibraryOnToolboxOpen !== false) {
-        const appWindow = getCurrentWindow();
+        const appWindow = platform.getCurrentWindow();
         await appWindow.hide();
         toolboxWin.once("tauri://destroyed", async () => {
           await appWindow.show();
@@ -821,7 +817,7 @@
       }
     } catch (e: any) {
       console.error("打开工具箱失败:", e);
-      await message(`打开工具箱失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`打开工具箱失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 
@@ -868,9 +864,8 @@
 
     const encoded = encodeURIComponent(filePath);
     try {
-      const appWindow = getCurrentWindow();
-      const win = new WebviewWindow(windowLabel("reader"), {
-        url: `/reader?file=${encoded}`,
+      const appWindow = platform.getCurrentWindow();
+      const win = await platform.createWebviewWindow(windowLabel("reader"), `/reader?file=${encoded}`, {
         title: "TEpub-Editor-Reader",
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -890,7 +885,7 @@
       }
     } catch (e: any) {
       console.error("打开阅读器失败:", e);
-      await message(`打开失败：${e}`, { title: "错误", kind: "error" });
+      await platform.message(`打开失败：${e}`, { title: "错误", kind: "error" });
     }
   }
 
@@ -903,9 +898,8 @@
     const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
 
     try {
-      const appWindow = getCurrentWindow();
-      const win = new WebviewWindow(`editor-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, {
-        url,
+      const appWindow = platform.getCurrentWindow();
+      const win = await platform.createWebviewWindow(`editor-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, url, {
         title,
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -925,18 +919,18 @@
       }
     } catch (e: any) {
       console.error("打开编辑器失败:", e);
-      await message(`打开失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`打开失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 
   async function removeBook(book: BookEntry) {
     try {
-      await invoke("remove_book_from_library", { bookId: book.id });
+      await platform.invoke("remove_book_from_library", { bookId: book.id });
       if (selectedBook?.id === book.id) selectedBook = null;
       await loadLibrary();
     } catch (e: any) {
       console.error("移除图书失败:", e);
-      await message(`移除图书失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`移除图书失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 
@@ -948,9 +942,8 @@
     const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
 
     try {
-      const appWindow = getCurrentWindow();
-      const win = new WebviewWindow(windowLabel("editor"), {
-        url,
+      const appWindow = platform.getCurrentWindow();
+      const win = await platform.createWebviewWindow(windowLabel("editor"), url, {
         title,
         width: TOOLBOX_WINDOW_WIDTH,
         height: TOOLBOX_WINDOW_HEIGHT,
@@ -971,7 +964,7 @@
       }
     } catch (e: any) {
       console.error("打开编辑器失败:", e);
-      await message(`打开失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`打开失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 
@@ -989,9 +982,8 @@
     const title = `${book.title || "阅读"} · 阅读`;
 
     try {
-      const appWindow = getCurrentWindow();
-      const win = new WebviewWindow(windowLabel("reader"), {
-        url,
+      const appWindow = platform.getCurrentWindow();
+      const win = await platform.createWebviewWindow(windowLabel("reader"), url, {
         title,
         // 阅读器窗口纵横比 高:宽 = 8:5（严格：500*8/5=800）。
         // 选 800 是为了在 1366x768 这类老笔记本上仍能完整显示
@@ -1015,7 +1007,7 @@
       }
     } catch (e: any) {
       console.error("打开阅读器失败:", e);
-      await message(`打开失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`打开失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 
@@ -1073,7 +1065,7 @@
     aiMatchMessage = "智能匹配中...";
     aiMatchResult = null;
     try {
-      const response = await invoke<{ content: string }>("run_ai_proofing", {
+      const response = await platform.invoke<{ content: string }>("run_ai_proofing", {
         request: {
           config,
           systemPrompt: LIBRARY_MATCH_SYSTEM_PROMPT,
@@ -1123,7 +1115,7 @@
     if (savingMetadata) return;
     savingMetadata = true;
     try {
-      const updated = await invoke<BookEntry>("update_book_metadata", {
+      const updated = await platform.invoke<BookEntry>("update_book_metadata", {
         bookId: selectedBook.id,
         title: metaForm.title,
         author: metaForm.author,
@@ -1141,7 +1133,7 @@
       showMetaEditor = false;
     } catch (e: any) {
       console.error("保存元数据失败:", e);
-      await message(`保存失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`保存失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       savingMetadata = false;
     }
@@ -1294,7 +1286,7 @@
     if (!selectedBook || refreshing) return;
     refreshing = true;
     try {
-      const updated = await invoke<BookEntry>("refresh_book_metadata", {
+      const updated = await platform.invoke<BookEntry>("refresh_book_metadata", {
         bookId: selectedBook.id,
       });
       const idx = books.findIndex(b => b.id === selectedBook!.id);
@@ -1307,7 +1299,7 @@
       if (!metaForm.epubUuid) metaForm.epubUuid = updated.epubUuid || "";
     } catch (e: any) {
       console.error("重新提取元数据失败:", e);
-      await message(`重新提取失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`重新提取失败: ${e}`, { title: "错误", kind: "error" });
     } finally {
       refreshing = false;
     }
@@ -1328,13 +1320,13 @@
   async function changeCover() {
     if (!selectedBook) return;
     try {
-      const selected = await open({
+      const selected = await platform.openDialog({
         filters: [{ name: "图片文件", extensions: ["jpg", "jpeg", "png", "gif"] }],
         multiple: false,
       });
       if (!selected) return;
-      const data = await invoke<number[]>("read_binary_file", { path: selected });
-      const newPath = await invoke<string>("update_book_cover", {
+      const data = await platform.invoke<number[]>("read_binary_file", { path: selected });
+      const newPath = await platform.invoke<string>("update_book_cover", {
         bookId: selectedBook.id,
         coverData: data,
       });
@@ -1351,7 +1343,7 @@
       if (idx >= 0) books[idx].coverPath = newPath;
     } catch (e: any) {
       console.error("更换封面失败:", e);
-      await message(`更换封面失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`更换封面失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
 
@@ -1445,8 +1437,8 @@
   async function saveLibraryConfig() {
     try {
       syncGlobalAppSettingsFromLibrary();
-      const data = await invoke<LibraryData>("load_library");
-      await invoke("save_library", {
+      const data = await platform.invoke<LibraryData>("load_library");
+      await platform.invoke("save_library", {
         data: { ...data, config: libraryConfig }
       });
     } catch (e) {
@@ -1519,13 +1511,13 @@
         : true
     ).length;
     if (localCount === 0) return;
-    const yes = await ask(
+    const yes = await platform.ask(
       `是否立即按新规则重命名书库中的 ${localCount} 本本地书文件？\n（仅会重命名复制进书库的副本，引用模式下的原文件不会动）`,
       { kind: "info", title: "应用新命名" },
     );
     if (!yes) return;
     try {
-      const summary = await invoke<{ renamed: number; skipped: number; failed: number; failures: string[] }>(
+      const summary = await platform.invoke<{ renamed: number; skipped: number; failed: number; failures: string[] }>(
         "rebuild_book_filenames",
         { config: libraryConfig },
       );
@@ -1533,10 +1525,10 @@
       if (summary.failed > 0) {
         msg += `，失败 ${summary.failed} 本：\n` + summary.failures.slice(0, 5).join("\n");
       }
-      await message(msg, { title: "重命名完成", kind: summary.failed > 0 ? "warning" : "info" });
+      await platform.message(msg, { title: "重命名完成", kind: summary.failed > 0 ? "warning" : "info" });
       await loadLibrary();
     } catch (e: any) {
-      await message(`重命名失败: ${e}`, { title: "错误", kind: "error" });
+      await platform.message(`重命名失败: ${e}`, { title: "错误", kind: "error" });
     }
   }
   function onNamingPresetChange(v: string) {
@@ -1555,7 +1547,7 @@
 
   async function pickCustomWorkDir(): Promise<boolean> {
     try {
-      const selected = await open({ directory: true, multiple: false });
+      const selected = await platform.openDialog({ directory: true, multiple: false });
       if (typeof selected === "string" && selected.trim()) {
         libraryConfig.customWorkDir = selected;
         await saveLibraryConfig();
@@ -1588,22 +1580,23 @@
     appSettings = loadAppSettings();
     applyGlobalTheme(appSettings.uiTheme);
     await bootLibrary();
-    const appWindow = getCurrentWindow();
 
     // 主窗口固定标题为 TEpub-Editor（避免被 editor/reader 子流程残留的 TXT/EPUB 标题污染）
     try {
-      await appWindow.setTitle("TEpub-Editor");
+      await platform.setCurrentWindowTitle("TEpub-Editor");
     } catch (_) {}
 
-    appWindow.onCloseRequested(async (event) => {
-      if (appWindow.label === "main" && window.location.pathname === "/library") {
+    // 窗口 label 不会变，进入页面时取一次即可（web 端恒为 null，关闭拦截自然不生效）
+    const currentWindowLabel = await platform.getCurrentWindowLabel().catch(() => null);
+    platform.onCurrentWindowCloseRequested(async (event) => {
+      if (currentWindowLabel === "main" && window.location.pathname === "/library") {
         event.preventDefault();
         window.location.href = "/";
       }
     });
 
     try {
-      const launchInfo = await invoke<LaunchInfo>("get_launch_info");
+      const launchInfo = await platform.invoke<LaunchInfo>("get_launch_info");
       const action = launchInfo?.action ?? "";
       const launchPaths = collectLaunchPaths(launchInfo).filter(supportedLaunchPath);
       if (launchPaths.length > 0) {
@@ -1618,21 +1611,19 @@
     } catch {}
 
 
-    // 拖放处理 (Tauri)
-    appWindow.onDragDropEvent((ev: any) => {
-      if (ev.payload?.type === "drop" && ev.payload?.paths) {
-        (async () => {
-          for (const p of ev.payload.paths) {
-            try {
-              await addBookWithCollisionRetry(p);
-            } catch (e) {
-              console.error("拖放添加失败:", e);
-              toastError("拖放添加图书失败：" + e);
-            }
+    // 系统级文件拖放（桌面端；web 端不触发，由 svelte:window 的 HTML5 drop 兜底）
+    platform.onCurrentWindowFileDrop((paths) => {
+      (async () => {
+        for (const p of paths) {
+          try {
+            await addBookWithCollisionRetry(p);
+          } catch (e) {
+            console.error("拖放添加失败:", e);
+            toastError("拖放添加图书失败：" + e);
           }
-          await loadLibrary();
-        })();
-      }
+        }
+        await loadLibrary();
+      })();
     });
   });
 
