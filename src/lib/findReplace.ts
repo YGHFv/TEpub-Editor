@@ -139,6 +139,63 @@ export function findNextMatch(
 }
 
 /**
+ * 桌面 epub-editor 单文件定向查找（带循环回绕开关）。
+ *
+ * 语义逐条沿用桌面 epub-editor 既有内联实现，与 findNextMatch（toolbox 语义）
+ * 存在历史差异，为保持行为兼容不做统一：
+ * - up 方向以“匹配整体位于 start 之前”为界（to <= start），
+ *   而非 findNextMatch 的 from < start（regex）/ from <= start（字面量）；
+ * - text 模式 down 用 indexOf(pattern, start)，可命中与上一次匹配重叠的位置；
+ * - wrap 回绕：down 回到第一个匹配、up 回到最后一个匹配；
+ *   text 模式回绕命中还需分别满足 from < start（down，直查失败时天然成立）
+ *   与 from >= start（up，跨越 start 的匹配不回绕命中），regex 模式无此限制。
+ *
+ * regex 模式 pattern 非法时抛出原生 SyntaxError，
+ * 调用方沿用既有 try/catch → “搜索模式无效。” 提示路径。
+ */
+export function findNextMatchWrapped(
+  content: string,
+  query: FindQuery,
+  start: number,
+  direction: SearchDirection,
+  wrap: boolean,
+): MatchRange | null {
+  if (!query.pattern) return null;
+  if (isPlainTextQuery(query)) {
+    const pattern = query.pattern;
+    if (direction === "down") {
+      const index = content.indexOf(pattern, start);
+      if (index !== -1) return { from: index, to: index + pattern.length };
+      if (wrap) {
+        const wrapIndex = content.indexOf(pattern, 0);
+        if (wrapIndex !== -1 && wrapIndex < start) {
+          return { from: wrapIndex, to: wrapIndex + pattern.length };
+        }
+      }
+      return null;
+    }
+    const index = content.substring(0, start).lastIndexOf(pattern);
+    if (index !== -1) return { from: index, to: index + pattern.length };
+    if (wrap) {
+      const wrapIndex = content.lastIndexOf(pattern);
+      if (wrapIndex !== -1 && wrapIndex >= start) {
+        return { from: wrapIndex, to: wrapIndex + pattern.length };
+      }
+    }
+    return null;
+  }
+  const matches = findAllMatches(content, query);
+  if (matches.length === 0) return null;
+  if (direction === "down") {
+    return matches.find((item) => item.from >= start) ?? (wrap ? matches[0] : null);
+  }
+  for (let i = matches.length - 1; i >= 0; i--) {
+    if (matches[i].to <= start) return matches[i];
+  }
+  return wrap ? matches[matches.length - 1] : null;
+}
+
+/**
  * 单文件全部替换。
  * - regex 模式：replacement 支持 $1/$& 等替换模板；
  * - text 模式：replacement 始终按字面量插入（$ 无特殊含义），

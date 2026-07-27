@@ -7,6 +7,7 @@ import {
   filterFilesInScope,
   findAllMatches,
   findNextMatch,
+  findNextMatchWrapped,
   replaceAllInContent,
   type FindQuery,
 } from "./findReplace";
@@ -150,6 +151,77 @@ describe("findNextMatch", () => {
 
   it("returns null for empty patterns", () => {
     expect(findNextMatch(content, textQuery(""), 0, "down")).toBeNull();
+  });
+});
+
+describe("findNextMatchWrapped", () => {
+  const content = "ab ab ab";
+
+  it("finds down matches from start and wraps back to the first match", () => {
+    expect(findNextMatchWrapped(content, textQuery("ab"), 0, "down", false)).toEqual({
+      from: 0,
+      to: 2,
+    });
+    expect(findNextMatchWrapped(content, textQuery("ab"), 7, "down", false)).toBeNull();
+    expect(findNextMatchWrapped(content, textQuery("ab"), 7, "down", true)).toEqual({
+      from: 0,
+      to: 2,
+    });
+    expect(findNextMatchWrapped(content, regexQuery("ab"), 7, "down", true)).toEqual({
+      from: 0,
+      to: 2,
+    });
+  });
+
+  it("searches up only among matches fully before start (to <= start)", () => {
+    // 与 findNextMatch 的 up 边界（from < start / from <= start）不同：
+    // 桌面 epub-editor 语义要求匹配整体位于 start 之前
+    expect(findNextMatchWrapped(content, textQuery("ab"), 5, "up", false)).toEqual({
+      from: 3,
+      to: 5,
+    });
+    expect(findNextMatchWrapped(content, textQuery("ab"), 4, "up", false)).toEqual({
+      from: 0,
+      to: 2,
+    });
+    expect(findNextMatchWrapped(content, regexQuery("ab"), 4, "up", false)).toEqual({
+      from: 0,
+      to: 2,
+    });
+    expect(findNextMatchWrapped(content, textQuery("ab"), 1, "up", false)).toBeNull();
+  });
+
+  it("wraps up to the last match, except straddling text matches", () => {
+    expect(findNextMatchWrapped(content, textQuery("ab"), 1, "up", true)).toEqual({
+      from: 6,
+      to: 8,
+    });
+    expect(findNextMatchWrapped(content, regexQuery("ab"), 1, "up", true)).toEqual({
+      from: 6,
+      to: 8,
+    });
+    // text 模式 up 回绕要求 from >= start：唯一匹配跨越 start 时不命中（沿用桌面实现）
+    expect(findNextMatchWrapped("abc", textQuery("abc"), 1, "up", true)).toBeNull();
+    // regex 模式无此限制
+    expect(findNextMatchWrapped("abc", regexQuery("abc"), 1, "up", true)).toEqual({
+      from: 0,
+      to: 3,
+    });
+  });
+
+  it("allows overlapping text matches when searching down", () => {
+    // text 模式 down 用 indexOf，可命中与上一次匹配重叠的位置
+    expect(findNextMatchWrapped("aaa", textQuery("aa"), 1, "down", false)).toEqual({
+      from: 1,
+      to: 3,
+    });
+  });
+
+  it("returns null for empty patterns and throws on invalid regex", () => {
+    expect(findNextMatchWrapped(content, textQuery(""), 0, "down", true)).toBeNull();
+    expect(() => findNextMatchWrapped(content, regexQuery("([bad"), 0, "down", true)).toThrow(
+      SyntaxError,
+    );
   });
 });
 
