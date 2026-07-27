@@ -12,6 +12,20 @@
     import Toast from "$lib/Toast.svelte";
     import { toastInfo, toastSuccess, toastError } from "$lib/toast";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import {
+        DEFAULT_FONT_PREVIEW_TEXT,
+        type FontGlyphAnalyzeResult,
+        accumulateCharUsage,
+        buildFontFamilyAliases,
+        collectSelectorsUsingFont,
+        createFontPreviewFamily,
+        fontFileStem,
+        getBinaryMimeType,
+        isFontFile,
+        resolveCssHrefToZipPath,
+        styleAttributeUsesFont,
+        summarizeGlyphUsage,
+    } from "$lib/fontTools";
 
     // Setup Close Listener
     onMount(() => {
@@ -298,8 +312,6 @@
     let currentFontSrc: string | null = null;
     let currentFontFamily = "";
     let currentFontInternalName = "";
-    const DEFAULT_FONT_PREVIEW_TEXT =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n春江潮水连海平，海上明月共潮生。\n永和九年，岁在癸丑，暮春之初。\n天地玄黄 宇宙洪荒 日月盈昃 辰宿列张\n1234567890 ~!@#$%^&*()";
     let fontPreviewText = DEFAULT_FONT_PREVIEW_TEXT;
     let fontStatsLoading = false;
     let fontUsedCharCount = 0;
@@ -311,30 +323,6 @@
 
     function isImageFile(name: string) {
         return /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(name);
-    }
-
-    function isFontFile(name: string) {
-        return /\.(ttf|otf|woff|woff2|eot)$/i.test(name);
-    }
-
-    function getBinaryMimeType(fileName: string): string {
-        const lower = fileName.toLowerCase();
-        if (lower.endsWith(".png")) return "image/png";
-        if (lower.endsWith(".gif")) return "image/gif";
-        if (lower.endsWith(".svg")) return "image/svg+xml";
-        if (lower.endsWith(".webp")) return "image/webp";
-        if (lower.endsWith(".woff2")) return "font/woff2";
-        if (lower.endsWith(".woff")) return "font/woff";
-        if (lower.endsWith(".ttf")) return "font/ttf";
-        if (lower.endsWith(".otf")) return "font/otf";
-        if (lower.endsWith(".eot")) return "application/vnd.ms-fontobject";
-        return "application/octet-stream";
-    }
-
-    interface FontGlyphAnalyzeResult {
-        internal_names: string[];
-        missing_chars: string[];
-        unsupported_reason: string | null;
     }
 
     interface EpubPrepareResult {
@@ -387,95 +375,6 @@
         fontMissingGlyphCharCount = 0;
         fontMissingChars = [];
         fontStatsError = "";
-    }
-
-    function normalizeZipPath(path: string): string {
-        return path.replace(/\\/g, "/").replace(/^\/+/, "");
-    }
-
-    function stripQueryAndHash(path: string): string {
-        return path.split("#")[0].split("?")[0];
-    }
-
-    function normalizeFontFamilyName(name: string): string {
-        return name.replace(/^['"]|['"]$/g, "").trim().toLowerCase();
-    }
-
-    function parseFontFamilyList(value: string): string[] {
-        const chunks = value.match(/\"[^\"]*\"|'[^']*'|[^,]+/g) || [];
-        return chunks
-            .map((item) => normalizeFontFamilyName(item))
-            .filter(Boolean);
-    }
-
-    function collectSelectorsUsingFont(
-        cssContent: string,
-        targetFamilies: Set<string>,
-    ): string[] {
-        const selectors: string[] = [];
-        const ruleRegex = /([^{}]+)\{([^{}]*)\}/g;
-        let match: RegExpExecArray | null;
-
-        while ((match = ruleRegex.exec(cssContent)) !== null) {
-            const selectorPart = match[1].trim();
-            const body = match[2];
-            if (!selectorPart || selectorPart.startsWith("@")) continue;
-
-            const familyMatch = body.match(/font-family\s*:\s*([^;]+);?/i);
-            if (!familyMatch) continue;
-
-            const families = parseFontFamilyList(familyMatch[1]);
-            if (!families.some((f) => targetFamilies.has(f))) continue;
-
-            selectorPart
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean)
-                .forEach((s) => selectors.push(s));
-        }
-
-        return selectors;
-    }
-
-    function collectFontFaceFamiliesByFontPath(
-        cssPath: string,
-        cssContent: string,
-        targetFontPath: string,
-    ): string[] {
-        const result: string[] = [];
-        const target = normalizeZipPath(stripQueryAndHash(targetFontPath));
-        const faceRegex = /@font-face\s*\{([\s\S]*?)\}/gi;
-        let faceMatch: RegExpExecArray | null;
-
-        while ((faceMatch = faceRegex.exec(cssContent)) !== null) {
-            const block = faceMatch[1];
-            const srcMatch = block.match(/src\s*:\s*([^;]+);?/i);
-            const familyMatch = block.match(/font-family\s*:\s*([^;]+);?/i);
-            if (!srcMatch || !familyMatch) continue;
-
-            const srcValue = srcMatch[1];
-            const urls = [...srcValue.matchAll(/url\(([^)]+)\)/gi)].map((m) =>
-                m[1].trim().replace(/^['"]|['"]$/g, ""),
-            );
-
-            const matched = urls.some((u) => {
-                if (!u || u.startsWith("data:") || u.startsWith("http")) {
-                    return false;
-                }
-                const abs = normalizeZipPath(
-                    stripQueryAndHash(resolvePath(cssPath, u)),
-                );
-                return abs === target;
-            });
-
-            if (!matched) continue;
-
-            parseFontFamilyList(familyMatch[1]).forEach((family) => {
-                if (family) result.push(family);
-            });
-        }
-
-        return result;
     }
 
     let showPrompt = false;
@@ -767,26 +666,13 @@
 
             if (token !== currentFontStatsToken) return;
 
-            const familyAliases = new Set<string>();
-            familyAliases.add(normalizeFontFamilyName(fontFamily));
-            familyAliases.add(
-                normalizeFontFamilyName(fontFile.name.replace(/\.[^.]+$/, "")),
-            );
-            extraAliases.forEach((name) => {
-                familyAliases.add(normalizeFontFamilyName(name));
+            const familyAliases = buildFontFamilyAliases({
+                fontFamily,
+                fontFileName: fontFile.name,
+                extraAliases,
+                cssContents,
+                fontPath: fontFile.path,
             });
-
-            for (const cssPath of cssPaths) {
-                const cssContent = cssContents[cssPath] || "";
-                const linkedFamilies = collectFontFaceFamiliesByFontPath(
-                    cssPath,
-                    cssContent,
-                    fontFile.path,
-                );
-                linkedFamilies.forEach((f) =>
-                    familyAliases.add(normalizeFontFamilyName(f)),
-                );
-            }
 
             const parser = new DOMParser();
             const usageMap = new Map<string, number>();
@@ -814,9 +700,7 @@
                 )) {
                     const href = linkEl.getAttribute("href") || "";
                     if (!href) continue;
-                    const cssPath = normalizeZipPath(
-                        stripQueryAndHash(resolvePath(htmlPath, href)),
-                    );
+                    const cssPath = resolveCssHrefToZipPath(htmlPath, href);
                     const cssContent = cssContents[cssPath] || "";
                     if (!cssContent) continue;
                     selectors.push(
@@ -836,10 +720,7 @@
 
                 doc.querySelectorAll("[style]").forEach((el) => {
                     const style = el.getAttribute("style") || "";
-                    const familyMatch = style.match(/font-family\s*:\s*([^;]+);?/i);
-                    if (!familyMatch) return;
-                    const families = parseFontFamilyList(familyMatch[1]);
-                    if (families.some((f) => familyAliases.has(f))) {
+                    if (styleAttributeUsesFont(style, familyAliases)) {
                         matchedElements.add(el);
                     }
                 });
@@ -868,10 +749,10 @@
                         }
 
                         if (isCovered) {
-                            for (const ch of textNode.nodeValue || "") {
-                                if (/\s/u.test(ch)) continue;
-                                usageMap.set(ch, (usageMap.get(ch) || 0) + 1);
-                            }
+                            accumulateCharUsage(
+                                textNode.nodeValue || "",
+                                usageMap,
+                            );
                         }
                     }
 
@@ -899,19 +780,13 @@
                 return;
             }
 
-            const missingSet = new Set(analyze.missing_chars || []);
-            let usedCount = 0;
-            let missingCount = 0;
-            for (const [ch, count] of usageMap.entries()) {
-                usedCount += count;
-                if (missingSet.has(ch)) {
-                    missingCount += count;
-                }
-            }
-
-            fontUsedCharCount = usedCount;
-            fontMissingGlyphCharCount = missingCount;
-            fontMissingChars = Array.from(missingSet.values());
+            const missingSummary = summarizeGlyphUsage(
+                usageMap,
+                analyze.missing_chars || [],
+            );
+            fontUsedCharCount = missingSummary.usedCount;
+            fontMissingGlyphCharCount = missingSummary.missingCount;
+            fontMissingChars = missingSummary.missingChars;
         } catch (e) {
             fontStatsError = "统计失败：" + e;
         } finally {
@@ -2713,7 +2588,7 @@ document.addEventListener("click", function (event) {
                     console.warn("Failed to read font internal names", inspectErr);
                 }
 
-                const renderFamily = "tepub-font-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+                const renderFamily = createFontPreviewFamily();
                 const buffer = fontBinary.buffer.slice(
                     fontBinary.byteOffset,
                     fontBinary.byteOffset + fontBinary.byteLength,
@@ -2725,7 +2600,7 @@ document.addEventListener("click", function (event) {
                 currentFontFamily = renderFamily;
 
                 const statFamily =
-                    internalNames[0] || file.name.replace(/\.[^.]+$/, "");
+                    internalNames[0] || fontFileStem(file.name);
                 await computeFontUsageStats(file, statFamily, internalNames);
 
                 fileContent = "";
