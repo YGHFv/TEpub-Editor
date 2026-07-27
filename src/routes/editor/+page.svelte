@@ -11,6 +11,8 @@
     import SettingsShell from "$lib/SettingsShell.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import Toast from "$lib/Toast.svelte";
+    import { toastError } from "$lib/toast";
     import {
         loadAppSettings as loadGlobalAppSettings,
         saveAppSettings as saveGlobalAppSettings,
@@ -3688,6 +3690,7 @@
             }
         } catch (e) {
             console.error("Select file failed:", e);
+            toastError("打开文件失败：" + e);
         }
     }
 
@@ -4466,6 +4469,7 @@
             allMatches = [];
         } catch (e) {
             replaceMsg = "替换失败";
+            toastError("替换失败：" + e);
         }
     }
 
@@ -4643,6 +4647,7 @@
 
 <!-- <ContextMenu /> --> <!-- Removed duplicate at top -->
 
+<Toast />
 
 <main class="app-container" on:contextmenu|preventDefault>
     <header class="toolbar">

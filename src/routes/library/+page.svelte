@@ -9,6 +9,8 @@
   import LibraryPreview from "$lib/LibraryPreview.svelte";
   import CustomSelect from "$lib/CustomSelect.svelte";
   import SettingsShell from "$lib/SettingsShell.svelte";
+  import Toast from "$lib/Toast.svelte";
+  import { toastError } from "$lib/toast";
   import {
     applyTheme as applyGlobalTheme,
     loadAppSettings,
@@ -602,6 +604,7 @@
       }
     } catch (e) {
       console.error("选择目录失败:", e);
+      toastError("选择目录失败：" + e);
     }
   }
 
@@ -686,6 +689,7 @@
       }
     } catch (e) {
       console.error("加载书库失败:", e);
+      toastError("加载书库失败：" + e);
     } finally {
       isLoading = false;
     }
@@ -718,6 +722,7 @@
       });
     } catch (e: any) {
       console.error("打开文件对话框失败:", e);
+      toastError("打开文件对话框失败：" + e);
       return;
     }
     if (!selected) return;
@@ -757,6 +762,7 @@
       });
     } catch (e: any) {
       console.error("打开文件对话框失败:", e);
+      toastError("打开文件对话框失败：" + e);
       return;
     }
     if (!selected) return;
@@ -1359,6 +1365,7 @@
       setTimeout(() => { if (copyFeedbackKey === key) copyFeedbackKey = ""; }, 1200);
     } catch (e) {
       console.error("复制失败:", e);
+      toastError("复制失败：" + e);
     }
   }
 
@@ -1422,6 +1429,7 @@
           await addBookWithCollisionRetry(path);
         } catch (e) {
           console.error("拖放添加失败:", e);
+          toastError("拖放添加图书失败：" + e);
         }
       }
     }
@@ -1443,6 +1451,7 @@
       });
     } catch (e) {
       console.error("保存设置失败:", e);
+      toastError("保存设置失败：" + e);
     }
   }
 
@@ -1555,6 +1564,7 @@
       return false;
     } catch (e) {
       console.error("选择目录失败:", e);
+      toastError("选择目录失败：" + e);
       return false;
     }
   }
@@ -1617,6 +1627,7 @@
               await addBookWithCollisionRetry(p);
             } catch (e) {
               console.error("拖放添加失败:", e);
+              toastError("拖放添加图书失败：" + e);
             }
           }
           await loadLibrary();
@@ -1635,6 +1646,8 @@
   on:dragover={(e) => e.preventDefault()}
   on:drop={handleDragDrop}
 />
+
+<Toast />
 
 <div class="library-app" data-context-type="library-root">
   <!-- 顶部工具栏 -->
