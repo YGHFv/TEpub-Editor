@@ -37,6 +37,18 @@ export function createTauriPlatform(): PlatformAdapter {
       return invoke<T>(command, args);
     },
 
+    async listen(event, handler) {
+      const { listen } = await import("@tauri-apps/api/event");
+      // Tauri 的 Event<T>（含 event / payload / id）结构上兼容 PlatformEvent<T>，
+      // 直接透传 handler。
+      return await listen(event, handler);
+    },
+
+    async getFileSrcConverter() {
+      const { convertFileSrc } = await import("@tauri-apps/api/core");
+      return convertFileSrc;
+    },
+
     async openDialog<T>(options = {}) {
       const { open } = await import("@tauri-apps/plugin-dialog");
       return open(options as any) as Promise<T>;

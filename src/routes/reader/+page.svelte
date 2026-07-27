@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
-  import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { platform, type PlatformUnlisten } from "$lib/platform";
   import { page } from "$app/stores";
   import ReaderTocNode from "$lib/ReaderTocNode.svelte";
   import CustomSelect from "$lib/CustomSelect.svelte";
@@ -42,7 +40,7 @@
   let loading = true;
   let loadingMsg = "正在解压 EPUB…";
   let errorMsg = "";
-  let unlistenPrepareStage: UnlistenFn | undefined;
+  let unlistenPrepareStage: PlatformUnlisten | undefined;
 
   type EpubPrepareStageEvent = {
     epubPath: string;
@@ -217,7 +215,7 @@
       // 1) 准备文件（处理混淆 / 加密格式）
       loadingMsg = "正在解压 EPUB…";
       try {
-        const prepared: any = await invoke("prepare_epub_for_open", { epubPath });
+        const prepared: any = await platform.invoke("prepare_epub_for_open", { epubPath });
         // 注意：Rust 端字段是 snake_case `processed_path`（与编辑器对齐）。
         // 之前这里用 preparedPath，永远 undefined，混淆 EPUB 进不来。
         if (prepared && prepared.processed_path) epubPath = prepared.processed_path;
@@ -227,7 +225,7 @@
       }
 
       // 2) 触发解压并建立缓存
-      await invoke("extract_epub", { epubPath });
+      await platform.invoke("extract_epub", { epubPath });
 
       // 2.5) 立刻拿临时目录绝对路径，准备 asset URL 拼接器和 fetch 辅助
       //
@@ -241,7 +239,7 @@
       //     IPC batch 快至少一个数量级。
       let tempDirPath = "";
       try {
-        tempDirPath = await invoke<string>("get_epub_temp_dir_path", { epubPath });
+        tempDirPath = await platform.invoke<string>("get_epub_temp_dir_path", { epubPath });
       } catch (e) {
         console.warn("get_epub_temp_dir_path 失败，回退到 IPC 文本读取:", e);
       }
@@ -254,8 +252,12 @@
       // 一退就退到 root，于是出现 GET asset.localhost/Fonts/x.ttf 之类 500，
       // 全屏背景图也因此加载不出来。
       const tempDirSlash = tempDirPath.replace(/\\/g, "/").replace(/\/+$/, "");
+      // 同步转换器从 platform 异步获取一次（Tauri 端懒加载 convertFileSrc；
+      // Web 端为恒等函数）——toAssetUrl 会在 processCss 的同步 replace 回调里
+      // 被逐次调用，必须保持同步。
+      const convertFileSrc = tempDirPath ? await platform.getFileSrcConverter() : null;
       function toAssetUrl(absInEpub: string): string {
-        if (!tempDirPath) return absInEpub;
+        if (!tempDirPath || !convertFileSrc) return absInEpub;
         const cleaned = absInEpub.replace(/\\/g, "/").replace(/^\/+/, "");
         return convertFileSrc(`${tempDirSlash}/${cleaned}`, "asset");
       }
@@ -271,7 +273,7 @@
             console.warn(`fetch ${absInEpub} 失败，回退 IPC:`, e);
           }
         }
-        return invoke<string>("read_epub_file_content", { epubPath, filePath: absInEpub });
+        return platform.invoke<string>("read_epub_file_content", { epubPath, filePath: absInEpub });
       }
 
       // 3) 读取 container.xml -> OPF 路径（解析与 webEpub.ts 共用同一实现）
@@ -1809,11 +1811,14 @@
   }
 
   async function back() {
-    try {
-      await getCurrentWindow().close();
-    } catch {
-      window.history.back();
+    // 桌面：关闭当前 Tauri 窗口（失败时回退浏览器后退）；Web：直接浏览器后退。
+    if (platform.isTauri) {
+      try {
+        await platform.closeCurrentWindow();
+        return;
+      } catch {}
     }
+    window.history.back();
   }
 
   // ===== 生命周期 =====
@@ -1835,7 +1840,7 @@
     window.addEventListener("resize", onResize);
     window.addEventListener("wheel", onWheel, { passive: false });
 
-    listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
+    platform.listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
       if (!loading) return;
       if (event.payload.epubPath && event.payload.epubPath !== epubPath) return;
       loadingMsg = event.payload.message;

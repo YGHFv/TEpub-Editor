@@ -73,6 +73,20 @@ export function createWebPlatform(): PlatformAdapter {
       });
     },
 
+    async listen() {
+      // Web 端没有 Tauri 事件总线，后端推送事件（如解压进度阶段）不会到达
+      // 浏览器。监听器都是纯通知消费者（更新 loading 文案等），事件永不触发
+      // 没有副作用，因此这里安全地返回 no-op unlisten。
+      return () => {};
+    },
+
+    async getFileSrcConverter() {
+      // 浏览器无法把本地文件系统路径映射为可加载 URL（无 asset 协议）。
+      // 返回恒等转换：调用方 fetch 该"URL"会快速失败，走它们自己的回退路径
+      // （如 reader 回退到 platform.invoke 的文本读取）。
+      return (filePath: string) => filePath;
+    },
+
     async openDialog() {
       throw new PlatformUnsupportedError("Native file picker", "web");
     },

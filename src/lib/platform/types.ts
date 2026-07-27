@@ -5,6 +5,17 @@ export type PlatformCloseEvent = {
   preventDefault(): void;
 };
 
+// 后端 → 前端事件（Tauri event bus 的最小结构子集）。
+export type PlatformEvent<T> = {
+  event: string;
+  payload: T;
+};
+
+// 把本地文件路径转换为 webview 可加载 URL 的同步函数（Tauri convertFileSrc 的
+// 抽象）。以"异步取同步转换器"的形式暴露：调用方常在同步字符串替换回调
+// （如 CSS url() 改写）里逐次转换，无法逐次 await。
+export type FileSrcConverter = (filePath: string, protocol?: string) => string;
+
 export interface PlatformWindowHandle {
   label: string | null;
   show(): Promise<void>;
@@ -22,6 +33,8 @@ export interface PlatformAdapter {
   apiBaseUrl: string;
 
   invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>;
+  listen<T = unknown>(event: string, handler: (event: PlatformEvent<T>) => void): Promise<PlatformUnlisten>;
+  getFileSrcConverter(): Promise<FileSrcConverter>;
   openDialog<T = string | string[] | null>(options?: Record<string, unknown>): Promise<T>;
   saveDialog(options?: Record<string, unknown>): Promise<string | null>;
   message(text: string, options?: Record<string, unknown>): Promise<void>;
