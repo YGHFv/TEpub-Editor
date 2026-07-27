@@ -6,6 +6,13 @@
   import { page } from "$app/stores";
   import ReaderTocNode from "$lib/ReaderTocNode.svelte";
   import CustomSelect from "$lib/CustomSelect.svelte";
+  import {
+    parseContainerRootfilePath,
+    parseOpfPackage,
+    parseNavDocument,
+    parseNcxDocument,
+    type WebEpubNavItem,
+  } from "$lib/webEpub";
 
   // ===== EPUB 数据结构 =====
   interface SpineEntry {
@@ -267,7 +274,7 @@
         return invoke<string>("read_epub_file_content", { epubPath, filePath: absInEpub });
       }
 
-      // 3) 读取 container.xml -> OPF 路径
+      // 3) 读取 container.xml -> OPF 路径（解析与 webEpub.ts 共用同一实现）
       loadingMsg = "解析目录…";
       let containerXml = "";
       try {
@@ -275,51 +282,23 @@
       } catch (e) {
         throw new Error("找不到 META-INF/container.xml: " + e);
       }
-      const containerDoc = new DOMParser().parseFromString(containerXml, "application/xml");
-      const rootfile = findFirstByLocalName(containerDoc, "rootfile");
-      const opfPath = rootfile?.getAttribute("full-path") || "";
-      if (!opfPath) throw new Error("container.xml 中未找到 rootfile");
+      const opfPath = parseContainerRootfilePath(containerXml);
 
-      // 4) 读取 OPF
+      // 4) 读取并解析 OPF
       const opfXml = await fetchText(opfPath);
-      const opfDoc = new DOMParser().parseFromString(opfXml, "application/xml");
+      const pkg = parseOpfPackage(opfXml, opfPath);
+      bookTitle = (pkg.metadata.title || "").trim() || "未命名";
+      bookAuthor = (pkg.metadata.creator || "").trim();
 
-      // metadata
-      const titleEl = findFirstByLocalName(opfDoc, "title");
-      const creatorEl = findFirstByLocalName(opfDoc, "creator");
-      bookTitle = (titleEl?.textContent || "").trim() || "未命名";
-      bookAuthor = (creatorEl?.textContent || "").trim();
-
-      // manifest: id -> {href, mediaType, properties}
-      const manifest = new Map<string, { href: string; mediaType: string; properties: string }>();
-      findAllByLocalName(opfDoc, "item").forEach(item => {
-        const id = item.getAttribute("id") || "";
-        const href = item.getAttribute("href") || "";
-        const mediaType = item.getAttribute("media-type") || "";
-        const properties = item.getAttribute("properties") || "";
-        if (id && href) manifest.set(id, { href, mediaType, properties });
-      });
-
-      const opfDir = opfPath.split("/").slice(0, -1).join("/");
-      const inOpf = (rel: string) => opfDir ? `${opfDir}/${rel}` : rel;
-
-      // spine 顺序
-      const spineRefs: string[] = [];
-      findAllByLocalName(opfDoc, "itemref").forEach(it => {
-        const id = it.getAttribute("idref");
-        if (id) spineRefs.push(id);
-      });
-      const spinePaths: string[] = spineRefs
-        .map(id => manifest.get(id)?.href)
-        .filter((h): h is string => !!h)
-        .map(h => resolveRelative(opfPath, h));
+      const spinePaths: string[] = pkg.spine
+        .map((s) => s.manifest?.fullPath)
+        .filter((h): h is string => !!h);
 
       // 5) 读取 NCX / Nav 用于章节标题 + 多级目录树
       //
       // 两个产物：
       //   titleByPath: 每个 spine 文件的最佳章节标题，用于 spine[i].title
-      //                （旧行为，其他地方依赖这个字段）
-      //   toc:         原始的多级目录树，每个节点带一个 spineIdx（或 -1）
+      //   toc:         多级目录树，每个节点带一个 spineIdx（或 -1）
       //                用于"目录"面板的 ReaderTocNode 递归渲染
       const titleByPath = new Map<string, string>();
 
@@ -333,123 +312,45 @@
         return -1;
       }
 
+      // webEpub.ts 的层级 nav/ncx 解析结果 -> 本页 TocNode（附带填 titleByPath）
+      const mapNavItems = (items: WebEpubNavItem[]): TocNode[] =>
+        items.map((item) => {
+          const abs = item.fullPath ? item.fullPath.split("#")[0] : "";
+          if (abs && item.label && !titleByPath.has(abs)) {
+            titleByPath.set(abs, item.label);
+          }
+          return {
+            title: item.label || "(未命名)",
+            spineIdx: item.fullPath ? hrefToSpineIdx(item.fullPath) : -1,
+            children: item.children ? mapNavItems(item.children) : [],
+          };
+        });
+
       // EPUB3 nav
-      const navEntry = Array.from(manifest.values()).find(m => m.properties.split(/\s+/).includes("nav"));
+      const navEntry = pkg.manifest.find((m) =>
+        m.properties.split(/\s+/).includes("nav"),
+      );
       if (navEntry) {
         try {
-          const navPath = resolveRelative(opfPath, navEntry.href);
-          const navHtml = await fetchText(navPath);
-          const navDoc = new DOMParser().parseFromString(navHtml, "application/xhtml+xml");
-          const navs = findAllByLocalName(navDoc, "nav");
-          let tocNav = navs.find(n => (n.getAttribute("epub:type") || n.getAttributeNS("http://www.idpf.org/2007/ops", "type")) === "toc") || navs[0];
-          if (tocNav) {
-            // 先兼容旧逻辑：一次 querySelectorAll 填 titleByPath
-            tocNav.querySelectorAll("a").forEach(a => {
-              const href = (a as HTMLElement).getAttribute("href") || "";
-              const text = (a.textContent || "").trim();
-              if (href && text) {
-                const abs = resolveRelative(navPath, href);
-                if (!titleByPath.has(abs)) titleByPath.set(abs, text);
-              }
-            });
-
-            // 再递归构建 toc 树。nav 结构标准是：
-            //   <nav><ol><li><a>标题</a><ol>子列表</ol></li>...</ol></nav>
-            // 个别 epub 用 ul 代替 ol；容错：同时接受 ol / ul。
-            const walkList = (listEl: Element): TocNode[] => {
-              const out: TocNode[] = [];
-              for (const li of Array.from(listEl.children)) {
-                if (li.tagName.toLowerCase() !== "li") continue;
-                // 第一层 a / span 当作本节点的标题
-                let title = "";
-                let spineIdx = -1;
-                for (const child of Array.from(li.children)) {
-                  const tag = child.tagName.toLowerCase();
-                  if (tag === "a") {
-                    title = (child.textContent || "").trim();
-                    const href = (child as HTMLElement).getAttribute("href") || "";
-                    if (href) spineIdx = hrefToSpineIdx(resolveRelative(navPath, href));
-                    break;
-                  } else if (tag === "span") {
-                    title = (child.textContent || "").trim();
-                    break;
-                  }
-                }
-                // 子列表
-                let children: TocNode[] = [];
-                const subList = Array.from(li.children).find(c => {
-                  const t = c.tagName.toLowerCase();
-                  return t === "ol" || t === "ul";
-                });
-                if (subList) children = walkList(subList);
-                if (title || children.length) {
-                  out.push({ title: title || "(未命名)", spineIdx, children });
-                }
-              }
-              return out;
-            };
-            const rootList = Array.from(tocNav.children).find(c => {
-              const t = c.tagName.toLowerCase();
-              return t === "ol" || t === "ul";
-            });
-            if (rootList) toc = walkList(rootList);
-          }
+          const navHtml = await fetchText(navEntry.fullPath);
+          toc = mapNavItems(parseNavDocument(navHtml, navEntry.fullPath));
         } catch {}
       }
 
-      // EPUB2 NCX (manifest 中 media-type == application/x-dtbncx+xml 或扩展名 .ncx)
-      // 逻辑：navMap > navPoint（可嵌套 navPoint 形成层级）
+      // EPUB2 NCX (media-type == application/x-dtbncx+xml 或扩展名 .ncx)
       if (toc.length === 0) {
-        const ncxEntry = Array.from(manifest.values()).find(m =>
-          m.mediaType === "application/x-dtbncx+xml" || m.href.endsWith(".ncx")
+        const ncxEntry = pkg.manifest.find(
+          (m) =>
+            m.mediaType === "application/x-dtbncx+xml" ||
+            m.fullPath.endsWith(".ncx"),
         );
         if (ncxEntry) {
           try {
-            const ncxPath = resolveRelative(opfPath, ncxEntry.href);
-            const ncxXml = await fetchText(ncxPath);
-            const ncxDoc = new DOMParser().parseFromString(ncxXml, "application/xml");
-            // 同时填 titleByPath（旧行为）
-            findAllByLocalName(ncxDoc, "navPoint").forEach(np => {
-              const labelEl = findFirstByLocalName(np, "text");
-              const contentEl = findFirstByLocalName(np, "content");
-              const text = (labelEl?.textContent || "").trim();
-              const src = contentEl?.getAttribute("src") || "";
-              if (text && src) {
-                const abs = resolveRelative(ncxPath, src);
-                if (!titleByPath.has(abs)) titleByPath.set(abs, text);
-              }
-            });
-            // 递归构建 toc 树：只处理直接子 navPoint（不走 getElementsByTagName 的
-            // 扁平化路径，否则层级会全部丢失）
-            const walkNavPoints = (parent: Element): TocNode[] => {
-              const out: TocNode[] = [];
-              for (const np of Array.from(parent.children)) {
-                if (np.localName !== "navPoint") continue;
-                // navPoint 的直接子：navLabel/text、content、子 navPoint 列表
-                let title = "";
-                let spineIdx = -1;
-                for (const child of Array.from(np.children)) {
-                  if (child.localName === "navLabel") {
-                    const textEl = Array.from(child.children).find(c => c.localName === "text");
-                    title = (textEl?.textContent || "").trim();
-                  } else if (child.localName === "content") {
-                    const src = child.getAttribute("src") || "";
-                    if (src) spineIdx = hrefToSpineIdx(resolveRelative(ncxPath, src));
-                  }
-                }
-                const children = walkNavPoints(np);
-                if (title || children.length) {
-                  out.push({ title: title || "(未命名)", spineIdx, children });
-                }
-              }
-              return out;
-            };
-            const navMap = findFirstByLocalName(ncxDoc, "navMap");
-            if (navMap) toc = walkNavPoints(navMap);
+            const ncxXml = await fetchText(ncxEntry.fullPath);
+            toc = mapNavItems(parseNcxDocument(ncxXml, ncxEntry.fullPath));
           } catch {}
         }
       }
-
       // 最终兜底：没有 nav 也没有 ncx —— 每个 spine 文件就是一个顶层目录项。
       if (toc.length === 0) {
         toc = spinePaths.map((p, i) => ({

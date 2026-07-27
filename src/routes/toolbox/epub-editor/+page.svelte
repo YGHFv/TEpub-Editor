@@ -6,6 +6,13 @@
   import CustomSelect from "$lib/CustomSelect.svelte";
   import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
   import FileTreeItem from "$lib/FileTreeItem.svelte";
+  import {
+    countMatchesInContent,
+    filterFilesInScope,
+    findNextMatch,
+    replaceAllInContent,
+    type FindQuery,
+  } from "$lib/findReplace";
   import TocNode from "$lib/TocNode.svelte";
   import ToolImportPage from "$lib/ToolImportPage.svelte";
   import { hasUnsavedEpubChanges } from "$lib/unsavedChanges";
@@ -1310,45 +1317,20 @@
 
   function getFilesInScope() {
     if (!doc) return [];
-    if (searchScope === "current") return selectedFile ? [selectedFile] : [];
-    if (searchScope === "open") return selectedFile ? [selectedFile] : [];
-    if (searchScope === "html") return doc.files.filter((file) => file.kind === "xhtml" && file.editable);
-    if (searchScope === "selected") {
-      const selected = Array.from(multiSelectedFiles)
-        .map((path) => fileByPath(path))
-        .filter((file): file is WebEpubFileEntry => !!file?.editable);
-      return selected.length > 0 ? selected : (selectedFile ? [selectedFile] : []);
-    }
-    return doc.files.filter((file) => file.editable);
+    const selected = Array.from(multiSelectedFiles)
+      .map((path) => fileByPath(path))
+      .filter((file): file is WebEpubFileEntry => !!file);
+    return filterFilesInScope(searchScope, {
+      allFiles: doc.files,
+      currentFile: selectedFile,
+      selectedFiles: selected,
+      isHtml: (file) => file.kind === "xhtml",
+      isEditable: (file) => file.editable,
+    });
   }
 
-  function regexForFind() {
-    if (!isRegex) return null;
-    return new RegExp(findPattern, "g");
-  }
-
-  function findMatchInContent(content: string, start: number, direction: "down" | "up") {
-    if (!findPattern) return null;
-    if (isRegex) {
-      const regex = regexForFind();
-      if (!regex) return null;
-      const matches: { from: number; to: number }[] = [];
-      let match: RegExpExecArray | null;
-      while ((match = regex.exec(content))) {
-        const from = match.index;
-        const to = from + match[0].length;
-        if (to === from) regex.lastIndex += 1;
-        matches.push({ from, to });
-      }
-      if (direction === "up") return [...matches].reverse().find((item) => item.from < start) || null;
-      return matches.find((item) => item.from >= start) || null;
-    }
-    if (direction === "up") {
-      const index = content.lastIndexOf(findPattern, Math.max(0, start));
-      return index >= 0 ? { from: index, to: index + findPattern.length } : null;
-    }
-    const index = content.indexOf(findPattern, Math.max(0, start));
-    return index >= 0 ? { from: index, to: index + findPattern.length } : null;
+  function currentFindQuery(): FindQuery {
+    return { pattern: findPattern, mode: isRegex ? "regex" : "text" };
   }
 
   async function contentForFile(file: WebEpubFileEntry) {
@@ -1385,6 +1367,7 @@
       : [...files.slice(currentIndex), ...files.slice(0, currentIndex)];
 
     try {
+      const query = currentFindQuery();
       for (const file of ordered) {
         const content = await contentForFile(file);
         const isCurrent = file.path === selectedFile.path;
@@ -1393,9 +1376,9 @@
             ? (direction === "up" ? currentMatchInfo.from - 1 : currentMatchInfo.to)
             : currentEditorCursor(direction, content.length))
           : (direction === "up" ? content.length : 0);
-        let match = findMatchInContent(content, cursor, direction);
+        let match = findNextMatch(content, query, cursor, direction);
         if (!match && wrapAround && isCurrent && files.length === 1) {
-          match = findMatchInContent(content, direction === "up" ? content.length : 0, direction);
+          match = findNextMatch(content, query, direction === "up" ? content.length : 0, direction);
         }
         if (match) {
           await selectMatch(file, match.from, match.to);
@@ -1439,23 +1422,6 @@
     await findNext();
   }
 
-  function replaceAllInContent(content: string) {
-    if (!findPattern) return { content, count: 0 };
-    if (isRegex) {
-      const regex = regexForFind();
-      if (!regex) return { content, count: 0 };
-      const matches = content.match(regex);
-      return { content: content.replace(regex, replacePattern), count: matches?.length || 0 };
-    }
-    let count = 0;
-    let index = 0;
-    while ((index = content.indexOf(findPattern, index)) !== -1) {
-      count += 1;
-      index += findPattern.length;
-    }
-    return { content: content.split(findPattern).join(replacePattern), count };
-  }
-
   async function performReplaceAll() {
     if (!doc || !findPattern) {
       searchMessage = "请输入查找内容";
@@ -1464,9 +1430,10 @@
     rememberSearchInputs();
     let total = 0;
     try {
+      const query = currentFindQuery();
       for (const file of getFilesInScope()) {
         const original = await contentForFile(file);
-        const replaced = replaceAllInContent(original);
+        const replaced = replaceAllInContent(original, query, replacePattern);
         if (replaced.count === 0) continue;
         total += replaced.count;
         updateWebEpubText(doc, file.path, replaced.content);
@@ -1492,16 +1459,10 @@
     }
     let total = 0;
     try {
+      const query = currentFindQuery();
       for (const file of getFilesInScope()) {
         const content = await contentForFile(file);
-        if (isRegex) total += content.match(regexForFind() || /$a/g)?.length || 0;
-        else {
-          let index = 0;
-          while ((index = content.indexOf(findPattern, index)) !== -1) {
-            total += 1;
-            index += findPattern.length;
-          }
-        }
+        total += countMatchesInContent(content, query);
       }
       searchMessage = `共 ${total} 处匹配`;
     } catch {

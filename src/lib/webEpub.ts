@@ -259,7 +259,7 @@ function parseSpine(opfDoc: XMLDocument, manifest: WebEpubManifestItem[]) {
   });
 }
 
-function parseNavDocument(source: string, navPath: string) {
+export function parseNavDocument(source: string, navPath: string) {
   const navDoc = parseXml(source, "NAV");
   const navDir = dirname(navPath);
   const navs = byLocalName(navDoc, "nav") as Element[];
@@ -291,7 +291,7 @@ function parseNavDocument(source: string, navPath: string) {
   return directChildrenByLocalName(rootOl, "li").map(parseLi).filter((item): item is WebEpubNavItem => !!item);
 }
 
-function parseNcxDocument(source: string, ncxPath: string) {
+export function parseNcxDocument(source: string, ncxPath: string) {
   const ncxDoc = parseXml(source, "NCX");
   const ncxDir = dirname(ncxPath);
   function parseNavPoint(node: Element): WebEpubNavItem | null {
@@ -427,18 +427,12 @@ export async function loadWebEpub(file: File): Promise<WebEpubDocument> {
   const containerSource = await zip.file("META-INF/container.xml")?.async("string");
   if (!containerSource) throw new Error("缺少 META-INF/container.xml");
 
-  const containerDoc = parseXml(containerSource, "container.xml");
-  const rootfile = byLocalName(containerDoc, "rootfile")[0] as Element | undefined;
-  const opfPath = rootfile?.getAttribute("full-path") || "";
-  if (!opfPath) throw new Error("container.xml 未声明 OPF 路径");
+  const opfPath = parseContainerRootfilePath(containerSource);
 
   const opfSource = await zip.file(opfPath)?.async("string");
   if (!opfSource) throw new Error(`找不到 OPF 文件：${opfPath}`);
 
-  const opfDoc = parseXml(opfSource, "OPF");
-  const opfDir = dirname(opfPath);
-  const manifest = parseManifest(opfDoc, opfDir);
-  const spine = parseSpine(opfDoc, manifest);
+  const { opfDir, metadata, manifest, spine } = parseOpfPackage(opfSource, opfPath);
   const navItems = await parseNavigation(zip, manifest);
 
   return {
@@ -446,12 +440,28 @@ export async function loadWebEpub(file: File): Promise<WebEpubDocument> {
     zip,
     opfPath,
     opfDir,
-    metadata: parseMetadata(opfDoc),
+    metadata,
     manifest,
     spine,
     navItems,
     files: collectFiles(zip, manifest),
   };
+}
+
+export function parseContainerRootfilePath(source: string) {
+  const containerDoc = parseXml(source, "container.xml");
+  const rootfile = byLocalName(containerDoc, "rootfile")[0] as Element | undefined;
+  const opfPath = rootfile?.getAttribute("full-path") || "";
+  if (!opfPath) throw new Error("container.xml 未声明 OPF 路径");
+  return opfPath;
+}
+
+export function parseOpfPackage(source: string, opfPath: string) {
+  const opfDoc = parseXml(source, "OPF");
+  const opfDir = dirname(opfPath);
+  const manifest = parseManifest(opfDoc, opfDir);
+  const spine = parseSpine(opfDoc, manifest);
+  return { opfDir, metadata: parseMetadata(opfDoc), manifest, spine };
 }
 
 export async function readWebEpubText(doc: WebEpubDocument, path: string) {
