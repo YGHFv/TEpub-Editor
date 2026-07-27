@@ -27,6 +27,12 @@ jobs:
       - name: install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: run svelte-check
+        run: pnpm check
+
+      - name: run frontend tests
+        run: pnpm test
+
       - name: build web frontend
         run: pnpm build:web
 

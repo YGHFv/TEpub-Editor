@@ -13,7 +13,32 @@ env:
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/tepub-editor-web
 
 jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run svelte-check
+        run: pnpm check
+
+      - name: Run frontend tests
+        run: pnpm test
+
   docker:
+    needs: test
     runs-on: ubuntu-22.04
     permissions:
       contents: read

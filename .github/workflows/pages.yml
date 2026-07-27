@@ -34,6 +34,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run svelte-check
+        run: pnpm check
+
+      - name: Run frontend tests
+        run: pnpm test
+
       - name: Build static web app
         run: TEPUB_BASE_PATH=/TEpub-Editor pnpm build:web
 
