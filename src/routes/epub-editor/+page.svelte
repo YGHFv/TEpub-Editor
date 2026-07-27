@@ -8,7 +8,7 @@
     import TocNode from "$lib/TocNode.svelte";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
-    import FileTreeItem from "$lib/FileTreeItem.svelte";
+    import FileTreePanel from "$lib/epubEditor/FileTreePanel.svelte";
     import Toast from "$lib/Toast.svelte";
     import { toastInfo, toastSuccess, toastError } from "$lib/toast";
     import CustomSelect from "$lib/CustomSelect.svelte";
@@ -890,7 +890,7 @@
                 });
             };
             autoExpand(fileTree);
-            expandedFolders = expandedFolders;
+            expandedFolders = new Set(expandedFolders);
 
             isLoading = false;
 
@@ -1084,7 +1084,7 @@
         } else {
             expandedFolders.add(path);
         }
-        expandedFolders = expandedFolders;
+        expandedFolders = new Set(expandedFolders);
     }
 
     onMount(() => {
@@ -1162,7 +1162,7 @@
                         } else {
                             multiSelectedFiles.add(context.path);
                         }
-                        multiSelectedFiles = multiSelectedFiles;
+                        multiSelectedFiles = new Set(multiSelectedFiles);
                     }
                 } else if (action === "save-as") {
                     try {
@@ -1417,7 +1417,7 @@
                             );
                             if (newFolderPath) {
                                 expandedFolders.add(newFolderPath);
-                                expandedFolders = expandedFolders;
+                                expandedFolders = new Set(expandedFolders);
                             }
                         } catch (e) {
                             console.error("Rename/Refactor failed", e);
@@ -1544,7 +1544,7 @@
                             isProjectDirty = true;
 
                             expandedFolders.add(folderPath);
-                            expandedFolders = expandedFolders;
+                            expandedFolders = new Set(expandedFolders);
                         } catch (e) {
                             console.error(
                                 "[DEBUG] new-file: add_epub_file failed:",
@@ -1575,7 +1575,7 @@
                                             (currentPath ? "/" : "") + parts[i];
                                         expandedFolders.add(currentPath);
                                     }
-                                    expandedFolders = expandedFolders;
+                                    expandedFolders = new Set(expandedFolders);
 
                                     selectFile(node);
                                     return true;
@@ -1695,7 +1695,7 @@
                                 filesToSelect.forEach((p) =>
                                     multiSelectedFiles.add(p),
                                 );
-                                multiSelectedFiles = multiSelectedFiles; // trigger
+                                multiSelectedFiles = new Set(multiSelectedFiles); // trigger
 
                                 // Auto expand folders for first item
                                 const firstPath = filesToSelect
@@ -1709,7 +1709,7 @@
                                             (currentPath ? "/" : "") + parts[i];
                                         expandedFolders.add(currentPath);
                                     }
-                                    expandedFolders = expandedFolders;
+                                    expandedFolders = new Set(expandedFolders);
                                 }
                             } else {
                                 toastInfo("该目录项下未找到文件。");
@@ -1796,7 +1796,7 @@
                             await loadEpub();
                             if (context.path) {
                                 expandedFolders.add(context.path);
-                                expandedFolders = expandedFolders;
+                                expandedFolders = new Set(expandedFolders);
                             }
                         }
                     }
@@ -2423,7 +2423,7 @@ document.addEventListener("click", function (event) {
             } else {
                 multiSelectedFiles.add(file.path);
             }
-            multiSelectedFiles = multiSelectedFiles; // trigger update
+            multiSelectedFiles = new Set(multiSelectedFiles); // trigger update
             // Also set as current selected file for preview? Yes.
         } else {
             // Normal click clears multi-select unless right-click
@@ -2432,7 +2432,7 @@ document.addEventListener("click", function (event) {
             // But if user Left Clicks, clear multi-select
             multiSelectedFiles.clear();
             multiSelectedFiles.add(file.path);
-            multiSelectedFiles = multiSelectedFiles;
+            multiSelectedFiles = new Set(multiSelectedFiles);
         }
 
         currentGeneration++;
@@ -2441,7 +2441,7 @@ document.addEventListener("click", function (event) {
         selectedFile = file;
 
         expandParents(fileTree, file.path);
-        expandedFolders = expandedFolders;
+        expandedFolders = new Set(expandedFolders);
         await tick();
         const escapedPath = file.path.replace(/"/g, '\"');
         const fileNode = document.querySelector('.tree-node[data-path="' + escapedPath + '"]');
@@ -3387,7 +3387,7 @@ document.addEventListener("click", function (event) {
         };
 
         fileTree = sortRecursive(fileTree);
-        expandedFolders = expandedFolders; // Trigger reactivity
+        expandedFolders = new Set(expandedFolders); // Trigger reactivity
     }
 
     async function loadTOC() {
@@ -3474,7 +3474,7 @@ document.addEventListener("click", function (event) {
                 currentPath += (i > 0 ? "/" : "") + parts[i];
                 expandedFolders.add(currentPath);
             }
-            expandedFolders = expandedFolders;
+            expandedFolders = new Set(expandedFolders);
         }
 
         function findAndSelect(nodes: EpubFileNode[]): boolean {
@@ -3505,29 +3505,6 @@ document.addEventListener("click", function (event) {
 
         expandParentFolders(targetPath);
         findAndSelect(fileTree);
-    }
-
-    function getFileDescription(file: EpubFileNode): string {
-        if (file.file_type === "html" && file.title) {
-            return file.title;
-        }
-
-        const fileName = file.name.toLowerCase();
-        if (fileName === "container.xml") return "\u5BB9\u5668\u914D\u7F6E";
-        if (fileName === "content.opf") return "\u5143\u6570\u636E";
-        if (fileName.includes("toc") || fileName.includes("ncx")) return "\u76EE\u5F55\u7ED3\u6784";
-        if (file.file_type === "css") return "\u6837\u5F0F\u8868";
-        if (file.file_type === "font") {
-            return "\u5B57\u4F53 " + ((file.size || 0) / 1024).toFixed(1) + "KB";
-        }
-        if (file.file_type === "image") {
-            const sizeStr = file.size ? Math.round(file.size / 1024) + "KB" : "";
-            if (file.resolution) {
-                return file.resolution + (sizeStr ? " " + sizeStr : "");
-            }
-            return sizeStr ? "\u56FE\u7247 " + sizeStr : "\u56FE\u7247\u8D44\u6E90";
-        }
-        return file.path;
     }
 
     function highlightHTML(code: string): string {
@@ -4400,45 +4377,19 @@ document.addEventListener("click", function (event) {
         <div class="error page-error">{error}</div>
     {:else}
         <div class="epub-editor">
-            <aside class="file-tree">
-                <div class="tree-header">
-                    <h3>&#25991;&#20214;&#32467;&#26500;</h3>
-                    <div class="header-actions">
-                        <button
-                            class="icon-btn"
-                            on:click={saveAllChanges}
-                            disabled={isSaving || (!isProjectDirty && modifiedFiles.size === 0)}
-                            title="&#20445;&#23384;&#25152;&#26377;&#26356;&#25913; (Ctrl+S)"
-                            aria-label="&#20445;&#23384;&#25152;&#26377;&#26356;&#25913;"
-                            class:dirty={isProjectDirty || modifiedFiles.size > 0}
-                        >
-                            {isSaving ? "\u4FDD\u5B58\u4E2D..." : "\u{1F4BE}"}
-                        </button>
-                        <button
-                            class="icon-btn"
-                            on:click={loadEpub}
-                            title="&#21047;&#26032; EPUB"
-                            aria-label="&#21047;&#26032; EPUB"
-                        >
-                            &#128260;
-                        </button>
-                    </div>
-                </div>
-                <div class="tree-content">
-                    {#each fileTree as node (node.path)}
-                        <FileTreeItem
-                            {node}
-                            {expandedFolders}
-                            {selectedFile}
-                            {multiSelectedFiles}
-                            {toggleFolder}
-                            {selectFile}
-                            {getFileIcon}
-                            {getFileDescription}
-                        />
-                    {/each}
-                </div>
-            </aside>
+            <FileTreePanel
+                {fileTree}
+                {expandedFolders}
+                {selectedFile}
+                {multiSelectedFiles}
+                {isSaving}
+                isDirty={isProjectDirty || modifiedFiles.size > 0}
+                onToggleFolder={toggleFolder}
+                onSelectFile={selectFile}
+                onSaveAll={saveAllChanges}
+                onRefresh={loadEpub}
+                {getFileIcon}
+            />
 
         <main class="editor-pane">
             {#if openTabs.length > 0}
@@ -4961,72 +4912,6 @@ document.addEventListener("click", function (event) {
         overflow: hidden;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
             Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-    }
-
-    .file-tree {
-        width: 240px;
-        background: #fff;
-        border-right: 1px solid #ddd;
-        display: flex;
-        flex-direction: column;
-        flex-shrink: 0;
-    }
-
-    .tree-header {
-        height: 40px; /* Matched with tabs-bar */
-        padding: 0 16px;
-        border-bottom: 1px solid #eee;
-        background: #fafafa;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        box-sizing: border-box;
-    }
-
-    .tree-header h3 {
-        margin: 0;
-        font-size: 16px;
-        color: #333;
-        flex: 1;
-    }
-
-    .header-actions {
-        display: flex;
-        gap: 8px;
-        flex-shrink: 0;
-    }
-
-    .icon-btn {
-        background: transparent;
-        border: none;
-        cursor: pointer;
-        padding: 4px;
-        border-radius: 4px;
-        font-size: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background 0.2s;
-    }
-
-    .icon-btn:hover:not(:disabled) {
-        background: #e0e0e0;
-    }
-
-    .icon-btn:disabled {
-        opacity: 0.3;
-        cursor: default;
-    }
-
-    .icon-btn.dirty {
-        color: #ff9800;
-        filter: drop-shadow(0 0 2px rgba(255, 152, 0, 0.5));
-    }
-
-    .tree-content {
-        flex: 1;
-        overflow-y: auto;
-        padding: 8px;
     }
 
     .editor-pane {
@@ -5814,15 +5699,6 @@ document.addEventListener("click", function (event) {
         color: var(--color-text);
     }
 
-    .file-tree {
-        width: 260px;
-        background: rgba(255, 255, 255, 0.82);
-        border-right: 1px solid var(--color-border);
-        box-shadow: 10px 0 30px rgba(23, 36, 52, 0.05);
-        backdrop-filter: blur(16px);
-    }
-
-    .tree-header,
     .preview-header,
     .tabs-bar {
         background: rgba(255, 255, 255, 0.78);
@@ -5830,75 +5706,8 @@ document.addEventListener("click", function (event) {
         backdrop-filter: blur(18px) saturate(1.12);
     }
 
-    .tree-header,
     .preview-header {
         height: 52px;
-    }
-
-    .tree-header {
-        padding: 0 14px;
-        justify-content: space-between;
-    }
-
-    .tree-header h3 {
-        color: var(--color-text);
-        font-size: 18px;
-        font-weight: 800;
-        letter-spacing: 0.01em;
-    }
-
-    .header-actions {
-        gap: 8px;
-    }
-
-    .header-actions .icon-btn {
-        width: 34px;
-        min-width: 34px;
-        height: 34px;
-        padding: 0;
-        white-space: nowrap;
-        font-size: 16px;
-        font-weight: 600;
-        line-height: 1;
-    }
-
-    .icon-btn {
-        width: 32px;
-        height: 32px;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-xs);
-        background: rgba(255, 255, 255, 0.82);
-        color: var(--color-text-soft);
-        box-shadow: var(--shadow-xs);
-        transition:
-            transform var(--transition-fast),
-            border-color var(--transition-fast),
-            background var(--transition-fast),
-            color var(--transition-fast),
-            box-shadow var(--transition-fast);
-    }
-
-    .icon-btn:hover:not(:disabled) {
-        background: var(--color-hover);
-        border-color: var(--color-border-strong);
-        color: var(--color-text);
-        box-shadow: var(--shadow-sm);
-    }
-
-    .icon-btn:active:not(:disabled) {
-        transform: translateY(1px) scale(0.98);
-    }
-
-    .icon-btn.dirty {
-        color: var(--color-warning);
-        background: var(--color-warning-soft);
-        border-color: rgba(233, 155, 47, 0.38);
-        filter: none;
-    }
-
-    .tree-content {
-        padding: 10px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(246, 249, 252, 0.64));
     }
 
     .editor-pane {
