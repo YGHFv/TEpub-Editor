@@ -10,6 +10,8 @@
           var isWeb = location.protocol === "http:" || location.protocol === "https:";
           if (!isWeb) return;
           var queryView = new URLSearchParams(location.search).get("view");
+          // 该 key 与 src/lib/storageKeys.ts 的 WEB_VIEW_OVERRIDE_KEY 同值：
+          // 内联脚本无法 import，改动必须两处同步。
           var storedView = localStorage.getItem("tepub-web-view-mode");
           var view = queryView === "desktop" || queryView === "mobile" ? queryView : storedView;
           if (view === "desktop") {

@@ -13,6 +13,7 @@
     type EpubStyleModule,
     type EpubTitleLayout,
   } from "$lib/epubStyleLibrary";
+  import { EPUB_STYLE_LIBRARY_KEY as STORAGE_KEY } from "$lib/storageKeys";
 
   type ViewMode = EpubStyleKind | "interface";
   type PanelMode = "browse" | "create";
@@ -27,7 +28,6 @@
     originalHeight: number;
   };
 
-  const STORAGE_KEY = "tepub-epub-style-library-v1";
   const HEADER_TEMPLATE_LONG_EDGE = 1080;
   const DEFAULT_HEADER_TITLE_STYLE_ID = "title-purple-red-emphasis";
   const FIXED_HEADER_PREVIEW_URL = new URL("../../../lib/assets/epub-style-library/fixed-preview-header.png", import.meta.url).href;

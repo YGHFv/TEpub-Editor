@@ -16,6 +16,7 @@
   import TocNode from "$lib/TocNode.svelte";
   import ToolImportPage from "$lib/ToolImportPage.svelte";
   import { hasUnsavedEpubChanges } from "$lib/unsavedChanges";
+  import { EPUB_FIND_HISTORY_KEY, EPUB_REPLACE_HISTORY_KEY } from "$lib/storageKeys";
   import {
     addWebEpubResource,
     deleteWebEpubResource,
@@ -1266,14 +1267,14 @@
   }
 
   function saveSearchHistory() {
-    localStorage.setItem("epub-find-history", JSON.stringify(findHistory));
-    localStorage.setItem("epub-replace-history", JSON.stringify(replaceHistory));
+    localStorage.setItem(EPUB_FIND_HISTORY_KEY, JSON.stringify(findHistory));
+    localStorage.setItem(EPUB_REPLACE_HISTORY_KEY, JSON.stringify(replaceHistory));
   }
 
   function loadSearchHistory() {
     try {
-      findHistory = JSON.parse(localStorage.getItem("epub-find-history") || "[]");
-      replaceHistory = JSON.parse(localStorage.getItem("epub-replace-history") || "[]");
+      findHistory = JSON.parse(localStorage.getItem(EPUB_FIND_HISTORY_KEY) || "[]");
+      replaceHistory = JSON.parse(localStorage.getItem(EPUB_REPLACE_HISTORY_KEY) || "[]");
       if (findHistory[0]) findPattern = findHistory[0];
       if (replaceHistory[0]) replacePattern = replaceHistory[0];
     } catch {

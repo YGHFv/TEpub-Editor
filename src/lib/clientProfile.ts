@@ -1,8 +1,8 @@
 import { platform } from "$lib/platform";
+import { WEB_VIEW_OVERRIDE_KEY } from "./storageKeys";
 
 const MOBILE_UA_PATTERN =
   /Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i;
-const WEB_VIEW_OVERRIDE_KEY = "tepub-web-view-mode";
 const CLIENT_PROFILE_EVENT = "tepub-client-profile-updated";
 const DEFAULT_VIEWPORT_CONTENT = "width=device-width, initial-scale=1";
 const DESKTOP_VIEWPORT_CONTENT = "width=1200, initial-scale=1";

@@ -35,14 +35,14 @@ src-tauri/src/
 
 验收结果：`cargo build` 0 警告、`cargo test` 13/13、83 个命令名与拆分前逐一 diff 一致。
 
-### 第 2 期：前端共享逻辑下沉到 `src/lib`（部分完成）
+### 第 2 期：前端共享逻辑下沉到 `src/lib` ✅ 已完成（2026-07-28，findReplace 消费者切换遗留见第 1 条）
 
 从巨型组件里**先抽纯逻辑，不动 UI**，每块配套 vitest：
 
 1. ✅ 查找替换核心 → `src/lib/findReplace.ts`（21 个测试）。已切换 Web 版 `toolbox/epub-editor`（净 -39 行）。**剩余**：桌面 epub-editor、editor（后端 Rust 正则，语义不同需谨慎）、search-replace 窗口（有独占的 extended 转义模式）逐个切换；四套实现的行为差异清单见 findReplace.ts 注释与 2026-07 审查记录。
 2. ✅ reader 的 container.xml/OPF/nav/NCX 手写解析（约 180 行）已删除，改用 `webEpub.ts` 导出的 `parseContainerRootfilePath` / `parseOpfPackage` / `parseNavDocument` / `parseNcxDocument`；`loadWebEpub` 同步改为复用同一实现。
-3. ⬜ localStorage key 集中到一个 `storageKeys.ts`，消除桌面/Web 共用 key 的隐性耦合。
-4. ⬜ 字体管理（family 解析、预览、子集化调用）→ `src/lib/fontTools.ts`。
+3. ✅ localStorage key 已集中到 `src/lib/storageKeys.ts`（21 个 key/前缀，动态 key 配生成函数），16 个使用文件全部改为常量导入；共享 key（`app-settings`、`epub-find/replace-history`、`tepub-epub-style-library-v1`、`tepub-editor-launch-files`、`tepub-editor-batch-task:` 等）在模块内注明共享方。webAccount.ts 私有账号 key 原地保留（storageKeys.ts 登记备查）；app.html 内联脚本无法 import，保留 `tepub-web-view-mode` 硬编码副本并两侧注释互指。
+4. ✅ 字体逻辑 → `src/lib/fontTools.ts`（17 个导出、26 个测试，epub-editor 净 -125 行）；DOM 遍历与 FontFace 注册等状态耦合部分按计划留在页面。
 
 ### 第 3 期：桌面页面接入平台抽象
 

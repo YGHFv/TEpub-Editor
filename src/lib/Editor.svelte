@@ -7,6 +7,7 @@
   import { search, setSearchQuery, SearchQuery, findNext, findPrevious, replaceNext, replaceAll } from "@codemirror/search";
   import { listen, emit } from "@tauri-apps/api/event";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import { EDITOR_FONT_SIZE_KEY } from "./storageKeys";
 
   export let doc = "";
   export let titleLines: number[] = [];
@@ -139,7 +140,7 @@
     window.addEventListener("keydown", blockNativeSearch, true);
 
     try {
-      const savedSize = localStorage.getItem("editor-font-size");
+      const savedSize = localStorage.getItem(EDITOR_FONT_SIZE_KEY);
       if (savedSize) fontSize = parseInt(savedSize);
       lastKnownDoc = doc;
 

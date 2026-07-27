@@ -32,6 +32,10 @@
     type ProofTocNode,
   } from "$lib/textProofing";
   import { runWebAiText } from "$lib/webAiText";
+  import {
+    TEXT_EDITOR_DRAFT_KEY as DRAFT_KEY,
+    TEXT_EDITOR_EPUB_HANDOFF_KEY as EPUB_HANDOFF_KEY,
+  } from "$lib/storageKeys";
 
   type EncodingOption = "utf-8" | "gb18030" | "big5";
   type SearchMode = "plain" | "regex";
@@ -105,8 +109,6 @@
     selected: boolean;
   };
 
-  const DRAFT_KEY = "tepub-web-text-editor-draft";
-  const EPUB_HANDOFF_KEY = "tepub-web-text-editor-epub-handoff";
   const encodingLabels: Record<EncodingOption, string> = {
     "utf-8": "UTF-8",
     gb18030: "GB18030",

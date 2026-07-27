@@ -20,6 +20,7 @@
         EPUB_TITLE_STYLES,
         type EpubStyleModule,
     } from "$lib/epubStyleLibrary";
+    import { EPUB_STYLE_LIBRARY_KEY as EPUB_STYLE_LIBRARY_STORAGE_KEY } from "$lib/storageKeys";
 
     interface RegexRule {
         enabled: boolean;
@@ -123,7 +124,6 @@
     const DEFAULT_CHAPTER_REGEX =
         "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*";
     const WEB_EPUB_FONT_CSS = `@charset "utf-8";`;
-    const EPUB_STYLE_LIBRARY_STORAGE_KEY = "tepub-epub-style-library-v1";
     const DEFAULT_WEB_TITLE_STYLE_ID = "title-cinematic-slab";
     const DEFAULT_FULL_COVER_WIDTH = 1400;
     const DEFAULT_FULL_COVER_HEIGHT = 2400;

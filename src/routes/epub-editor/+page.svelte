@@ -26,6 +26,11 @@
         styleAttributeUsesFont,
         summarizeGlyphUsage,
     } from "$lib/fontTools";
+    import {
+        EPUB_SEARCH_OPTIONS_KEY,
+        EPUB_FIND_HISTORY_KEY,
+        EPUB_REPLACE_HISTORY_KEY,
+    } from "$lib/storageKeys";
 
     // Setup Close Listener
     onMount(() => {
@@ -521,7 +526,7 @@
     ];
 
     if (typeof localStorage !== "undefined") {
-        const savedOptions = localStorage.getItem("epub-search-options");
+        const savedOptions = localStorage.getItem(EPUB_SEARCH_OPTIONS_KEY);
         if (savedOptions) {
             try {
                 const options = JSON.parse(savedOptions);
@@ -536,7 +541,7 @@
 
     $: if (typeof localStorage !== "undefined") {
         localStorage.setItem(
-            "epub-search-options",
+            EPUB_SEARCH_OPTIONS_KEY,
             JSON.stringify({
                 isRegex,
                 searchScope,
@@ -4198,17 +4203,17 @@ document.addEventListener("click", function (event) {
     // 保存查找历史到 localStorage
 
     function saveSearchHistory() {
-        localStorage.setItem("epub-find-history", JSON.stringify(findHistory));
+        localStorage.setItem(EPUB_FIND_HISTORY_KEY, JSON.stringify(findHistory));
         localStorage.setItem(
-            "epub-replace-history",
+            EPUB_REPLACE_HISTORY_KEY,
             JSON.stringify(replaceHistory),
         );
     }
 
     function loadSearchHistory() {
         try {
-            const findH = localStorage.getItem("epub-find-history");
-            const replaceH = localStorage.getItem("epub-replace-history");
+            const findH = localStorage.getItem(EPUB_FIND_HISTORY_KEY);
+            const replaceH = localStorage.getItem(EPUB_REPLACE_HISTORY_KEY);
             if (findH) findHistory = JSON.parse(findH);
             if (replaceH) replaceHistory = JSON.parse(replaceH);
             if (findHistory.length > 0) findPattern = findHistory[0];

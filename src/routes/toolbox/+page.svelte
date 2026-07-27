@@ -27,6 +27,7 @@
     usesWebScopedSettings,
     type WebAccountSession,
   } from "$lib/webAccount";
+  import { LAUNCH_SESSION_KEY, batchTaskKey } from "$lib/storageKeys";
 
   type ToolId =
     | "library"
@@ -107,8 +108,6 @@
     config?: Record<string, any>;
   };
 
-  const LAUNCH_SESSION_KEY = "tepub-editor-launch-files";
-  const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
   const TOOLBOX_WINDOW_WIDTH = 1200;
   const TOOLBOX_WINDOW_HEIGHT = 740;
   const THEME_OPTIONS = [
@@ -699,7 +698,7 @@
     try {
       const taskId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       localStorage.setItem(
-        `${BATCH_TASK_PREFIX}${taskId}`,
+        batchTaskKey(taskId),
         JSON.stringify({
           taskId,
           tool: tool.id,

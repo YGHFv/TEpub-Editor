@@ -39,6 +39,13 @@
         type ProofTocNode,
         type ProofTransformResult,
     } from "$lib/textProofing";
+    import {
+        APP_SETTINGS_KEY,
+        CRASH_RECOVERY_KEY,
+        windowPosKey,
+        aiProofingCacheKey,
+        manualTitleOverridesKey,
+    } from "$lib/storageKeys";
 
     // --- [1. 完整的接口定义] ---
     interface RawChapter {
@@ -1917,7 +1924,7 @@
             appSettings.selectedStyleTemplateId = STYLE_TEMPLATE_BUILTIN_ID;
         }
         localStorage.setItem(
-            "app-settings",
+            APP_SETTINGS_KEY,
             JSON.stringify(appSettings),
         );
         if (settingsActiveTab === "ai" || settingsActiveTab === "api") {
@@ -2216,7 +2223,7 @@
 
     function getAiProofingCacheKey(path = filePath) {
         if (!path || path === "请打开一本小说...") return "";
-        return `ai-proofing-cache:${path}`;
+        return aiProofingCacheKey(path);
     }
 
     function compactAiProofingLogText(text: string, limit = 180) {
@@ -2959,7 +2966,7 @@
     async function closeTxtEditorWindow() {
         if (isClosingEditorWindow) return;
         isClosingEditorWindow = true;
-        localStorage.removeItem("app-crash-recovery");
+        localStorage.removeItem(CRASH_RECOVERY_KEY);
         if (txtEditorCloseAction === "exit") {
             await invoke("exit_app");
             return;
@@ -3040,11 +3047,11 @@
             const label = appWindow.label;
             const initialFilePath = getUrlFileParam() || await invoke<string | null>("get_launch_args");
             if (initialFilePath) {
-                localStorage.removeItem("app-crash-recovery");
+                localStorage.removeItem(CRASH_RECOVERY_KEY);
             }
 
             // 1. 窗口位置恢复
-            const savedPos = localStorage.getItem("window_pos_" + label);
+            const savedPos = localStorage.getItem(windowPosKey(label));
             if (savedPos) {
                 try {
                     const { x, y } = JSON.parse(savedPos);
@@ -3056,7 +3063,7 @@
             appWindow.listen("tauri://move", async () => {
                 try {
                     const pos = await appWindow.outerPosition();
-                    localStorage.setItem("window_pos_" + label, JSON.stringify(pos));
+                    localStorage.setItem(windowPosKey(label), JSON.stringify(pos));
                 } catch (e) {}
             });
 
@@ -3087,7 +3094,7 @@
             }
 
             // 3. 读取设置
-            const stored = localStorage.getItem("app-settings");
+            const stored = localStorage.getItem(APP_SETTINGS_KEY);
             if (stored) {
                 try {
                     let parsed = JSON.parse(stored);
@@ -3129,7 +3136,7 @@
                         await loadStyleTemplates();
                     }
                     appSettings.defaultEpubStyles = { "main.css": "", "font.css": "" };
-                    localStorage.setItem("app-settings", JSON.stringify(appSettings));
+                    localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings));
                 } catch (e) {
                     console.warn("清理旧默认样式缓存失败:", e);
                 }
@@ -3149,7 +3156,7 @@
             // 目录查找通过 onTocSearch 回调处理（见 Editor 组件绑定）
 
             // 4. 崩溃恢复逻辑
-            const savedState = localStorage.getItem("app-crash-recovery");
+            const savedState = localStorage.getItem(CRASH_RECOVERY_KEY);
             if (savedState && !initialFilePath) {
                 try {
                     const state = JSON.parse(savedState);
@@ -3169,7 +3176,7 @@
                             fileContent = diskContent;
                             isModified = false;
                             if (state.isModified)
-                                localStorage.removeItem("app-crash-recovery");
+                                localStorage.removeItem(CRASH_RECOVERY_KEY);
                         }
 
                         if (fileContent) {
@@ -3187,7 +3194,7 @@
                     }
                 } catch (e) {
                     console.error("Recovery failed:", e);
-                    localStorage.removeItem("app-crash-recovery");
+                    localStorage.removeItem(CRASH_RECOVERY_KEY);
                 }
             }
 
@@ -3511,7 +3518,7 @@
             content:
                 isModified && fileContent.length < 3000000 ? fileContent : null,
         };
-        localStorage.setItem("app-crash-recovery", JSON.stringify(state));
+        localStorage.setItem(CRASH_RECOVERY_KEY, JSON.stringify(state));
     }
 
     async function openLocalFile(path: string, initialLaunch = false) {
@@ -3650,7 +3657,7 @@
                 if (isCheckModeOn) runFullCheck();
 
                 isLoading = false;
-                localStorage.removeItem("app-crash-recovery");
+                localStorage.removeItem(CRASH_RECOVERY_KEY);
                 setTimeout(() => {
                     isLoadingFile = false;
                 }, 100);
@@ -3721,7 +3728,7 @@
 
             isModified = false;
             // Clear crash recovery on explicit save
-            localStorage.removeItem("app-crash-recovery");
+            localStorage.removeItem(CRASH_RECOVERY_KEY);
             // saveStateToCache(0); // Optional: re-save cleanslate or just remove. Removing is safer.
             await updateMd5(fileContent);
             await scanToc(fileContent);
@@ -3738,7 +3745,7 @@
     // --- TOC 解析与同步 (含双向绑定) ---
     function manualTitleStorageKey() {
         if (!filePath || !/^[A-Za-z]:[\\/]|[\\/]/.test(filePath)) return "";
-        return `manual-title-overrides:${filePath}`;
+        return manualTitleOverridesKey(filePath);
     }
 
     function loadManualTitleOverrides() {
@@ -4240,7 +4247,7 @@
         if (!Number.isFinite(max) || max < 0) max = DEFAULT_SETTINGS.wordCountMaxThreshold;
         appSettings.wordCountMinThreshold = Math.floor(min);
         appSettings.wordCountMaxThreshold = Math.floor(max);
-        localStorage.setItem("app-settings", JSON.stringify(appSettings));
+        localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings));
         runFullCheck();
     }
 

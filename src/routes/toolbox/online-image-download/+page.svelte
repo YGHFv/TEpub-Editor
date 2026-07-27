@@ -13,6 +13,7 @@
   } from "$lib/webEpubRemoteImages";
   import { downloadBrowserBlob, validateBrowserFiles } from "$lib/webFileWorkflow";
   import { platform } from "$lib/platform";
+  import { EPUB_STYLE_LIBRARY_KEY as STYLE_STORAGE_KEY } from "$lib/storageKeys";
 
   type DesktopDownloadResponse = {
     dataBase64: string;
@@ -20,7 +21,6 @@
     finalUrl: string;
   };
 
-  const STYLE_STORAGE_KEY = "tepub-epub-style-library-v1";
   const DEFAULT_STYLE_ID = "illustration-centered-caption";
   const MAX_BROWSER_IMAGE_BYTES = 32 * 1024 * 1024;
   const MAX_CANVAS_PIXELS = 36_000_000;

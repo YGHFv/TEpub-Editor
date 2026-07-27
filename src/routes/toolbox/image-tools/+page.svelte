@@ -2,6 +2,7 @@
   import { onDestroy, onMount, tick } from "svelte";
   import { platform, type PlatformUnlisten } from "$lib/platform";
   import { loadAppSettings, type AiProviderConfig, type GlobalAppSettings } from "$lib/appSettings";
+  import { IMAGE_TOOLS_AI_CONFIG_KEY as CONFIG_KEY } from "$lib/storageKeys";
 
   type AiTarget = "duokan" | "standard" | "banner";
   type ToolMode = "cover" | "header" | "ai";
@@ -18,7 +19,6 @@
     size: string;
   };
 
-  const CONFIG_KEY = "tepub-image-tools-ai-config";
   const DEFAULT_COVER_PROMPT =
     "帮我制作作者{author}的小说《{title}》的全屏竖版封面，比例适合电子书阅读器全屏展示，可以参考原书籍封面。保留书籍气质，画面精致、清晰、无水印。";
   const DEFAULT_STANDARD_PROMPT =

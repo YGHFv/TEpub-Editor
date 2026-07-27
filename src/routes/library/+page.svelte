@@ -18,6 +18,7 @@
     saveAppSettings,
     type GlobalAppSettings,
   } from "$lib/appSettings";
+  import { LAUNCH_SESSION_KEY, SHELF_SETTINGS_KEY } from "$lib/storageKeys";
 
   const TOOLBOX_WINDOW_WIDTH = 1200;
   const TOOLBOX_WINDOW_HEIGHT = 740;
@@ -76,7 +77,6 @@
     action?: string | null;
   }
 
-  const LAUNCH_SESSION_KEY = "tepub-editor-launch-files";
   const NAMING_MODE_OPTIONS = [
     { value: "template", label: "按模板重命名" },
     { value: "source", label: "使用源文件名" },
@@ -499,7 +499,7 @@
 
   function loadShelfSettings() {
     try {
-      const saved = localStorage.getItem("shelf-settings");
+      const saved = localStorage.getItem(SHELF_SETTINGS_KEY);
       if (!saved) return;
       const parsed = JSON.parse(saved);
       // 旧版本只有 alwaysHidePreview 布尔，迁移到三态 previewMode
@@ -516,7 +516,7 @@
   }
 
   function saveShelfSettings() {
-    localStorage.setItem("shelf-settings", JSON.stringify({ ...shelfSettings, viewMode }));
+    localStorage.setItem(SHELF_SETTINGS_KEY, JSON.stringify({ ...shelfSettings, viewMode }));
   }
 
   function cycleViewMode() {

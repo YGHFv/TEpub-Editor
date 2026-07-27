@@ -8,6 +8,7 @@
     import { html } from "@codemirror/lang-html";
     import { css } from "@codemirror/lang-css";
     import { xml } from "@codemirror/lang-xml";
+    import { EPUB_EDITOR_FONT_SIZE_KEY } from "./storageKeys";
 
     export let doc = "";
     export let language: "html" | "css" | "xml" | "other" = "other";
@@ -182,7 +183,7 @@
         };
         window.addEventListener("keydown", blockNativeSearch, true);
 
-        const savedSize = localStorage.getItem("epub-editor-font-size");
+        const savedSize = localStorage.getItem(EPUB_EDITOR_FONT_SIZE_KEY);
         if (savedSize) fontSize = parseInt(savedSize);
 
         lastKnownDoc = doc;
@@ -336,7 +337,7 @@
 
     function updateFontSize(delta: number) {
         fontSize = Math.max(12, Math.min(fontSize + delta, 24));
-        localStorage.setItem("epub-editor-font-size", fontSize.toString());
+        localStorage.setItem(EPUB_EDITOR_FONT_SIZE_KEY, fontSize.toString());
         view.dispatch({
             effects: themeCompartment.reconfigure(
                 EditorView.theme({ "&": { fontSize: `${fontSize}px` } }),

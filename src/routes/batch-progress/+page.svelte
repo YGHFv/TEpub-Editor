@@ -6,6 +6,7 @@
   import { ask, open, save } from "@tauri-apps/plugin-dialog";
   import { writeTextFile } from "@tauri-apps/plugin-fs";
   import CustomSelect from "$lib/CustomSelect.svelte";
+  import { batchTaskKey } from "$lib/storageKeys";
 
   type BatchEvent = {
     taskId: string;
@@ -85,7 +86,6 @@
   const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
   const taskId = params.get("taskId") ?? "";
   const toolTitleParam = params.get("tool") ?? "批量处理";
-  const BATCH_TASK_PREFIX = "tepub-editor-batch-task:";
 
   const TOOL_META: Record<string, { title: string; detail: string }> = {
     "epub-diagnose": { title: "EPUB Diagnose", detail: "Batch check EPUB structure, references, and manifest issues" },
@@ -267,7 +267,7 @@
 
   function readTaskConfig() {
     if (typeof window === "undefined") return null;
-    const raw = localStorage.getItem(`${BATCH_TASK_PREFIX}${taskId}`);
+    const raw = localStorage.getItem(batchTaskKey(taskId));
     if (!raw) return null;
     try {
       return JSON.parse(raw) as BatchTaskConfig;
@@ -279,7 +279,7 @@
   function saveTaskConfig() {
     if (typeof window === "undefined") return;
     localStorage.setItem(
-      `${BATCH_TASK_PREFIX}${taskId}`,
+      batchTaskKey(taskId),
       JSON.stringify({
         taskId,
         tool,

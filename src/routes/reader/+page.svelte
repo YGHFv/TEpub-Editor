@@ -11,6 +11,7 @@
     parseNcxDocument,
     type WebEpubNavItem,
   } from "$lib/webEpub";
+  import { READER_SETTINGS_KEY, readerProgressKey, readerBookmarksKey } from "$lib/storageKeys";
 
   // ===== EPUB 数据结构 =====
   interface SpineEntry {
@@ -737,7 +738,7 @@
       }
 
       // 12) 进度恢复（兼容旧格式：纯 currentSpread 数字 / 新格式：{ch,sp}）
-      progressKey = `reader:progress:${epubPath}`;
+      progressKey = readerProgressKey(epubPath);
       let initialChIdx = 0;
       let initialSpInCh = 0;
       try {
@@ -1532,7 +1533,7 @@
 
   function persistSettings() {
     try {
-      localStorage.setItem("reader:settings", JSON.stringify({
+      localStorage.setItem(READER_SETTINGS_KEY, JSON.stringify({
         readMode, columnLayout, pageMode,
         fontSize, lineHeight, paragraphSpacing,
         pageMarginH, pageMarginV,
@@ -1545,7 +1546,7 @@
   }
   function loadSettings() {
     try {
-      const raw = localStorage.getItem("reader:settings");
+      const raw = localStorage.getItem(READER_SETTINGS_KEY);
       if (!raw) return;
       const s = JSON.parse(raw);
       if (s.readMode === "portrait" || s.readMode === "landscape") readMode = s.readMode;
@@ -1575,7 +1576,7 @@
   }
 
   // 书签持久化（按 epubPath 独立，不与 settings 共享）
-  function bookmarkKey(): string { return `reader:bookmarks:${epubPath}`; }
+  function bookmarkKey(): string { return readerBookmarksKey(epubPath); }
   function loadBookmarks() {
     try {
       const raw = localStorage.getItem(bookmarkKey());

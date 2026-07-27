@@ -1,3 +1,5 @@
+import { APP_SETTINGS_KEY } from "./storageKeys";
+
 export interface WebAccountSession {
   username: string;
   token: string;
@@ -10,7 +12,9 @@ interface AuthResponse {
   settings?: Record<string, any>;
 }
 
-const LEGACY_SETTINGS_KEY = "app-settings";
+// Tauri 运行时直接读写全局设置 key（与 editor 页共享，定义见 storageKeys.ts）。
+const LEGACY_SETTINGS_KEY = APP_SETTINGS_KEY;
+// 以下 key 为本模块私有（storageKeys.ts 中有登记注释），不与页面共享。
 const GUEST_SETTINGS_KEY = "tepub-web-guest-settings";
 const AUTH_KEY = "tepub-web-auth";
 const LOCAL_USERS_KEY = "tepub-web-local-users";
