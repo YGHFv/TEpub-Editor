@@ -9,6 +9,12 @@
     } from "$lib/editor/ChapterSidebar.svelte";
     import EditorToolbar from "$lib/editor/EditorToolbar.svelte";
     import SettingsDisplayTab from "$lib/editor/SettingsDisplayTab.svelte";
+    import SettingsFontsTab, {
+        type ImportedFontInfo,
+    } from "$lib/editor/SettingsFontsTab.svelte";
+    import SettingsTocTab, {
+        type CustomRegexRule,
+    } from "$lib/editor/SettingsTocTab.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
@@ -90,12 +96,6 @@
         path: string;
         category: string;
         role?: string;
-    };
-    type ImportedFontInfo = {
-        family: string;
-        css_value: string;
-        file_name: string;
-        path: string;
     };
     type StyleTemplateInfo = {
         id: string;
@@ -238,11 +238,6 @@
     }
 
     // --- [2. 默认配置 (三大正则回归 & 新增动态生成规则)] ---
-    interface CustomRegexRule {
-        level: number;
-        pattern: string;
-    }
-
     const DEFAULT_META_VOLUME_REGEX =
         "^\\s*(?:内容简介|本书相关|完本感言)\\s*(?:[:：].*)?$";
     const DEFAULT_META_BODY_REGEX =
@@ -508,6 +503,47 @@
     function buildTitlePrefixRegex(prefix: string) {
         const escaped = escapeRegExp(prefix.trim());
         return `^\\s*(?:(?:新增\\s*)?${escaped}(?:\\s+|[:：、.．\\-—])\\S+.*|【\\s*${escaped}\\s*】\\s*\\S+.*)$`;
+    }
+
+    // 目录正则 tab 的规则操作统一走拷贝赋值（新数组 + 变更项新对象），
+    // 避免原地 splice/push/字段改写穿过 runes prop 后因引用相等不触发更新。
+    const TOC_PRESET_PATTERNS = REGEX_PRESETS.filter((preset) => preset.value).map(
+        (preset) => preset.value,
+    );
+
+    function addTocPrefixRule(level: number, prefix: string) {
+        appSettings.customRegexRules = [
+            ...appSettings.customRegexRules,
+            { level, pattern: buildTitlePrefixRegex(prefix) },
+        ];
+    }
+
+    function updateTocRegexRule(index: number, patch: Partial<CustomRegexRule>) {
+        appSettings.customRegexRules = appSettings.customRegexRules.map((rule, idx) =>
+            idx === index ? { ...rule, ...patch } : rule,
+        );
+    }
+
+    function removeTocRegexRule(index: number) {
+        appSettings.customRegexRules = appSettings.customRegexRules.filter(
+            (_, idx) => idx !== index,
+        );
+    }
+
+    function resetTocRegexRules() {
+        appSettings.customRegexRules = [
+            { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
+            { level: 1, pattern: DEFAULT_SETTINGS.volRegex },
+            { level: 3, pattern: DEFAULT_META_BODY_REGEX },
+            { level: 3, pattern: DEFAULT_SETTINGS.chapRegex },
+        ];
+    }
+
+    function addTocRegexRule() {
+        appSettings.customRegexRules = [
+            ...appSettings.customRegexRules,
+            { level: 3, pattern: "" },
+        ];
     }
 
     function isLikelyTocTitle(title: string, level: number) {
@@ -5350,49 +5386,16 @@
                             bind:wordCountMaxThreshold={appSettings.wordCountMaxThreshold}
                         />
                     {:else if settingsActiveTab === 'fonts'}
-                        <div class="font-settings-panel">
-                            <div class="font-settings-head">
-                                <div>
-                                    <div class="font-settings-title">外部字体</div>
-                                    <div class="font-settings-note">导入后自动复制到当前书库目录下的“字体”文件夹，并可直接在块编辑里选择使用。</div>
-                                </div>
-                                <button class="grid-btn blue" disabled={isImportingFont} on:click={importExternalFont}>
-                                    {isImportingFont ? "导入中..." : "导入字体"}
-                                </button>
-                            </div>
-                            {#if fontSettingsMessage}
-                                <div class="font-settings-status">{fontSettingsMessage}</div>
-                            {/if}
-                            <div class="font-settings-list">
-                                {#each importedFonts as font}
-                                    <div class="font-settings-item">
-                                        <div class="font-settings-item-top">
-                                            <div class="font-settings-meta">
-                                                <strong>{font.family}</strong>
-                                                <span>{font.file_name}</span>
-                                            </div>
-                                            <div class="font-settings-actions">
-                                                <button
-                                                    class="mini-action"
-                                                    type="button"
-                                                    disabled={renamingFontFileName === font.file_name || deletingFontFileName === font.file_name}
-                                                    on:click={() => renameImportedFont(font)}
-                                                >{renamingFontFileName === font.file_name ? "重命名中..." : "重命名"}</button>
-                                                <button
-                                                    class="mini-action"
-                                                    type="button"
-                                                    disabled={deletingFontFileName === font.file_name || renamingFontFileName === font.file_name}
-                                                    on:click={() => deleteImportedFont(font)}
-                                                >{deletingFontFileName === font.file_name ? "删除中..." : "删除"}</button>
-                                            </div>
-                                        </div>
-                                        <code>{font.css_value}</code>
-                                    </div>
-                                {:else}
-                                    <div class="empty-msg">还没有导入外部字体</div>
-                                {/each}
-                            </div>
-                        </div>
+                        <SettingsFontsTab
+                            fonts={importedFonts}
+                            message={fontSettingsMessage}
+                            isImporting={isImportingFont}
+                            renamingFileName={renamingFontFileName}
+                            deletingFileName={deletingFontFileName}
+                            onImport={importExternalFont}
+                            onRename={renameImportedFont}
+                            onDelete={deleteImportedFont}
+                        />
                     {:else if settingsActiveTab === 'styles'}
                         <div class="font-settings-panel style-settings-panel">
                             <div class="font-settings-head">
@@ -5540,73 +5543,17 @@
                             </div>
                         </div>
                     {:else if settingsActiveTab === 'toc'}
-                        <div class="rules-header">正则表达式</div>
-                        <div class="rule-helper-row">
-                            <CustomSelect className="rule-type rule-type-helper" value={String(tocPrefixLevel)} options={[1, 2, 3, 4, 5].map((level) => ({ value: String(level), label: `层级 ${level}` }))} ariaLabel="前缀层级" on:change={(event) => (tocPrefixLevel = Number(event.detail))} />
-                            <input
-                                class="rule-prefix-input"
-                                bind:value={tocPrefixText}
-                                placeholder="前缀识别，例如：番外、后日谈"
-                            />
-                            <button
-                                type="button"
-                                class="rule-btn add"
-                                on:click={() => {
-                                    const prefix = tocPrefixText.trim();
-                                    if (!prefix) return;
-                                    appSettings.customRegexRules = [
-                                        ...appSettings.customRegexRules,
-                                        { level: tocPrefixLevel, pattern: buildTitlePrefixRegex(prefix) },
-                                    ];
-                                    tocPrefixText = "";
-                                    tocPrefixLevel = 3;
-                                }}
-                            >＋ 前缀</button>
-                        </div>
-                        <div class="rules-list">
-                            {#each appSettings.customRegexRules as rule, idx}
-                                <div class="rule-item" style="gap: 8px; align-items: center;">
-                                    <CustomSelect className="rule-type" value={String(rule.level)} options={[1, 2, 3, 4, 5].map((level) => ({ value: String(level), label: `层级 ${level}` }))} ariaLabel="目录层级" on:change={(event) => (rule.level = Number(event.detail))} />
-
-                                    <div class="rule-input-group">
-                                        <input
-                                            class="rule-input"
-                                            type="text"
-                                            bind:value={rule.pattern}
-                                            placeholder="输入正则表达式"
-                                        />
-                                        <CustomSelect
-                                            className="rule-preset-select"
-                                            value=""
-                                            placeholder="预设"
-                                            options={REGEX_PRESETS.filter((preset) => preset.value).map((preset) => ({ value: preset.value, label: preset.value }))}
-                                            ariaLabel="选择预设正则"
-                                            on:change={(event) => { if (event.detail) rule.pattern = event.detail; }}
-                                        />
-                                    </div>
-
-                                    <button class="rule-btn remove" on:click={() => {
-                                        appSettings.customRegexRules.splice(idx, 1);
-                                        appSettings.customRegexRules = [...appSettings.customRegexRules];
-                                    }}>－</button>
-                                </div>
-                            {/each}
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                            <button class="grid-btn" style="padding: 4px 10px; font-size: 13px;" on:click={() => {
-                                appSettings.customRegexRules = [
-                                    { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
-                                    { level: 1, pattern: DEFAULT_SETTINGS.volRegex },
-                                    { level: 3, pattern: DEFAULT_META_BODY_REGEX },
-                                    { level: 3, pattern: DEFAULT_SETTINGS.chapRegex }
-                                ];
-                            }}>↺ 还原正则</button>
-                            <button class="grid-btn" style="padding: 4px 10px; font-size: 13px; color: #0066b8; border-color: #0066b8;" on:click={() => {
-                                appSettings.customRegexRules.push({ level: 3, pattern: "" });
-                                appSettings.customRegexRules = [...appSettings.customRegexRules];
-                            }}>＋ 新增正则</button>
-                        </div>
-
+                        <SettingsTocTab
+                            rules={appSettings.customRegexRules}
+                            presetPatterns={TOC_PRESET_PATTERNS}
+                            bind:prefixLevel={tocPrefixLevel}
+                            bind:prefixText={tocPrefixText}
+                            onAddPrefix={addTocPrefixRule}
+                            onUpdateRule={updateTocRegexRule}
+                            onRemoveRule={removeTocRegexRule}
+                            onResetRules={resetTocRegexRules}
+                            onAddRule={addTocRegexRule}
+                        />
                     {:else if settingsActiveTab === 'api'}
                         <div class="ai-settings-form">
                             {#if aiSettingsMessage}
@@ -6926,60 +6873,6 @@
         box-sizing: border-box;
     }
 
-    .font-settings-list {
-        display: grid;
-        gap: 8px;
-        max-height: 320px;
-        overflow: auto;
-        padding-right: 2px;
-    }
-
-    .font-settings-item {
-        display: grid;
-        gap: 6px;
-        padding: 10px 12px;
-        border: 1px solid #e0e6ed;
-        border-radius: 8px;
-        background: #fff;
-    }
-
-    .font-settings-item-top {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 12px;
-    }
-
-    .font-settings-meta {
-        display: grid;
-        gap: 2px;
-    }
-
-    .font-settings-meta strong {
-        font-size: 13px;
-        color: #1b2d3f;
-    }
-
-    .font-settings-meta span {
-        font-size: 11px;
-        color: #7b8794;
-    }
-
-    .font-settings-item code {
-        font-size: 11px;
-        color: #466176;
-        white-space: normal;
-        word-break: break-word;
-    }
-
-    .font-settings-actions {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 6px;
-        flex-shrink: 0;
-    }
-
     .style-source-editor textarea {
         flex: 1;
         width: 100%;
@@ -7682,79 +7575,6 @@
             grid-template-columns: 1fr;
         }
     }
-    .rules-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-    .rule-item {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .rule-input-group {
-        display: flex;
-        flex: 1;
-        align-items: center;
-        position: relative;
-    }
-    .rule-input {
-        flex: 1;
-        height: 32px;
-        padding: 0 10px;
-        border: 1px solid #ccc;
-        border-right: none;
-        border-radius: 6px 0 0 6px;
-        font-size: 13px;
-        background: #fff;
-        min-width: 0;
-        z-index: 1;
-    }
-    .rule-btn {
-        width: 32px;
-        height: 32px;
-        min-width: 32px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        background: #fff;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: 0.1s;
-    }
-    .rule-btn:hover {
-        background: #fee;
-        color: #d32f2f;
-        border-color: #ffcdd2;
-    }
-    .rule-btn.add:hover {
-        background: #f3f8ff;
-        color: #0066b8;
-        border-color: #b9d8ff;
-    }
-    .rules-header {
-        font-size: 13px;
-        font-weight: bold;
-        color: #666;
-        margin-bottom: 5px;
-    }
-    .rule-helper-row {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        margin-bottom: 8px;
-    }
-    .rule-prefix-input {
-        flex: 1;
-        min-width: 0;
-        height: 32px;
-        padding: 0 10px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        font-size: 13px;
-        background: #fff;
-    }
 
     /* EPUB 制作面板重构样式 */
     .epub-modal-body {
@@ -8384,14 +8204,6 @@
         backdrop-filter: blur(4px);
     }
 
-    .rule-btn {
-        border: 1px solid var(--color-border);
-        background: rgba(255, 255, 255, 0.86);
-        color: var(--color-text-soft);
-        border-radius: var(--radius-xs);
-        box-shadow: none;
-    }
-
     .toc-count {
         color: var(--color-muted);
     }
@@ -8436,7 +8248,6 @@
 
     .dialog-content,
     .set-row label,
-    .rules-header,
     .sec-title {
         color: var(--color-text-soft);
     }
@@ -8450,8 +8261,7 @@
     .set-row input,
     .set-row textarea,
     .epub-input-small,
-    .epub-textarea,
-    .rule-input {
+    .epub-textarea {
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
         background: rgba(255, 255, 255, 0.9);
@@ -8465,24 +8275,11 @@
     .set-row input:focus,
     .set-row textarea:focus,
     .epub-input-small:focus,
-    .epub-textarea:focus,
-    .rule-input:focus {
+    .epub-textarea:focus {
         outline: none;
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
         background: #fff;
-    }
-    .rule-prefix-input:focus {
-        outline: none;
-        border-color: var(--color-accent);
-        box-shadow: var(--focus-ring);
-        background: #fff;
-    }
-
-    .rule-btn:hover {
-        background: var(--color-danger-soft);
-        border-color: rgba(215, 68, 82, 0.3);
-        color: var(--color-danger);
     }
 
     .epub-cover-preview {
@@ -8555,31 +8352,6 @@
         min-height: 34px;
         background: rgba(255, 255, 255, 0.78);
         font-size: 0.8rem;
-        font-weight: 600;
-    }
-
-    .rule-item :global(.rule-type),
-    .rule-helper-row :global(.rule-type-helper) {
-        width: 112px;
-        flex: 0 0 112px;
-    }
-
-    .rule-item :global(.rule-type .custom-select-trigger),
-    .rule-helper-row :global(.rule-type-helper .custom-select-trigger) {
-        min-height: 32px;
-        padding-block: 5px;
-        font-weight: 600;
-    }
-
-    .rule-input-group :global(.rule-preset-select) {
-        width: 112px;
-        flex: 0 0 112px;
-    }
-
-    .rule-input-group :global(.rule-preset-select .custom-select-trigger) {
-        min-height: 32px;
-        border-radius: 0 6px 6px 0;
-        font-size: 12px;
         font-weight: 600;
     }
 
