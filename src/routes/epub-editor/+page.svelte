@@ -8,6 +8,7 @@
     import FileTreePanel from "$lib/epubEditor/FileTreePanel.svelte";
     import TabsBar from "$lib/epubEditor/TabsBar.svelte";
     import FindReplacePanel from "$lib/epubEditor/FindReplacePanel.svelte";
+    import PreviewPane from "$lib/epubEditor/PreviewPane.svelte";
     import Toast from "$lib/Toast.svelte";
     import { toastInfo, toastSuccess, toastError } from "$lib/toast";
     import {
@@ -94,7 +95,7 @@
 
     // Editor -> Preview Sync
     function handleEditorClick(line: number) {
-        const iframeWindow = previewIframe?.contentWindow;
+        const iframeWindow = previewPane?.getContentWindow();
         if (!iframeWindow) return;
 
         const view = epubCodeEditorComponent?.getView();
@@ -119,7 +120,7 @@
 
     let editorSelectionTimeout: any;
     function handleEditorSelection(text: string) {
-        const iframeWindow = previewIframe?.contentWindow;
+        const iframeWindow = previewPane?.getContentWindow();
         if (!iframeWindow) return;
 
         if (editorSelectionTimeout) clearTimeout(editorSelectionTimeout);
@@ -236,48 +237,7 @@
 
     let flatHtmlFiles: EpubFileNode[] = [];
 
-    let previewIframe: HTMLIFrameElement | null = null;
-
-    function handlePreviewIframeLoad() {
-        const iframeDoc = previewIframe?.contentDocument;
-        if (!iframeDoc || iframeDoc.documentElement.dataset.tepubFootnotesBound === "1") return;
-        iframeDoc.documentElement.dataset.tepubFootnotesBound = "1";
-        iframeDoc.addEventListener("click", (event) => {
-            const clicked = event.target as Element | null;
-            const trigger = clicked?.closest<HTMLAnchorElement>("a");
-            if (!trigger) return;
-            if (trigger.classList.contains("duokan-footnote-back")) {
-                event.preventDefault();
-                event.stopPropagation();
-                trigger.closest(".footnote-popup-backdrop")?.remove();
-                return;
-            }
-            const epubType = trigger.getAttribute("epub:type") || "";
-            const isNoteref = trigger.getAttribute("role") === "doc-noteref"
-                || trigger.classList.contains("duokan-footnote")
-                || epubType.split(/\s+/).includes("noteref");
-            if (!isNoteref) return;
-            const href = trigger.getAttribute("href") || "";
-            if (!href.startsWith("#")) return;
-            const note = iframeDoc.getElementById(decodeURIComponent(href.slice(1)));
-            if (!note) return;
-            event.preventDefault();
-            event.stopPropagation();
-            iframeDoc.querySelector(".footnote-popup-backdrop")?.remove();
-            const backdrop = iframeDoc.createElement("div");
-            backdrop.className = "footnote-popup-backdrop";
-            backdrop.style.cssText = "position:fixed;inset:0;z-index:9998;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box";
-            const popup = iframeDoc.createElement("div");
-            popup.className = "footnote-popup";
-            popup.innerHTML = note.innerHTML;
-            popup.style.cssText = "position:relative;width:min(90vw,720px);max-height:88vh;overflow:auto;background:#fff;padding:16px;box-sizing:border-box;border-radius:8px";
-            backdrop.appendChild(popup);
-            backdrop.addEventListener("click", (closeEvent) => {
-                if (closeEvent.target === backdrop) backdrop.remove();
-            });
-            iframeDoc.body.appendChild(backdrop);
-        }, true);
-    }
+    let previewPane: PreviewPane | null = null;
     let editorContentDiv: HTMLElement | null = null;
     let epubCodeEditorComponent: EpubCodeEditor | null = null;
 
@@ -292,31 +252,6 @@
             return;
         }
         await platform.getCurrentWindow().destroy();
-    }
-
-    $: if (previewIframe && previewContent) {
-        const disableContextMenu = () => {
-            try {
-                const iframeDoc = previewIframe?.contentDocument;
-                if (iframeDoc) {
-                    iframeDoc.removeEventListener(
-                        "contextmenu",
-                        preventContextMenu,
-                    );
-                    iframeDoc.addEventListener(
-                        "contextmenu",
-                        preventContextMenu,
-                    );
-                }
-            } catch (err) {
-            }
-        };
-
-        const preventContextMenu = (e: Event) => {
-            e.preventDefault();
-        };
-
-        setTimeout(disableContextMenu, 100);
     }
 
     let openTabs: EpubFileNode[] = [];
@@ -558,7 +493,8 @@
     const MAX_HISTORY = 10;
 
     function handleEditorScroll(event: Event) {
-        if (!previewIframe?.contentWindow || !editorContentDiv) return;
+        const iframeWindow = previewPane?.getContentWindow();
+        if (!iframeWindow || !editorContentDiv) return;
 
         const target = event.target as HTMLElement;
         const scrollTop = target.scrollTop;
@@ -568,7 +504,7 @@
 
         const scrollPercent = scrollTop / scrollHeight;
 
-        previewIframe.contentWindow.postMessage(
+        iframeWindow.postMessage(
             {
                 type: "editorScroll",
                 percent: scrollPercent,
@@ -4360,39 +4296,12 @@ document.addEventListener("click", function (event) {
                 </div>
             </div>
             {#if activeTab === "preview"}
-                <div class="preview-container">
-                    {#if previewError.length > 0}
-                        <div class="preview-error">
-                            <div class="error-header">
-                                <span class="error-icon">!</span>
-                                <span>&#39044;&#35272;&#36807;&#31243;&#20013;&#20986;&#29616;&#20102; {previewError.length} &#20010;&#38169;&#35823;</span>
-                            </div>
-                            <div class="error-content">
-                                {#each previewError as err}
-                                    <div class="error-item">{err.message}</div>
-                                {/each}
-                            </div>
-                        </div>
-                    {/if}
-
-                    {#if previewContent}
-                        <div class="mobile-frame">
-                            <iframe
-                                bind:this={previewIframe}
-                                title="preview"
-                                srcdoc={previewContent}
-                                sandbox="allow-same-origin allow-scripts"
-                                on:load={handlePreviewIframeLoad}
-                            ></iframe>
-                        </div>
-                    {:else}
-                        <div class="placeholder">
-                            {selectedFile
-                                ? "\u5C11\u5973\u7948\u7977\u4E2D\u00B7\u00B7\u00B7\u00B7\u00B7\u00B7"
-                                : "\u8BF7\u4ECE\u5DE6\u4FA7\u9009\u62E9\u4E00\u4E2A\u6587\u4EF6"}
-                        </div>
-                    {/if}
-                </div>
+                <PreviewPane
+                    bind:this={previewPane}
+                    content={previewContent}
+                    errors={previewError}
+                    hasSelectedFile={!!selectedFile}
+                />
             {:else}
                 <div class="toc-container">
                     {#if isTocLoading}
@@ -4516,51 +4425,6 @@ document.addEventListener("click", function (event) {
         color: #333;
     }
 
-    /* Preview Error (Absolute Position) */
-    .preview-error {
-        background: #fff3cd;
-        border: 1px solid #ffc107;
-        border-radius: 4px;
-        margin: 8px;
-        font-size: 12px;
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 10;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        opacity: 0.95;
-    }
-
-    .preview-error .error-header {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 12px;
-        background: #ffc107;
-        color: #856404;
-        font-weight: 600;
-        border-radius: 4px 4px 0 0;
-    }
-
-    .preview-error .error-content {
-        margin: 0;
-        padding: 8px 12px;
-        color: #856404;
-        white-space: pre-wrap;
-        max-height: 100px;
-        overflow-y: auto;
-        font-family: "Consolas", monospace;
-    }
-
-    /* Ensure container is relative and takes full height for centering */
-    .preview-container {
-        position: relative;
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-    }
     .epub-editor {
         display: flex;
         height: 100vh;
@@ -4745,47 +4609,6 @@ document.addEventListener("click", function (event) {
         color: #2196f3;
         border-bottom: 2px solid #2196f3;
         background: #fff;
-    }
-
-    .preview-container {
-        flex: 1; /* Grow vertically */
-        width: 100%; /* Fill sidebar width */
-        display: flex;
-        flex-direction: column;
-        overflow-y: hidden; /* Let iframe handle scroll, prevent double scrollbar */
-        overflow-x: hidden; /* Prevent horizontal scrollbar */
-        background: #f0f0f0; /* Darker background to distinguish phone frame */
-        align-items: center; /* Center horizontally */
-        justify-content: flex-start; /* Align to top (placeholder will center itself) */
-        padding: 0; /* No padding */
-    }
-
-    .mobile-frame {
-        width: 100%; /* 320px */
-        height: 700px;
-        max-height: 100%;
-        background: #fff;
-        border: 1px solid #ddd;
-        box-sizing: border-box; /* Prevent border from adding width */
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); /* Shadow for depth */
-        overflow: hidden; /* Hide overflow outside the "phone screen" */
-        position: relative;
-        display: flex; /* Make it a flex container for iframe */
-        flex-direction: column;
-    }
-
-    .mobile-frame::-webkit-scrollbar {
-        display: none;
-    }
-
-    .preview-container iframe {
-        width: 100%;
-        height: 100%;
-        border: none;
-        background: #fff;
-        margin: 0;
-        padding: 0;
-        display: block;
     }
 
     .toc-container {
@@ -5118,22 +4941,6 @@ document.addEventListener("click", function (event) {
         box-shadow: 0 -6px 16px rgba(23, 36, 52, 0.05);
     }
 
-    .preview-container {
-        background: linear-gradient(180deg, rgba(231, 240, 247, 0.88), rgba(239, 245, 249, 0.94));
-        padding: 12px;
-        box-sizing: border-box;
-    }
-
-    .mobile-frame {
-        border: 1px solid var(--color-border);
-        border-radius: 18px;
-        box-shadow: var(--shadow-md);
-    }
-
-    .preview-container iframe {
-        border-radius: 17px;
-    }
-
     .toc-container {
         background: rgba(255, 255, 255, 0.72);
         border-radius: var(--radius-md);
@@ -5149,24 +4956,6 @@ document.addEventListener("click", function (event) {
 
     .error {
         color: var(--color-danger);
-    }
-
-    .preview-error {
-        background: var(--color-warning-soft);
-        border-color: rgba(233, 155, 47, 0.38);
-        border-radius: var(--radius-md);
-        box-shadow: var(--shadow-sm);
-    }
-
-    .preview-error .error-header {
-        background: rgba(233, 155, 47, 0.18);
-        color: #8a5a14;
-        border-radius: var(--radius-md) var(--radius-md) 0 0;
-    }
-
-    .preview-error .error-content {
-        color: #8a5a14;
-        font-family: var(--font-code);
     }
 
     .image-preview-container,
