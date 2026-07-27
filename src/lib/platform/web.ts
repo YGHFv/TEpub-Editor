@@ -118,6 +118,13 @@ export function createWebPlatform(): PlatformAdapter {
       return window.confirm(text);
     },
 
+    async confirm(text) {
+      // 浏览器原生双钮对话框只有 window.confirm，其"确定/取消"按钮语义
+      // 与桌面 plugin-dialog confirm（OK/Cancel）一致，是真实等价降级。
+      if (typeof window === "undefined") return false;
+      return window.confirm(text);
+    },
+
     async readFile(path) {
       if (/^https?:\/\//i.test(path) || path.startsWith("/")) {
         const response = await fetch(path);

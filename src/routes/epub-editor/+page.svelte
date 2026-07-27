@@ -1,9 +1,6 @@
 <script lang="ts">
     import { onMount, tick } from "svelte";
-    import { invoke } from "@tauri-apps/api/core";
-    import { getCurrentWindow } from "@tauri-apps/api/window";
-    import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event"; // Added emit
-    import { confirm, open, save } from "@tauri-apps/plugin-dialog";
+    import { platform, type PlatformUnlisten } from "$lib/platform";
     import { page } from "$app/stores";
     import TocNode from "$lib/TocNode.svelte";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
@@ -35,7 +32,7 @@
 
     // Setup Close Listener
     onMount(() => {
-        const win = getCurrentWindow();
+        const win = platform.getCurrentWindow();
         let unlistenClose: (() => void) | null = null;
         let isUnmounted = false;
 
@@ -161,7 +158,7 @@
         );
         if (needMeta.length === 0) return;
         try {
-            const metas = await invoke<EpubFileMeta[]>("load_epub_file_meta", {
+            const metas = await platform.invoke<EpubFileMeta[]>("load_epub_file_meta", {
                 epubPath,
                 filePaths: needMeta.map((n) => n.path),
             });
@@ -203,7 +200,7 @@
     let isLoading = true;
     let loadingMessage = "正在加载 EPUB...";
     let error = "";
-    let unlistenPrepareStage: UnlistenFn | undefined;
+    let unlistenPrepareStage: PlatformUnlisten | undefined;
     let expandedFolders: Set<string> = new Set();
 
     // Modification Tracking
@@ -277,12 +274,16 @@
     let epubCodeEditorComponent: EpubCodeEditor | null = null;
 
     async function closeEpubEditorWindow() {
-        const appWindow = getCurrentWindow();
-        if (appWindow.label === "main") {
+        // 桌面端 label 恒为字符串：main 窗口回首页，其余窗口 destroy（与原
+        // getCurrentWindow().label 判断等价）。web 端 label 为 null，标签页
+        // window.close() 对非脚本打开的页面是 no-op，回首页是最接近
+        // "关闭编辑器"的真实降级。
+        const label = await platform.getCurrentWindowLabel();
+        if (label === "main" || label === null) {
             window.location.href = "/";
             return;
         }
-        await appWindow.destroy();
+        await platform.getCurrentWindow().destroy();
     }
 
     $: if (previewIframe && previewContent) {
@@ -651,7 +652,7 @@
             let cssContents: Record<string, string> = {};
 
             if (htmlPaths.length > 0) {
-                htmlContents = await invoke<Record<string, string>>(
+                htmlContents = await platform.invoke<Record<string, string>>(
                     "read_epub_files_batch",
                     {
                         epubPath,
@@ -661,7 +662,7 @@
             }
 
             if (cssPaths.length > 0) {
-                cssContents = await invoke<Record<string, string>>(
+                cssContents = await platform.invoke<Record<string, string>>(
                     "read_epub_files_batch",
                     {
                         epubPath,
@@ -766,7 +767,7 @@
                 }
             }
 
-            const analyze = await invoke<FontGlyphAnalyzeResult>(
+            const analyze = await platform.invoke<FontGlyphAnalyzeResult>(
                 "analyze_epub_font_glyphs",
                 {
                     epubPath,
@@ -828,7 +829,7 @@
             previewSourcePath = "";
             loadingMessage = "准备 EPUB 文件...";
 
-            const prepared = await invoke<EpubPrepareResult>(
+            const prepared = await platform.invoke<EpubPrepareResult>(
                 "prepare_epub_for_open",
                 {
                     epubPath: requestedPath,
@@ -838,7 +839,7 @@
             sourceEpubPath = prepared.source_path || requestedPath;
 
             loadingMessage = "正在解压 EPUB 文件树...";
-            fileTree = await invoke<EpubFileNode[]>("extract_epub", {
+            fileTree = await platform.invoke<EpubFileNode[]>("extract_epub", {
                 epubPath,
             });
             loadingMessage = "正在整理 EPUB 文件树...";
@@ -929,7 +930,7 @@
             content = fileContentCache.get(filePath)!;
         } else {
             try {
-                content = await invoke<string>("read_epub_file_content", {
+                content = await platform.invoke<string>("read_epub_file_content", {
                     epubPath: epubPath,
                     filePath: filePath,
                 });
@@ -993,7 +994,7 @@
         // 2. Batch read all CSS files
         let cssContents: Record<string, string> = {};
         try {
-            cssContents = await invoke<Record<string, string>>(
+            cssContents = await platform.invoke<Record<string, string>>(
                 "read_epub_files_batch",
                 {
                     epubPath: epubPath,
@@ -1031,7 +1032,7 @@
 
         let binaryData: Record<string, number[]> = {};
         try {
-            binaryData = await invoke<Record<string, number[]>>(
+            binaryData = await platform.invoke<Record<string, number[]>>(
                 "read_epub_binary_batch",
                 {
                     epubPath: epubPath,
@@ -1094,14 +1095,15 @@
         let unlistenClose: (() => void) | null = null;
         const setupCloseHandler = async () => {
             try {
-                const appWindow = getCurrentWindow();
-                unlistenClose = await appWindow.onCloseRequested(
+                // 窗口 label 不可变，mount 时取一次即可（桌面端恒为字符串）。
+                const label = await platform.getCurrentWindowLabel();
+                unlistenClose = await platform.onCurrentWindowCloseRequested(
                     async (event) => {
                         if (hasUnsavedChanges()) {
                             event.preventDefault();
                             closeContext = "app";
                             showCloseDialog = true;
-                        } else if (appWindow.label === "main") {
+                        } else if (label === "main") {
                             event.preventDefault();
                             await closeEpubEditorWindow();
                         }
@@ -1114,7 +1116,7 @@
         setupCloseHandler();
 
         // Calling loadEpub (now top-level)
-        listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
+        platform.listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
             if (!isLoading) return;
             const routePath = $page.url.searchParams.get("file") || "";
             const activePath = sourceEpubPath || epubPath || routePath;
@@ -1167,7 +1169,7 @@
                     }
                 } else if (action === "save-as") {
                     try {
-                        const res = await invoke<Record<string, string>>(
+                        const res = await platform.invoke<Record<string, string>>(
                             "read_epub_files_batch",
                             {
                                 epubPath,
@@ -1176,7 +1178,7 @@
                         );
                         const content = res[context.path];
                         if (!content) throw new Error("读取导出内容失败。");
-                        const savedPath = await save({
+                        const savedPath = await platform.saveDialog({
                             defaultPath: context.path.split("/").pop(),
                             filters: [
                                 {
@@ -1186,7 +1188,7 @@
                             ],
                         });
                         if (savedPath) {
-                            await invoke("save_text_file", {
+                            await platform.invoke("save_text_file", {
                                 path: savedPath,
                                 content,
                             });
@@ -1198,7 +1200,7 @@
                 } else if (action === "duplicate") {
                     try {
                         const oldPath = context.path;
-                        const res = await invoke<Record<string, string>>(
+                        const res = await platform.invoke<Record<string, string>>(
                             "read_epub_files_batch",
                             {
                                 epubPath,
@@ -1213,7 +1215,7 @@
                         const base = parts.join(".");
                         const newPath = base + "_copy." + ext;
 
-                        await invoke("add_epub_file", {
+                        await platform.invoke("add_epub_file", {
                             epubPath,
                             filePath: newPath,
                             content,
@@ -1227,7 +1229,7 @@
                     }
                 } else if (action === "import-sibling") {
                     try {
-                        const selected = await open({
+                        const selected = await platform.openDialog({
                             multiple: false,
                             filters: [
                                 {
@@ -1247,11 +1249,11 @@
                             );
                             const newEpubPath = currentDir + "/" + fileName;
 
-                            const content = await invoke<string>(
+                            const content = await platform.invoke<string>(
                                 "read_text_file",
                                 { path: localPath },
                             );
-                            await invoke("add_epub_file", {
+                            await platform.invoke("add_epub_file", {
                                 epubPath,
                                 filePath: newEpubPath,
                                 content,
@@ -1281,7 +1283,7 @@
 
                         isPromptBusy = true;
                         try {
-                            await invoke("add_epub_file", {
+                            await platform.invoke("add_epub_file", {
                                 epubPath,
                                 filePath: newPath,
                                 content,
@@ -1318,7 +1320,7 @@
 
                         try {
                             // 1. Rename file in backend
-                            await invoke("rename_epub_file", {
+                            await platform.invoke("rename_epub_file", {
                                 epubPath,
                                 oldPath,
                                 newPath,
@@ -1366,7 +1368,7 @@
 
                                     let content = "";
                                     try {
-                                        content = await invoke<string>(
+                                        content = await platform.invoke<string>(
                                             "read_epub_file_content",
                                             {
                                                 epubPath,
@@ -1394,7 +1396,7 @@
                                     );
 
                                     if (newContent !== content) {
-                                        await invoke("add_epub_file", {
+                                        await platform.invoke("add_epub_file", {
                                             epubPath,
                                             filePath: targetFilePath,
                                             content: newContent,
@@ -1439,7 +1441,7 @@
                     );
                     if (confirmed) {
                         // 1. Delete file
-                        await invoke("delete_epub_file", {
+                        await platform.invoke("delete_epub_file", {
                             epubPath,
                             filePath: context.path,
                         });
@@ -1531,7 +1533,7 @@
                                 '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml">\n<head>\n<title></title>\n</head>\n<body>\n</body>\n</html>';
                         }
                         try {
-                            await invoke("add_epub_file", {
+                            await platform.invoke("add_epub_file", {
                                 epubPath,
                                 filePath,
                                 content,
@@ -1755,7 +1757,7 @@
                         filters = [{ name: "全部文件", extensions: ["*"] }];
                     }
 
-                    const selected = await open({
+                    const selected = await platform.openDialog({
                         multiple: true,
                         filters,
                     });
@@ -1773,14 +1775,14 @@
                                 const targetPath =
                                     context.path + "/" + fileName;
 
-                                const fileData = await invoke<number[]>(
+                                const fileData = await platform.invoke<number[]>(
                                     "read_binary_file",
                                     {
                                         path: filePath,
                                     },
                                 );
 
-                                await invoke("add_epub_file_binary", {
+                                await platform.invoke("add_epub_file_binary", {
                                     epubPath,
                                     filePath: targetPath,
                                     content: fileData,
@@ -1906,7 +1908,7 @@
         let cssContents: Record<string, string> = {};
         if (!skipAssets && cssPaths.length > 0) {
             try {
-                cssContents = await invoke<Record<string, string>>(
+                cssContents = await platform.invoke<Record<string, string>>(
                     "read_epub_files_batch",
                     {
                         epubPath: epubPath,
@@ -2000,7 +2002,7 @@
 
         if (!skipAssets && allBinaryPaths.length > 0) {
             try {
-                binaryData = await invoke<Record<string, number[]>>(
+                binaryData = await platform.invoke<Record<string, number[]>>(
                     "read_epub_binary_batch",
                     {
                         epubPath: epubPath,
@@ -2300,7 +2302,7 @@ document.addEventListener("click", function (event) {
 
                     const previewHtml =
                         fileContentCache.get(previewSourcePath) ??
-                        (await invoke<string>("read_epub_file_content", {
+                        (await platform.invoke<string>("read_epub_file_content", {
                             epubPath,
                             filePath: previewSourcePath,
                         }));
@@ -2332,7 +2334,7 @@ document.addEventListener("click", function (event) {
                 const content = fileContentCache.get(path);
                 if (content === undefined) return;
 
-                await invoke("save_epub_file_content", {
+                await platform.invoke("save_epub_file_content", {
                     epubPath,
                     filePath: path,
                     content,
@@ -2350,11 +2352,11 @@ document.addEventListener("click", function (event) {
         isSaving = true;
         try {
             await persistModifiedFiles();
-            await invoke("save_epub_to_disk", { epubPath });
+            await platform.invoke("save_epub_to_disk", { epubPath });
             isProjectDirty = false;
         } catch (e) {
             console.error("保存失败:", e);
-            await confirm("保存失败：" + e, {
+            await platform.confirm("保存失败：" + e, {
                 title: "错误",
                 kind: "error",
             });
@@ -2371,7 +2373,7 @@ document.addEventListener("click", function (event) {
         if (!selectedFile) return;
         isSaving = true;
         try {
-            await invoke("save_epub_file_content", {
+            await platform.invoke("save_epub_file_content", {
                 epubPath: epubPath,
                 filePath: selectedFile.path,
                 content: fileContent,
@@ -2381,7 +2383,7 @@ document.addEventListener("click", function (event) {
             isProjectDirty = true;
         } catch (e) {
             console.error("保存失败:", e);
-            await confirm("保存失败：" + e, {
+            await platform.confirm("保存失败：" + e, {
                 title: "错误",
                 kind: "error",
             });
@@ -2507,7 +2509,7 @@ document.addEventListener("click", function (event) {
                     currentImageSrc = assetCache.get(file.path)!;
                 } else {
                     try {
-                        const binaryData = await invoke<
+                        const binaryData = await platform.invoke<
                             Record<string, number[]>
                         >("read_epub_binary_batch", {
                             epubPath: epubPath,
@@ -2539,7 +2541,7 @@ document.addEventListener("click", function (event) {
 
                 let fontBinary = fontBinaryCache.get(file.path);
                 if (!fontBinary) {
-                    const binaryData = await invoke<Record<string, number[]>>(
+                    const binaryData = await platform.invoke<Record<string, number[]>>(
                         "read_epub_binary_batch",
                         {
                             epubPath,
@@ -2567,7 +2569,7 @@ document.addEventListener("click", function (event) {
 
                 let internalNames: string[] = [];
                 try {
-                    const inspect = await invoke<FontGlyphAnalyzeResult>(
+                    const inspect = await platform.invoke<FontGlyphAnalyzeResult>(
                         "analyze_epub_font_glyphs",
                         {
                             epubPath,
@@ -2609,7 +2611,7 @@ document.addEventListener("click", function (event) {
             if (fileContentCache.has(file.path)) {
                 content = fileContentCache.get(file.path)!;
             } else {
-                content = await invoke<string>("read_epub_file_content", {
+                content = await platform.invoke<string>("read_epub_file_content", {
                     epubPath: epubPath,
                     filePath: file.path,
                 });
@@ -2719,7 +2721,7 @@ document.addEventListener("click", function (event) {
                 );
                 if (contentToSave !== undefined) {
                     try {
-                        await invoke("save_epub_file_content", {
+                        await platform.invoke("save_epub_file_content", {
                             epubPath: epubPath,
                             filePath: pendingCloseFile.path,
                             content: contentToSave,
@@ -2742,7 +2744,7 @@ document.addEventListener("click", function (event) {
                 const tasks = Array.from(modifiedFiles).map(async (path) => {
                     const content = fileContentCache.get(path);
                     if (content !== undefined) {
-                        await invoke("save_epub_file_content", {
+                        await platform.invoke("save_epub_file_content", {
                             epubPath: epubPath,
                             filePath: path,
                             content: content,
@@ -2756,7 +2758,7 @@ document.addEventListener("click", function (event) {
                 await closeEpubEditorWindow();
             } catch (e) {
                 isSaving = false;
-                await confirm("保存失败：" + e, { kind: "error" });
+                await platform.confirm("保存失败：" + e, { kind: "error" });
                 return;
             }
         }
@@ -2829,7 +2831,7 @@ document.addEventListener("click", function (event) {
             // Try reading content directly
             let content = "";
             try {
-                const res = await invoke<Record<string, string>>(
+                const res = await platform.invoke<Record<string, string>>(
                     "read_epub_files_batch",
                     {
                         epubPath,
@@ -2890,7 +2892,7 @@ document.addEventListener("click", function (event) {
     async function addToOpf(newFullPath: string, insertAfterFullPath: string) {
         try {
             let opfPath = "OEBPS/content.opf";
-            const res = await invoke<Record<string, string>>(
+            const res = await platform.invoke<Record<string, string>>(
                 "read_epub_files_batch",
                 {
                     epubPath,
@@ -2967,7 +2969,7 @@ document.addEventListener("click", function (event) {
             const serializer = new XMLSerializer();
             const newOpfContent = serializer.serializeToString(doc);
 
-            await invoke("save_epub_file_content", {
+            await platform.invoke("save_epub_file_content", {
                 epubPath: epubPath,
                 filePath: opfPath,
                 content: newOpfContent,
@@ -2982,7 +2984,7 @@ document.addEventListener("click", function (event) {
     async function addAssetToOpf(newFullPath: string) {
         try {
             let opfPath = "OEBPS/content.opf";
-            const res = await invoke<Record<string, string>>(
+            const res = await platform.invoke<Record<string, string>>(
                 "read_epub_files_batch",
                 {
                     epubPath,
@@ -3041,7 +3043,7 @@ document.addEventListener("click", function (event) {
 
                 const serializer = new XMLSerializer();
                 const newOpf = serializer.serializeToString(doc);
-                await invoke("save_epub_file_content", {
+                await platform.invoke("save_epub_file_content", {
                     epubPath,
                     filePath: opfPath,
                     content: newOpf,
@@ -3119,7 +3121,7 @@ document.addEventListener("click", function (event) {
                     filesMap[f.path] = f.content;
                 }
 
-                await invoke("save_epub_files_batch", {
+                await platform.invoke("save_epub_files_batch", {
                     epubPath,
                     files: filesMap,
                 });
@@ -3134,7 +3136,7 @@ document.addEventListener("click", function (event) {
                 // Manually implement simplified batch OPF update here to avoid N reads/writes
                 // Reuse logic from addToOpf but for a list
                 let opfPath = "OEBPS/content.opf";
-                const res = await invoke<Record<string, string>>(
+                const res = await platform.invoke<Record<string, string>>(
                     "read_epub_files_batch",
                     {
                         epubPath,
@@ -3235,7 +3237,7 @@ document.addEventListener("click", function (event) {
                         // Save OPF
                         const serializer = new XMLSerializer();
                         const newOpf = serializer.serializeToString(doc);
-                        await invoke("save_epub_file_content", {
+                        await platform.invoke("save_epub_file_content", {
                             epubPath,
                             filePath: opfPath,
                             content: newOpf,
@@ -3388,7 +3390,7 @@ document.addEventListener("click", function (event) {
         }
 
         try {
-            const ncxContent = await invoke<string>("read_epub_file_content", {
+            const ncxContent = await platform.invoke<string>("read_epub_file_content", {
                 epubPath: epubPath,
                 filePath: ncxNode.path,
             });
@@ -3800,7 +3802,7 @@ document.addEventListener("click", function (event) {
             let nextContent = fileContentCache.get(nextFile.path) || "";
             if (!nextContent) {
                 try {
-                    nextContent = await invoke<string>(
+                    nextContent = await platform.invoke<string>(
                         "read_epub_file_content",
                         {
                             epubPath: epubPath,
@@ -3988,7 +3990,7 @@ document.addEventListener("click", function (event) {
             let content = fileContentCache.get(file.path) || "";
             if (!content) {
                 try {
-                    content = await invoke<string>("read_epub_file_content", {
+                    content = await platform.invoke<string>("read_epub_file_content", {
                         epubPath: epubPath,
                         filePath: file.path,
                     });
@@ -4074,7 +4076,7 @@ document.addEventListener("click", function (event) {
                 searchMessage = `正在后台搜索 ${backendFiles.length} 个文件...`;
                 await tick();
                 try {
-                    const count = await invoke("search_in_files", {
+                    const count = await platform.invoke("search_in_files", {
                         epubPath,
                         files: backendFiles,
                         pattern: findPattern,

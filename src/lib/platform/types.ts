@@ -44,6 +44,9 @@ export interface PlatformAdapter {
   saveDialog(options?: Record<string, unknown>): Promise<string | null>;
   message(text: string, options?: Record<string, unknown>): Promise<void>;
   ask(text: string, options?: Record<string, unknown>): Promise<boolean>;
+  // 确认对话框（Tauri plugin-dialog confirm 的抽象，OK/Cancel 双钮）。
+  // 与 ask（Yes/No）按钮语义不同，不能互相替代。
+  confirm(text: string, options?: Record<string, unknown>): Promise<boolean>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array | number[]): Promise<void>;
   revealPath(path: string): Promise<void>;

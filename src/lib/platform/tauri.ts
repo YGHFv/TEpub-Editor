@@ -78,6 +78,11 @@ export function createTauriPlatform(): PlatformAdapter {
       return ask(text, options as any);
     },
 
+    async confirm(text, options = {}) {
+      const { confirm } = await import("@tauri-apps/plugin-dialog");
+      return confirm(text, options as any);
+    },
+
     async readFile(path) {
       const { readFile } = await import("@tauri-apps/plugin-fs");
       return await readFile(path);
