@@ -22,6 +22,10 @@ function wrapTauriWindow(win: any): PlatformWindowHandle {
       if (!win.once) return () => {};
       return await win.once(event, handler);
     },
+    async listen(event, handler) {
+      if (!win.listen) return () => {};
+      return await win.listen(event, handler);
+    },
   };
 }
 
@@ -42,6 +46,11 @@ export function createTauriPlatform(): PlatformAdapter {
       // Tauri 的 Event<T>（含 event / payload / id）结构上兼容 PlatformEvent<T>，
       // 直接透传 handler。
       return await listen(event, handler);
+    },
+
+    async emit(event, payload) {
+      const { emit } = await import("@tauri-apps/api/event");
+      await emit(event, payload);
     },
 
     async getFileSrcConverter() {
@@ -128,6 +137,9 @@ export function createTauriPlatform(): PlatformAdapter {
         async once(event, handler) {
           return await (await lazyWindow.value).once(event, handler);
         },
+        async listen(event, handler) {
+          return await (await lazyWindow.value).listen(event, handler);
+        },
       };
     },
 
@@ -146,6 +158,30 @@ export function createTauriPlatform(): PlatformAdapter {
     async setCurrentWindowTitle(title) {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().setTitle(title);
+    },
+
+    async setCurrentWindowPosition(x, y) {
+      const { getCurrentWindow, LogicalPosition } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().setPosition(new LogicalPosition(x, y));
+    },
+
+    async setCurrentWindowSize(width, height) {
+      const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().setSize(new LogicalSize(width, height));
+    },
+
+    async onCurrentWindowMoved(handler) {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      return await win.listen("tauri://move", async () => {
+        try {
+          const pos = await win.outerPosition();
+          handler({ x: pos.x, y: pos.y });
+        } catch {
+          // 窗口销毁瞬间 outerPosition 可能失败：静默跳过，与原调用点
+          // （editor 页 try/catch 包裹）语义一致。
+        }
+      });
     },
 
     async closeCurrentWindow() {

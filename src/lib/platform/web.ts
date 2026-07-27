@@ -55,6 +55,12 @@ function createBrowserWindowHandle(target: Window | null = null): PlatformWindow
     async once() {
       return () => {};
     },
+    async listen() {
+      // 浏览器窗口句柄没有跨窗口事件通道（window.open 的标签页与本页无事件
+      // 总线）。消费方均为纯通知回调（如主窗口等待"restore-main-window"后
+      // show/setFocus），事件永不触发没有副作用，返回 no-op unlisten。
+      return () => {};
+    },
   };
 }
 
@@ -78,6 +84,13 @@ export function createWebPlatform(): PlatformAdapter {
       // 浏览器。监听器都是纯通知消费者（更新 loading 文案等），事件永不触发
       // 没有副作用，因此这里安全地返回 no-op unlisten。
       return () => {};
+    },
+
+    async emit() {
+      // Web 端没有跨窗口事件总线。emit 的消费者都是其他 Tauri 窗口
+      // （search-replace 窗口的命中计数、epub-metadata 窗口的初始化数据），
+      // 这些窗口在 web 端要么不存在、要么是无法互通的独立标签页。
+      // 事件丢失只影响跨窗口通知展示，不改变本页状态，no-op 无副作用。
     },
 
     async getFileSrcConverter() {
@@ -163,6 +176,24 @@ export function createWebPlatform(): PlatformAdapter {
     async setCurrentWindowTitle(title) {
       // 浏览器等价物：改标签页标题。
       if (typeof document !== "undefined") document.title = title;
+    },
+
+    async setCurrentWindowPosition() {
+      // 浏览器标签页无法移动宿主窗口（window.moveTo 仅对脚本自开窗口生效，
+      // 且标签页没有"窗口位置"语义）。调用方只做位置恢复这一增强体验，
+      // 跳过不影响任何后续逻辑，no-op 无副作用。
+    },
+
+    async setCurrentWindowSize() {
+      // 同上：浏览器标签页无法调整宿主窗口尺寸（window.resizeTo 限制同
+      // setCurrentWindowPosition），布局由浏览器窗口自身决定，no-op 无副作用。
+    },
+
+    async onCurrentWindowMoved() {
+      // 浏览器没有窗口移动事件；该回调仅用于把位置持久化到 localStorage，
+      // 而 web 端位置恢复（setCurrentWindowPosition）本身就是 no-op，
+      // 不保存也不会产生行为差异，返回 no-op unlisten。
+      return () => {};
     },
 
     async closeCurrentWindow() {

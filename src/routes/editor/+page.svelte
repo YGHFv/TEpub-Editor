@@ -1,11 +1,8 @@
 ﻿<script lang="ts">
     import { onMount, tick } from "svelte";
-    import { invoke } from "@tauri-apps/api/core";
-    import { listen, emit } from "@tauri-apps/api/event";
-    import { open, save, message, ask } from "@tauri-apps/plugin-dialog";
-    // import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs"; // Removed to force use of custom backend
-    import { getCurrentWindow } from "@tauri-apps/api/window";
-    import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+    import { platform } from "$lib/platform";
+    // 文本读写不走 fs 插件，统一使用自定义后端命令（platform.invoke 的
+    // read_text_file / save_text_file）。
     import Editor from "$lib/Editor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
@@ -1336,9 +1333,9 @@
 
         if (tocSearchIndex >= 0 && tocSearchIndex < tocSearchMatches.length) {
             navigateToTocMatch(tocSearchMatches[tocSearchIndex]);
-            emit("search-status", { count: tocSearchMatches.length, current: tocSearchIndex + 1 });
+            platform.emit("search-status", { count: tocSearchMatches.length, current: tocSearchIndex + 1 });
         } else {
-            emit("search-status", { count: 0 });
+            platform.emit("search-status", { count: 0 });
         }
     }
 
@@ -1525,7 +1522,7 @@
 
     async function loadSharedLibrarySettings() {
         try {
-            libraryData = await invoke<LibraryData>("load_library");
+            libraryData = await platform.invoke<LibraryData>("load_library");
             const appSettings = saveGlobalAppSettings(loadGlobalAppSettings(libraryData?.config || {}));
             aiProofingConfig = normalizeAiProofingConfig(appSettings.aiProofing);
             aiProviders = appSettings.aiProviders
@@ -1679,7 +1676,7 @@
             historyList = [];
             return;
         }
-        historyList = await invoke("get_history_list", {
+        historyList = await platform.invoke("get_history_list", {
             originalPath: filePath,
         });
     }
@@ -1687,7 +1684,7 @@
     async function loadProofLogs(selectFirst = false) {
         proofLogMessage = "正在读取校对日志...";
         try {
-            proofLogList = await invoke<ProofLogInfo[]>("list_ai_proofing_logs");
+            proofLogList = await platform.invoke<ProofLogInfo[]>("list_ai_proofing_logs");
             proofLogMessage = proofLogList.length ? "" : "暂无校对日志";
             if (selectFirst && proofLogList.length > 0) {
                 await openProofLog(proofLogList[0]);
@@ -1710,7 +1707,7 @@
         selectedProofLogPath = log.path;
         proofLogMessage = "正在打开日志...";
         try {
-            selectedProofLogContent = await invoke<string>("read_ai_proofing_log", { path: log.path });
+            selectedProofLogContent = await platform.invoke<string>("read_ai_proofing_log", { path: log.path });
             proofLogMessage = "";
         } catch (error) {
             console.error("打开校对日志失败:", error);
@@ -1721,7 +1718,7 @@
 
     async function loadImportedFonts() {
         try {
-            importedFonts = await invoke<ImportedFontInfo[]>("list_library_fonts");
+            importedFonts = await platform.invoke<ImportedFontInfo[]>("list_library_fonts");
             syncManagedFontAssets();
             epubMeta = { ...epubMeta };
         } catch (error) {
@@ -1739,7 +1736,7 @@
 
     async function loadStyleTemplates() {
         try {
-            styleTemplates = await invoke<StyleTemplateInfo[]>("list_style_templates");
+            styleTemplates = await platform.invoke<StyleTemplateInfo[]>("list_style_templates");
         } catch (error) {
             console.error("加载样式模板失败:", error);
             styleTemplates = [{ id: STYLE_TEMPLATE_BUILTIN_ID, name: "内置模板", file_name: "builtin.css", path: "", is_builtin: true }];
@@ -1748,7 +1745,7 @@
     }
 
     async function readStyleTemplateCss(templateId: string) {
-        const template = await invoke<StyleTemplateContent>("read_style_template", { id: templateId });
+        const template = await platform.invoke<StyleTemplateContent>("read_style_template", { id: templateId });
         return template.main_css.trim() || (templateId === STYLE_TEMPLATE_BUILTIN_ID ? getBuiltinStyleTemplateCss() : "");
     }
 
@@ -1772,16 +1769,24 @@
 
     async function importExternalFont() {
         if (isImportingFont) return;
-        const selection = await open({
-            multiple: false,
-            filters: [{ name: "Font", extensions: ["ttf", "otf", "woff", "woff2"] }],
-        });
+        let selection: string | string[] | null = null;
+        try {
+            selection = await platform.openDialog({
+                multiple: false,
+                filters: [{ name: "Font", extensions: ["ttf", "otf", "woff", "woff2"] }],
+            });
+        } catch (e) {
+            // web 端无原生文件选择器（openDialog 抛 PlatformUnsupportedError），
+            // 桌面端选择器异常也在此兜底提示。
+            fontSettingsMessage = `打开文件选择器失败：${e}`;
+            return;
+        }
         if (!selection) return;
 
         isImportingFont = true;
         fontSettingsMessage = "正在导入字体...";
         try {
-            const imported = await invoke<ImportedFontInfo>("import_library_font", {
+            const imported = await platform.invoke<ImportedFontInfo>("import_library_font", {
                 path: extractPickedPath(selection as string | string[]),
             });
             await loadImportedFonts();
@@ -1803,7 +1808,7 @@
         renamingFontFileName = font.file_name;
         fontSettingsMessage = "正在重命名字体...";
         try {
-            await invoke<ImportedFontInfo>("rename_library_font", {
+            await platform.invoke<ImportedFontInfo>("rename_library_font", {
                 fileName: font.file_name,
                 family: nextFamily,
             });
@@ -1820,7 +1825,7 @@
     }
 
     async function deleteImportedFont(font: ImportedFontInfo) {
-        const confirmed = await ask(`确定删除字体“${font.family}”吗？`, {
+        const confirmed = await platform.ask(`确定删除字体“${font.family}”吗？`, {
             title: "删除字体",
             kind: "warning",
         });
@@ -1829,7 +1834,7 @@
         deletingFontFileName = font.file_name;
         fontSettingsMessage = "正在删除字体...";
         try {
-            await invoke("delete_library_font", {
+            await platform.invoke("delete_library_font", {
                 fileName: font.file_name,
             });
             await loadImportedFonts();
@@ -1846,16 +1851,24 @@
 
     async function importStyleTemplateFile() {
         if (isImportingStyleTemplate) return;
-        const selection = await open({
-            multiple: false,
-            filters: [{ name: "CSS", extensions: ["css"] }],
-        });
+        let selection: string | string[] | null = null;
+        try {
+            selection = await platform.openDialog({
+                multiple: false,
+                filters: [{ name: "CSS", extensions: ["css"] }],
+            });
+        } catch (e) {
+            // web 端无原生文件选择器（openDialog 抛 PlatformUnsupportedError），
+            // 桌面端选择器异常也在此兜底提示。
+            styleSettingsMessage = `打开文件选择器失败：${e}`;
+            return;
+        }
         if (!selection) return;
 
         isImportingStyleTemplate = true;
         styleSettingsMessage = "正在导入样式模板...";
         try {
-            const imported = await invoke<StyleTemplateInfo>("import_style_template", {
+            const imported = await platform.invoke<StyleTemplateInfo>("import_style_template", {
                 path: extractPickedPath(selection as string | string[]),
             });
             await loadStyleTemplates();
@@ -1880,7 +1893,7 @@
                 syncToolbarStyleToEpubMeta();
             }
             const targetId = appSettings.selectedStyleTemplateId || STYLE_TEMPLATE_BUILTIN_ID;
-            await invoke<StyleTemplateInfo>("save_style_template", {
+            await platform.invoke<StyleTemplateInfo>("save_style_template", {
                 id: targetId,
                 mainCss: epubMeta.styles["main.css"],
             });
@@ -1899,7 +1912,7 @@
     async function restoreBuiltinStyleTemplateToDefault() {
         styleSettingsMessage = "正在恢复内置模板...";
         try {
-            await invoke("restore_builtin_style_template");
+            await platform.invoke("restore_builtin_style_template");
             await loadStyleTemplates();
             if ((appSettings.selectedStyleTemplateId || STYLE_TEMPLATE_BUILTIN_ID) === STYLE_TEMPLATE_BUILTIN_ID) {
                 await applySelectedStyleTemplate(STYLE_TEMPLATE_BUILTIN_ID);
@@ -2330,7 +2343,7 @@
             return "";
         }
         try {
-            const path = await invoke<string>("save_ai_proofing_log", {
+            const path = await platform.invoke<string>("save_ai_proofing_log", {
                 txtPath: filePath,
                 model: aiProofingConfig.model,
                 content: buildAiProofingLogContent(),
@@ -2450,7 +2463,7 @@
         }
         appendAiProofingLog(`自动审批：${chapterTitle}，待审 ${rows.length} 条`);
         try {
-            const response = await invoke<AiProofingResponse>("run_ai_proofing", {
+            const response = await platform.invoke<AiProofingResponse>("run_ai_proofing", {
                 request: {
                     config: proofingConfigForProvider(txtAiProofingConfig.approvalProviderId),
                     systemPrompt: AI_APPROVAL_SYSTEM_PROMPT,
@@ -2520,7 +2533,7 @@
                 appendAiProofingLog(`请求章节 ${i + 1}/${chapters.length}：${chapter.title}（发送 ${chapter.text.length}/${chapter.text.length} 字）`);
                 let suggestions: AiProofingSuggestion[] = [];
                 try {
-                    const response = await invoke<AiProofingResponse>("run_ai_proofing", {
+                    const response = await platform.invoke<AiProofingResponse>("run_ai_proofing", {
                         request: {
                             config: aiProofingConfig,
                             systemPrompt: AI_PROOFING_SYSTEM_PROMPT,
@@ -2968,11 +2981,11 @@
         isClosingEditorWindow = true;
         localStorage.removeItem(CRASH_RECOVERY_KEY);
         if (txtEditorCloseAction === "exit") {
-            await invoke("exit_app");
+            await platform.invoke("exit_app");
             return;
         }
         if (openedFromLibrary) {
-            await getCurrentWindow().destroy();
+            await platform.getCurrentWindow().destroy();
             return;
         }
         window.location.href = "/";
@@ -3042,30 +3055,30 @@
         let unlistenDragDrop: any;
 
         const init = async () => {
-            const { getCurrentWindow, LogicalPosition } = await import("@tauri-apps/api/window");
-            const appWindow = getCurrentWindow();
-            const label = appWindow.label;
-            const initialFilePath = getUrlFileParam() || await invoke<string | null>("get_launch_args");
+            const appWindow = platform.getCurrentWindow();
+            const label = await platform.getCurrentWindowLabel();
+            const initialFilePath = getUrlFileParam() || await platform.invoke<string | null>("get_launch_args");
             if (initialFilePath) {
                 localStorage.removeItem(CRASH_RECOVERY_KEY);
             }
 
-            // 1. 窗口位置恢复
-            const savedPos = localStorage.getItem(windowPosKey(label));
-            if (savedPos) {
-                try {
-                    const { x, y } = JSON.parse(savedPos);
-                    await appWindow.setPosition(new LogicalPosition(x, y));
-                } catch (e) {}
-            }
+            // 1. 窗口位置恢复（web 端拿不到窗口 label，跳过；桌面端 label 恒为字符串）
+            if (label !== null) {
+                const savedPos = localStorage.getItem(windowPosKey(label));
+                if (savedPos) {
+                    try {
+                        const { x, y } = JSON.parse(savedPos);
+                        await platform.setCurrentWindowPosition(x, y);
+                    } catch (e) {}
+                }
 
-            // 监听移动并保存
-            appWindow.listen("tauri://move", async () => {
-                try {
-                    const pos = await appWindow.outerPosition();
-                    localStorage.setItem(windowPosKey(label), JSON.stringify(pos));
-                } catch (e) {}
-            });
+                // 监听移动并保存
+                platform.onCurrentWindowMoved((pos) => {
+                    try {
+                        localStorage.setItem(windowPosKey(label), JSON.stringify(pos));
+                    } catch (e) {}
+                });
+            }
 
             // Listen for restore request from EPUB window
             appWindow.listen("restore-main-window", async () => {
@@ -3076,12 +3089,9 @@
 
             // 监听系统文件拖放：将 txt/md/epub 直接拖到窗口即可打开
             try {
-                unlistenDragDrop = await appWindow.onDragDropEvent(async (event: any) => {
-                    const payload = event?.payload;
-                    if (!payload || payload.type !== "drop") return;
-                    const paths: string[] = Array.isArray(payload.paths) ? payload.paths : [];
+                unlistenDragDrop = await platform.onCurrentWindowFileDrop((paths) => {
                     if (paths.length === 0) return;
-                    await openDroppedFile(paths);
+                    void openDroppedFile(paths);
                 });
             } catch (e) {
                 console.warn("注册拖放监听失败:", e);
@@ -3128,11 +3138,11 @@
             if (appSettings.defaultEpubStyles?.["main.css"]?.trim()) {
                 try {
                     const legacyMainCss = appSettings.defaultEpubStyles["main.css"].trim();
-                    const builtinTemplate = await invoke<StyleTemplateContent>("read_style_template", {
+                    const builtinTemplate = await platform.invoke<StyleTemplateContent>("read_style_template", {
                         id: STYLE_TEMPLATE_BUILTIN_ID,
                     });
                     if (builtinTemplate.main_css.trim() === legacyMainCss) {
-                        await invoke("restore_builtin_style_template");
+                        await platform.invoke("restore_builtin_style_template");
                         await loadStyleTemplates();
                     }
                     appSettings.defaultEpubStyles = { "main.css": "", "font.css": "" };
@@ -3164,7 +3174,7 @@
                         filePath = state.filePath;
                         let diskContent = "";
                         try {
-                            diskContent = await invoke("read_text_file", { path: filePath });
+                            diskContent = await platform.invoke("read_text_file", { path: filePath });
                         } catch (e) {
                             console.warn("File read fail:", e);
                         }
@@ -3207,7 +3217,7 @@
             }, initialFilePath ? 0 : 500);
 
             // 6. 关闭拦截
-            await appWindow.setTitle("TEpub-Editor-TXT");
+            await platform.setCurrentWindowTitle("TEpub-Editor-TXT");
             try {
                 const sp = new URLSearchParams(window.location.search);
                 openedFromLibrary = sp.get("fromLibrary") === "1";
@@ -3217,7 +3227,7 @@
                     txtEditorCloseAction = action;
                 }
             } catch (_) {}
-            unlistenClose = await appWindow.onCloseRequested(async (event) => {
+            unlistenClose = await platform.onCurrentWindowCloseRequested(async (event) => {
                 if (isClosingEditorWindow) return;
                 if (isModified) {
                     event.preventDefault();
@@ -3256,7 +3266,7 @@
 
     async function updateMd5(content: string) {
         try {
-            epubMeta.md5 = await invoke("calculate_md5", { content });
+            epubMeta.md5 = await platform.invoke("calculate_md5", { content });
         } catch (e) {}
     }
 
@@ -3361,7 +3371,7 @@
             if (normalizedPath !== epubMeta.cover_path) {
                 epubMeta.cover_path = normalizedPath;
             }
-            const data = await invoke<number[]>("read_binary_file", { path: normalizedPath });
+            const data = await platform.invoke<number[]>("read_binary_file", { path: normalizedPath });
             const ext = normalizedPath.split('.').pop()?.toLowerCase() || 'jpg';
             const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
             const mime = mimeMap[ext] || 'image/jpeg';
@@ -3395,9 +3405,17 @@
     }
 
     async function pickLocalCover() {
-        const selection = await open({
-            filters: [{ name: "Image", extensions: ["jpg", "png", "jpeg", "webp"] }],
-        });
+        let selection: string | string[] | null = null;
+        try {
+            selection = await platform.openDialog({
+                filters: [{ name: "Image", extensions: ["jpg", "png", "jpeg", "webp"] }],
+            });
+        } catch (e) {
+            // web 端无原生文件选择器（openDialog 抛 PlatformUnsupportedError），
+            // 桌面端选择器异常也在此兜底提示。
+            coverSearchMessage = `打开文件选择器失败：${e}`;
+            return;
+        }
         if (!selection) return;
         epubMeta.cover_path = extractPickedPath(selection as string | string[]);
         coverSearchMessage = "已使用本地封面";
@@ -3408,7 +3426,7 @@
         if (isCoverApplying) return;
         isCoverApplying = true;
         try {
-            const localPath = await invoke<string>("download_cover_to_temp", {
+            const localPath = await platform.invoke<string>("download_cover_to_temp", {
                 imageUrl: result.image_url,
                 title: epubMeta.title || result.title || "cover",
             });
@@ -3442,7 +3460,7 @@
         coverSearchMessage = "正在搜索封面...";
         coverSearchResults = [];
         try {
-            const results = await invoke<CoverSearchResult[]>("search_book_covers", { title, author });
+            const results = await platform.invoke<CoverSearchResult[]>("search_book_covers", { title, author });
             coverSearchResults = results;
             if (!results.length) {
                 coverSearchMessage = "没有找到可用封面";
@@ -3459,14 +3477,13 @@
 
     async function openAdvancedEpubMetadata() {
         try {
-            const existing = await WebviewWindow.getByLabel("epub-metadata");
+            const existing = await platform.getWindowByLabel("epub-metadata");
             if (existing) {
                 await existing.setFocus();
                 return;
             }
 
-            const win = new WebviewWindow("epub-metadata", {
-                url: "/epub-metadata",
+            const win = await platform.createWebviewWindow("epub-metadata", "/epub-metadata", {
                 title: "高级选项",
                 width: 540,
                 height: 620,
@@ -3478,7 +3495,7 @@
             });
 
             win.once("metadata-window-ready", async () => {
-                await emit("init-metadata", {
+                await platform.emit("init-metadata", {
                     meta: {
                         publisher: epubMeta.publisher,
                         uuid: epubMeta.uuid,
@@ -3490,7 +3507,7 @@
                 });
             });
 
-            const unlisten = await listen("update-metadata", (event: any) => {
+            const unlisten = await platform.listen("update-metadata", (event: any) => {
                 const { meta, custom } = event.payload;
                 epubMeta.publisher = meta.publisher;
                 epubMeta.uuid = meta.uuid;
@@ -3504,7 +3521,7 @@
                 unlisten();
             });
         } catch (e) {
-            message("打开高级选项失败: " + e, { kind: "error" });
+            platform.message("打开高级选项失败: " + e, { kind: "error" });
         }
     }
 
@@ -3531,12 +3548,8 @@
 
                     if (initialLaunch) {
                         // Initial launch: Reuse the main window
-                        const { getCurrentWindow, LogicalSize } = await import(
-                            "@tauri-apps/api/window"
-                        );
-                        const appWindow = getCurrentWindow();
-                        await appWindow.setTitle("TEpub-Editor-EPUB");
-                        await appWindow.setSize(new LogicalSize(1200, 800));
+                        await platform.setCurrentWindowTitle("TEpub-Editor-EPUB");
+                        await platform.setCurrentWindowSize(1200, 800);
                         window.location.href = `/epub-editor?file=${encodedPath}`;
                         return;
                     }
@@ -3546,10 +3559,10 @@
                         // 确保路径正确编码
                         console.log("编码后路径:", encodedPath);
 
-                        const epubWindow = new WebviewWindow(
+                        const epubWindow = await platform.createWebviewWindow(
                             "epub-editor-" + Date.now(),
+                            `/epub-editor?file=${encodedPath}`,
                             {
-                                url: `/epub-editor?file=${encodedPath}`,
                                 title: "TEpub-Editor-EPUB",
                                 width: 1200,
                                 height: 740,
@@ -3567,7 +3580,7 @@
                             fileContent ? fileContent.length : 0,
                         );
 
-                        const current = getCurrentWindow();
+                        const current = platform.getCurrentWindow();
                         // 强制隐藏：只要不是在编辑已有的文件（通过内容是否为空判断），就隐藏
                         if (!fileContent || fileContent.trim().length === 0) {
                             console.log("Hiding main window...");
@@ -3581,7 +3594,7 @@
                         // 无论隐藏与否，都监听错误
                         epubWindow.once("tauri://error", (e) => {
                             console.error("窗口创建失败:", e);
-                            message("打开 EPUB 编辑器失败: " + e, {
+                            platform.message("打开 EPUB 编辑器失败: " + e, {
                                 title: "错误",
                                 kind: "error",
                             });
@@ -3592,13 +3605,13 @@
                             console.log(
                                 "EPUB window destroyed, restoring main window...",
                             );
-                            const current = getCurrentWindow();
+                            const current = platform.getCurrentWindow();
                             await current.show();
                             await current.setFocus();
                         });
                     } catch (e) {
                         console.error("EPUB 窗口打开错误:", e);
-                        await message("打开 EPUB 编辑器失败: " + e, {
+                        await platform.message("打开 EPUB 编辑器失败: " + e, {
                             title: "错误",
                             kind: "error",
                         });
@@ -3617,7 +3630,7 @@
                 editorComponent?.resetDoc("");
 
                 // 读取原生文本并施加终极降维打击：强力规范化换行符！
-                let rawContent = await invoke<string>("read_text_file", {
+                let rawContent = await platform.invoke<string>("read_text_file", {
                     path: filePath,
                 });
                 let content = rawContent.replace(
@@ -3665,7 +3678,7 @@
         } catch (e) {
             isLoading = false;
             console.error("Open file failed:", e);
-            message(`打开文件失败: ${e}`, { kind: "error" });
+            platform.message(`打开文件失败: ${e}`, { kind: "error" });
         }
     }
 
@@ -3673,7 +3686,7 @@
         if (!paths || paths.length === 0) return;
         const firstSupported = paths.find((p) => /\.(txt|md|epub)$/i.test(p));
         if (!firstSupported) {
-            await message("仅支持拖入 TXT/MD/EPUB 文件", { kind: "warning" });
+            await platform.message("仅支持拖入 TXT/MD/EPUB 文件", { kind: "warning" });
             return;
         }
         await openLocalFile(firstSupported);
@@ -3681,7 +3694,7 @@
 
     async function selectFile() {
         try {
-            const selected = await open({
+            const selected = await platform.openDialog({
                 multiple: false,
                 filters: [
                     {
@@ -3706,7 +3719,7 @@
         isSaving = true;
         try {
             if (filePath.startsWith("请打开")) {
-                const path = await save({
+                const path = await platform.saveDialog({
                     filters: [{ name: "Text", extensions: ["txt"] }],
                 });
                 if (!path) {
@@ -3716,12 +3729,12 @@
                 filePath = path;
             }
             // await writeTextFile(filePath, fileContent);
-            await invoke("save_text_file", {
+            await platform.invoke("save_text_file", {
                 path: filePath,
                 content: fileContent,
             });
             // 调用后端保存历史
-            await invoke("save_history", {
+            await platform.invoke("save_history", {
                 originalPath: filePath,
                 content: fileContent,
             }).catch(() => {});
@@ -3732,9 +3745,9 @@
             // saveStateToCache(0); // Optional: re-save cleanslate or just remove. Removing is safer.
             await updateMd5(fileContent);
             await scanToc(fileContent);
-            // await message("保存成功！"); // 移除弹窗，保持静默成功
+            // await platform.message("保存成功！"); // 移除弹窗，保持静默成功
         } catch (e) {
-            await message(`保存失败: ${e}\n请确保已授予“所有文件访问权限”`, {
+            await platform.message(`保存失败: ${e}\n请确保已授予“所有文件访问权限”`, {
                 kind: "error",
             });
         } finally {
@@ -3951,7 +3964,7 @@
         try {
             // 调用 Rust 正则扫描
             loadManualTitleOverrides();
-            const rawList = await invoke<RawChapter[]>("scan_chapters", {
+            const rawList = await platform.invoke<RawChapter[]>("scan_chapters", {
                 content: text,
                 rules: appSettings.customRegexRules,
             });
@@ -4433,7 +4446,7 @@
     async function performFind() {
         if (!fileContent || !findPattern) return;
         try {
-            const res = await invoke<SearchResult>("advanced_search", {
+            const res = await platform.invoke<SearchResult>("advanced_search", {
                 content: fileContent,
                 pattern: findPattern,
                 isRegex,
@@ -4458,13 +4471,13 @@
 
     async function performReplaceAll() {
         if (!fileContent || !findPattern) return;
-        const confirmed = await ask("确定执行全书替换吗？此操作无法撤销。", {
+        const confirmed = await platform.ask("确定执行全书替换吗？此操作无法撤销。", {
             kind: "warning",
         });
         if (!confirmed) return;
 
         try {
-            const res = await invoke<string>("advanced_replace", {
+            const res = await platform.invoke<string>("advanced_replace", {
                 content: fileContent,
                 pattern: findPattern,
                 replacement: replacePattern,
@@ -4502,7 +4515,7 @@
         epubGenerationStatus = "generating";
         isLoading = true;
         try {
-            const savePath = await save({
+            const savePath = await platform.saveDialog({
                 filters: [{ name: "EPUB", extensions: ["epub"] }],
                 defaultPath: epubMeta.title + ".epub",
             });
@@ -4512,7 +4525,7 @@
                 return;
             }
 
-            let chapters = await invoke<RawChapter[]>("scan_chapters", {
+            let chapters = await platform.invoke<RawChapter[]>("scan_chapters", {
                 content: fileContent,
                 rules: appSettings.customRegexRules,
             });
@@ -4531,7 +4544,7 @@
                 return c;
             });
 
-            await invoke("export_epub", {
+            await platform.invoke("export_epub", {
                 savePath,
                 content: fileContent,
                 chapters,
@@ -4563,7 +4576,7 @@
             lastGeneratedEpubPath = savePath;
         } catch (e) {
             // 失败时显示错误并重置状态
-            await message("制作失败: " + e, { kind: "error" });
+            await platform.message("制作失败: " + e, { kind: "error" });
             epubGenerationStatus = "idle";
         } finally {
             isLoading = false;
@@ -4578,9 +4591,9 @@
     async function revealGeneratedEpub() {
         if (!lastGeneratedEpubPath) return;
         try {
-            await invoke("reveal_in_explorer", { path: lastGeneratedEpubPath });
+            await platform.revealPath(lastGeneratedEpubPath);
         } catch (e) {
-            await message("打开文件位置失败: " + e, { kind: "error" });
+            await platform.message("打开文件位置失败: " + e, { kind: "error" });
         }
     }
 
@@ -4590,14 +4603,14 @@
         try {
             // 1. 先保存当前版本为新历史
             if (filePath && fileContent) {
-                await invoke("save_history", {
+                await platform.invoke("save_history", {
                     originalPath: filePath,
                     content: fileContent,
                 });
             }
 
             // 2. 执行回退
-            fileContent = await invoke("read_text_file", {
+            fileContent = await platform.invoke("read_text_file", {
                 path: restoreTargetSnapshot.path,
             });
             editorComponent.resetDoc(fileContent);
@@ -4607,7 +4620,7 @@
             closeAllPanels();
             await scanToc();
         } catch (e) {
-            await message("回退失败: " + e, { kind: "error" });
+            await platform.message("回退失败: " + e, { kind: "error" });
         }
     }
 

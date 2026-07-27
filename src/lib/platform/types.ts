@@ -23,7 +23,10 @@ export interface PlatformWindowHandle {
   hide(): Promise<void>;
   close(): Promise<void>;
   destroy(): Promise<void>;
-  once(event: string, handler: () => void | Promise<void>): Promise<PlatformUnlisten>;
+  once(event: string, handler: (event: PlatformEvent<unknown>) => void | Promise<void>): Promise<PlatformUnlisten>;
+  // 窗口作用域事件监听（Tauri Window.listen：既收全局 emit，也收 emitTo 到
+  // 本窗口的定向事件——与全局 listen 语义不同，不能互相替代）。
+  listen(event: string, handler: (event: PlatformEvent<unknown>) => void | Promise<void>): Promise<PlatformUnlisten>;
 }
 
 export interface PlatformAdapter {
@@ -34,6 +37,8 @@ export interface PlatformAdapter {
 
   invoke<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>;
   listen<T = unknown>(event: string, handler: (event: PlatformEvent<T>) => void): Promise<PlatformUnlisten>;
+  // 前端 → 前端/后端广播事件（Tauri emit 的抽象），用于跨窗口通信。
+  emit(event: string, payload?: unknown): Promise<void>;
   getFileSrcConverter(): Promise<FileSrcConverter>;
   openDialog<T = string | string[] | null>(options?: Record<string, unknown>): Promise<T>;
   saveDialog(options?: Record<string, unknown>): Promise<string | null>;
@@ -50,6 +55,11 @@ export interface PlatformAdapter {
   // 系统级文件拖放：仅在文件真正落下（drop）时回调本地路径列表。
   onCurrentWindowFileDrop(handler: (paths: string[]) => void): Promise<PlatformUnlisten>;
   setCurrentWindowTitle(title: string): Promise<void>;
+  // 逻辑坐标/逻辑尺寸（Tauri LogicalPosition / LogicalSize）。
+  setCurrentWindowPosition(x: number, y: number): Promise<void>;
+  setCurrentWindowSize(width: number, height: number): Promise<void>;
+  // 窗口移动后回调外部物理坐标（Tauri outerPosition），用于持久化窗口位置。
+  onCurrentWindowMoved(handler: (pos: { x: number; y: number }) => void): Promise<PlatformUnlisten>;
   closeCurrentWindow(): Promise<void>;
   createWebviewWindow(label: string, url: string, options?: Record<string, unknown>): Promise<PlatformWindowHandle>;
 }
