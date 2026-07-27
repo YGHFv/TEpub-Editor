@@ -1,7 +1,7 @@
 # TEpub Editor
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-blue)
-![Version](https://img.shields.io/badge/Version-1.0.0-orange)
+![Version](https://img.shields.io/badge/Version-1.0.2-orange)
 ![Stack](https://img.shields.io/badge/Stack-Tauri%202%20%2B%20Svelte%205%20%2B%20Rust-00a7d0)
 
 TEpub Editor 是一个围绕 TXT 与 EPUB 的工作台，把书库管理、长文本编辑、EPUB 制作、EPUB 内部编辑、阅读和一批 EPUB 处理工具放在同一个应用里，同时提供桌面客户端和浏览器 Web 版。
@@ -69,7 +69,7 @@ TEpub Editor 是一个围绕 TXT 与 EPUB 的工作台，把书库管理、长�
 
 ## Web 版
 
-除桌面客户端外，项目还能构建成浏览器版本。Web 版由静态前端加一个可选的轻量 Node 服务组成；服务端提供账号注册、登录、账号级设置保存和 AI 请求代理，账号数据写入 `/data`。
+除桌面客户端外，项目还能构建成浏览器版本。Web 版由静态前端加一个可选的轻量 Node 服务组成；服务端提供账号注册、登录、账号级设置保存和 AI 请求代理，账号数据写入 `/data`。出于安全考虑，AI 校对、AI 生图和远程图片下载等服务端代理功能需要先登录账号才能使用。
 
 Web 工具箱已提供全部 14 个入口：书库、TXT 制作 EPUB、EPUB 样式库、TXT 编辑器、EPUB 编辑器 / 阅读器、字体加密 / 解密、文件加密 / 解密、EPUB 重构、图片转换、图片处理和 EPUB 诊断。Web 书库使用 IndexedDB 保存图书与历史版本，可请求浏览器持久存储；TXT 和 EPUB 可从书库直接进入阅读、编辑并写回。
 

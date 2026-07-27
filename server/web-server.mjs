@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -14,6 +14,10 @@ const maxAiImageInputBytes = 20 * 1024 * 1024;
 const aiImageUserAgent = "TEpub-Editor/web-image-tools";
 const maxRemoteImageBytes = 32 * 1024 * 1024;
 const remoteImageUserAgent = "Mozilla/5.0 (compatible; TEpub-Editor/1.0; +https://github.com/YGHFv/TEpub-Editor)";
+const maxAuthBodyBytes = 1 * 1024 * 1024;
+const maxCommandBodyBytes = 128 * 1024 * 1024;
+const authRateLimitWindowMs = 5 * 60 * 1000;
+const authRateLimitMaxAttempts = 10;
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -62,9 +66,18 @@ function verifyPassword(password, stored) {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-async function readBody(req) {
+async function readBody(req, maxBytes = maxAuthBodyBytes) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      const error = new Error("请求体过大。");
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
   return raw ? JSON.parse(raw) : {};
 }
@@ -94,6 +107,29 @@ function authUser(req, db) {
   const token = header.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
   return Object.values(db.users).find((user) => user.sessions?.includes(token)) || null;
+}
+
+function requestIp(req) {
+  return String(req.socket?.remoteAddress || "unknown");
+}
+
+const authAttempts = new Map();
+
+function checkAuthRateLimit(req) {
+  const now = Date.now();
+  const key = requestIp(req);
+  const entry = authAttempts.get(key);
+  if (!entry || now - entry.start > authRateLimitWindowMs) {
+    authAttempts.set(key, { start: now, count: 1 });
+    if (authAttempts.size > 10_000) {
+      for (const [k, v] of authAttempts) {
+        if (now - v.start > authRateLimitWindowMs) authAttempts.delete(k);
+      }
+    }
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= authRateLimitMaxAttempts;
 }
 
 function normalizeAiBaseUrl(value) {
@@ -235,13 +271,26 @@ function buildAiImageRequestBodies(model, prompt, size, referenceDataUrl) {
 }
 
 async function downloadAiImageUrl(url) {
-  const response = await fetch(String(url || "").trim(), {
-    headers: { accept: "image/*,*/*;q=0.8", "user-agent": aiImageUserAgent },
-  });
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (!response.ok) throw new Error(`下载生成图片返回 ${response.status}`);
-  validateAiImageBytes(bytes, "生成图片");
-  return bytes;
+  let current = await validatePublicHttpUrl(url, "生成图片地址");
+  for (let redirectCount = 0; redirectCount <= 3; redirectCount += 1) {
+    const response = await fetch(current, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(60_000),
+      headers: { accept: "image/*,*/*;q=0.8", "user-agent": aiImageUserAgent },
+    });
+    if (response.status >= 300 && response.status < 400) {
+      if (redirectCount === 3) throw new Error("生成图片地址重定向次数过多");
+      const location = response.headers.get("location");
+      if (!location) throw new Error(`生成图片地址返回了无目标的重定向 ${response.status}`);
+      current = await validatePublicHttpUrl(new URL(location, current).toString(), "生成图片地址");
+      continue;
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) throw new Error(`下载生成图片返回 ${response.status}`);
+    validateAiImageBytes(bytes, "生成图片");
+    return bytes;
+  }
+  throw new Error("下载生成图片失败");
 }
 
 async function extractAiImageBytes(value, keyHint = "") {
@@ -281,8 +330,10 @@ async function extractAiImageBytes(value, keyHint = "") {
 }
 
 async function requestAiImageGeneration(request, body) {
-  const response = await fetch(aiImageGenerationUrl(request.baseUrl), {
+  const endpoint = await validatePublicHttpUrl(aiImageGenerationUrl(request.baseUrl), "生图接口地址");
+  const response = await fetch(endpoint, {
     method: "POST",
+    signal: AbortSignal.timeout(300_000),
     headers: {
       accept: "application/json,image/*",
       "content-type": "application/json",
@@ -319,8 +370,10 @@ async function requestAiImageEdit(request, prompt, size, referenceBytes) {
   form.set("response_format", "b64_json");
   if (String(size || "").trim()) form.set("size", String(size).trim());
   form.set("image", new Blob([referenceBytes], { type: mime }), `reference.${extension}`);
-  const response = await fetch(aiImageEditsUrl(request.baseUrl), {
+  const endpoint = await validatePublicHttpUrl(aiImageEditsUrl(request.baseUrl), "图片编辑接口地址");
+  const response = await fetch(endpoint, {
     method: "POST",
+    signal: AbortSignal.timeout(300_000),
     headers: {
       accept: "application/json,image/*",
       authorization: `Bearer ${String(request.apiKey || "").trim()}`,
@@ -450,24 +503,28 @@ function blockedIpAddress(address) {
   return mapped ? blockedIpv4(mapped) : false;
 }
 
-async function validateRemoteImageUrl(value) {
+async function validatePublicHttpUrl(value, label = "地址") {
   let parsed;
   try {
     parsed = new URL(String(value || "").trim());
   } catch (error) {
-    throw new Error(`图片地址无效：${error.message}`);
+    throw new Error(`${label}无效：${error.message}`);
   }
-  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("仅支持 HTTP 或 HTTPS 图片地址");
-  if (parsed.username || parsed.password) throw new Error("图片地址不能包含用户名或密码");
+  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error(`${label}仅支持 HTTP 或 HTTPS`);
+  if (parsed.username || parsed.password) throw new Error(`${label}不能包含用户名或密码`);
   const host = parsed.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
-    throw new Error("不允许下载本机或局域网图片地址");
+    throw new Error(`${label}不允许指向本机或局域网`);
   }
   const addresses = isIP(host) ? [{ address: host }] : await lookup(host, { all: true, verbatim: true });
   if (!addresses.length || addresses.some((item) => blockedIpAddress(item.address))) {
-    throw new Error("不允许下载本机、私有网络或链路本地图片地址");
+    throw new Error(`${label}不允许指向本机、私有网络或链路本地地址`);
   }
   return parsed;
+}
+
+async function validateRemoteImageUrl(value) {
+  return validatePublicHttpUrl(value, "图片地址");
 }
 
 async function readLimitedResponse(response) {
@@ -527,6 +584,7 @@ async function runAiProofingCommand(payload) {
   const model = String(config.model || "").trim();
   if (!base || !apiKey || !model) throw new Error("请先填写文字模型 API 地址、API Key 和模型名");
   const endpoint = base.toLowerCase().endsWith("/chat/completions") ? base : `${base}/chat/completions`;
+  await validatePublicHttpUrl(endpoint, "文字模型接口地址");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(30, Math.min(1800, Number(config.responseTimeoutSec) || 300)) * 1000);
   try {
@@ -560,9 +618,12 @@ async function runAiProofingCommand(payload) {
   }
 }
 
-async function handleCommand(req, res, command) {
+async function handleCommand(req, res, command, db) {
   try {
-    const body = await readBody(req);
+    if (!authUser(req, db)) {
+      return json(res, 401, { error: "请先登录后再使用该功能。" });
+    }
+    const body = await readBody(req, maxCommandBodyBytes);
     if (req.method === "POST" && command === "toolbox_generate_ai_image") {
       return json(res, 200, await generateAiImageCommand(body));
     }
@@ -574,7 +635,7 @@ async function handleCommand(req, res, command) {
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {
-    return json(res, 400, { error: String(error?.message || error) });
+    return json(res, Number(error?.status) || 400, { error: String(error?.message || error) });
   }
 }
 
@@ -583,10 +644,11 @@ async function handleApi(req, res, url) {
     const db = loadDb();
 
     if (url.pathname.startsWith("/api/commands/")) {
-      return handleCommand(req, res, decodeURIComponent(url.pathname.slice("/api/commands/".length)));
+      return handleCommand(req, res, decodeURIComponent(url.pathname.slice("/api/commands/".length)), db);
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/register") {
+      if (!checkAuthRateLimit(req)) return json(res, 429, { error: "尝试过于频繁，请稍后再试。" });
       const body = await readBody(req);
       const username = normalizeUsername(body.username);
       const password = normalizePassword(body.password);
@@ -605,6 +667,7 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/login") {
+      if (!checkAuthRateLimit(req)) return json(res, 429, { error: "尝试过于频繁，请稍后再试。" });
       const body = await readBody(req);
       const username = normalizeUsername(body.username);
       const password = normalizePassword(body.password);
@@ -616,6 +679,17 @@ async function handleApi(req, res, url) {
       user.sessions = [...(user.sessions || []).slice(-4), token];
       saveDb(db);
       return json(res, 200, { token, ...publicUser(user) });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/logout") {
+      const user = authUser(req, db);
+      if (user) {
+        const header = String(req.headers.authorization || "");
+        const token = header.replace(/^Bearer\s+/i, "").trim();
+        user.sessions = (user.sessions || []).filter((item) => item !== token);
+        saveDb(db);
+      }
+      return json(res, 200, { ok: true });
     }
 
     if (url.pathname === "/api/settings") {
@@ -633,7 +707,7 @@ async function handleApi(req, res, url) {
 
     return json(res, 404, { error: "Not found" });
   } catch (error) {
-    return json(res, 400, { error: String(error?.message || error) });
+    return json(res, Number(error?.status) || 400, { error: String(error?.message || error) });
   }
 }
 
@@ -651,26 +725,42 @@ function serveStatic(req, res, url) {
     res.end();
     return;
   }
-  const requestPath = decodeURIComponent(url.pathname);
+  let requestPath;
+  try {
+    requestPath = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+    res.end("Bad request\n");
+    return;
+  }
   const candidate = normalize(join(root, requestPath));
-  const file = candidate.startsWith(root) && existsSync(candidate) && !candidate.endsWith("/") ? candidate : join(root, "index.html");
+  const insideRoot = candidate === root || candidate.startsWith(root + sep);
+  const file = insideRoot && existsSync(candidate) && !candidate.endsWith("/") && !candidate.endsWith(sep) ? candidate : join(root, "index.html");
   const type = contentTypes[extname(file).toLowerCase()] || "application/octet-stream";
-  res.writeHead(200, { "content-type": type });
+  res.writeHead(200, { "content-type": type, "x-content-type-options": "nosniff" });
   createReadStream(file).pipe(res);
 }
 
 createServer((req, res) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  if (url.pathname === "/healthz") {
-    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-    res.end("ok\n");
-    return;
+  try {
+    const url = new URL(req.url || "/", "http://localhost");
+    if (url.pathname === "/healthz") {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      res.end("ok\n");
+      return;
+    }
+    if (url.pathname.startsWith("/api/")) {
+      void handleApi(req, res, url);
+      return;
+    }
+    serveStatic(req, res, url);
+  } catch (error) {
+    console.error("请求处理失败:", error);
+    if (!res.headersSent) {
+      res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+    }
+    res.end("Internal server error\n");
   }
-  if (url.pathname.startsWith("/api/")) {
-    void handleApi(req, res, url);
-    return;
-  }
-  serveStatic(req, res, url);
 }).listen(port, "0.0.0.0", () => {
   console.log(`TEpub web server listening on ${port}`);
 });

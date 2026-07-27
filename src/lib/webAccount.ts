@@ -182,6 +182,15 @@ function applyAuthResult(result: AuthResponse, localOnly: boolean) {
 }
 
 export function logoutWebAccount() {
+  const session = getWebAccountSession();
+  if (session?.token && !session.localOnly) {
+    void requestJson("/auth/logout", {
+      method: "POST",
+      headers: { authorization: `Bearer ${session.token}` },
+    }).catch(() => {
+      // 服务端不可达时仅清除本地会话。
+    });
+  }
   setWebAccountSession(null);
   notifySettingsChanged();
 }

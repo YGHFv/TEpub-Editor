@@ -1,8 +1,14 @@
 import { PlatformUnsupportedError, type PlatformAdapter, type PlatformWindowHandle } from "./types";
+import { getWebAccountSession } from "$lib/webAccount";
 
 function getWebApiBaseUrl(): string {
   const env = import.meta.env.PUBLIC_TEPUB_API_BASE;
   return String(env || "/api").replace(/\/+$/, "");
+}
+
+function webAuthHeaders(): Record<string, string> {
+  const session = getWebAccountSession();
+  return session?.token && !session.localOnly ? { authorization: `Bearer ${session.token}` } : {};
 }
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -62,6 +68,7 @@ export function createWebPlatform(): PlatformAdapter {
     async invoke<T = unknown>(command: string, args: Record<string, unknown> = {}) {
       return requestJson<T>(`/commands/${encodeURIComponent(command)}`, {
         method: "POST",
+        headers: webAuthHeaders(),
         body: JSON.stringify(args),
       });
     },
