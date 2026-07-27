@@ -7,6 +7,7 @@
     import ChapterSidebar, {
         type TocNode,
     } from "$lib/editor/ChapterSidebar.svelte";
+    import EditorToolbar from "$lib/editor/EditorToolbar.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
@@ -4669,6 +4670,31 @@
         showProofPanel = true;
     }
 
+    // ===== 工具栏回调（EditorToolbar 纯展示，逻辑与 editorComponent 转发均留在页面） =====
+    function openEpubModal() {
+        closeAllPanels();
+        refreshEpubMetadata();
+        showEpubModal = true;
+        // 重置EPUB制作状态
+        epubGenerationStatus = "idle";
+        coverSearchResults = [];
+        coverSearchMessage = "";
+        loadCoverPreview();
+    }
+
+    function openSearchPanel() {
+        closeAllPanels();
+        if (editorComponent) {
+            editorComponent.openSearchWindow();
+        }
+    }
+
+    function openSettingsPanel() {
+        showSettingsPanel = true;
+        showEpubModal = false;
+        showHistoryPanel = false;
+    }
+
 </script>
 
 <svelte:head>
@@ -4685,77 +4711,18 @@
 <Toast />
 
 <main class="app-container" on:contextmenu|preventDefault>
-    <header class="toolbar">
-        <div class="btn-group">
-            <button class="btn-primary" on:click={selectFile}>📂</button>
-            <button
-                class={isModified ? "btn-save-modified" : "btn-save-default"}
-                on:click={saveFile}>💾</button
-            >
-            <button
-                class="btn-secondary"
-                on:click={() => editorComponent.triggerUndo()}>↩️</button
-            >
-            <button
-                class="btn-secondary"
-                on:click={() => editorComponent.triggerRedo()}>↪️</button
-            >
-            <button
-                class="btn-secondary"
-                on:click={() => (showSidebar = !showSidebar)}>📖</button
-            >
-            <button
-                class="btn-secondary"
-                on:click={() => {
-                    closeAllPanels();
-                    refreshEpubMetadata();
-                    showEpubModal = true;
-                    // 重置EPUB制作状态
-                    epubGenerationStatus = "idle";
-                    coverSearchResults = [];
-                    coverSearchMessage = "";
-                    loadCoverPreview();
-                }}>📚</button
-            >
-        </div>
-        <div class="toolbar-tail">
-            <button
-                class="btn-secondary"
-                title="查找与替换 (Ctrl+F)"
-                on:click={() => {
-                    closeAllPanels();
-                    if (editorComponent) {
-                        editorComponent.openSearchWindow();
-                    }
-                }}>🔍</button
-            >
-            <button
-                class="btn-secondary proof-tool-btn"
-                title="校对"
-                aria-label="校对"
-                on:click={toggleProofPanel}
-            >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M5 4.5h10.2a2.3 2.3 0 0 1 2.3 2.3v3.45" />
-                    <path d="M5 8.5h8.5" />
-                    <path d="M5 12.5h6.2" />
-                    <path d="M5 16.5h4.1" />
-                    <path d="m14.2 16.7 2.05 2.05L20.8 14.2" />
-                    <path d="M4.5 3.5h11.2a3.8 3.8 0 0 1 3.8 3.8v2.2" />
-                </svg>
-            </button
-            >
-            <button
-                class="btn-secondary"
-                title="偏好设置"
-                on:click={() => {
-                    showSettingsPanel = true;
-                    showEpubModal = false;
-                    showHistoryPanel = false;
-                }}>⚙️</button
-            >
-        </div>
-    </header>
+    <EditorToolbar
+        {isModified}
+        onSelectFile={selectFile}
+        onSaveFile={saveFile}
+        onUndo={() => editorComponent.triggerUndo()}
+        onRedo={() => editorComponent.triggerRedo()}
+        onToggleSidebar={() => (showSidebar = !showSidebar)}
+        onOpenEpubModal={openEpubModal}
+        onOpenSearch={openSearchPanel}
+        onToggleProof={toggleProofPanel}
+        onOpenSettings={openSettingsPanel}
+    />
 
     <div class="main-body">
         {#if showSidebar && isMobile}
@@ -6295,27 +6262,6 @@
         height: 100vh;
         width: 100vw;
     }
-    .toolbar {
-        padding-top: env(safe-area-inset-top);
-        background: #f3f3f3;
-        height: 44px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding-left: 10px;
-        padding-right: 10px;
-        border-bottom: 1px solid #ddd;
-        z-index: 100;
-    }
-    .btn-group {
-        display: flex;
-        gap: 6px;
-    }
-    .toolbar-tail {
-        display: flex;
-        gap: 6px;
-        margin-left: auto;
-    }
     button {
         height: 34px;
         min-width: 40px;
@@ -6332,17 +6278,6 @@
     button:active {
         background: #eee;
         transform: scale(0.96);
-    }
-    .btn-primary {
-        background: #0066b8;
-        color: #fff;
-        border: none;
-    }
-    .btn-save-modified {
-        background: #d32f2f;
-        color: #fff;
-        border: none;
-        animation: pulse 2s infinite;
     }
     @keyframes pulse {
         0% {
@@ -6373,23 +6308,6 @@
         flex-direction: column;
         flex-shrink: 0;
         overflow: hidden;
-    }
-
-    .proof-tool-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
-    }
-
-    .proof-tool-btn svg {
-        width: 20px;
-        height: 20px;
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 1.9;
-        stroke-linecap: round;
-        stroke-linejoin: round;
     }
 
     .style-panel-header {
@@ -8336,19 +8254,6 @@
         background: rgba(246, 250, 253, 0.68);
     }
 
-    .toolbar {
-        height: 52px;
-        padding: env(safe-area-inset-top) 14px 0;
-        background: rgba(255, 255, 255, 0.78);
-        border-bottom: 1px solid var(--color-border);
-        box-shadow: var(--shadow-xs);
-        backdrop-filter: blur(18px) saturate(1.15);
-    }
-
-    .btn-group {
-        gap: 8px;
-    }
-
     button {
         height: var(--control-height);
         min-width: 38px;
@@ -8384,7 +8289,6 @@
         box-shadow: none;
     }
 
-    .btn-primary,
     .btn.primary,
     .epub-confirm {
         background: var(--gradient-accent);
@@ -8393,8 +8297,6 @@
         box-shadow: 0 10px 22px rgba(22, 119, 184, 0.2);
     }
 
-    .btn-secondary,
-    .btn-save-default,
     .btn.secondary,
     .epub-cancel,
     .btn-small {
@@ -8402,7 +8304,6 @@
         color: var(--color-text-soft);
     }
 
-    .btn-save-modified,
     .btn.danger {
         background: var(--gradient-danger);
         border-color: transparent;
