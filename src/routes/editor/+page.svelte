@@ -15,6 +15,13 @@
     import SettingsTocTab, {
         type CustomRegexRule,
     } from "$lib/editor/SettingsTocTab.svelte";
+    import SettingsApiTab, {
+        type AiProviderConfig,
+    } from "$lib/editor/SettingsApiTab.svelte";
+    import SettingsAiTab from "$lib/editor/SettingsAiTab.svelte";
+    import SettingsProofLogsTab, {
+        type ProofLogInfo,
+    } from "$lib/editor/SettingsProofLogsTab.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
@@ -124,12 +131,6 @@
         timestamp: number;
         size: number;
     }
-    interface ProofLogInfo {
-        fileName: string;
-        path: string;
-        timestamp: number;
-        size: number;
-    }
     interface AiProofingConfig {
         enabled: boolean;
         baseUrl: string;
@@ -140,15 +141,6 @@
         responseTimeoutSec: number;
         autoApprove: boolean;
         extraPrompt: string;
-    }
-    interface AiProviderConfig {
-        id: string;
-        name: string;
-        kind?: "text" | "image";
-        baseUrl: string;
-        apiKey: string;
-        model: string;
-        temperature: number;
     }
     interface TxtAiProofingConfig {
         providerId: string;
@@ -5555,141 +5547,44 @@
                             onAddRule={addTocRegexRule}
                         />
                     {:else if settingsActiveTab === 'api'}
-                        <div class="ai-settings-form">
-                            {#if aiSettingsMessage}
-                                <div class="font-settings-status">{aiSettingsMessage}</div>
-                            {/if}
-                            <div class="font-settings-head ai-provider-head">
-                                <div>
-                                    <div class="font-settings-title">API 配置</div>
-                                    <div class="font-settings-note">可添加多个 OpenAI 兼容 API，分别供校对和自动审批选择。</div>
-                                </div>
-                                <div class="style-settings-actions">
-                                    <button class="mini-action" type="button" on:click={addTxtAiProvider}>新增</button>
-                                </div>
-                            </div>
-
-                            {#if aiProviders.length === 0 && !apiEditorOpen}
-                                <div class="api-empty">暂无 API 配置，点击“新增”添加文字模型。</div>
-                            {:else}
-                                <div class="api-list">
-                                    {#each aiProviders as provider}
-                                        <div class="api-item">
-                                            <div class="api-item-main">
-                                                <div class="api-item-title">
-                                                    <strong>{provider.name || provider.model}</strong>
-                                                    <span>文字模型</span>
-                                                </div>
-                                                <div class="api-item-meta">
-                                                    <span>{provider.model || "未填写模型"}</span>
-                                                    <span>{provider.baseUrl || "未填写 API 地址"}</span>
-                                                    <span>{provider.apiKey ? "已保存 Key" : "未填写 Key"}</span>
-                                                </div>
-                                            </div>
-                                            <div class="api-item-actions">
-                                                <button class="mini-action" type="button" on:click={() => editTxtAiProvider(provider)}>编辑</button>
-                                                <button class="mini-action danger" type="button" on:click={() => removeTxtAiProvider(provider.id)}>删除</button>
-                                            </div>
-                                        </div>
-                                    {/each}
-                                </div>
-                            {/if}
-
-                            {#if apiEditorOpen && apiEditorDraft}
-                            <div class="api-editor">
-                                <div class="api-editor-head">
-                                    <strong>{apiEditorMode === "new" ? "新增 API" : "编辑 API"}</strong>
-                                    <div class="api-editor-actions">
-                                        <button class="mini-action primary" type="button" on:click={saveTxtAiProviderEditor}>保存</button>
-                                        <button class="mini-action" type="button" on:click={cancelTxtAiProviderEditor}>取消</button>
-                                    </div>
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiProviderName">名称:</label>
-                                    <input id="aiProviderName" type="text" value={apiEditorDraft.name || ""} on:input={(e) => updateSelectedTxtAiProvider("name", e.currentTarget.value)} />
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiProviderBaseUrl">API 地址:</label>
-                                    <input id="aiProviderBaseUrl" type="text" value={apiEditorDraft.baseUrl || ""} on:input={(e) => updateSelectedTxtAiProvider("baseUrl", e.currentTarget.value)} placeholder="https://api.openai.com/v1" />
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiProviderKey">API Key:</label>
-                                    <input id="aiProviderKey" type="password" value={apiEditorDraft.apiKey || ""} on:input={(e) => updateSelectedTxtAiProvider("apiKey", e.currentTarget.value)} placeholder="sk-..." />
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiProviderModel">模型:</label>
-                                    <input id="aiProviderModel" type="text" value={apiEditorDraft.model || ""} on:input={(e) => updateSelectedTxtAiProvider("model", e.currentTarget.value)} placeholder="deepseek-chat / gpt-4o-mini" />
-                                </div>
-                                <div class="set-row">
-                                    <label for="aiProviderTemperature">温度:</label>
-                                    <input id="aiProviderTemperature" type="number" min="0" max="1" step="0.1" value={apiEditorDraft.temperature ?? 0.1} on:input={(e) => updateSelectedTxtAiProvider("temperature", Number(e.currentTarget.value))} />
-                                </div>
-                            </div>
-                            {/if}
-                        </div>
+                        <SettingsApiTab
+                            message={aiSettingsMessage}
+                            providers={aiProviders}
+                            editorOpen={apiEditorOpen}
+                            editorMode={apiEditorMode}
+                            editorDraft={apiEditorDraft}
+                            onAdd={addTxtAiProvider}
+                            onEdit={editTxtAiProvider}
+                            onRemove={removeTxtAiProvider}
+                            onSave={saveTxtAiProviderEditor}
+                            onCancel={cancelTxtAiProviderEditor}
+                            onUpdateDraft={updateSelectedTxtAiProvider}
+                        />
                     {:else if settingsActiveTab === 'ai'}
-                        <div class="ai-settings-form">
-                            {#if aiSettingsMessage}
-                                <div class="font-settings-status">{aiSettingsMessage}</div>
-                            {/if}
-                            <div class="set-row">
-                                <label for="aiProofProvider">校对 API:</label>
-                                <CustomSelect id="aiProofProvider" value={txtAiProofingConfig.providerId} options={aiProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.model }))} on:change={(event) => { txtAiProofingConfig.providerId = event.detail; aiProofingConfig = proofingConfigForProvider(event.detail); }} />
-                            </div>
-                            <div class="set-row">
-                                <label for="aiApprovalProvider">审批 API:</label>
-                                <CustomSelect id="aiApprovalProvider" value={txtAiProofingConfig.approvalProviderId} options={aiProviders.map((provider) => ({ value: provider.id, label: provider.name || provider.model }))} on:change={(event) => (txtAiProofingConfig.approvalProviderId = event.detail)} />
-                            </div>
-                            <div class="set-row">
-                                <label for="aiMaxChars">单章上限:</label>
-                                <input id="aiMaxChars" type="number" min="1000" step="1000" bind:value={aiProofingConfig.maxChapterChars} />
-                            </div>
-                            <div class="set-row">
-                                <label for="aiTimeoutSec">最长响应时间:</label>
-                                <input id="aiTimeoutSec" type="number" min="30" max="1800" step="30" bind:value={aiProofingConfig.responseTimeoutSec} />
-                            </div>
-                            <label class="set-row ai-toggle-row" for="aiAutoApprove">
-                                <span>自动审批:</span>
-                                <input id="aiAutoApprove" type="checkbox" bind:checked={aiProofingConfig.autoApprove} />
-                                <small>AI 审核非自动建议，通过则自动应用，存疑保留人工审核。</small>
-                            </label>
-                            <div class="set-row ai-textarea-row">
-                                <label for="aiExtraPrompt">额外要求:</label>
-                                <textarea id="aiExtraPrompt" rows="4" bind:value={aiProofingConfig.extraPrompt} placeholder="例如：保留作者口癖，不做风格润色。"></textarea>
-                            </div>
-                        </div>
+                        <SettingsAiTab
+                            message={aiSettingsMessage}
+                            providers={aiProviders}
+                            proofProviderId={txtAiProofingConfig.providerId}
+                            approvalProviderId={txtAiProofingConfig.approvalProviderId}
+                            bind:maxChapterChars={aiProofingConfig.maxChapterChars}
+                            bind:responseTimeoutSec={aiProofingConfig.responseTimeoutSec}
+                            bind:autoApprove={aiProofingConfig.autoApprove}
+                            bind:extraPrompt={aiProofingConfig.extraPrompt}
+                            onProofProviderChange={(providerId) => {
+                                txtAiProofingConfig.providerId = providerId;
+                                aiProofingConfig = proofingConfigForProvider(providerId);
+                            }}
+                            onApprovalProviderChange={(providerId) => (txtAiProofingConfig.approvalProviderId = providerId)}
+                        />
                     {:else if settingsActiveTab === 'proofLogs'}
-                        <div class="proof-log-settings">
-                            <div class="proof-log-toolbar">
-                                <span>{proofLogMessage || `共 ${proofLogList.length} 个日志文件`}</span>
-                                <button class="mini-action" type="button" on:click={() => loadProofLogs(false)}>刷新</button>
-                            </div>
-                            <div class="proof-log-browser">
-                                <div class="proof-log-list">
-                                    {#each proofLogList as log}
-                                        <button
-                                            type="button"
-                                            class:active={selectedProofLogPath === log.path}
-                                            on:click={() => openProofLog(log)}
-                                        >
-                                            <span class="proof-log-name">{log.fileName}</span>
-                                            <span class="proof-log-meta">
-                                                {new Date(log.timestamp * 1000).toLocaleString()} · {(log.size / 1024).toFixed(1)}KB
-                                            </span>
-                                        </button>
-                                    {:else}
-                                        <div class="empty-msg">暂无校对日志</div>
-                                    {/each}
-                                </div>
-                                <textarea
-                                    class="proof-log-content"
-                                    readonly
-                                    value={selectedProofLogContent || "选择左侧日志后查看完整内容"}
-                                    data-native-context-menu="true"
-                                    on:contextmenu|stopPropagation
-                                ></textarea>
-                            </div>
-                        </div>
+                        <SettingsProofLogsTab
+                            logs={proofLogList}
+                            message={proofLogMessage}
+                            selectedPath={selectedProofLogPath}
+                            selectedContent={selectedProofLogContent}
+                            onRefresh={() => loadProofLogs(false)}
+                            onOpenLog={openProofLog}
+                        />
                     {:else}
                         <div class="history-settings-card">
                             {#each historyList as h}
@@ -6260,11 +6155,6 @@
         color: #11679f;
     }
 
-    .mini-action.danger {
-        border-color: #f1b8b8;
-        color: #c03535;
-    }
-
     .style-block-editor-layout {
         flex: 1;
         min-height: 0;
@@ -6617,260 +6507,6 @@
 
     .style-panel-header.in-settings {
         min-height: 50px;
-    }
-
-    .ai-settings-form {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        max-width: 100%;
-        padding-top: 4px;
-    }
-
-    .ai-settings-form .set-row {
-        margin-bottom: 0;
-    }
-
-    .ai-provider-head {
-        margin-bottom: 4px;
-    }
-
-    .api-empty,
-    .api-item,
-    .api-editor {
-        border: 1px solid #e1e6ee;
-        border-radius: 8px;
-        background: #fff;
-    }
-
-    .api-empty {
-        padding: 10px 12px;
-        color: #667085;
-        font-size: 13px;
-        line-height: 1.5;
-    }
-
-    .api-list {
-        display: grid;
-        gap: 10px;
-    }
-
-    .api-item {
-        min-width: 0;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 12px;
-    }
-
-    .api-item-main {
-        min-width: 0;
-        display: grid;
-        gap: 6px;
-    }
-
-    .api-item-title,
-    .api-item-actions,
-    .api-editor-head,
-    .api-editor-actions {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-
-    .api-item-title strong {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 14px;
-        color: #253547;
-    }
-
-    .api-item-title span {
-        flex: 0 0 auto;
-        padding: 2px 7px;
-        border-radius: 999px;
-        background: #eaf5fc;
-        color: #176b94;
-        font-size: 11px;
-        font-weight: 800;
-    }
-
-    .api-item-meta {
-        min-width: 0;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px 12px;
-        color: #708093;
-        font-size: 12px;
-        line-height: 1.4;
-    }
-
-    .api-item-meta span {
-        max-width: 100%;
-        overflow-wrap: anywhere;
-    }
-
-    .api-editor {
-        margin-top: 2px;
-        padding: 12px;
-        display: grid;
-        gap: 12px;
-        background: #f9fbfd;
-    }
-
-    .api-editor-head {
-        justify-content: space-between;
-    }
-
-    .api-editor-head strong {
-        color: #253547;
-        font-size: 14px;
-    }
-
-    .ai-settings-form .set-row label {
-        width: 110px;
-        flex-shrink: 0;
-        font-weight: bold;
-        color: #444;
-        font-size: 13px;
-        line-height: 1.4;
-    }
-
-    .ai-settings-form .set-row {
-        align-items: center;
-        justify-content: flex-start;
-        gap: 10px;
-    }
-
-    .ai-settings-form .set-row input:not([type="checkbox"]),
-    .ai-settings-form .set-row textarea {
-        flex: 1 1 auto;
-        min-width: 0;
-        min-height: 34px;
-        box-sizing: border-box;
-        font-size: 13px;
-    }
-
-    .ai-settings-form .ai-textarea-row {
-        align-items: flex-start;
-    }
-
-    .ai-settings-form .ai-textarea-row label {
-        padding-top: 8px;
-    }
-
-    .ai-settings-form .set-row textarea {
-        flex: 1;
-        width: 100%;
-        min-height: 78px;
-        resize: vertical;
-        line-height: 1.55;
-    }
-
-    .ai-settings-form .ai-toggle-row {
-        display: grid;
-        grid-template-columns: 110px 24px minmax(0, 1fr);
-        align-items: center;
-        gap: 10px;
-    }
-
-    .ai-settings-form .ai-toggle-row input {
-        width: 16px;
-        height: 16px;
-        min-height: 0;
-        accent-color: #0b92b3;
-    }
-
-    .ai-settings-form .ai-toggle-row small {
-        color: #667085;
-        font-size: 11px;
-        line-height: 1.45;
-    }
-
-    .proof-log-settings {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        min-height: 0;
-        height: 100%;
-    }
-
-    .proof-log-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        color: #52606d;
-        font-size: 12px;
-    }
-
-    .proof-log-browser {
-        flex: 1;
-        min-height: 0;
-        display: grid;
-        grid-template-columns: minmax(180px, 0.9fr) minmax(0, 1.35fr);
-        gap: 10px;
-    }
-
-    .proof-log-list {
-        min-height: 0;
-        overflow: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding-right: 2px;
-    }
-
-    .proof-log-list button {
-        width: 100%;
-        min-height: 54px;
-        display: grid;
-        gap: 4px;
-        padding: 9px 10px;
-        border: 1px solid #e0e6ed;
-        border-radius: 8px;
-        background: #fff;
-        text-align: left;
-    }
-
-    .proof-log-list button.active {
-        border-color: #1677b8;
-        background: #eef8ff;
-        box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.1);
-    }
-
-    .proof-log-name {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: #1b2d3f;
-        font-size: 12px;
-        font-weight: 800;
-    }
-
-    .proof-log-meta {
-        color: #748295;
-        font-size: 11px;
-    }
-
-    .proof-log-content {
-        width: 100%;
-        min-width: 0;
-        min-height: 0;
-        resize: none;
-        padding: 10px;
-        border: 1px solid #d6e0eb;
-        border-radius: 8px;
-        background: #fbfcfe;
-        color: #334155;
-        font-family: Consolas, "Microsoft YaHei", monospace;
-        font-size: 11px;
-        line-height: 1.55;
-        box-sizing: border-box;
     }
 
     .style-source-editor textarea {
@@ -7568,12 +7204,6 @@
         color: #64748b;
         font-family: monospace;
         font-size: 12px;
-    }
-
-    @media (max-width: 760px) {
-        .proof-log-browser {
-            grid-template-columns: 1fr;
-        }
     }
 
     /* EPUB 制作面板重构样式 */
