@@ -8,6 +8,7 @@
         type TocNode,
     } from "$lib/editor/ChapterSidebar.svelte";
     import EditorToolbar from "$lib/editor/EditorToolbar.svelte";
+    import SettingsDisplayTab from "$lib/editor/SettingsDisplayTab.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
     import TagsEditor from "$lib/TagsEditor.svelte";
@@ -5340,57 +5341,14 @@
                     contentClass="editor-settings-content"
                 >
                     {#if settingsActiveTab === 'display'}
-                        <div class="settings-section display-settings-panel">
-                            <div class="section-title">显示设置</div>
-                            <div class="section-hint">把常用开关收成一列卡片，减少左右拉扯，和书库设置页保持同一套节奏。</div>
-                            <div class="settings-toggle-list">
-                                <label class="settings-toggle-card" for="wordWrap">
-                                    <div class="settings-toggle-copy">
-                                        <span class="settings-toggle-title">自动换行</span>
-                                        <span class="settings-toggle-note">编辑时按容器宽度自动换行，减少横向滚动。</span>
-                                    </div>
-                                    <input id="wordWrap" type="checkbox" bind:checked={appSettings.wordWrap} />
-                                </label>
-                                <label class="settings-toggle-card" for="showWhitespace">
-                                    <div class="settings-toggle-copy">
-                                        <span class="settings-toggle-title">显示空格</span>
-                                        <span class="settings-toggle-note">把空格可视化，便于清理多余缩进和格式噪点。</span>
-                                    </div>
-                                    <input id="showWhitespace" type="checkbox" bind:checked={appSettings.showWhitespace} />
-                                </label>
-                                <label class="settings-toggle-card" for="showLineBreaks">
-                                    <div class="settings-toggle-copy">
-                                        <span class="settings-toggle-title">显示换行符</span>
-                                        <span class="settings-toggle-note">把段落换行位置标出来，排查断行和章节格式更直接。</span>
-                                    </div>
-                                    <input id="showLineBreaks" type="checkbox" bind:checked={appSettings.showLineBreaks} />
-                                </label>
-                                <label class="settings-toggle-card" for="clh">
-                                    <div class="settings-toggle-copy">
-                                        <span class="settings-toggle-title">保存清空撤销</span>
-                                        <span class="settings-toggle-note">保存成功后重置当前撤销栈，避免历史状态和新内容混在一起。</span>
-                                    </div>
-                                    <input id="clh" type="checkbox" bind:checked={appSettings.clearHistoryOnSave} />
-                                </label>
-                                <label class="settings-toggle-card" for="subsetFonts">
-                                    <div class="settings-toggle-copy">
-                                        <span class="settings-toggle-title">字体子集化</span>
-                                        <span class="settings-toggle-note">导出时只保留用到的字形，通常能进一步压缩 EPUB 体积。</span>
-                                    </div>
-                                    <input id="subsetFonts" type="checkbox" bind:checked={appSettings.subsetFonts} />
-                                </label>
-                            </div>
-                        </div>
-                        <!-- 撤销开关 -->
-                        <div class="set-row" style="display: none;">
-                            <label for="wth" style="display: none;">单章字数检查:</label>
-                            <input
-                                id="wth"
-                                type="hidden"
-                                bind:value={appSettings.wordCountMaxThreshold}
-                                style="width: 80px;"
-                            />
-                        </div>
+                        <SettingsDisplayTab
+                            bind:wordWrap={appSettings.wordWrap}
+                            bind:showWhitespace={appSettings.showWhitespace}
+                            bind:showLineBreaks={appSettings.showLineBreaks}
+                            bind:clearHistoryOnSave={appSettings.clearHistoryOnSave}
+                            bind:subsetFonts={appSettings.subsetFonts}
+                            bind:wordCountMaxThreshold={appSettings.wordCountMaxThreshold}
+                        />
                     {:else if settingsActiveTab === 'fonts'}
                         <div class="font-settings-panel">
                             <div class="font-settings-head">
