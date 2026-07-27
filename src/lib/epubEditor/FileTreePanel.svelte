@@ -12,6 +12,7 @@
 
 <script lang="ts">
     import FileTreeItem from "$lib/FileTreeItem.svelte";
+    import { getFileIcon } from "./fileIcons";
 
     let {
         fileTree,
@@ -24,7 +25,6 @@
         onSelectFile,
         onSaveAll,
         onRefresh,
-        getFileIcon,
     }: {
         fileTree: EpubFileNode[];
         expandedFolders: Set<string>;
@@ -39,7 +39,6 @@
         ) => void;
         onSaveAll: () => void;
         onRefresh: () => void;
-        getFileIcon: (type: string) => string;
     } = $props();
 
     function getFileDescription(file: EpubFileNode): string {

@@ -9,6 +9,7 @@
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
     import FileTreePanel from "$lib/epubEditor/FileTreePanel.svelte";
+    import TabsBar from "$lib/epubEditor/TabsBar.svelte";
     import Toast from "$lib/Toast.svelte";
     import { toastInfo, toastSuccess, toastError } from "$lib/toast";
     import CustomSelect from "$lib/CustomSelect.svelte";
@@ -311,7 +312,7 @@
 
     let openTabs: EpubFileNode[] = [];
     let activeTabIndex: number = -1;
-    let tabsBarDiv: HTMLElement | null = null;
+    let tabsBar: TabsBar | null = null;
 
     let currentImageSrc: string | null = null;
     let currentFontSrc: string | null = null;
@@ -869,7 +870,7 @@
 
             isProjectDirty = false;
             modifiedFiles.clear();
-            modifiedFiles = modifiedFiles;
+            modifiedFiles = new Set(modifiedFiles);
 
             flatHtmlFiles = flattenFiles(fileTree);
             await loadSpine();
@@ -1334,7 +1335,7 @@
                                 }
                                 return tab;
                             });
-                            openTabs = openTabs;
+                            openTabs = [...openTabs];
 
                             if (selectedFile && selectedFile.path === oldPath) {
                                 selectedFile = {
@@ -2253,7 +2254,7 @@ document.addEventListener("click", function (event) {
         if (selectedFile) {
             fileContentCache.set(selectedFile.path, newContent);
             modifiedFiles.add(selectedFile.path);
-            modifiedFiles = modifiedFiles; // reactivity
+            modifiedFiles = new Set(modifiedFiles); // reactivity
 
             if (validationTimer) clearTimeout(validationTimer);
             validationTimer = setTimeout(async () => {
@@ -2340,7 +2341,7 @@ document.addEventListener("click", function (event) {
         );
 
         modifiedFiles.clear();
-        modifiedFiles = modifiedFiles;
+        modifiedFiles = new Set(modifiedFiles);
         isProjectDirty = true;
     }
 
@@ -2376,7 +2377,7 @@ document.addEventListener("click", function (event) {
                 content: fileContent,
             });
             modifiedFiles.delete(selectedFile.path);
-            modifiedFiles = modifiedFiles;
+            modifiedFiles = new Set(modifiedFiles);
             isProjectDirty = true;
         } catch (e) {
             console.error("保存失败:", e);
@@ -2455,25 +2456,14 @@ document.addEventListener("click", function (event) {
         if (existingIndex >= 0) {
             activeTabIndex = existingIndex;
             await tick();
-            if (tabsBarDiv && tabsBarDiv.children[existingIndex]) {
-                const tabElement = tabsBarDiv.children[
-                    existingIndex
-                ] as HTMLElement;
-                tabElement.scrollIntoView({
-                    behavior: "smooth",
-                    block: "nearest",
-                    inline: "center",
-                });
-            }
+            tabsBar?.scrollTabIntoView(existingIndex);
         } else {
             openTabs.push(file);
             activeTabIndex = openTabs.length - 1;
-            openTabs = openTabs;
+            openTabs = [...openTabs];
 
             await tick();
-            if (tabsBarDiv) {
-                tabsBarDiv.scrollLeft = tabsBarDiv.scrollWidth;
-            }
+            tabsBar?.scrollToEnd();
         }
 
         if (previewCache.has(file.path)) {
@@ -2697,10 +2687,10 @@ document.addEventListener("click", function (event) {
 
         const tab = openTabs[index];
         modifiedFiles.delete(tab.path);
-        modifiedFiles = modifiedFiles;
+        modifiedFiles = new Set(modifiedFiles);
 
         openTabs.splice(index, 1);
-        openTabs = openTabs;
+        openTabs = [...openTabs];
 
         if (openTabs.length === 0) {
             activeTabIndex = -1;
@@ -2735,7 +2725,7 @@ document.addEventListener("click", function (event) {
                             content: contentToSave,
                         });
                         modifiedFiles.delete(pendingCloseFile.path);
-                        modifiedFiles = modifiedFiles;
+                        modifiedFiles = new Set(modifiedFiles);
                     } catch (e) {
                         console.error("弹窗保存失败:", e);
                     }
@@ -2761,7 +2751,7 @@ document.addEventListener("click", function (event) {
                 });
                 await Promise.all(tasks);
                 modifiedFiles.clear();
-                modifiedFiles = modifiedFiles;
+                modifiedFiles = new Set(modifiedFiles);
 
                 await closeEpubEditorWindow();
             } catch (e) {
@@ -2780,7 +2770,7 @@ document.addEventListener("click", function (event) {
         if (closeContext === "tab") {
             if (pendingCloseFile) {
                 modifiedFiles.delete(pendingCloseFile.path);
-                modifiedFiles = modifiedFiles;
+                modifiedFiles = new Set(modifiedFiles);
             }
             showCloseDialog = false;
             if (pendingCloseIndex !== -1) {
@@ -2802,25 +2792,6 @@ document.addEventListener("click", function (event) {
         pendingCloseIndex = -1;
         pendingCloseFile = null;
         closeContext = "tab"; // Reset to default
-    }
-
-    function getFileIcon(type: string): string {
-        switch (type) {
-            case "folder":
-                return "\u{1F4C1}";
-            case "html":
-                return "\u{1F4C4}";
-            case "css":
-                return "\u{1F3A8}";
-            case "xml":
-                return "\u2699\uFE0F";
-            case "image":
-                return "\u{1F5BC}\uFE0F";
-            case "font":
-                return "\u{1F524}";
-            default:
-                return "\u{1F4C4}";
-        }
     }
 
     interface TocItem {
@@ -4066,7 +4037,7 @@ document.addEventListener("click", function (event) {
             }
         }
 
-        modifiedFiles = modifiedFiles; // 触发响应式
+        modifiedFiles = new Set(modifiedFiles); // 触发响应式
         searchMessage = `已替换 ${totalReplaced} 处`;
         currentMatchInfo = null;
     }
@@ -4388,38 +4359,17 @@ document.addEventListener("click", function (event) {
                 onSelectFile={selectFile}
                 onSaveAll={saveAllChanges}
                 onRefresh={loadEpub}
-                {getFileIcon}
             />
 
         <main class="editor-pane">
-            {#if openTabs.length > 0}
-                <div class="tabs-bar" bind:this={tabsBarDiv}>
-                    {#each openTabs as tab, index}
-                        <div
-                            class="editor-tab"
-                            class:active={index === activeTabIndex}
-                            on:click={() => switchTab(index)}
-                            on:keydown={(e) => e.key === "Enter" && switchTab(index)}
-                            role="button"
-                            tabindex="0"
-                        >
-                            <span class="tab-icon">{getFileIcon(tab.file_type)}</span>
-                            <span class="tab-name" title={tab.name}
-                                >{tab.name}{#if modifiedFiles.has(tab.path)}
-                                    <span class="modified-indicator">*</span>
-                                {/if}</span
-                            >
-                            <button
-                                class="tab-close"
-                                on:click={(e) => closeTab(e, index)}
-                                aria-label={"\u5173\u95ED\u6807\u7B7E\u9875"}
-                            >
-                                &times;
-                            </button>
-                        </div>
-                    {/each}
-                </div>
-            {/if}
+            <TabsBar
+                bind:this={tabsBar}
+                {openTabs}
+                {activeTabIndex}
+                {modifiedFiles}
+                onSelectTab={switchTab}
+                onCloseTab={closeTab}
+            />
 
             {#if selectedFile}
                 {#if isImageFile(selectedFile.name)}
@@ -4819,13 +4769,6 @@ document.addEventListener("click", function (event) {
         color: #333;
     }
 
-    /* Mod Indicator */
-    .modified-indicator {
-        color: #ff9800;
-        margin-left: 4px;
-        font-weight: bold;
-    }
-
     /* Preview Error (Absolute Position) */
     .preview-error {
         background: #fff3cd;
@@ -4923,83 +4866,6 @@ document.addEventListener("click", function (event) {
         border-right: 1px solid #ddd;
         min-width: 0;
         position: relative;
-    }
-
-    .tabs-bar {
-        display: flex;
-        background: #f3f3f3;
-        border-bottom: 1px solid #ddd;
-        overflow-x: auto;
-        overflow-y: hidden;
-        gap: 0;
-        flex-shrink: 0;
-        max-height: 40px;
-        width: 100%;
-        box-sizing: border-box;
-    }
-
-    .editor-tab {
-        display: flex;
-        align-items: center;
-        padding: 8px 12px;
-        min-width: 120px;
-        max-width: 200px;
-        border-right: 1px solid #ddd;
-        cursor: pointer;
-        background: #e8e8e8;
-        transition: background 0.2s;
-        user-select: none;
-        flex-shrink: 0;
-    }
-
-    .editor-tab:hover {
-        background: #d8d8d8;
-    }
-
-    .editor-tab.active {
-        background: #fff;
-        border-bottom: 2px solid #2196f3;
-        position: relative;
-    }
-
-    .tab-icon {
-        font-size: 14px;
-        margin-right: 6px;
-        flex-shrink: 0;
-    }
-
-    .tab-name {
-        flex: 1;
-        font-size: 13px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: #333;
-    }
-
-    .tab-close {
-        margin-left: 6px;
-        width: 20px;
-        height: 20px;
-        border: none;
-        background: transparent;
-        color: #999;
-        font-size: 16px;
-        font-family: "Segoe UI Symbol", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-        font-weight: 400;
-        line-height: 1;
-        cursor: pointer;
-        border-radius: 3px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        padding: 0;
-    }
-
-    .tab-close:hover {
-        background: #ccc;
-        color: #333;
     }
 
     .code-block :global(.line-with-number) {
@@ -5699,8 +5565,7 @@ document.addEventListener("click", function (event) {
         color: var(--color-text);
     }
 
-    .preview-header,
-    .tabs-bar {
+    .preview-header {
         background: rgba(255, 255, 255, 0.78);
         border-bottom: 1px solid var(--color-border);
         backdrop-filter: blur(18px) saturate(1.12);
@@ -5715,63 +5580,6 @@ document.addEventListener("click", function (event) {
         border-left: 0;
         border-right: 1px solid var(--color-border);
         box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.68);
-    }
-
-    .tabs-bar {
-        min-height: 46px;
-        max-height: 46px;
-        gap: 4px;
-        padding: 6px 8px 0;
-    }
-
-    .editor-tab {
-        min-width: 132px;
-        border: 1px solid transparent;
-        border-bottom: 0;
-        border-radius: 13px 13px 0 0;
-        background: rgba(255, 255, 255, 0.48);
-        color: var(--color-text-soft);
-        transition:
-            background var(--transition-fast),
-            border-color var(--transition-fast),
-            color var(--transition-fast),
-            box-shadow var(--transition-fast);
-    }
-
-    .editor-tab:hover {
-        background: var(--color-hover);
-        border-color: var(--color-border);
-    }
-
-    .editor-tab.active {
-        background: var(--color-surface);
-        border-color: var(--color-border);
-        border-bottom: 2px solid var(--color-accent);
-        box-shadow: 0 -8px 18px rgba(23, 36, 52, 0.05);
-    }
-
-    .tab-name {
-        color: inherit;
-        font-weight: 600;
-    }
-
-    .tab-close {
-        color: var(--color-muted);
-        border-radius: 999px;
-        transition:
-            background var(--transition-fast),
-            color var(--transition-fast),
-            transform var(--transition-fast);
-    }
-
-    .tab-close:hover {
-        background: var(--color-danger-soft);
-        color: var(--color-danger);
-        transform: scale(1.02);
-    }
-
-    .modified-indicator {
-        color: var(--color-warning);
     }
 
     .editor-content {
