@@ -44,16 +44,22 @@ src-tauri/src/
 3. ✅ localStorage key 已集中到 `src/lib/storageKeys.ts`（21 个 key/前缀，动态 key 配生成函数），16 个使用文件全部改为常量导入；共享 key（`app-settings`、`epub-find/replace-history`、`tepub-epub-style-library-v1`、`tepub-editor-launch-files`、`tepub-editor-batch-task:` 等）在模块内注明共享方。webAccount.ts 私有账号 key 原地保留（storageKeys.ts 登记备查）；app.html 内联脚本无法 import，保留 `tepub-web-view-mode` 硬编码副本并两侧注释互指。
 4. ✅ 字体逻辑 → `src/lib/fontTools.ts`（17 个导出、26 个测试，epub-editor 净 -125 行）；DOM 遍历与 FontFace 注册等状态耦合部分按计划留在页面。
 
-### 第 3 期：桌面页面接入平台抽象
+### 第 3 期：桌面页面接入平台抽象（进行中：reader、library 已完成）
 
-把 editor / epub-editor / library / reader 中的 `@tauri-apps/api` 直接调用替换为 `$lib/platform`（迁移规则见 `docs/web-deploy.md`）。一次一个工作流（如"打开文件"、"保存"），桌面行为保持不变。完成后桌面与 Web 可逐步共享页面组件。
+把 editor / epub-editor / library / reader 中的 `@tauri-apps/api` 直接调用替换为 `$lib/platform`（迁移规则见 `docs/web-deploy.md`）。桌面行为保持不变。完成后桌面与 Web 可逐步共享页面组件。
 
-### 第 4 期：拆分巨型组件
+- ✅ reader（2026-07-28）：8 处替换，静态导入清零；PlatformAdapter 新增 `listen`、`getFileSrcConverter`（异步取同步转换器，适配 CSS url() 同步替换）。
+- ✅ library（2026-07-28）：60 处替换，静态导入清零；新增 `onCurrentWindowFileDrop`、`setCurrentWindowTitle`；对话框走已有 openDialog/message/ask（web = 浏览器等价物）。
+- ⬜ editor（约 9000 行，直接依赖面最大，建议按工作流分多次：打开/保存 → 对话框 → 窗口管理）。
+- ⬜ epub-editor（建议与第 4 期拆组件交替进行，拆一块迁一块）。
+
+### 第 4 期：拆分巨型组件（进行中：FileTreePanel 已拆出）
 
 前两期完成后组件已明显变薄，再按 UI 区域拆：
 
-- `epub-editor`：文件树、标签栏、预览面板、查找替换面板、字体预览各自成组件。
-- `editor`：工具栏、设置面板、批处理队列。
+- `epub-editor`：✅ 文件树面板 → `src/lib/epubEditor/FileTreePanel.svelte`（254 行，纯 runes，净 -191 行）。下一刀：TabsBar（openTabs/activeTabIndex/modifiedFiles 边界清晰），随后预览面板、查找替换面板（可顺带切换到 findReplace.ts）、字体预览。
+- `editor`：⬜ 工具栏、设置面板、批处理队列。
+- 注意事项（FileTreePanel 落地经验）：legacy 页面里 `set = set` 自赋值穿过 runes 组件 prop 会被引用相等短路，拆组件时须同步改为 `new Set()` 拷贝；共享 CSS 选择器要按归属拆分。
 
 拆出的新组件**直接用 Svelte 5 runes 写**；存量 legacy 代码不主动改写，随拆分自然消化。这就是 Svelte 5 迁移策略：新代码 runes、旧代码不动、不做一次性大迁移。
 
