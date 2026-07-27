@@ -3,6 +3,7 @@ import {
   buildFindRegex,
   countMatchesInContent,
   escapeRegExpLiteral,
+  expandExtendedEscapes,
   filterFilesInScope,
   findAllMatches,
   findNextMatch,
@@ -24,6 +25,46 @@ describe("escapeRegExpLiteral", () => {
     const regex = new RegExp(escapeRegExpLiteral(source));
     expect(regex.test(source)).toBe(true);
     expect(new RegExp(escapeRegExpLiteral("a.b")).test("axb")).toBe(false);
+  });
+
+  it("stays valid under the u-flag dialect used by CodeMirror SearchQuery", () => {
+    // Editor.svelte 的 wholeWord 包装把产物喂给 SearchQuery（内部 "gmu" 标志），
+    // 因此转义结果不允许出现 `\-` 这类 u 模式非法转义
+    for (const sample of ["a-b", "a/b", "price$", "x{1}", "back\\slash", "(par)"]) {
+      expect(() => new RegExp(`\\b${escapeRegExpLiteral(sample)}\\b`, "gmu")).not.toThrow();
+    }
+    // 词边界包装后仍按字面量整词命中（\b 依赖两侧词字符，取词字符收尾的样例）
+    for (const sample of ["a-b", "a/b", "x1"]) {
+      const regex = new RegExp(`\\b${escapeRegExpLiteral(sample)}\\b`, "gmu");
+      expect(`x ${sample} y`.match(regex)).toEqual([sample]);
+    }
+  });
+});
+
+describe("expandExtendedEscapes", () => {
+  it("expands literal \\n, \\t and \\r into control characters", () => {
+    expect(expandExtendedEscapes("a\\nb\\tc\\rd")).toBe("a\nb\tc\rd");
+    expect(expandExtendedEscapes("\\r\\n")).toBe("\r\n");
+  });
+
+  it("leaves plain text and other escape sequences untouched", () => {
+    expect(expandExtendedEscapes("")).toBe("");
+    expect(expandExtendedEscapes("plain text")).toBe("plain text");
+    expect(expandExtendedEscapes("\\s\\d\\w\\b")).toBe("\\s\\d\\w\\b");
+  });
+
+  it("keeps the legacy sequential semantics without backslash un-escaping", () => {
+    // 与既有内联实现一致：\\n（双反斜杠 + n）也会命中第一遍替换，
+    // 展开成 反斜杠 + 换行，而不是保留字面量 \n
+    expect(expandExtendedEscapes("\\\\n")).toBe("\\\n");
+    // 顺序替换（\n → \t → \r）逐遍作用于上一遍的结果
+    expect(expandExtendedEscapes("\\n\\t\\r")).toBe("\n\t\r");
+  });
+
+  it("applies the same expansion to replacement strings", () => {
+    const search = expandExtendedEscapes("one\\ntwo");
+    const replaced = replaceAllInContent("one\ntwo three", textQuery(search), expandExtendedEscapes("1\\t2"));
+    expect(replaced).toEqual({ content: "1\t2 three", count: 1 });
   });
 });
 

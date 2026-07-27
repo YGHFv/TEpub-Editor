@@ -7,6 +7,7 @@
   import { search, setSearchQuery, SearchQuery, findNext, findPrevious, replaceNext, replaceAll } from "@codemirror/search";
   import { listen, emit } from "@tauri-apps/api/event";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import { escapeRegExpLiteral, expandExtendedEscapes } from "./findReplace";
   import { EDITOR_FONT_SIZE_KEY } from "./storageKeys";
 
   export let doc = "";
@@ -185,11 +186,13 @@
         let wholeWord = !!p.wholeWord;
 
         if (p.searchMode === "extended") {
-          searchStr = searchStr.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r");
-          replaceStr = replaceStr.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r");
+          // 扩展模式的 \n/\t/\r 展开下沉到 $lib/findReplace（顺序替换语义不变）
+          searchStr = expandExtendedEscapes(searchStr);
+          replaceStr = expandExtendedEscapes(replaceStr);
         } else if (p.searchMode === "normal" && wholeWord) {
-          const escapeRegex = (s: string) => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-          searchStr = `\\b${escapeRegex(searchStr)}\\b`;
+          // 共享转义只处理正则语法字符，产物在 SearchQuery 的 "gmu" 方言下合法
+          //（旧内联表额外转义 `-` 生成 `\-`，在 u 模式下反而是非法转义）
+          searchStr = `\\b${escapeRegExpLiteral(searchStr)}\\b`;
           isRegex = true;
         }
 

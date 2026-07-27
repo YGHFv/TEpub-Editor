@@ -32,9 +32,28 @@ export interface ReplaceAllResult {
   count: number;
 }
 
-/** 把字面量文本转义成可安全嵌入正则的形式。 */
+/**
+ * 把字面量文本转义成可安全嵌入正则的形式。
+ *
+ * 只转义正则语法字符（SyntaxCharacter），产物在带 u 标志的方言
+ * （如 CodeMirror SearchQuery 内部使用的 "gmu"）下同样合法——
+ * 不要额外转义 `-`、`/` 等普通字符，`\-` 在 u 模式下是 SyntaxError。
+ */
 export function escapeRegExpLiteral(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * search-replace 窗口“扩展(\n,\r,\t)”查找模式的转义展开：
+ * 把输入里的字面量 `\n` / `\t` / `\r` 展开成换行、制表、回车，
+ * 查找串与替换串都经过同一展开。
+ *
+ * 语义严格沿用既有内联实现：按 `\n` → `\t` → `\r` 顺序整串替换，
+ * 不支持 `\\` 反转义（例如输入 `\\n` 会展开成 `\` + 换行），
+ * 其余转义序列（`\s`、`\d` 等）原样保留。
+ */
+export function expandExtendedEscapes(text: string): string {
+  return text.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r");
 }
 
 /**
