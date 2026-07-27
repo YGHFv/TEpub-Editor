@@ -81,5 +81,16 @@ export default defineConfig(async ({ mode }) => {
   define: {
     __TEPUB_TARGET__: JSON.stringify(isWebMode ? "web" : "tauri"),
   },
+  test: {
+    // Node by default; DOM-dependent suites opt in via `// @vitest-environment happy-dom`.
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+      include: ["src/lib/**/*.ts"],
+      exclude: ["src/lib/**/*.test.ts", "src/lib/**/*.d.ts"],
+    },
+  },
   };
 });

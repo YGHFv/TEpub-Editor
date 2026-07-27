@@ -1,0 +1,10 @@
+node_modules/
+build/
+.svelte-kit/
+src-tauri/target/
+src-tauri/gen/
+flutter/
+pnpm-lock.yaml
+*.md
+.dev-logs/
+static/
