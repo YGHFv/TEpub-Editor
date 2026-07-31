@@ -5,9 +5,15 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::epub::{ChapterInfo, EpubMetadata, EpubParsedMeta, EpubRewrite, RegexRule, export_epub, locate_cover_in_opf, parse_epub_metadata, parse_epub_metadata_live, read_opf_from_dir, read_opf_from_epub, rewrite_epub, scan_chapters, write_opf_metadata};
-use crate::fs_utils::{app_data_root, build_processed_epub_path, ensure_dir, lock_epub_cache, sanitize_filename_part};
 use crate::app::read_text_file;
+use crate::epub::{
+    export_epub, locate_cover_in_opf, parse_epub_metadata, parse_epub_metadata_live,
+    read_opf_from_dir, read_opf_from_epub, rewrite_epub, scan_chapters, write_opf_metadata,
+    ChapterInfo, EpubMetadata, EpubParsedMeta, EpubRewrite, RegexRule,
+};
+use crate::fs_utils::{
+    app_data_root, build_processed_epub_path, ensure_dir, lock_epub_cache, sanitize_filename_part,
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub(crate) struct MobileEpubMetadata {
@@ -567,4 +573,3 @@ pub async fn mobile_export_epub(
     .await
     .map_err(|e| format!("导出 EPUB 任务失败: {}", e))?
 }
-

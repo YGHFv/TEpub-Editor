@@ -8,15 +8,15 @@ use tauri::{
     utils::config::Color,
     Manager, WindowEvent,
 };
+mod ai;
+mod app;
+mod epub;
+mod font;
 mod fs_utils;
+mod library;
+mod mobile;
 mod search;
 mod templates;
-mod font;
-mod ai;
-mod epub;
-mod mobile;
-mod library;
-mod app;
 mod toolbox;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

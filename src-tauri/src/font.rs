@@ -4,8 +4,11 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::fs_utils::{ensure_dir, hidden_process_command, lock_epub_cache, normalize_local_file_path, sanitize_filename_part};
 use crate::epub::EpubMetadata;
+use crate::fs_utils::{
+    ensure_dir, hidden_process_command, lock_epub_cache, normalize_local_file_path,
+    sanitize_filename_part,
+};
 use crate::library::library_data_dir;
 use crate::library::library_fonts_dir;
 
@@ -90,7 +93,11 @@ pub(crate) fn ensure_fonttools_available() -> Result<(), String> {
     }
 }
 
-pub(crate) fn try_subset_font_bytes(bytes: &[u8], ext: &str, subset_text: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn try_subset_font_bytes(
+    bytes: &[u8],
+    ext: &str,
+    subset_text: &str,
+) -> Result<Vec<u8>, String> {
     let ext = ext.to_lowercase();
     if subset_text.trim().is_empty() || !matches!(ext.as_str(), "ttf" | "otf" | "woff" | "woff2") {
         return Ok(bytes.to_vec());
@@ -726,4 +733,3 @@ pub async fn analyze_epub_font_glyphs(
         unsupported_reason: None,
     })
 }
-

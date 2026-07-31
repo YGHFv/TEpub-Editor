@@ -7,8 +7,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::epub::{EpubParsedMeta, EpubRewrite, IngestTempFile, parse_epub_metadata, read_opf_from_epub, rewrite_epub, set_dcterms_modified, try_prepare_epub_for_ingest, write_opf_metadata};
-use crate::fs_utils::{app_data_root, detect_image_ext, ensure_dir, is_portable, portable_data_root, sanitize_filename_part};
+use crate::epub::{
+    parse_epub_metadata, read_opf_from_epub, rewrite_epub, set_dcterms_modified,
+    try_prepare_epub_for_ingest, write_opf_metadata, EpubParsedMeta, EpubRewrite, IngestTempFile,
+};
+use crate::fs_utils::{
+    app_data_root, detect_image_ext, ensure_dir, is_portable, portable_data_root,
+    sanitize_filename_part,
+};
 
 #[derive(Serialize)]
 pub(crate) struct HistoryMeta {
@@ -1427,7 +1433,10 @@ pub async fn add_book_to_library(
 }
 
 #[tauri::command]
-pub async fn remove_book_from_library(app: tauri::AppHandle, book_id: String) -> Result<(), String> {
+pub async fn remove_book_from_library(
+    app: tauri::AppHandle,
+    book_id: String,
+) -> Result<(), String> {
     let mut data = read_library_data(&app)?;
     let idx = data
         .books
@@ -1736,4 +1745,3 @@ pub async fn update_book_cover(
     write_library_data_atomic(&app, &data)?;
     Ok(cover_path_str)
 }
-

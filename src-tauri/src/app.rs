@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process;
 
 use crate::fs_utils::{app_data_root, is_portable};
-use crate::library::{library_pointer_path};
+use crate::library::library_pointer_path;
 
 // --- 换行符规范化 ---
 // 将所有换行符（包括 Mac 旧时代的 \r 以及影响底层布局框架的特殊 Unicode 行分割符 U+2028）
@@ -375,4 +375,3 @@ pub fn get_app_mode_info(app: tauri::AppHandle) -> Result<AppModeInfo, String> {
         app_data_dir: data_root,
     })
 }
-

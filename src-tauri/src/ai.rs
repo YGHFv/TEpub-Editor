@@ -4,8 +4,8 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::fs_utils::{ensure_dir, sanitize_filename_part};
-use crate::library::AiProofingConfig;
 use crate::library::library_proof_logs_dir;
+use crate::library::AiProofingConfig;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -282,4 +282,3 @@ pub async fn read_ai_proofing_log(path: String) -> Result<String, String> {
 // ============================================================
 // ===== Library - Phase 2: add / remove =====
 // ============================================================
-

@@ -38,7 +38,8 @@ static CSS_URL_PATH_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// 安全获取 EPUB_CACHE 锁，避免 Mutex 中毒后连锁 panic。
-pub(crate) fn lock_epub_cache() -> Result<std::sync::MutexGuard<'static, Option<EpubCache>>, String> {
+pub(crate) fn lock_epub_cache() -> Result<std::sync::MutexGuard<'static, Option<EpubCache>>, String>
+{
     EPUB_CACHE
         .lock()
         .map_err(|_| "EPUB 缓存已被中毒，无法访问".to_string())
@@ -936,4 +937,3 @@ pub(crate) fn detect_image_ext(bytes: &[u8]) -> &'static str {
         "jpg"
     }
 }
-

@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::fs_utils::{app_data_root, ensure_dir, normalize_local_file_path, sanitize_filename_part};
+use crate::fs_utils::{
+    app_data_root, ensure_dir, normalize_local_file_path, sanitize_filename_part,
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct EpubTemplateRepository {
@@ -397,7 +399,10 @@ pub fn list_style_templates(app: tauri::AppHandle) -> Result<Vec<StyleTemplateIn
 }
 
 #[tauri::command]
-pub fn read_style_template(app: tauri::AppHandle, id: String) -> Result<StyleTemplateContent, String> {
+pub fn read_style_template(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<StyleTemplateContent, String> {
     let is_builtin = id == "builtin";
     let path = if is_builtin {
         builtin_style_template_path(&app)?
@@ -432,7 +437,10 @@ pub fn read_style_template(app: tauri::AppHandle, id: String) -> Result<StyleTem
 }
 
 #[tauri::command]
-pub fn import_style_template(app: tauri::AppHandle, path: String) -> Result<StyleTemplateInfo, String> {
+pub fn import_style_template(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<StyleTemplateInfo, String> {
     let normalized = normalize_local_file_path(&path);
     let source = PathBuf::from(&normalized);
     if !source.exists() || !source.is_file() {
@@ -514,4 +522,3 @@ fn is_stale_builtin_style_template_css(css: &str) -> bool {
 
     normalized.contains("TEpub template schema: 1") && !normalized.contains(".te-volume-subtitle")
 }
-

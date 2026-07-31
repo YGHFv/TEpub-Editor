@@ -14,8 +14,15 @@ use tauri::Emitter;
 use walkdir::WalkDir;
 use zip::write::SimpleFileOptions;
 
-use crate::font::{ensure_fonttools_available};
-use crate::fs_utils::{build_processed_epub_path, detect_image_ext, ensure_unique_zip_name, escape_xml, friendly_name_for_path, hidden_process_command, is_external_or_inline_ref, is_text_like_entry, parse_xmlish_attrs, percent_decode, read_epub_bytes, rebuild_epub_with_sanitized_names_from_bytes_with_progress, rewrite_text_links, sanitize_filename_part, sanitize_windows_component, sanitize_zip_entry_name, split_ref_suffix, zip_join, zip_parent, zip_relative_path};
+use crate::font::ensure_fonttools_available;
+use crate::fs_utils::{
+    build_processed_epub_path, detect_image_ext, ensure_unique_zip_name, escape_xml,
+    friendly_name_for_path, hidden_process_command, is_external_or_inline_ref, is_text_like_entry,
+    parse_xmlish_attrs, percent_decode, read_epub_bytes,
+    rebuild_epub_with_sanitized_names_from_bytes_with_progress, rewrite_text_links,
+    sanitize_filename_part, sanitize_windows_component, sanitize_zip_entry_name, split_ref_suffix,
+    zip_join, zip_parent, zip_relative_path,
+};
 
 static TOOLBOX_BATCH_CANCEL: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
@@ -1281,7 +1288,10 @@ fn finalize_toolbox_output(
                 .iter()
                 .filter_map(|root| {
                     let root_path = Path::new(root);
-                    source.strip_prefix(root_path).ok().map(|rel| rel.to_path_buf())
+                    source
+                        .strip_prefix(root_path)
+                        .ok()
+                        .map(|rel| rel.to_path_buf())
                 })
                 .next();
             match rel {
@@ -1353,8 +1363,7 @@ fn finalize_toolbox_output(
     match fs::rename(&source_output, &target) {
         Ok(_) => {}
         Err(_) => {
-            fs::copy(&source_output, &target)
-                .map_err(|e| format!("复制到输出目录失败: {}", e))?;
+            fs::copy(&source_output, &target).map_err(|e| format!("复制到输出目录失败: {}", e))?;
             fs::remove_file(&source_output).map_err(|e| format!("清理临时输出失败: {}", e))?;
         }
     }
@@ -3464,8 +3473,8 @@ fn raster_image_content_type(bytes: &[u8]) -> Option<&'static str> {
 
 #[tauri::command]
 pub async fn download_remote_image(url: String) -> Result<RemoteImageDownloadResponse, String> {
-    let mut current = reqwest::Url::parse(url.trim())
-        .map_err(|e| format!("图片地址无效: {}", e))?;
+    let mut current =
+        reqwest::Url::parse(url.trim()).map_err(|e| format!("图片地址无效: {}", e))?;
     validate_remote_image_url(&current)?;
 
     let client = reqwest::Client::builder()
@@ -3530,9 +3539,8 @@ pub async fn download_remote_image(url: String) -> Result<RemoteImageDownloadRes
         if bytes.is_empty() {
             return Err("图片响应为空".to_string());
         }
-        let content_type = raster_image_content_type(&bytes).ok_or_else(|| {
-            "响应不是支持的 JPG、PNG、WebP 或 GIF 图片".to_string()
-        })?;
+        let content_type = raster_image_content_type(&bytes)
+            .ok_or_else(|| "响应不是支持的 JPG、PNG、WebP 或 GIF 图片".to_string())?;
         return Ok(RemoteImageDownloadResponse {
             data_base64: general_purpose::STANDARD.encode(bytes),
             content_type: content_type.to_string(),
@@ -4138,11 +4146,7 @@ fn toolbox_epub_diagnose_tool_result(source: &Path) -> Result<ToolboxEpubToolRes
     };
 
     Ok(toolbox_epub_tool_result(
-        source,
-        source,
-        false,
-        action,
-        message,
+        source, source, false, action, message,
     ))
 }
 
@@ -4811,4 +4815,3 @@ mod toolbox_tests {
         Ok(())
     }
 }
-

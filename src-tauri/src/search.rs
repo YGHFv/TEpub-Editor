@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::fs_utils::{lock_epub_cache};
+use crate::fs_utils::lock_epub_cache;
 
 #[derive(Serialize, Clone, Copy)]
 struct MatchLocation {
@@ -136,4 +136,3 @@ pub async fn search_in_files(
     .await
     .map_err(|e| format!("任务失败: {}", e))?
 }
-

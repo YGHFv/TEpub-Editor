@@ -10,7 +10,14 @@ use walkdir::WalkDir;
 use zip::write::SimpleFileOptions;
 
 use crate::font::{build_font_subset_text, try_subset_font_bytes};
-use crate::fs_utils::{EpubCache, build_processed_epub_path, clear_zip_encryption_flags, detect_image_ext, ensure_dir, escape_xml, is_zip_archive_bytes, is_zip_archive_path, lock_epub_cache, normalize_local_file_path, percent_decode, read_epub_bytes, rebuild_epub_with_sanitized_names_from_bytes, rebuild_epub_with_sanitized_names_from_bytes_with_progress, sanitize_filename_part, xor_bytes};
+use crate::fs_utils::{
+    build_processed_epub_path, clear_zip_encryption_flags, detect_image_ext, ensure_dir,
+    escape_xml, is_zip_archive_bytes, is_zip_archive_path, lock_epub_cache,
+    normalize_local_file_path, percent_decode, read_epub_bytes,
+    rebuild_epub_with_sanitized_names_from_bytes,
+    rebuild_epub_with_sanitized_names_from_bytes_with_progress, sanitize_filename_part, xor_bytes,
+    EpubCache,
+};
 use crate::library::library_extract_dir;
 use crate::mobile::mobile_is_meta_title;
 
@@ -976,7 +983,9 @@ pub fn prepare_epub_for_open(
 //   Ok(None)  ：源文件已是合法 EPUB，无需处理
 //   Ok(Some)  ：(临时清洗文件 path, 动作描述)
 //   Err       ：检测到非 ZIP 且无法用通用密钥解混淆
-pub(crate) fn try_prepare_epub_for_ingest(source: &Path) -> Result<Option<(PathBuf, String)>, String> {
+pub(crate) fn try_prepare_epub_for_ingest(
+    source: &Path,
+) -> Result<Option<(PathBuf, String)>, String> {
     let bytes = read_epub_bytes(source)?;
 
     // 在系统临时目录构造一个"虚拟 source"，使 build_processed_epub_path /
@@ -1150,7 +1159,8 @@ pub async fn export_epub(
     let file = fs::File::create(&path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    let options_store = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let options_store =
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
     zip.start_file("mimetype", options_store)
         .map_err(|e| e.to_string())?;
@@ -1982,7 +1992,10 @@ pub async fn get_epub_temp_dir_path(epub_path: String) -> Result<String, String>
 }
 
 #[tauri::command]
-pub async fn read_epub_file_content(epub_path: String, file_path: String) -> Result<String, String> {
+pub async fn read_epub_file_content(
+    epub_path: String,
+    file_path: String,
+) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         // 1. 获取临时目录路径
         let temp_path: PathBuf = {
@@ -2012,7 +2025,10 @@ pub async fn read_epub_file_content(epub_path: String, file_path: String) -> Res
 }
 
 #[tauri::command]
-pub async fn read_epub_file_binary(epub_path: String, file_path: String) -> Result<Vec<u8>, String> {
+pub async fn read_epub_file_binary(
+    epub_path: String,
+    file_path: String,
+) -> Result<Vec<u8>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         // 1. 获取临时目录路径
         let temp_path: PathBuf = {
@@ -3273,8 +3289,10 @@ pub(crate) fn rewrite_epub(epub_path: &Path, changes: &EpubRewrite) -> Result<()
     let tmp_path = format!("{}.tmp", epub_path.to_string_lossy());
     let tmp_file = fs::File::create(&tmp_path).map_err(|e| format!("创建临时 zip 失败: {}", e))?;
     let mut zw = zip::ZipWriter::new(tmp_file);
-    let opts_deflated = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    let opts_stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let opts_deflated =
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let opts_stored =
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
 
     let count = archive.len();
     for i in 0..count {
@@ -3324,4 +3342,3 @@ pub(crate) fn rewrite_epub(epub_path: &Path, changes: &EpubRewrite) -> Result<()
     fs::rename(&tmp_path, epub_path).map_err(|e| format!("替换 EPUB 失败: {}", e))?;
     Ok(())
 }
-
