@@ -1547,6 +1547,9 @@
         return filterFilesInScope(searchScope, {
             allFiles: doc.files,
             currentFile: selectedFile,
+            // Web 版编辑器没有多标签，一次只打开一个文件，
+            // 所以「已打开」范围就等于当前文件。
+            openFiles: selectedFile ? [selectedFile] : [],
             selectedFiles: selected,
             isHtml: (file) => file.kind === "xhtml",
             isEditable: (file) => file.editable,

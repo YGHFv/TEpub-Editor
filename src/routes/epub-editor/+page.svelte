@@ -33,6 +33,7 @@
     } from "$lib/storageKeys";
     import {
         countMatchesInContent,
+        filterFilesInScope,
         findNextMatch,
         findNextMatchWrapped,
         replaceAllInContent,
@@ -519,16 +520,22 @@
         );
     }
 
+    // HTML 判定的唯一来源：flatHtmlFiles（flattenFiles）与查找替换的
+    // 「HTML文件」范围（filterFilesInScope 的 isHtml）都用它，避免两处各写一套。
+    function isHtmlNode(node: EpubFileNode): boolean {
+        return (
+            (node.file_type === "html" ||
+                node.name.endsWith(".xhtml") ||
+                node.name.endsWith(".html")) &&
+            !node.name.endsWith(".opf") &&
+            !node.name.endsWith(".ncx")
+        );
+    }
+
     function flattenFiles(nodes: EpubFileNode[]): EpubFileNode[] {
         let result: EpubFileNode[] = [];
         for (const node of nodes) {
-            if (
-                (node.file_type === "html" ||
-                    node.name.endsWith(".xhtml") ||
-                    node.name.endsWith(".html")) &&
-                !node.name.endsWith(".opf") &&
-                !node.name.endsWith(".ncx")
-            ) {
+            if (isHtmlNode(node)) {
                 result.push(node);
             }
             if (node.children) {
@@ -3570,60 +3577,18 @@ document.addEventListener("click", function (event) {
     }
 
     function getFilesInScope(): EpubFileNode[] {
-        switch (searchScope) {
-            case "current":
-                return selectedFile ? [selectedFile] : [];
-            case "selected":
-                if (multiSelectedFiles.size > 0) {
-                    // Convert Set to Array of EpubFileNode
-                    // This requires finding nodes by path.
-                    // flatHtmlFiles only contains HTML.
-                    // We need a map or traverse.
-                    // For performance, we can just filter allFiles or Use flatHtmlFiles if we assume HTML only?
-                    // Selected files might be CSS.
-                    // Let's traverse tree or use a cache.
-                    const selected: EpubFileNode[] = [];
-                    const traverse = (nodes: EpubFileNode[]) => {
-                        for (const node of nodes) {
-                            if (multiSelectedFiles.has(node.path))
-                                selected.push(node);
-                            if (node.children) traverse(node.children);
-                        }
-                    };
-                    traverse(fileTree);
-                    return selected;
-                }
-                return selectedFile ? [selectedFile] : [];
-            case "open":
-                return openTabs.filter(
-                    (tab) =>
-                        tab.file_type === "html" ||
-                        tab.file_type === "css" ||
-                        tab.file_type === "xml" ||
-                        tab.name.endsWith(".xhtml") ||
-                        tab.name.endsWith(".html"),
-                );
-            case "html":
-                return flatHtmlFiles;
-            case "all":
-                const allFiles: EpubFileNode[] = [];
-                const collectFiles = (nodes: EpubFileNode[]) => {
-                    for (const node of nodes) {
-                        if (node.file_type !== "folder") {
-                            if (isEditable(node.file_type)) {
-                                allFiles.push(node);
-                            }
-                        }
-                        if (node.children) {
-                            collectFiles(node.children);
-                        }
-                    }
-                };
-                collectFiles(fileTree);
-                return allFiles;
-            default:
-                return [];
-        }
+        const allFiles = getAllFiles(fileTree);
+        const selected = allFiles.filter((node) =>
+            multiSelectedFiles.has(node.path),
+        );
+        return filterFilesInScope(searchScope, {
+            allFiles,
+            currentFile: selectedFile,
+            openFiles: openTabs,
+            selectedFiles: selected,
+            isHtml: isHtmlNode,
+            isEditable: (node) => isEditable(node.file_type),
+        });
     }
 
     function currentFindQuery(): FindQuery {

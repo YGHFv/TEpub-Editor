@@ -39,7 +39,8 @@ src-tauri/src/
 
 从巨型组件里**先抽纯逻辑，不动 UI**，每块配套 vitest：
 
-1. ✅ 查找替换核心 → `src/lib/findReplace.ts`（31 个测试）。已切换：Web 版 toolbox/epub-editor、search-replace 窗口（extended 转义下沉、顺带修复 wholeWord 连字符正则非法的潜在 bug）、桌面 epub-editor（findNextMatchWrapped 保留历史语义；getFilesInScope 因桌面 open/selected/html 范围语义与共享版实质不同，有意保留待统一）。editor 走后端 Rust 正则（advanced_search），语义不同，按设计不切换。
+1. ✅ 查找替换核心 → `src/lib/findReplace.ts`（34 个测试）。已切换全部消费者：Web 版 toolbox/epub-editor、search-replace 窗口（extended 转义下沉、顺带修复 wholeWord 连字符正则非法的潜在 bug）、桌面 epub-editor（含 `getFilesInScope` 范围语义统一，见下）。editor 走后端 Rust 正则（advanced_search），语义不同，按设计不切换。
+   - **范围语义统一（2026-07-31）**：`filterFilesInScope` 新增必填的 `openFiles`，把「已打开」从「当前文件」修正为「已打开文件中可编辑的」——桌面传标签页列表，Web 传 `[currentFile]`（该页无多标签，语义上确实等价）。桌面侧同时收敛了两处：`selected` 现在过滤掉不可编辑文件（原先会把选中的图片/字体也塞进文本查找）并在无可用文件时回退当前文件；`open` 的类型白名单换成统一的 `isEditable`，opf/ncx 标签页不再被排除（与「全部文件」范围保持一致）。HTML 判定收敛为单一 `isHtmlNode`，`flatHtmlFiles` 与查找范围共用。
 2. ✅ reader 的 container.xml/OPF/nav/NCX 手写解析（约 180 行）已删除，改用 `webEpub.ts` 导出的 `parseContainerRootfilePath` / `parseOpfPackage` / `parseNavDocument` / `parseNcxDocument`；`loadWebEpub` 同步改为复用同一实现。
 3. ✅ localStorage key 已集中到 `src/lib/storageKeys.ts`（21 个 key/前缀，动态 key 配生成函数），16 个使用文件全部改为常量导入；共享 key（`app-settings`、`epub-find/replace-history`、`tepub-epub-style-library-v1`、`tepub-editor-launch-files`、`tepub-editor-batch-task:` 等）在模块内注明共享方。webAccount.ts 私有账号 key 原地保留（storageKeys.ts 登记备查）；app.html 内联脚本无法 import，保留 `tepub-web-view-mode` 硬编码副本并两侧注释互指。
 4. ✅ 字体逻辑 → `src/lib/fontTools.ts`（17 个导出、26 个测试，epub-editor 净 -125 行）；DOM 遍历与 FontFace 注册等状态耦合部分按计划留在页面。
@@ -74,4 +75,4 @@ src-tauri/src/
 
 - **LICENSE**：README 声明保留所有权利，但公开推 Docker 镜像并教用户自部署，默认授权矛盾。需要作者决定：补一个写明允许范围的自定义 LICENSE，或换 MIT/Apache-2.0。
 - **Tauri `fs:scope "**"` 收敛** ✅ 已完成（2026-07-31）：`fs:scope` 的 `**` 条目已删除，`assetProtocol.scope` 收为 `$APPDATA/**`。前端直接 fs 调用只剩三处且都在 `$APPDATA` 或对话框返回路径内；对话框选中路径由 plugin-dialog 自动授权；`extract_epub`（解压目录 → asset 协议）与 `mobile_export_epub`（公共下载目录导出文件 → fs scope）在运行时按实际路径补授权。细节见 `docs/web-deploy.md` 的「桌面端文件访问范围」章节。
-- **全量 cargo fmt / prettier --write**：工具链已配好（`.prettierrc`、`eslint.config.js`、`rustfmt.toml`），全量格式化会产生巨大 diff，应在某个功能间歇期单独提交，不与功能改动混合。
+- **全量 cargo fmt / prettier --write** ✅ 已完成（2026-07-31）：拆成两个纯格式化提交——`cargo fmt`（11 个模块）与 `prettier --write`（94 个文件）。两个 commit 都登记在仓库根的 `.git-blame-ignore-revs`，`git blame` 会跳过（本地需 `git config blame.ignoreRevsFile .git-blame-ignore-revs`，GitHub/GitLab 自动识别）。格式化前核查过空白敏感标记：`<pre>` 内容均为单表达式、`<textarea>` 全为空内容，重排不影响渲染。

@@ -354,13 +354,14 @@ describe("filterFilesInScope", () => {
   const source = {
     allFiles: [chapter, style, image],
     currentFile: style,
+    // 默认按「单文档平台」建模（Web 版编辑器没有多标签）：已打开 == 当前文件
+    openFiles: [style],
     isHtml: (file: F) => file.html,
     isEditable: (file: F) => file.editable,
   };
 
-  it("returns only the current file for current/open scopes", () => {
+  it("returns only the current file for the current scope", () => {
     expect(filterFilesInScope("current", source)).toEqual([style]);
-    expect(filterFilesInScope("open", source)).toEqual([style]);
     expect(
       filterFilesInScope("current", { ...source, currentFile: null }),
     ).toEqual([]);
@@ -382,5 +383,37 @@ describe("filterFilesInScope", () => {
       filterFilesInScope("selected", { ...source, selectedFiles: [image] }),
     ).toEqual([style]);
     expect(filterFilesInScope("selected", source)).toEqual([style]);
+  });
+
+  describe("open scope", () => {
+    it("returns every editable open file on multi-tab platforms", () => {
+      // 桌面 epub-editor 传标签页列表，「已打开」应覆盖全部可编辑标签页，
+      // 而不是退化成只搜当前文件
+      expect(
+        filterFilesInScope("open", {
+          ...source,
+          openFiles: [chapter, style, image],
+        }),
+      ).toEqual([chapter, style]);
+    });
+
+    it("equals the current file when the platform has no tabs", () => {
+      expect(filterFilesInScope("open", source)).toEqual([style]);
+      expect(
+        filterFilesInScope("open", {
+          ...source,
+          currentFile: null,
+          openFiles: [],
+        }),
+      ).toEqual([]);
+    });
+
+    it("does not fall back to the current file when no open file is editable", () => {
+      // 与 selected 不同：open 不做回退——用户明确要求「已打开」，
+      // 打开的全是二进制文件时结果就该是空，而不是悄悄改搜当前文件
+      expect(
+        filterFilesInScope("open", { ...source, openFiles: [image] }),
+      ).toEqual([]);
+    });
   });
 });

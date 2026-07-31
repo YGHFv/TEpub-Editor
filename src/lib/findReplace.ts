@@ -243,15 +243,34 @@ export type SearchScope = "current" | "open" | "html" | "selected" | "all";
 export interface ScopeFileSource<T> {
   /** 文档内全部文件。 */
   allFiles: readonly T[];
-  /** 当前打开的文件（current/open 范围的目标，也是 selected 范围为空时的回退）。 */
+  /** 当前打开的文件（current 范围的目标，也是 selected 范围为空时的回退）。 */
   currentFile: T | null;
+  /**
+   * 已打开的文件（open 范围）。桌面 epub-editor 传标签页列表；
+   * Web 版没有多标签，传 `currentFile ? [currentFile] : []` 即可
+   * ——「已打开」在单文档平台上就等于「当前文件」。
+   * 设为必填是刻意的：新调用方必须显式表态，避免再次出现两端语义悄悄分叉。
+   */
+  openFiles: readonly T[];
   /** 多选的文件（selected 范围），由调用方从路径解析为文件对象。 */
   selectedFiles?: readonly T[];
   isHtml: (file: T) => boolean;
   isEditable: (file: T) => boolean;
 }
 
-/** 计算给定搜索范围内应参与查找/替换的文件列表。 */
+/**
+ * 计算给定搜索范围内应参与查找/替换的文件列表。
+ *
+ * 统一语义（对应 UI 上的五个选项）：
+ * - `current` 当前文件：仅 currentFile，没有则空
+ * - `open`   已打开：openFiles 中可编辑的
+ * - `html`   HTML文件：allFiles 中的 HTML 且可编辑
+ * - `selected` 选中文件：selectedFiles 中可编辑的；一个都不可编辑时回退到当前文件
+ * - `all`    全部文件：allFiles 中可编辑的
+ *
+ * 所有范围都过滤 isEditable，因为查找替换按文本处理内容——把图片/字体
+ * 之类的二进制文件放进范围只会读出乱码或直接报错。
+ */
 export function filterFilesInScope<T>(
   scope: SearchScope,
   source: ScopeFileSource<T>,
@@ -259,8 +278,9 @@ export function filterFilesInScope<T>(
   const current = source.currentFile === null ? [] : [source.currentFile];
   switch (scope) {
     case "current":
-    case "open":
       return current;
+    case "open":
+      return source.openFiles.filter((file) => source.isEditable(file));
     case "html":
       return source.allFiles.filter(
         (file) => source.isHtml(file) && source.isEditable(file),
