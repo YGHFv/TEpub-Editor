@@ -95,10 +95,11 @@
                             <span
                                 class="fr-history-text"
                                 onclick={() => selectFindHistory(item)}
-                                onkeydown={(e) => e.key === "Enter" && selectFindHistory(item)}
+                                onkeydown={(e) =>
+                                    e.key === "Enter" &&
+                                    selectFindHistory(item)}
                                 role="button"
-                                tabindex="0"
-                                >{item}</span
+                                tabindex="0">{item}</span
                             >
                             <button
                                 class="fr-history-del"
@@ -106,8 +107,7 @@
                                     e.stopPropagation();
                                     onRemoveFindHistory(i);
                                 }}
-                                title="&#21024;&#38500;"
-                                >&times;</button
+                                title="&#21024;&#38500;">&times;</button
                             >
                         </div>
                     {/each}
@@ -115,13 +115,21 @@
             {/if}
         </div>
         <div class="fr-actions fr-find-actions">
-            <button class="fr-btn fr-btn-text" onclick={onCountMatches} title="&#35745;&#25968;"
-                >&#35745;&#25968;</button
+            <button
+                class="fr-btn fr-btn-text"
+                onclick={onCountMatches}
+                title="&#35745;&#25968;">&#35745;&#25968;</button
             >
-            <button class="fr-btn fr-btn-text" onclick={onFindPrev} title="&#19978;&#19968;&#20010;"
+            <button
+                class="fr-btn fr-btn-text"
+                onclick={onFindPrev}
+                title="&#19978;&#19968;&#20010;"
                 >&#19978;&#19968;&#20010;</button
             >
-            <button class="fr-btn fr-btn-text" onclick={onFindNext} title="&#19979;&#19968;&#20010;"
+            <button
+                class="fr-btn fr-btn-text"
+                onclick={onFindNext}
+                title="&#19979;&#19968;&#20010;"
                 >&#19979;&#19968;&#20010;</button
             >
         </div>
@@ -154,10 +162,11 @@
                             <span
                                 class="fr-history-text"
                                 onclick={() => selectReplaceHistory(item)}
-                                onkeydown={(e) => e.key === "Enter" && selectReplaceHistory(item)}
+                                onkeydown={(e) =>
+                                    e.key === "Enter" &&
+                                    selectReplaceHistory(item)}
                                 role="button"
-                                tabindex="0"
-                                >{item}</span
+                                tabindex="0">{item}</span
                             >
                             <button
                                 class="fr-history-del"
@@ -165,8 +174,7 @@
                                     e.stopPropagation();
                                     onRemoveReplaceHistory(i);
                                 }}
-                                title="&#21024;&#38500;"
-                                >&times;</button
+                                title="&#21024;&#38500;">&times;</button
                             >
                         </div>
                     {/each}
@@ -174,8 +182,10 @@
             {/if}
         </div>
         <div class="fr-actions">
-            <button class="fr-btn fr-btn-text" onclick={onReplace} title="&#26367;&#25442;"
-                >&#26367;&#25442;</button
+            <button
+                class="fr-btn fr-btn-text"
+                onclick={onReplace}
+                title="&#26367;&#25442;">&#26367;&#25442;</button
             >
             <button
                 class="fr-btn fr-btn-wide fr-danger"
@@ -203,13 +213,17 @@
             className="fr-custom-select fr-select-xs"
             value={searchDirection}
             options={SEARCH_DIRECTION_OPTIONS}
-            on:change={(event) => (searchDirection = event.detail as SearchDirection)}
+            on:change={(event) =>
+                (searchDirection = event.detail as SearchDirection)}
         />
         <label class="fr-checkbox">
             <input type="checkbox" bind:checked={wrapAround} />&#24490;&#29615;
         </label>
         <label class="fr-checkbox">
-            <input type="checkbox" bind:checked={textOnly} />&#32431;&#25991;&#26412;
+            <input
+                type="checkbox"
+                bind:checked={textOnly}
+            />&#32431;&#25991;&#26412;
         </label>
         <span class="fr-message">{searchMessage}</span>
     </div>
@@ -340,7 +354,8 @@
     }
 
     .fr-options :global(.fr-custom-select.open .custom-select-trigger),
-    .fr-options :global(.fr-custom-select .custom-select-trigger:focus-visible) {
+    .fr-options
+        :global(.fr-custom-select .custom-select-trigger:focus-visible) {
         border-color: #2196f3;
         box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
     }

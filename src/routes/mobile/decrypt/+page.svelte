@@ -35,10 +35,15 @@
                 action: string;
             }>("prepare_epub_for_open", { epubPath });
             resultPath = result.processed_path || epubPath;
-            status = result.changed ? result.action : "这个 EPUB 暂时不需要解密或修复，可直接导出副本。";
+            status = result.changed
+                ? result.action
+                : "这个 EPUB 暂时不需要解密或修复，可直接导出副本。";
         } catch (err) {
             status = "处理 EPUB 失败";
-            await message(`处理 EPUB 失败：${err}`, { title: "解密 EPUB", kind: "error" });
+            await message(`处理 EPUB 失败：${err}`, {
+                title: "解密 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -55,7 +60,10 @@
             await processEpub(cachedPath, file.name);
         } catch (err) {
             status = "导入 EPUB 失败";
-            await message(`导入 EPUB 失败：${err}`, { title: "解密 EPUB", kind: "error" });
+            await message(`导入 EPUB 失败：${err}`, {
+                title: "解密 EPUB",
+                kind: "error",
+            });
         }
     }
 
@@ -64,13 +72,22 @@
         if (!path) return;
         try {
             busy = true;
-            const base = selectionName(selectedName || "book.epub").replace(/\.epub$/i, "");
-            const result = await exportEpubPath(path, safeFileName(`${base}-clean`, "epub"));
+            const base = selectionName(selectedName || "book.epub").replace(
+                /\.epub$/i,
+                "",
+            );
+            const result = await exportEpubPath(
+                path,
+                safeFileName(`${base}-clean`, "epub"),
+            );
             exportPath = result.output_path;
             status = result.message;
         } catch (err) {
             status = "导出 EPUB 失败";
-            await message(`导出 EPUB 失败：${err}`, { title: "解密 EPUB", kind: "error" });
+            await message(`导出 EPUB 失败：${err}`, {
+                title: "解密 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -89,7 +106,13 @@
 </svelte:head>
 
 <main class="page">
-    <input bind:this={fileInputEl} class="file-input" type="file" accept=".epub" on:change={onFileChange} />
+    <input
+        bind:this={fileInputEl}
+        class="file-input"
+        type="file"
+        accept=".epub"
+        on:change={onFileChange}
+    />
     <header class="topbar">
         <a href="/mobile" aria-label="返回">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -99,12 +122,19 @@
         <h1>解密 EPUB</h1>
     </header>
     <section class="panel">
-        <button type="button" on:click={openPicker} disabled={busy}>{busy ? "处理中" : "重新选择 EPUB"}</button>
+        <button type="button" on:click={openPicker} disabled={busy}
+            >{busy ? "处理中" : "重新选择 EPUB"}</button
+        >
         {#if selectedName}<strong>{selectedName}</strong>{/if}
         <p>{status}</p>
         {#if resultPath}<code>{resultPath}</code>{/if}
         {#if resultPath}
-            <button class="secondary" type="button" on:click={exportResult} disabled={busy}>导出处理结果</button>
+            <button
+                class="secondary"
+                type="button"
+                on:click={exportResult}
+                disabled={busy}>导出处理结果</button
+            >
         {/if}
         {#if exportPath}<code>{exportPath}</code>{/if}
     </section>
@@ -119,7 +149,8 @@
     .page {
         min-height: 100vh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 14px max(44px, env(safe-area-inset-bottom));
+        padding: max(10px, env(safe-area-inset-top)) 14px
+            max(44px, env(safe-area-inset-bottom));
         background: #f4f5f8;
         color: #171b24;
     }

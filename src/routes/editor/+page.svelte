@@ -244,7 +244,7 @@
             { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
             { level: 1, pattern: DEFAULT_VOLUME_REGEX },
             { level: 3, pattern: DEFAULT_META_BODY_REGEX },
-            { level: 3, pattern: DEFAULT_CHAPTER_REGEX }
+            { level: 3, pattern: DEFAULT_CHAPTER_REGEX },
         ] as CustomRegexRule[],
         wordCountMinThreshold: 2000,
         wordCountMaxThreshold: 6000,
@@ -329,34 +329,85 @@
 
     const REGEX_PRESETS = [
         { label: "自定义", value: "" },
-        { label: "^\\s*第[一二三..]+章.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+章.*$" },
+        {
+            label: "^\\s*第[一二三..]+章.*$",
+            value: "^\\s*第[一二三四五六七八九十零〇百千两]+章.*$",
+        },
         { label: "第X卷 标题 / 卷X 标题", value: DEFAULT_VOLUME_REGEX },
-        { label: "终章 标题", value: "^\\s*终章(?:\\s+|[:：、.．\\-—])\\S+.*$" },
-        { label: "番外 / 后日谈", value: "^\\s*(?:(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*$" },
-        { label: "^\\s*第[一二三..]+回.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+回.*$" },
-        { label: "^\\s*第[一二三..]+节.*$", value: "^\\s*第[一二三四五六七八九十零〇百千两]+节.*$" },
+        {
+            label: "终章 标题",
+            value: "^\\s*终章(?:\\s+|[:：、.．\\-—])\\S+.*$",
+        },
+        {
+            label: "番外 / 后日谈",
+            value: "^\\s*(?:(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*$",
+        },
+        {
+            label: "^\\s*第[一二三..]+回.*$",
+            value: "^\\s*第[一二三四五六七八九十零〇百千两]+回.*$",
+        },
+        {
+            label: "^\\s*第[一二三..]+节.*$",
+            value: "^\\s*第[一二三四五六七八九十零〇百千两]+节.*$",
+        },
         { label: "^\\s*第\\d+章.*$", value: "^\\s*第\\d+章.*$" },
-        { label: "内容简介 / 本书相关 / 完本感言", value: DEFAULT_META_VOLUME_REGEX },
-        { label: "简介 / 前言 / 楔子 / 后记 / 尾声", value: DEFAULT_META_BODY_REGEX },
-        { label: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$", value: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$" },
-        { label: "^\\s*\\d+\\s*$", value: "^\\s*\\d+\\s*$" }
+        {
+            label: "内容简介 / 本书相关 / 完本感言",
+            value: DEFAULT_META_VOLUME_REGEX,
+        },
+        {
+            label: "简介 / 前言 / 楔子 / 后记 / 尾声",
+            value: DEFAULT_META_BODY_REGEX,
+        },
+        {
+            label: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$",
+            value: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$",
+        },
+        { label: "^\\s*\\d+\\s*$", value: "^\\s*\\d+\\s*$" },
     ];
 
-    function normalizeAiProofingConfig(config: Partial<AiProofingConfig> | undefined): AiProofingConfig {
+    function normalizeAiProofingConfig(
+        config: Partial<AiProofingConfig> | undefined,
+    ): AiProofingConfig {
         const merged = { ...DEFAULT_AI_PROOFING, ...(config || {}) };
         merged.enabled = Boolean(merged.enabled);
-        merged.baseUrl = String(merged.baseUrl || DEFAULT_AI_PROOFING.baseUrl).trim();
+        merged.baseUrl = String(
+            merged.baseUrl || DEFAULT_AI_PROOFING.baseUrl,
+        ).trim();
         merged.apiKey = String(merged.apiKey || "");
         merged.model = String(merged.model || DEFAULT_AI_PROOFING.model).trim();
-        merged.temperature = Math.max(0, Math.min(1, Number(merged.temperature) || DEFAULT_AI_PROOFING.temperature));
-        merged.maxChapterChars = Math.max(1000, Math.floor(Number(merged.maxChapterChars) || DEFAULT_AI_PROOFING.maxChapterChars));
-        merged.responseTimeoutSec = Math.max(30, Math.min(1800, Math.floor(Number(merged.responseTimeoutSec) || DEFAULT_AI_PROOFING.responseTimeoutSec)));
+        merged.temperature = Math.max(
+            0,
+            Math.min(
+                1,
+                Number(merged.temperature) || DEFAULT_AI_PROOFING.temperature,
+            ),
+        );
+        merged.maxChapterChars = Math.max(
+            1000,
+            Math.floor(
+                Number(merged.maxChapterChars) ||
+                    DEFAULT_AI_PROOFING.maxChapterChars,
+            ),
+        );
+        merged.responseTimeoutSec = Math.max(
+            30,
+            Math.min(
+                1800,
+                Math.floor(
+                    Number(merged.responseTimeoutSec) ||
+                        DEFAULT_AI_PROOFING.responseTimeoutSec,
+                ),
+            ),
+        );
         merged.autoApprove = Boolean(merged.autoApprove);
         merged.extraPrompt = String(merged.extraPrompt || "");
         return merged;
     }
 
-    function createAiProviderFromProofing(config: AiProofingConfig): AiProviderConfig {
+    function createAiProviderFromProofing(
+        config: AiProofingConfig,
+    ): AiProviderConfig {
         return {
             id: newAiProviderId(),
             name: config.model || "默认 API",
@@ -368,21 +419,38 @@
         };
     }
 
-    function normalizeAiProvider(provider: Partial<AiProviderConfig> | undefined, index = 0): AiProviderConfig {
+    function normalizeAiProvider(
+        provider: Partial<AiProviderConfig> | undefined,
+        index = 0,
+    ): AiProviderConfig {
         const id = String(provider?.id || `provider-${index + 1}`).trim();
-        const model = String(provider?.model || DEFAULT_AI_PROOFING.model).trim();
+        const model = String(
+            provider?.model || DEFAULT_AI_PROOFING.model,
+        ).trim();
         return {
             id,
             name: String(provider?.name || model || `API ${index + 1}`).trim(),
             kind: provider?.kind === "image" ? "image" : "text",
-            baseUrl: String(provider?.baseUrl || DEFAULT_AI_PROOFING.baseUrl).trim(),
+            baseUrl: String(
+                provider?.baseUrl || DEFAULT_AI_PROOFING.baseUrl,
+            ).trim(),
             apiKey: String(provider?.apiKey || ""),
             model,
-            temperature: Math.max(0, Math.min(1, Number(provider?.temperature) || DEFAULT_AI_PROOFING.temperature)),
+            temperature: Math.max(
+                0,
+                Math.min(
+                    1,
+                    Number(provider?.temperature) ||
+                        DEFAULT_AI_PROOFING.temperature,
+                ),
+            ),
         };
     }
 
-    function normalizeAiProviders(config: LibraryConfig | undefined, fallback: AiProofingConfig) {
+    function normalizeAiProviders(
+        config: LibraryConfig | undefined,
+        fallback: AiProofingConfig,
+    ) {
         const providers = (config?.aiProviders || [])
             .filter((item) => item?.kind !== "image")
             .map(normalizeAiProvider)
@@ -394,7 +462,10 @@
         return [];
     }
 
-    function providerToProofingConfig(provider: AiProviderConfig | undefined, base: AiProofingConfig) {
+    function providerToProofingConfig(
+        provider: AiProviderConfig | undefined,
+        base: AiProofingConfig,
+    ) {
         const normalized = normalizeAiProvider(provider, 0);
         return normalizeAiProofingConfig({
             ...base,
@@ -406,18 +477,26 @@
     }
 
     function findAiProvider(providerId: string) {
-        return aiProviders.find((provider) => provider.id === providerId) || aiProviders[0];
+        return (
+            aiProviders.find((provider) => provider.id === providerId) ||
+            aiProviders[0]
+        );
     }
 
     function proofingConfigForProvider(providerId: string) {
-        return providerToProofingConfig(findAiProvider(providerId), aiProofingConfig);
+        return providerToProofingConfig(
+            findAiProvider(providerId),
+            aiProofingConfig,
+        );
     }
 
     function newAiProviderId() {
         return `provider-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     }
 
-    function createBlankAiProvider(seed: Partial<AiProviderConfig> = {}): AiProviderConfig {
+    function createBlankAiProvider(
+        seed: Partial<AiProviderConfig> = {},
+    ): AiProviderConfig {
         return normalizeAiProvider(
             {
                 id: seed.id || newAiProviderId(),
@@ -426,7 +505,8 @@
                 baseUrl: seed.baseUrl || DEFAULT_AI_PROOFING.baseUrl,
                 apiKey: seed.apiKey || "",
                 model: seed.model || DEFAULT_AI_PROOFING.model,
-                temperature: seed.temperature ?? DEFAULT_AI_PROOFING.temperature,
+                temperature:
+                    seed.temperature ?? DEFAULT_AI_PROOFING.temperature,
             },
             aiProviders.length,
         );
@@ -494,9 +574,9 @@
 
     // 目录正则 tab 的规则操作统一走拷贝赋值（新数组 + 变更项新对象），
     // 避免原地 splice/push/字段改写穿过 runes prop 后因引用相等不触发更新。
-    const TOC_PRESET_PATTERNS = REGEX_PRESETS.filter((preset) => preset.value).map(
+    const TOC_PRESET_PATTERNS = REGEX_PRESETS.filter(
         (preset) => preset.value,
-    );
+    ).map((preset) => preset.value);
 
     function addTocPrefixRule(level: number, prefix: string) {
         appSettings.customRegexRules = [
@@ -505,9 +585,12 @@
         ];
     }
 
-    function updateTocRegexRule(index: number, patch: Partial<CustomRegexRule>) {
-        appSettings.customRegexRules = appSettings.customRegexRules.map((rule, idx) =>
-            idx === index ? { ...rule, ...patch } : rule,
+    function updateTocRegexRule(
+        index: number,
+        patch: Partial<CustomRegexRule>,
+    ) {
+        appSettings.customRegexRules = appSettings.customRegexRules.map(
+            (rule, idx) => (idx === index ? { ...rule, ...patch } : rule),
         );
     }
 
@@ -622,7 +705,15 @@
 
     // 面板显示状态
     let showSettingsPanel = false;
-    let settingsActiveTab: "display" | "fonts" | "styles" | "toc" | "api" | "ai" | "proofLogs" | "history" = "display";
+    let settingsActiveTab:
+        | "display"
+        | "fonts"
+        | "styles"
+        | "toc"
+        | "api"
+        | "ai"
+        | "proofLogs"
+        | "history" = "display";
     const editorSettingsTabs = [
         { id: "display", label: "显示" },
         { id: "fonts", label: "字体" },
@@ -688,7 +779,10 @@
     let stylePanelBaselineCss = "";
 
     const BUILTIN_FONT_FAMILY_OPTIONS: CssPropertyOption[] = [
-        { label: "Maintext / 宋体", value: `"Maintext", "DK-SONGTI", "st", "宋体", "zw", sans-serif` },
+        {
+            label: "Maintext / 宋体",
+            value: `"Maintext", "DK-SONGTI", "st", "宋体", "zw", sans-serif`,
+        },
         { label: "Title / 黑体", value: `"Title", "黑体", sans-serif` },
         { label: "系统宋体", value: `"宋体", SimSun, serif` },
         { label: "系统黑体", value: `"黑体", SimHei, sans-serif` },
@@ -721,12 +815,32 @@
             note: "全书页面基础样式",
             accent: "#a6781d",
             properties: [
-                { label: "字体", name: "font-family", value: `"Maintext", "DK-SONGTI", "st", "宋体", "zw", sans-serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
-                { label: "行间距", name: "line-height", value: "130%", options: LINE_HEIGHT_OPTIONS },
+                {
+                    label: "字体",
+                    name: "font-family",
+                    value: `"Maintext", "DK-SONGTI", "st", "宋体", "zw", sans-serif`,
+                    options: BUILTIN_FONT_FAMILY_OPTIONS,
+                },
+                {
+                    label: "行间距",
+                    name: "line-height",
+                    value: "130%",
+                    options: LINE_HEIGHT_OPTIONS,
+                },
                 { label: "左侧外边距", name: "margin-left", value: "1%" },
                 { label: "右侧外边距", name: "margin-right", value: "1%" },
-                { label: "水平对齐方式", name: "text-align", value: "justify", options: TEXT_ALIGN_OPTIONS },
-                { label: "颜色", name: "background-color", value: "transparent", color: true },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "justify",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
+                {
+                    label: "颜色",
+                    name: "background-color",
+                    value: "transparent",
+                    color: true,
+                },
             ],
         },
         {
@@ -736,11 +850,26 @@
             note: "正文段落",
             accent: "#a6781d",
             properties: [
-                { label: "字体", name: "font-family", value: `"DK-SONGTI", "st", "宋体", "zw", sans-serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
-                { label: "行间距", name: "line-height", value: "130%", options: LINE_HEIGHT_OPTIONS },
+                {
+                    label: "字体",
+                    name: "font-family",
+                    value: `"DK-SONGTI", "st", "宋体", "zw", sans-serif`,
+                    options: BUILTIN_FONT_FAMILY_OPTIONS,
+                },
+                {
+                    label: "行间距",
+                    name: "line-height",
+                    value: "130%",
+                    options: LINE_HEIGHT_OPTIONS,
+                },
                 { label: "左侧外边距", name: "margin-left", value: "1%" },
                 { label: "右侧外边距", name: "margin-right", value: "1%" },
-                { label: "水平对齐方式", name: "text-align", value: "justify", options: TEXT_ALIGN_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "justify",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
                 { label: "首行缩进", name: "text-indent", value: "2em" },
             ],
         },
@@ -751,7 +880,12 @@
             note: "封面页容器与封面图区域",
             accent: "#3d8c8a",
             properties: [
-                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "center",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
                 { label: "上边距", name: "margin-top", value: "3em" },
                 { label: "下边距", name: "margin-bottom", value: "1em" },
             ],
@@ -765,7 +899,11 @@
             hiddenInBlockEditor: true,
             properties: [
                 { label: "宽度", name: "width", value: "40%" },
-                { label: "阴影", name: "box-shadow", value: "3px 3px 3px #535353" },
+                {
+                    label: "阴影",
+                    name: "box-shadow",
+                    value: "3px 3px 3px #535353",
+                },
                 { label: "下边距", name: "margin-bottom", value: "0.5em" },
             ],
         },
@@ -776,13 +914,32 @@
             note: "制作说明页主卡片",
             accent: "#8d6c42",
             properties: [
-                { label: "外边距", name: "margin", value: "10% 7.25% 2.75% 7.25%" },
+                {
+                    label: "外边距",
+                    name: "margin",
+                    value: "10% 7.25% 2.75% 7.25%",
+                },
                 { label: "内边距", name: "padding", value: "5.25%" },
                 { label: "边框", name: "border", value: "1.5px solid #6C322D" },
                 { label: "圆角", name: "border-radius", value: "5px" },
-                { label: "颜色", name: "background-color", value: "rgba(255, 255, 255, 0.7)", color: true },
-                { label: "背景图", name: "background", value: "url(../Images/production-card-bg.jpg) no-repeat top left", hiddenInBlockEditor: true },
-                { label: "背景尺寸", name: "background-size", value: "35% auto", hiddenInBlockEditor: true },
+                {
+                    label: "颜色",
+                    name: "background-color",
+                    value: "rgba(255, 255, 255, 0.7)",
+                    color: true,
+                },
+                {
+                    label: "背景图",
+                    name: "background",
+                    value: "url(../Images/production-card-bg.jpg) no-repeat top left",
+                    hiddenInBlockEditor: true,
+                },
+                {
+                    label: "背景尺寸",
+                    name: "background-size",
+                    value: "35% auto",
+                    hiddenInBlockEditor: true,
+                },
             ],
         },
         {
@@ -792,8 +949,18 @@
             note: "内容简介/简介页面",
             accent: "#3e7dbb",
             properties: [
-                { label: "颜色", name: "background-color", value: "transparent", color: true },
-                { label: "颜色", name: "border-color", value: "rgba(83, 83, 83, 0.5)", color: true },
+                {
+                    label: "颜色",
+                    name: "background-color",
+                    value: "transparent",
+                    color: true,
+                },
+                {
+                    label: "颜色",
+                    name: "border-color",
+                    value: "rgba(83, 83, 83, 0.5)",
+                    color: true,
+                },
                 { label: "边框宽度", name: "border-width", value: "0.4em" },
             ],
         },
@@ -804,10 +971,20 @@
             note: "内容简介标题",
             accent: "#3e7dbb",
             properties: [
-                { label: "字体", name: "font-family", value: `"哥特宋"`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                {
+                    label: "字体",
+                    name: "font-family",
+                    value: `"哥特宋"`,
+                    options: BUILTIN_FONT_FAMILY_OPTIONS,
+                },
                 { label: "字号", name: "font-size", value: "125%" },
                 { label: "颜色", name: "color", value: "#00008B", color: true },
-                { label: "水平对齐方式", name: "text-align", value: "left", options: TEXT_ALIGN_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "left",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
                 { label: "外边距", name: "margin", value: "0.3em 0 0.5em 0" },
                 { label: "缩进", name: "text-indent", value: "0" },
             ],
@@ -819,14 +996,29 @@
             note: "卷序",
             accent: "#cc5f8c",
             properties: [
-                { label: "字体", name: "font-family", value: `"哥特宋", serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                {
+                    label: "字体",
+                    name: "font-family",
+                    value: `"哥特宋", serif`,
+                    options: BUILTIN_FONT_FAMILY_OPTIONS,
+                },
                 { label: "字号", name: "font-size", value: "1.2em" },
                 { label: "颜色", name: "color", value: "#59bde6", color: true },
                 { label: "字重", name: "font-weight", value: "600" },
                 { label: "外边距", name: "margin", value: "2em 0 1em 0" },
                 { label: "缩进", name: "text-indent", value: "0em" },
-                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
-                { label: "行间距", name: "line-height", value: "130%", options: LINE_HEIGHT_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "center",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
+                {
+                    label: "行间距",
+                    name: "line-height",
+                    value: "130%",
+                    options: LINE_HEIGHT_OPTIONS,
+                },
             ],
         },
         {
@@ -836,13 +1028,28 @@
             note: "卷名",
             accent: "#cc5f8c",
             properties: [
-                { label: "字体", name: "font-family", value: `"哥特宋", serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                {
+                    label: "字体",
+                    name: "font-family",
+                    value: `"哥特宋", serif`,
+                    options: BUILTIN_FONT_FAMILY_OPTIONS,
+                },
                 { label: "字号", name: "font-size", value: "1.2em" },
                 { label: "颜色", name: "color", value: "#59bde6", color: true },
                 { label: "外边距", name: "margin", value: "0em 0em 1em 0em" },
                 { label: "缩进", name: "text-indent", value: "0em" },
-                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
-                { label: "行间距", name: "line-height", value: "110%", options: LINE_HEIGHT_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "center",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
+                {
+                    label: "行间距",
+                    name: "line-height",
+                    value: "110%",
+                    options: LINE_HEIGHT_OPTIONS,
+                },
             ],
         },
         {
@@ -853,7 +1060,12 @@
             accent: "#cc5f8c",
             hiddenInBlockEditor: true,
             properties: [
-                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "center",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
                 { label: "外边距", name: "margin", value: "0.5em" },
                 { label: "缩进", name: "text-indent", value: "0" },
             ],
@@ -878,10 +1090,20 @@
             note: "章节序号与标题容器",
             accent: "#5c7fbf",
             properties: [
-                { label: "字体", name: "font-family", value: `"黑体", sans-serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                {
+                    label: "字体",
+                    name: "font-family",
+                    value: `"黑体", sans-serif`,
+                    options: BUILTIN_FONT_FAMILY_OPTIONS,
+                },
                 { label: "字号", name: "font-size", value: "1.2em" },
                 { label: "颜色", name: "color", value: "#c2181e", color: true },
-                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "center",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
                 { label: "字重", name: "font-weight", value: "900" },
                 { label: "外边距", name: "margin", value: "2em 0 3em 0" },
             ],
@@ -893,10 +1115,20 @@
             note: "章节序号徽标",
             accent: "#d48035",
             properties: [
-                { label: "字体", name: "font-family", value: `"黑体", sans-serif`, options: BUILTIN_FONT_FAMILY_OPTIONS },
+                {
+                    label: "字体",
+                    name: "font-family",
+                    value: `"黑体", sans-serif`,
+                    options: BUILTIN_FONT_FAMILY_OPTIONS,
+                },
                 { label: "字号", name: "font-size", value: "0.8em" },
                 { label: "颜色", name: "color", value: "#413245", color: true },
-                { label: "行间距", name: "line-height", value: "130%", options: LINE_HEIGHT_OPTIONS },
+                {
+                    label: "行间距",
+                    name: "line-height",
+                    value: "130%",
+                    options: LINE_HEIGHT_OPTIONS,
+                },
                 { label: "字重", name: "font-weight", value: "900" },
                 { label: "内边距", name: "padding", value: "0" },
             ],
@@ -909,7 +1141,12 @@
             accent: "#5c7fbf",
             hiddenInBlockEditor: true,
             properties: [
-                { label: "水平对齐方式", name: "text-align", value: "left", options: TEXT_ALIGN_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "left",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
                 { label: "外边距", name: "margin", value: "0" },
                 { label: "缩进", name: "text-indent", value: "0em" },
                 { label: "出血", name: "duokan-bleed", value: "lefttopright" },
@@ -922,9 +1159,7 @@
             note: "章节页顶部图片本体",
             accent: "#5c7fbf",
             hiddenInBlockEditor: true,
-            properties: [
-                { label: "宽度", name: "width", value: "100%" },
-            ],
+            properties: [{ label: "宽度", name: "width", value: "100%" }],
         },
         {
             id: "divider",
@@ -933,7 +1168,12 @@
             note: "章节内分割线与分割图容器",
             accent: "#6a7c5b",
             properties: [
-                { label: "水平对齐方式", name: "text-align", value: "center", options: TEXT_ALIGN_OPTIONS },
+                {
+                    label: "水平对齐方式",
+                    name: "text-align",
+                    value: "center",
+                    options: TEXT_ALIGN_OPTIONS,
+                },
                 { label: "缩进", name: "text-indent", value: "0" },
                 { label: "外边距", name: "margin", value: "1em 0" },
                 { label: "内边距", name: "padding", value: "0" },
@@ -956,7 +1196,9 @@
         },
     ];
     let styleBlocks: StyleBlock[] = cloneStyleBlocks(STYLE_BLOCK_DEFAULTS);
-    let activeStyleBlockId = STYLE_BLOCK_DEFAULTS.find((block) => !block.hiddenInBlockEditor)?.id || "";
+    let activeStyleBlockId =
+        STYLE_BLOCK_DEFAULTS.find((block) => !block.hiddenInBlockEditor)?.id ||
+        "";
 
     const STYLE_TEMPLATE_BUILTIN_ID = "builtin";
     const STYLE_TEMPLATE_HEADER = `@charset "utf-8";
@@ -985,7 +1227,9 @@
     }
 
     function channelToHex(value: number) {
-        return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+        return Math.max(0, Math.min(255, Math.round(value)))
+            .toString(16)
+            .padStart(2, "0");
     }
 
     function rgbToHex(r: number, g: number, b: number) {
@@ -1018,9 +1262,10 @@
         }
         const hexMatch = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
         if (hexMatch) {
-            const normalized = raw.length === 4
-                ? `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`
-                : raw.toUpperCase();
+            const normalized =
+                raw.length === 4
+                    ? `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`
+                    : raw.toUpperCase();
             const rgb = hexToRgb(normalized);
             return { hex: normalized, swatch: rgbToHex(rgb.r, rgb.g, rgb.b) };
         }
@@ -1029,12 +1274,27 @@
             const normalized = raw.toUpperCase();
             return { hex: normalized, swatch: normalized.slice(0, 7) };
         }
-        const rgbaMatch = raw.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([0-9.]+))?\s*\)$/i);
+        const rgbaMatch = raw.match(
+            /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([0-9.]+))?\s*\)$/i,
+        );
         if (rgbaMatch) {
-            const alpha = rgbaMatch[4] === undefined ? 255 : Math.max(0, Math.min(255, Math.round(Number(rgbaMatch[4]) * 255)));
-            const baseHex = rgbToHex(Number(rgbaMatch[1]), Number(rgbaMatch[2]), Number(rgbaMatch[3]));
+            const alpha =
+                rgbaMatch[4] === undefined
+                    ? 255
+                    : Math.max(
+                          0,
+                          Math.min(255, Math.round(Number(rgbaMatch[4]) * 255)),
+                      );
+            const baseHex = rgbToHex(
+                Number(rgbaMatch[1]),
+                Number(rgbaMatch[2]),
+                Number(rgbaMatch[3]),
+            );
             return {
-                hex: alpha >= 255 ? baseHex : `${baseHex}${channelToHex(alpha).toUpperCase()}`,
+                hex:
+                    alpha >= 255
+                        ? baseHex
+                        : `${baseHex}${channelToHex(alpha).toUpperCase()}`,
                 swatch: baseHex,
             };
         }
@@ -1067,9 +1327,17 @@
         return normalized;
     }
 
-    function updateToolbarColorValue(blockId: string, propName: string, value: string) {
+    function updateToolbarColorValue(
+        blockId: string,
+        propName: string,
+        value: string,
+    ) {
         const normalized = normalizeHexColorInput(value);
-        updateToolbarStyleValue(blockId, propName, normalized ? buildCssColorValue(normalized) : value);
+        updateToolbarStyleValue(
+            blockId,
+            propName,
+            normalized ? buildCssColorValue(normalized) : value,
+        );
     }
 
     function buildStyleBlocksCss(blocks = styleBlocks) {
@@ -1079,27 +1347,39 @@
                     .filter((prop) => prop.value.trim())
                     .map((prop) => `    ${prop.name}: ${prop.value.trim()};`)
                     .join("\n");
-                return declarations ? `/* [tepub-block:${block.id}] ${block.title} */\n${block.selector} {\n${declarations}\n}` : "";
+                return declarations
+                    ? `/* [tepub-block:${block.id}] ${block.title} */\n${block.selector} {\n${declarations}\n}`
+                    : "";
             })
             .filter(Boolean)
             .join("\n\n");
     }
 
-    function buildStyleTemplateCss(blocks = styleBlocks, extraCss = styleTemplateExtraCss) {
+    function buildStyleTemplateCss(
+        blocks = styleBlocks,
+        extraCss = styleTemplateExtraCss,
+    ) {
         const blockCss = buildStyleBlocksCss(blocks);
         const tail = extraCss.trim();
         return `${STYLE_TEMPLATE_HEADER}\n\n${blockCss}${tail ? `\n\n${tail}\n` : "\n"}`;
     }
 
     function getBuiltinStyleTemplateCss() {
-        return buildStyleTemplateCss(cloneStyleBlocks(STYLE_BLOCK_DEFAULTS), "");
+        return buildStyleTemplateCss(
+            cloneStyleBlocks(STYLE_BLOCK_DEFAULTS),
+            "",
+        );
     }
 
     function extractRuleDeclarations(css: string, selector: string) {
-        const match = css.match(new RegExp(`${escapeRegExp(selector)}\\s*\\{([\\s\\S]*?)\\}`, "m"));
+        const match = css.match(
+            new RegExp(`${escapeRegExp(selector)}\\s*\\{([\\s\\S]*?)\\}`, "m"),
+        );
         if (!match) return null;
         const declarations = new Map<string, string>();
-        for (const declaration of match[1].matchAll(/([-\w]+)\s*:\s*([^;]+);/g)) {
+        for (const declaration of match[1].matchAll(
+            /([-\w]+)\s*:\s*([^;]+);/g,
+        )) {
             declarations.set(declaration[1].trim(), declaration[2].trim());
         }
         return declarations;
@@ -1121,13 +1401,28 @@
         let extraCss = css;
         extraCss = extraCss.replace(/@charset\s+"utf-8";\s*/i, "");
         extraCss = extraCss.replace(/@import\s+url\("font\.css"\);\s*/i, "");
-        extraCss = extraCss.replace(/\/\*\s*TEpub template schema:\s*1\s*\*\/\s*/gi, "");
-        extraCss = extraCss.replace(/\/\*\s*@tepub-asset-slot[\s\S]*?\*\/\s*/gi, "");
-        extraCss = extraCss.replace(/\/\*\s*Standard classes:[\s\S]*?\*\/\s*/gi, "");
-        extraCss = extraCss.replace(/\/\*\s*\[tepub-block:[\s\S]*?\*\/\s*/gi, "");
+        extraCss = extraCss.replace(
+            /\/\*\s*TEpub template schema:\s*1\s*\*\/\s*/gi,
+            "",
+        );
+        extraCss = extraCss.replace(
+            /\/\*\s*@tepub-asset-slot[\s\S]*?\*\/\s*/gi,
+            "",
+        );
+        extraCss = extraCss.replace(
+            /\/\*\s*Standard classes:[\s\S]*?\*\/\s*/gi,
+            "",
+        );
+        extraCss = extraCss.replace(
+            /\/\*\s*\[tepub-block:[\s\S]*?\*\/\s*/gi,
+            "",
+        );
         for (const block of STYLE_BLOCK_DEFAULTS) {
             extraCss = extraCss.replace(
-                new RegExp(`${escapeRegExp(block.selector)}\\s*\\{[\\s\\S]*?\\}\\s*`, "g"),
+                new RegExp(
+                    `${escapeRegExp(block.selector)}\\s*\\{[\\s\\S]*?\\}\\s*`,
+                    "g",
+                ),
                 "",
             );
         }
@@ -1148,7 +1443,8 @@
     }
 
     function captureStylePanelBaseline() {
-        stylePanelBaselineCss = epubMeta.styles["main.css"] || getBuiltinStyleTemplateCss();
+        stylePanelBaselineCss =
+            epubMeta.styles["main.css"] || getBuiltinStyleTemplateCss();
     }
 
     function collectUsedImportedFonts(blocks = styleBlocks) {
@@ -1156,7 +1452,9 @@
         for (const block of blocks) {
             for (const prop of block.properties) {
                 if (prop.name !== "font-family") continue;
-                const matched = importedFonts.find((font) => font.css_value === prop.value.trim());
+                const matched = importedFonts.find(
+                    (font) => font.css_value === prop.value.trim(),
+                );
                 if (matched) {
                     used.set(matched.family, matched);
                 }
@@ -1169,7 +1467,8 @@
         if (!usedFonts.length) return "";
         return usedFonts
             .map((font) => {
-                const ext = font.file_name.split(".").pop()?.toLowerCase() || "ttf";
+                const ext =
+                    font.file_name.split(".").pop()?.toLowerCase() || "ttf";
                 const formatMap: Record<string, string> = {
                     ttf: "truetype",
                     otf: "opentype",
@@ -1190,32 +1489,57 @@
             role: `managed-font:${font.family}`,
         }));
         epubMeta.assets = [
-            ...epubMeta.assets.filter((asset) => !(asset.category === "fonts" && asset.role?.startsWith("managed-font:"))),
+            ...epubMeta.assets.filter(
+                (asset) =>
+                    !(
+                        asset.category === "fonts" &&
+                        asset.role?.startsWith("managed-font:")
+                    ),
+            ),
             ...managedAssets,
         ];
-        epubMeta.styles = { ...epubMeta.styles, "font.css": buildManagedFontCss(usedFonts) };
+        epubMeta.styles = {
+            ...epubMeta.styles,
+            "font.css": buildManagedFontCss(usedFonts),
+        };
     }
 
     function syncToolbarStyleToEpubMeta() {
-        epubMeta.styles = { ...epubMeta.styles, "main.css": buildStyleTemplateCss() };
+        epubMeta.styles = {
+            ...epubMeta.styles,
+            "main.css": buildStyleTemplateCss(),
+        };
         syncManagedFontAssets();
     }
 
-    function updateToolbarStyleBlock(blockIndex: number, propIndex: number, value: string) {
+    function updateToolbarStyleBlock(
+        blockIndex: number,
+        propIndex: number,
+        value: string,
+    ) {
         if (blockIndex < 0 || propIndex < 0) return;
         styleBlocks = styleBlocks.map((block, i) => {
             if (i !== blockIndex) return block;
             return {
                 ...block,
-                properties: block.properties.map((prop, j) => j === propIndex ? { ...prop, value } : prop),
+                properties: block.properties.map((prop, j) =>
+                    j === propIndex ? { ...prop, value } : prop,
+                ),
             };
         });
         syncToolbarStyleToEpubMeta();
     }
 
-    function updateToolbarStyleValue(blockId: string, propName: string, value: string) {
+    function updateToolbarStyleValue(
+        blockId: string,
+        propName: string,
+        value: string,
+    ) {
         const blockIndex = styleBlocks.findIndex((item) => item.id === blockId);
-        const propIndex = styleBlocks.find((item) => item.id === blockId)?.properties.findIndex((item) => item.name === propName) ?? -1;
+        const propIndex =
+            styleBlocks
+                .find((item) => item.id === blockId)
+                ?.properties.findIndex((item) => item.name === propName) ?? -1;
         updateToolbarStyleBlock(blockIndex, propIndex, value);
     }
 
@@ -1224,7 +1548,9 @@
         styleSourceDraft = stylePanelBaselineCss;
     }
 
-    function getVolumeCollapseKey(node: Pick<TocNode, "line_number" | "title">) {
+    function getVolumeCollapseKey(
+        node: Pick<TocNode, "line_number" | "title">,
+    ) {
         return `${node.line_number}:${node.title}`;
     }
 
@@ -1268,12 +1594,22 @@
     let tocSearchIndex = -1;
     let lastTocSearchKey = "";
 
-    function buildTocTestFn(query: string, searchMode: string): ((title: string) => boolean) | null {
+    function buildTocTestFn(
+        query: string,
+        searchMode: string,
+    ): ((title: string) => boolean) | null {
         if (searchMode === "regex") {
-            try { const regex = new RegExp(query, "i"); return (t) => regex.test(t); }
-            catch { return null; }
+            try {
+                const regex = new RegExp(query, "i");
+                return (t) => regex.test(t);
+            } catch {
+                return null;
+            }
         } else if (searchMode === "extended") {
-            const literal = query.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "\r");
+            const literal = query
+                .replace(/\\n/g, "\n")
+                .replace(/\\t/g, "\t")
+                .replace(/\\r/g, "\r");
             const lower = literal.toLowerCase();
             return (t) => t.toLowerCase().includes(lower);
         } else {
@@ -1308,14 +1644,32 @@
             tocTree = tocTree.map((n) => ({ ...n }));
         }
         if (editorComponent) {
-            console.log("[PAGE] navigateToTocMatch scrolling to line " + match.line_number + " title=" + match.title);
+            console.log(
+                "[PAGE] navigateToTocMatch scrolling to line " +
+                    match.line_number +
+                    " title=" +
+                    match.title,
+            );
             editorComponent.scrollToLine(match.line_number);
             activeChapterId = match.id;
         }
     }
 
-    function handleTocSearch(query: string, actionType: string, searchMode: string) {
-        console.log("[PAGE] handleTocSearch query=" + JSON.stringify(query) + " type=" + actionType + " mode=" + searchMode + " tocTreeLen=" + tocTree.length);
+    function handleTocSearch(
+        query: string,
+        actionType: string,
+        searchMode: string,
+    ) {
+        console.log(
+            "[PAGE] handleTocSearch query=" +
+                JSON.stringify(query) +
+                " type=" +
+                actionType +
+                " mode=" +
+                searchMode +
+                " tocTreeLen=" +
+                tocTree.length,
+        );
         if (!query) return;
 
         const searchKey = query + ":::" + searchMode;
@@ -1325,20 +1679,27 @@
             tocSearchMatches = findAllTocMatches(query, searchMode);
             tocSearchIndex = tocSearchMatches.length > 0 ? 0 : -1;
             lastTocSearchKey = searchKey;
-            console.log("[PAGE] new search: " + tocSearchMatches.length + " matches");
+            console.log(
+                "[PAGE] new search: " + tocSearchMatches.length + " matches",
+            );
         } else if (actionType === "find-next") {
             if (tocSearchMatches.length > 0) {
                 tocSearchIndex = (tocSearchIndex + 1) % tocSearchMatches.length;
             }
         } else if (actionType === "find-prev") {
             if (tocSearchMatches.length > 0) {
-                tocSearchIndex = (tocSearchIndex - 1 + tocSearchMatches.length) % tocSearchMatches.length;
+                tocSearchIndex =
+                    (tocSearchIndex - 1 + tocSearchMatches.length) %
+                    tocSearchMatches.length;
             }
         }
 
         if (tocSearchIndex >= 0 && tocSearchIndex < tocSearchMatches.length) {
             navigateToTocMatch(tocSearchMatches[tocSearchIndex]);
-            platform.emit("search-status", { count: tocSearchMatches.length, current: tocSearchIndex + 1 });
+            platform.emit("search-status", {
+                count: tocSearchMatches.length,
+                current: tocSearchIndex + 1,
+            });
         } else {
             platform.emit("search-status", { count: 0 });
         }
@@ -1395,8 +1756,8 @@
                         : proofActiveTab === "ai"
                           ? `智能校对 ${aiProofingRows.length} 条建议`
                           : proofActiveTab === "check"
-                          ? proofCheckMessage
-                          : "没有可预览的标题";
+                            ? proofCheckMessage
+                            : "没有可预览的标题";
         } catch (e: any) {
             proofPreviewRows = [];
             proofPreviewMessage = `预览失败: ${e?.message || e}`;
@@ -1404,7 +1765,9 @@
     }
 
     $: visibleProofPreviewRows = proofPreviewRows.filter(
-        (row) => row.kind === "volume" || !proofCollapsedVolumeKeys.has(row.volumeKey),
+        (row) =>
+            row.kind === "volume" ||
+            !proofCollapsedVolumeKeys.has(row.volumeKey),
     );
 
     $: proofCheckMessage = `断序 ${sequenceErrors.length} 项，标题 ${titleErrors.length} 项，字数 ${wordCountErrors.length} 项`;
@@ -1450,7 +1813,11 @@
         await tick();
         await scanToc(result.text);
         await updateMd5(result.text);
-        saveStateToCache(filePath ? (flatToc.find((node) => node.id === activeChapterId)?.line || 1) : 1);
+        saveStateToCache(
+            filePath
+                ? flatToc.find((node) => node.id === activeChapterId)?.line || 1
+                : 1,
+        );
     }
 
     async function applyProofTitleRewrite() {
@@ -1521,27 +1888,48 @@
 
     async function runProofFullConvert() {
         proofMessage = "正在转换繁简，请稍候...";
-        const result = await convertChineseText(fileContent, proofConvertDirection);
+        const result = await convertChineseText(
+            fileContent,
+            proofConvertDirection,
+        );
         await applyProofResult(result);
     }
 
     async function loadSharedLibrarySettings() {
         try {
             libraryData = await platform.invoke<LibraryData>("load_library");
-            const appSettings = saveGlobalAppSettings(loadGlobalAppSettings(libraryData?.config || {}));
-            aiProofingConfig = normalizeAiProofingConfig(appSettings.aiProofing);
+            const appSettings = saveGlobalAppSettings(
+                loadGlobalAppSettings(libraryData?.config || {}),
+            );
+            aiProofingConfig = normalizeAiProofingConfig(
+                appSettings.aiProofing,
+            );
             aiProviders = appSettings.aiProviders
                 .filter((provider) => provider.kind !== "image")
                 .map((provider, index) => normalizeAiProvider(provider, index));
-            txtAiProofingConfig = { ...DEFAULT_TXT_AI_PROOFING, ...appSettings.txtAiProofing };
-            if (!txtAiProofingConfig.providerId || !findAiProvider(txtAiProofingConfig.providerId)) {
+            txtAiProofingConfig = {
+                ...DEFAULT_TXT_AI_PROOFING,
+                ...appSettings.txtAiProofing,
+            };
+            if (
+                !txtAiProofingConfig.providerId ||
+                !findAiProvider(txtAiProofingConfig.providerId)
+            ) {
                 txtAiProofingConfig.providerId = aiProviders[0]?.id || "";
             }
-            if (!txtAiProofingConfig.approvalProviderId || !findAiProvider(txtAiProofingConfig.approvalProviderId)) {
-                txtAiProofingConfig.approvalProviderId = txtAiProofingConfig.providerId;
+            if (
+                !txtAiProofingConfig.approvalProviderId ||
+                !findAiProvider(txtAiProofingConfig.approvalProviderId)
+            ) {
+                txtAiProofingConfig.approvalProviderId =
+                    txtAiProofingConfig.providerId;
             }
-            aiProviderDraftId = txtAiProofingConfig.providerId || aiProviders[0]?.id || "";
-            aiProofingConfig = providerToProofingConfig(findAiProvider(txtAiProofingConfig.providerId), aiProofingConfig);
+            aiProviderDraftId =
+                txtAiProofingConfig.providerId || aiProviders[0]?.id || "";
+            aiProofingConfig = providerToProofingConfig(
+                findAiProvider(txtAiProofingConfig.providerId),
+                aiProofingConfig,
+            );
             const action = appSettings.txtEditorCloseAction;
             if (action === "exit" || action === "library") {
                 txtEditorCloseAction = action;
@@ -1561,24 +1949,44 @@
     async function saveSharedAiProofingSettings() {
         aiProofingConfig = normalizeAiProofingConfig(aiProofingConfig);
         aiProviders = aiProviders.map(normalizeAiProvider);
-        if (!txtAiProofingConfig.providerId || !findAiProvider(txtAiProofingConfig.providerId)) {
+        if (
+            !txtAiProofingConfig.providerId ||
+            !findAiProvider(txtAiProofingConfig.providerId)
+        ) {
             txtAiProofingConfig.providerId = aiProviders[0]?.id || "";
         }
-        if (!txtAiProofingConfig.approvalProviderId || !findAiProvider(txtAiProofingConfig.approvalProviderId)) {
-            txtAiProofingConfig.approvalProviderId = txtAiProofingConfig.providerId;
+        if (
+            !txtAiProofingConfig.approvalProviderId ||
+            !findAiProvider(txtAiProofingConfig.approvalProviderId)
+        ) {
+            txtAiProofingConfig.approvalProviderId =
+                txtAiProofingConfig.providerId;
         }
         const provider = findAiProvider(txtAiProofingConfig.providerId);
         if (provider) {
-            aiProofingConfig = providerToProofingConfig(provider, aiProofingConfig);
+            aiProofingConfig = providerToProofingConfig(
+                provider,
+                aiProofingConfig,
+            );
         }
         aiSettingsMessage = "正在保存...";
         try {
-            const currentGlobalSettings = loadGlobalAppSettings(libraryData?.config || {});
-            const imageProviders = currentGlobalSettings.aiProviders.filter((provider) => provider.kind === "image");
+            const currentGlobalSettings = loadGlobalAppSettings(
+                libraryData?.config || {},
+            );
+            const imageProviders = currentGlobalSettings.aiProviders.filter(
+                (provider) => provider.kind === "image",
+            );
             saveGlobalAppSettings({
                 ...currentGlobalSettings,
                 aiProofing: aiProofingConfig,
-                aiProviders: [...aiProviders.map((provider) => ({ ...provider, kind: "text" as const })), ...imageProviders],
+                aiProviders: [
+                    ...aiProviders.map((provider) => ({
+                        ...provider,
+                        kind: "text" as const,
+                    })),
+                    ...imageProviders,
+                ],
                 txtAiProofing: txtAiProofingConfig,
             });
             aiSettingsMessage = "已保存，工具箱设置与 TXT 编辑器设置已同步";
@@ -1606,9 +2014,15 @@
         return findAiProvider(aiProviderDraftId);
     }
 
-    function updateSelectedTxtAiProvider(field: keyof AiProviderConfig, value: string | number) {
+    function updateSelectedTxtAiProvider(
+        field: keyof AiProviderConfig,
+        value: string | number,
+    ) {
         if (!apiEditorDraft) return;
-        apiEditorDraft = normalizeAiProvider({ ...apiEditorDraft, [field]: value }, 0);
+        apiEditorDraft = normalizeAiProvider(
+            { ...apiEditorDraft, [field]: value },
+            0,
+        );
     }
 
     function addTxtAiProvider() {
@@ -1637,25 +2051,39 @@
         if (!apiEditorDraft) return;
         const provider = normalizeAiProvider({
             ...apiEditorDraft,
-            id: apiEditorMode === "edit" ? aiProviderDraftId : apiEditorDraft.id,
+            id:
+                apiEditorMode === "edit"
+                    ? aiProviderDraftId
+                    : apiEditorDraft.id,
             name: apiEditorDraft.name.trim() || "文字 API",
             baseUrl: apiEditorDraft.baseUrl.trim(),
             model: apiEditorDraft.model.trim(),
         });
-        if (!provider.name.trim() || !provider.baseUrl.trim() || !provider.model.trim()) {
+        if (
+            !provider.name.trim() ||
+            !provider.baseUrl.trim() ||
+            !provider.model.trim()
+        ) {
             aiSettingsMessage = "请填写名称、API 地址和模型。";
             return;
         }
         if (apiEditorMode === "edit") {
-            aiProviders = aiProviders.map((item) => (item.id === aiProviderDraftId ? provider : item));
+            aiProviders = aiProviders.map((item) =>
+                item.id === aiProviderDraftId ? provider : item,
+            );
         } else {
             aiProviders = [...aiProviders, provider];
         }
         aiProviderDraftId = provider.id;
-        if (!txtAiProofingConfig.providerId) txtAiProofingConfig.providerId = provider.id;
-        if (!txtAiProofingConfig.approvalProviderId) txtAiProofingConfig.approvalProviderId = provider.id;
+        if (!txtAiProofingConfig.providerId)
+            txtAiProofingConfig.providerId = provider.id;
+        if (!txtAiProofingConfig.approvalProviderId)
+            txtAiProofingConfig.approvalProviderId = provider.id;
         if (txtAiProofingConfig.providerId === provider.id) {
-            aiProofingConfig = providerToProofingConfig(provider, aiProofingConfig);
+            aiProofingConfig = providerToProofingConfig(
+                provider,
+                aiProofingConfig,
+            );
         }
         apiEditorOpen = false;
         apiEditorDraft = null;
@@ -1664,10 +2092,15 @@
 
     async function removeTxtAiProvider(providerId: string) {
         const wasEditing = apiEditorOpen && aiProviderDraftId === providerId;
-        aiProviders = aiProviders.filter((provider) => provider.id !== providerId);
+        aiProviders = aiProviders.filter(
+            (provider) => provider.id !== providerId,
+        );
         const fallbackId = aiProviders[0]?.id || "";
-        if (txtAiProofingConfig.providerId === providerId) txtAiProofingConfig.providerId = fallbackId;
-        if (txtAiProofingConfig.approvalProviderId === providerId) txtAiProofingConfig.approvalProviderId = txtAiProofingConfig.providerId || fallbackId;
+        if (txtAiProofingConfig.providerId === providerId)
+            txtAiProofingConfig.providerId = fallbackId;
+        if (txtAiProofingConfig.approvalProviderId === providerId)
+            txtAiProofingConfig.approvalProviderId =
+                txtAiProofingConfig.providerId || fallbackId;
         aiProviderDraftId = fallbackId;
         if (wasEditing) {
             cancelTxtAiProviderEditor();
@@ -1689,7 +2122,9 @@
     async function loadProofLogs(selectFirst = false) {
         proofLogMessage = "正在读取校对日志...";
         try {
-            proofLogList = await platform.invoke<ProofLogInfo[]>("list_ai_proofing_logs");
+            proofLogList = await platform.invoke<ProofLogInfo[]>(
+                "list_ai_proofing_logs",
+            );
             proofLogMessage = proofLogList.length ? "" : "暂无校对日志";
             if (selectFirst && proofLogList.length > 0) {
                 await openProofLog(proofLogList[0]);
@@ -1712,7 +2147,10 @@
         selectedProofLogPath = log.path;
         proofLogMessage = "正在打开日志...";
         try {
-            selectedProofLogContent = await platform.invoke<string>("read_ai_proofing_log", { path: log.path });
+            selectedProofLogContent = await platform.invoke<string>(
+                "read_ai_proofing_log",
+                { path: log.path },
+            );
             proofLogMessage = "";
         } catch (error) {
             console.error("打开校对日志失败:", error);
@@ -1723,7 +2161,8 @@
 
     async function loadImportedFonts() {
         try {
-            importedFonts = await platform.invoke<ImportedFontInfo[]>("list_library_fonts");
+            importedFonts =
+                await platform.invoke<ImportedFontInfo[]>("list_library_fonts");
             syncManagedFontAssets();
             epubMeta = { ...epubMeta };
         } catch (error) {
@@ -1741,22 +2180,45 @@
 
     async function loadStyleTemplates() {
         try {
-            styleTemplates = await platform.invoke<StyleTemplateInfo[]>("list_style_templates");
+            styleTemplates = await platform.invoke<StyleTemplateInfo[]>(
+                "list_style_templates",
+            );
         } catch (error) {
             console.error("加载样式模板失败:", error);
-            styleTemplates = [{ id: STYLE_TEMPLATE_BUILTIN_ID, name: "内置模板", file_name: "builtin.css", path: "", is_builtin: true }];
+            styleTemplates = [
+                {
+                    id: STYLE_TEMPLATE_BUILTIN_ID,
+                    name: "内置模板",
+                    file_name: "builtin.css",
+                    path: "",
+                    is_builtin: true,
+                },
+            ];
             styleSettingsMessage = "读取样式模板失败";
         }
     }
 
     async function readStyleTemplateCss(templateId: string) {
-        const template = await platform.invoke<StyleTemplateContent>("read_style_template", { id: templateId });
-        return template.main_css.trim() || (templateId === STYLE_TEMPLATE_BUILTIN_ID ? getBuiltinStyleTemplateCss() : "");
+        const template = await platform.invoke<StyleTemplateContent>(
+            "read_style_template",
+            { id: templateId },
+        );
+        return (
+            template.main_css.trim() ||
+            (templateId === STYLE_TEMPLATE_BUILTIN_ID
+                ? getBuiltinStyleTemplateCss()
+                : "")
+        );
     }
 
-    async function applySelectedStyleTemplate(templateId = appSettings.selectedStyleTemplateId || STYLE_TEMPLATE_BUILTIN_ID) {
+    async function applySelectedStyleTemplate(
+        templateId = appSettings.selectedStyleTemplateId ||
+            STYLE_TEMPLATE_BUILTIN_ID,
+    ) {
         currentStyleTemplateId = templateId;
-        const selectedTemplate = styleTemplates.find((item) => item.id === templateId);
+        const selectedTemplate = styleTemplates.find(
+            (item) => item.id === templateId,
+        );
         currentStyleTemplateName = selectedTemplate?.name || "当前模板";
         selectedStyleTemplateCss = await readStyleTemplateCss(templateId);
         applyResolvedStyleTemplateCss(selectedStyleTemplateCss);
@@ -1767,7 +2229,11 @@
         settingsActiveTab = "styles";
         styleSettingsMessage = "";
         await loadStyleTemplates();
-        applyResolvedStyleTemplateCss(epubMeta.styles["main.css"] || selectedStyleTemplateCss || getBuiltinStyleTemplateCss());
+        applyResolvedStyleTemplateCss(
+            epubMeta.styles["main.css"] ||
+                selectedStyleTemplateCss ||
+                getBuiltinStyleTemplateCss(),
+        );
         styleSourceDraft = epubMeta.styles["main.css"];
         captureStylePanelBaseline();
     }
@@ -1799,7 +2265,12 @@
         try {
             selection = await platform.openDialog({
                 multiple: false,
-                filters: [{ name: "Font", extensions: ["ttf", "otf", "woff", "woff2"] }],
+                filters: [
+                    {
+                        name: "Font",
+                        extensions: ["ttf", "otf", "woff", "woff2"],
+                    },
+                ],
             });
         } catch (e) {
             // web 端无原生文件选择器（openDialog 抛 PlatformUnsupportedError），
@@ -1812,9 +2283,12 @@
         isImportingFont = true;
         fontSettingsMessage = "正在导入字体...";
         try {
-            const imported = await platform.invoke<ImportedFontInfo>("import_library_font", {
-                path: extractPickedPath(selection as string | string[]),
-            });
+            const imported = await platform.invoke<ImportedFontInfo>(
+                "import_library_font",
+                {
+                    path: extractPickedPath(selection as string | string[]),
+                },
+            );
             await loadImportedFonts();
             syncManagedFontAssets();
             epubMeta = { ...epubMeta };
@@ -1828,7 +2302,9 @@
     }
 
     async function renameImportedFont(font: ImportedFontInfo) {
-        const nextFamily = window.prompt("输入新的字体显示名", font.family)?.trim();
+        const nextFamily = window
+            .prompt("输入新的字体显示名", font.family)
+            ?.trim();
         if (!nextFamily || nextFamily === font.family) return;
 
         renamingFontFileName = font.file_name;
@@ -1851,10 +2327,13 @@
     }
 
     async function deleteImportedFont(font: ImportedFontInfo) {
-        const confirmed = await platform.ask(`确定删除字体“${font.family}”吗？`, {
-            title: "删除字体",
-            kind: "warning",
-        });
+        const confirmed = await platform.ask(
+            `确定删除字体“${font.family}”吗？`,
+            {
+                title: "删除字体",
+                kind: "warning",
+            },
+        );
         if (!confirmed) return;
 
         deletingFontFileName = font.file_name;
@@ -1894,9 +2373,12 @@
         isImportingStyleTemplate = true;
         styleSettingsMessage = "正在导入样式模板...";
         try {
-            const imported = await platform.invoke<StyleTemplateInfo>("import_style_template", {
-                path: extractPickedPath(selection as string | string[]),
-            });
+            const imported = await platform.invoke<StyleTemplateInfo>(
+                "import_style_template",
+                {
+                    path: extractPickedPath(selection as string | string[]),
+                },
+            );
             await loadStyleTemplates();
             appSettings.selectedStyleTemplateId = imported.id;
             styleSettingsMessage = `已导入模板：${imported.name}`;
@@ -1918,7 +2400,9 @@
             } else {
                 syncToolbarStyleToEpubMeta();
             }
-            const targetId = appSettings.selectedStyleTemplateId || STYLE_TEMPLATE_BUILTIN_ID;
+            const targetId =
+                appSettings.selectedStyleTemplateId ||
+                STYLE_TEMPLATE_BUILTIN_ID;
             await platform.invoke<StyleTemplateInfo>("save_style_template", {
                 id: targetId,
                 mainCss: epubMeta.styles["main.css"],
@@ -1940,7 +2424,10 @@
         try {
             await platform.invoke("restore_builtin_style_template");
             await loadStyleTemplates();
-            if ((appSettings.selectedStyleTemplateId || STYLE_TEMPLATE_BUILTIN_ID) === STYLE_TEMPLATE_BUILTIN_ID) {
+            if (
+                (appSettings.selectedStyleTemplateId ||
+                    STYLE_TEMPLATE_BUILTIN_ID) === STYLE_TEMPLATE_BUILTIN_ID
+            ) {
                 await applySelectedStyleTemplate(STYLE_TEMPLATE_BUILTIN_ID);
                 captureStylePanelBaseline();
             }
@@ -1953,8 +2440,12 @@
 
     async function saveEditorSettings() {
         try {
-            const vols = appSettings.customRegexRules.filter(r => r.level === 1).map(r => `(${r.pattern})`);
-            const chaps = appSettings.customRegexRules.filter(r => r.level >= 2).map(r => `(${r.pattern})`);
+            const vols = appSettings.customRegexRules
+                .filter((r) => r.level === 1)
+                .map((r) => `(${r.pattern})`);
+            const chaps = appSettings.customRegexRules
+                .filter((r) => r.level >= 2)
+                .map((r) => `(${r.pattern})`);
             appSettings.volRegex = vols.length > 0 ? vols.join("|") : "^$";
             appSettings.chapRegex = chaps.length > 0 ? chaps.join("|") : "^$";
         } catch (e) {}
@@ -1962,10 +2453,7 @@
         if (!appSettings.selectedStyleTemplateId) {
             appSettings.selectedStyleTemplateId = STYLE_TEMPLATE_BUILTIN_ID;
         }
-        localStorage.setItem(
-            APP_SETTINGS_KEY,
-            JSON.stringify(appSettings),
-        );
+        localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings));
         if (settingsActiveTab === "ai" || settingsActiveTab === "api") {
             await saveSharedAiProofingSettings();
         }
@@ -1987,13 +2475,15 @@
             scriptProfile.dominant === "simplified" &&
             proofConvertDirection === "simplified-to-traditional"
         ) {
-            proofMessage = "检测到主体为简体，已跳过简体转繁体查找，避免误扫整本";
+            proofMessage =
+                "检测到主体为简体，已跳过简体转繁体查找，避免误扫整本";
         } else if (
             proofConvertPreviewRows.length === 0 &&
             scriptProfile.dominant === "traditional" &&
             proofConvertDirection === "traditional-to-simplified"
         ) {
-            proofMessage = "检测到主体为繁体，已跳过繁体转简体查找，避免误扫整本";
+            proofMessage =
+                "检测到主体为繁体，已跳过繁体转简体查找，避免误扫整本";
         } else {
             proofMessage =
                 proofConvertPreviewRows.length > 0
@@ -2075,19 +2565,23 @@
             .filter((node) => node.type === "Chapter")
             .sort((a, b) => a.line - b.line);
         if (chapters.length === 0) {
-            return [{
-                id: "full-text",
-                title: "全文",
-                startLine: 1,
-                endLine: lines.length,
-                startOffset: 0,
-                text: fileContent,
-            }];
+            return [
+                {
+                    id: "full-text",
+                    title: "全文",
+                    startLine: 1,
+                    endLine: lines.length,
+                    startOffset: 0,
+                    text: fileContent,
+                },
+            ];
         }
         return chapters.map((node, index) => {
             const next = chapters[index + 1];
             const startLine = Math.max(1, node.line);
-            const endLine = next ? Math.max(startLine, next.line - 1) : lines.length;
+            const endLine = next
+                ? Math.max(startLine, next.line - 1)
+                : lines.length;
             const startOffset = offsets[startLine - 1] ?? 0;
             const endOffset =
                 endLine >= lines.length
@@ -2109,12 +2603,26 @@
         return editorComponent?.getCursorLine?.()?.number || null;
     }
 
-    function findChapterRangeAtLine(chapters: AiProofingChapterRange[], lineNumber: number | null) {
+    function findChapterRangeAtLine(
+        chapters: AiProofingChapterRange[],
+        lineNumber: number | null,
+    ) {
         if (!lineNumber) return chapters[0] || null;
-        return chapters.find((chapter) => lineNumber >= chapter.startLine && lineNumber <= chapter.endLine) || chapters[0] || null;
+        return (
+            chapters.find(
+                (chapter) =>
+                    lineNumber >= chapter.startLine &&
+                    lineNumber <= chapter.endLine,
+            ) ||
+            chapters[0] ||
+            null
+        );
     }
 
-    function currentProofingChapters(scope: AiProofingScope, cursorLine: number | null) {
+    function currentProofingChapters(
+        scope: AiProofingScope,
+        cursorLine: number | null,
+    ) {
         const chapters = getChapterRanges();
         if (scope === "current") {
             const current = findChapterRangeAtLine(chapters, cursorLine);
@@ -2124,13 +2632,17 @@
             const current = findChapterRangeAtLine(chapters, cursorLine);
             if (!current) return chapters.slice(0, 1);
             if (!current.parentId) return [current];
-            const volumeChapters = chapters.filter((chapter) => chapter.parentId === current.parentId);
+            const volumeChapters = chapters.filter(
+                (chapter) => chapter.parentId === current.parentId,
+            );
             return volumeChapters.length > 0 ? volumeChapters : [current];
         }
         return chapters;
     }
 
-    $: hasProofVolumeScope = flatToc.some((node) => node.type === "Chapter" && Boolean(node.parentId));
+    $: hasProofVolumeScope = flatToc.some(
+        (node) => node.type === "Chapter" && Boolean(node.parentId),
+    );
     $: if (!hasProofVolumeScope && aiProofingScope === "volume") {
         aiProofingScope = "current";
     }
@@ -2142,7 +2654,11 @@
 
     function isAiFullChapterRemoval(suggestion: AiProofingSuggestion) {
         const type = suggestion.type.toLowerCase().replace(/[\s-]+/g, "_");
-        return type === "remove_chapter" || type === "chapter_delete" || type === "delete_chapter";
+        return (
+            type === "remove_chapter" ||
+            type === "chapter_delete" ||
+            type === "delete_chapter"
+        );
     }
 
     function differsOnlyByDeDiDe(original: string, replacement: string) {
@@ -2150,7 +2666,10 @@
         let changed = false;
         for (let i = 0; i < original.length; i += 1) {
             if (original[i] === replacement[i]) continue;
-            if (!/[的地得]/.test(original[i]) || !/[的地得]/.test(replacement[i])) {
+            if (
+                !/[的地得]/.test(original[i]) ||
+                !/[的地得]/.test(replacement[i])
+            ) {
                 return false;
             }
             changed = true;
@@ -2169,7 +2688,12 @@
         if (/[\uD800-\uDBFF][\uDC00-\uDFFF]/.test(trimmed)) return true;
         if (/^[^\p{L}\p{N}\s]{1,12}$/u.test(trimmed)) return true;
         if (/^[TtＴｔ]{2,}$/.test(trimmed)) return true;
-        if (/^[QAQqwQW；;:：'"\-_=+~^*#@!！?？<>/\\|()[\]{}【】（）…。，、·]+$/u.test(trimmed)) return true;
+        if (
+            /^[QAQqwQW；;:：'"\-_=+~^*#@!！?？<>/\\|()[\]{}【】（）…。，、·]+$/u.test(
+                trimmed,
+            )
+        )
+            return true;
         return false;
     }
 
@@ -2183,23 +2707,47 @@
         const o = original.trim();
         const r = replacement.trim();
         if (o === r || o.length > 4 || r.length > 4) return false;
-        if (/^[A-Za-z]{1,4}[\u4e00-\u9fff]+$/.test(o) && /^[\u4e00-\u9fff]+$/.test(r)) return true;
-        return /^[\u4e00-\u9fffA-Za-z·.]{1,4}$/.test(o) && /^[\u4e00-\u9fffA-Za-z·.]{1,4}$/.test(r);
+        if (
+            /^[A-Za-z]{1,4}[\u4e00-\u9fff]+$/.test(o) &&
+            /^[\u4e00-\u9fff]+$/.test(r)
+        )
+            return true;
+        return (
+            /^[\u4e00-\u9fffA-Za-z·.]{1,4}$/.test(o) &&
+            /^[\u4e00-\u9fffA-Za-z·.]{1,4}$/.test(r)
+        );
     }
 
-    function isStylePreferenceReplacement(original: string, replacement: string) {
+    function isStylePreferenceReplacement(
+        original: string,
+        replacement: string,
+    ) {
         const pair = `${original.trim()}=>${replacement.trim()}`;
-        return /如同=>如果|好像=>像|仿佛=>像|似乎=>好像|大概=>可能|也许=>可能|可以=>能够|一些=>一系列/.test(pair);
+        return /如同=>如果|好像=>像|仿佛=>像|似乎=>好像|大概=>可能|也许=>可能|可以=>能够|一些=>一系列/.test(
+            pair,
+        );
     }
 
     function getAiProofingRiskReason(row: AiProofingRow) {
         const type = row.type.toLowerCase().replace(/[\s-]+/g, "_");
-        if (row.fullChapterRemoval || type === "remove_chapter") return "整章移除风险高";
-        if ((type === "delete" || row.replacement === "") && containsEmojiOrSymbolOnly(row.original)) return "疑似表情/特殊符号";
-        if ((type === "delete" || row.replacement === "") && isBracketedNarrativeText(row.original)) return "括号内描述不删除";
-        if (changesLeadingIndent(row.original, row.replacement)) return "保留段首缩进";
-        if (isShortNameLikeReplacement(row.original, row.replacement)) return "疑似人名/专名";
-        if (isStylePreferenceReplacement(row.original, row.replacement)) return "疑似风格改写";
+        if (row.fullChapterRemoval || type === "remove_chapter")
+            return "整章移除风险高";
+        if (
+            (type === "delete" || row.replacement === "") &&
+            containsEmojiOrSymbolOnly(row.original)
+        )
+            return "疑似表情/特殊符号";
+        if (
+            (type === "delete" || row.replacement === "") &&
+            isBracketedNarrativeText(row.original)
+        )
+            return "括号内描述不删除";
+        if (changesLeadingIndent(row.original, row.replacement))
+            return "保留段首缩进";
+        if (isShortNameLikeReplacement(row.original, row.replacement))
+            return "疑似人名/专名";
+        if (isStylePreferenceReplacement(row.original, row.replacement))
+            return "疑似风格改写";
         return "";
     }
 
@@ -2210,8 +2758,16 @@
     function isAiProofingHardBlockedSuggestion(row: AiProofingRow) {
         const type = row.type.toLowerCase().replace(/[\s-]+/g, "_");
         if (row.fullChapterRemoval || type === "remove_chapter") return true;
-        if ((type === "delete" || row.replacement === "") && containsEmojiOrSymbolOnly(row.original)) return true;
-        if ((type === "delete" || row.replacement === "") && isBracketedNarrativeText(row.original)) return true;
+        if (
+            (type === "delete" || row.replacement === "") &&
+            containsEmojiOrSymbolOnly(row.original)
+        )
+            return true;
+        if (
+            (type === "delete" || row.replacement === "") &&
+            isBracketedNarrativeText(row.original)
+        )
+            return true;
         if (changesLeadingIndent(row.original, row.replacement)) return true;
         return false;
     }
@@ -2227,7 +2783,15 @@
         );
     }
 
-    function buildLocalEllipsisRows(chapter: { id: string; title: string; startOffset: number; text: string }, lineOffsets: number[]) {
+    function buildLocalEllipsisRows(
+        chapter: {
+            id: string;
+            title: string;
+            startOffset: number;
+            text: string;
+        },
+        lineOffsets: number[],
+    ) {
         const rows: AiProofingRow[] = [];
         const pattern = /(\.{3,}|。{2,}|…+)/g;
         let match: RegExpExecArray | null;
@@ -2236,7 +2800,11 @@
             if (original === "……") continue;
             const before = chapter.text[Math.max(0, match.index - 1)] || "";
             const after = chapter.text[match.index + original.length] || "";
-            if (/^\.+$/.test(original) && /[A-Za-z0-9]/.test(before) && /[A-Za-z0-9]/.test(after)) {
+            if (
+                /^\.+$/.test(original) &&
+                /[A-Za-z0-9]/.test(before) &&
+                /[A-Za-z0-9]/.test(after)
+            ) {
                 continue;
             }
             const globalStart = chapter.startOffset + match.index;
@@ -2267,10 +2835,17 @@
 
     function compactAiProofingLogText(text: string, limit = 180) {
         const compact = text.replace(/\s+/g, " ").trim();
-        return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
+        return compact.length > limit
+            ? `${compact.slice(0, limit)}...`
+            : compact;
     }
 
-    function logAiProofingSuggestion(stage: string, row: AiProofingRow | AiProofingSuggestion, chapterTitle: string, extra = "") {
+    function logAiProofingSuggestion(
+        stage: string,
+        row: AiProofingRow | AiProofingSuggestion,
+        chapterTitle: string,
+        extra = "",
+    ) {
         appendAiProofingLog(
             [
                 `建议/${stage}：${chapterTitle}`,
@@ -2278,7 +2853,9 @@
                 `${compactAiProofingLogText(row.original)} -> ${compactAiProofingLogText(row.replacement || "删除")}`,
                 row.reason ? `原因：${row.reason}` : "",
                 extra,
-            ].filter(Boolean).join("；"),
+            ]
+                .filter(Boolean)
+                .join("；"),
         );
     }
 
@@ -2342,29 +2919,56 @@
             const raw = localStorage.getItem(key);
             if (!raw) return;
             const state = JSON.parse(raw) as Partial<AiProofingCacheState>;
-            if (!Array.isArray(state.rows) || !Array.isArray(state.logs)) return;
-            if (state.contentMd5 && epubMeta.md5 && state.contentMd5 !== epubMeta.md5) {
+            if (!Array.isArray(state.rows) || !Array.isArray(state.logs))
+                return;
+            if (
+                state.contentMd5 &&
+                epubMeta.md5 &&
+                state.contentMd5 !== epubMeta.md5
+            ) {
                 aiProofingRows = [];
                 aiProofingSelectedIds = new Set();
-                aiProofingLogs = [`[${new Date().toLocaleTimeString()}] 已跳过旧校对缓存：当前文本内容已变化`];
+                aiProofingLogs = [
+                    `[${new Date().toLocaleTimeString()}] 已跳过旧校对缓存：当前文本内容已变化`,
+                ];
                 proofMessage = "旧智能校对缓存已跳过：当前文本内容已变化";
                 return;
             }
-            aiProofingScope = state.scope === "all" || state.scope === "volume" || state.scope === "current" ? state.scope : "current";
-            aiProofingView = state.view === "log" || state.view === "approval" ? state.view : "suggestions";
+            aiProofingScope =
+                state.scope === "all" ||
+                state.scope === "volume" ||
+                state.scope === "current"
+                    ? state.scope
+                    : "current";
+            aiProofingView =
+                state.view === "log" || state.view === "approval"
+                    ? state.view
+                    : "suggestions";
             aiProofingRows = state.rows as AiProofingRow[];
             const validIds = new Set(aiProofingRows.map((row) => row.id));
-            aiProofingSelectedIds = new Set((state.selectedIds || []).filter((id) => validIds.has(id)));
+            aiProofingSelectedIds = new Set(
+                (state.selectedIds || []).filter((id) => validIds.has(id)),
+            );
             aiProofingLogs = state.logs;
-            aiApprovalAppliedBatches = Array.isArray(state.approvalBatches) ? state.approvalBatches : [];
-            proofMessage = state.message || (aiProofingRows.length ? `已恢复 ${aiProofingRows.length} 条智能校对建议` : "");
+            aiApprovalAppliedBatches = Array.isArray(state.approvalBatches)
+                ? state.approvalBatches
+                : [];
+            proofMessage =
+                state.message ||
+                (aiProofingRows.length
+                    ? `已恢复 ${aiProofingRows.length} 条智能校对建议`
+                    : "");
         } catch (error) {
             console.warn("读取智能校对缓存失败:", error);
         }
     }
 
     async function persistAiProofingLogFile() {
-        if (!filePath || filePath === "请打开一本小说..." || aiProofingLogs.length === 0) {
+        if (
+            !filePath ||
+            filePath === "请打开一本小说..." ||
+            aiProofingLogs.length === 0
+        ) {
             saveAiProofingCache();
             return "";
         }
@@ -2384,13 +2988,19 @@
         }
     }
 
-    function parseAiProofingSuggestions(content: string): AiProofingSuggestion[] {
-        const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    function parseAiProofingSuggestions(
+        content: string,
+    ): AiProofingSuggestion[] {
+        const trimmed = content
+            .trim()
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/i, "");
         let parsed: any;
         try {
             parsed = JSON.parse(trimmed);
         } catch (error) {
-            const recovered = recoverAiProofingSuggestionsFromPartialJson(trimmed);
+            const recovered =
+                recoverAiProofingSuggestionsFromPartialJson(trimmed);
             if (recovered.length > 0) return recovered;
             throw error;
         }
@@ -2399,31 +3009,40 @@
         return normalizeAiProofingSuggestions(source);
     }
 
-    function normalizeAiProofingSuggestions(source: any[]): AiProofingSuggestion[] {
+    function normalizeAiProofingSuggestions(
+        source: any[],
+    ): AiProofingSuggestion[] {
         return source
             .map((item: any) => ({
                 original: String(item?.original || ""),
                 replacement: String(item?.replacement ?? ""),
                 reason: readAiProofingReason(item),
                 type: String(item?.type || "other"),
-                confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+                confidence: Math.max(
+                    0,
+                    Math.min(1, Number(item?.confidence) || 0),
+                ),
             }))
-            .filter((item) => item.original && item.original !== item.replacement);
+            .filter(
+                (item) => item.original && item.original !== item.replacement,
+            );
     }
 
     function readAiProofingReason(item: any) {
         return String(
             item?.reason ??
-            item?.["原因"] ??
-            item?.explanation ??
-            item?.["理由"] ??
-            item?.note ??
-            item?.comment ??
-            "",
+                item?.["原因"] ??
+                item?.explanation ??
+                item?.["理由"] ??
+                item?.note ??
+                item?.comment ??
+                "",
         ).trim();
     }
 
-    function recoverAiProofingSuggestionsFromPartialJson(content: string): AiProofingSuggestion[] {
+    function recoverAiProofingSuggestionsFromPartialJson(
+        content: string,
+    ): AiProofingSuggestion[] {
         const suggestions: any[] = [];
         const objectPattern =
             /\{\s*"original"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"replacement"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"reason"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"type"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"confidence"\s*:\s*([0-9.]+)[^}]*\}/g;
@@ -2449,11 +3068,16 @@
             extra ? `用户额外要求：${extra}` : "",
             "请根据系统校对标准检查以下章节，只输出 JSON：",
             chapterText,
-        ].filter(Boolean).join("\n\n");
+        ]
+            .filter(Boolean)
+            .join("\n\n");
     }
 
     function parseAiApprovalDecisions(content: string): AiProofingApproval[] {
-        const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        const trimmed = content
+            .trim()
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/i, "");
         const parsed = JSON.parse(trimmed);
         const source = Array.isArray(parsed) ? parsed : parsed?.decisions;
         if (!Array.isArray(source)) return [];
@@ -2466,7 +3090,11 @@
             .filter((item) => item.original);
     }
 
-    function buildAiApprovalPrompt(chapterTitle: string, chapterText: string, rows: AiProofingRow[]) {
+    function buildAiApprovalPrompt(
+        chapterTitle: string,
+        chapterText: string,
+        rows: AiProofingRow[],
+    ) {
         const suggestions = rows.map((row) => ({
             original: row.original,
             replacement: row.replacement,
@@ -2483,26 +3111,49 @@
         ].join("\n\n");
     }
 
-    async function approveAiProofingRows(chapterTitle: string, chapterText: string, rows: AiProofingRow[]) {
+    async function approveAiProofingRows(
+        chapterTitle: string,
+        chapterText: string,
+        rows: AiProofingRow[],
+    ) {
         if (!aiProofingConfig.autoApprove || rows.length === 0) {
             return { approvedRows: [] as AiProofingRow[], pendingRows: rows };
         }
-        appendAiProofingLog(`自动审批：${chapterTitle}，待审 ${rows.length} 条`);
+        appendAiProofingLog(
+            `自动审批：${chapterTitle}，待审 ${rows.length} 条`,
+        );
         try {
-            const response = await platform.invoke<AiProofingResponse>("run_ai_proofing", {
-                request: {
-                    config: proofingConfigForProvider(txtAiProofingConfig.approvalProviderId),
-                    systemPrompt: AI_APPROVAL_SYSTEM_PROMPT,
-                    userPrompt: buildAiApprovalPrompt(chapterTitle, chapterText, rows),
+            const response = await platform.invoke<AiProofingResponse>(
+                "run_ai_proofing",
+                {
+                    request: {
+                        config: proofingConfigForProvider(
+                            txtAiProofingConfig.approvalProviderId,
+                        ),
+                        systemPrompt: AI_APPROVAL_SYSTEM_PROMPT,
+                        userPrompt: buildAiApprovalPrompt(
+                            chapterTitle,
+                            chapterText,
+                            rows,
+                        ),
+                    },
                 },
-            });
+            );
             const decisions = parseAiApprovalDecisions(response.content);
             const approvedKeys = new Set(
-                decisions.filter((item) => item.approved).map((item) => item.original),
+                decisions
+                    .filter((item) => item.approved)
+                    .map((item) => item.original),
             );
-            const approvedRows = rows.filter((row) => approvedKeys.has(row.original));
-            const pendingRows = rows.filter((row) => !approvedKeys.has(row.original));
-            appendAiProofingLog(`自动审批完成：通过 ${approvedRows.length} 条，存疑 ${pendingRows.length} 条`);
+            const approvedRows = rows.filter((row) =>
+                approvedKeys.has(row.original),
+            );
+            const pendingRows = rows.filter(
+                (row) => !approvedKeys.has(row.original),
+            );
+            appendAiProofingLog(
+                `自动审批完成：通过 ${approvedRows.length} 条，存疑 ${pendingRows.length} 条`,
+            );
             return { approvedRows, pendingRows };
         } catch (error) {
             appendAiProofingLog(`自动审批失败，全部转人工审核：${error}`);
@@ -2512,8 +3163,14 @@
 
     async function runAiProofing() {
         await loadSharedLibrarySettings();
-        aiProofingConfig = proofingConfigForProvider(txtAiProofingConfig.providerId);
-        if (!aiProofingConfig.apiKey.trim() || !aiProofingConfig.baseUrl.trim() || !aiProofingConfig.model.trim()) {
+        aiProofingConfig = proofingConfigForProvider(
+            txtAiProofingConfig.providerId,
+        );
+        if (
+            !aiProofingConfig.apiKey.trim() ||
+            !aiProofingConfig.baseUrl.trim() ||
+            !aiProofingConfig.model.trim()
+        ) {
             proofMessage = "请先补全 API 地址、Key 和模型名";
             return;
         }
@@ -2541,8 +3198,15 @@
         let approvedApplyRows: AiProofingRow[] = [];
 
         try {
-            const scopeLabel = aiProofingScope === "all" ? "全书逐章" : aiProofingScope === "volume" ? "当前卷" : "当前章";
-            appendAiProofingLog(`开始智能校对：${scopeLabel}，指针行 ${cursorLine || "未知"}，共 ${chapters.length} 章`);
+            const scopeLabel =
+                aiProofingScope === "all"
+                    ? "全书逐章"
+                    : aiProofingScope === "volume"
+                      ? "当前卷"
+                      : "当前章";
+            appendAiProofingLog(
+                `开始智能校对：${scopeLabel}，指针行 ${cursorLine || "未知"}，共 ${chapters.length} 章`,
+            );
             for (let i = 0; i < chapters.length; i++) {
                 if (aiProofingAbortRequested) {
                     appendAiProofingLog("用户请求停止，结束剩余章节");
@@ -2552,32 +3216,57 @@
                 if (chapter.text.length > aiProofingConfig.maxChapterChars) {
                     skipped++;
                     proofMessage = `跳过超长章节：${chapter.title}`;
-                    appendAiProofingLog(`跳过超长章节 ${i + 1}/${chapters.length}：${chapter.title}（${chapter.text.length} 字）`);
+                    appendAiProofingLog(
+                        `跳过超长章节 ${i + 1}/${chapters.length}：${chapter.title}（${chapter.text.length} 字）`,
+                    );
                     continue;
                 }
                 proofMessage = `智能校对中 ${i + 1}/${chapters.length}：${chapter.title}`;
-                appendAiProofingLog(`请求章节 ${i + 1}/${chapters.length}：${chapter.title}（发送 ${chapter.text.length}/${chapter.text.length} 字）`);
+                appendAiProofingLog(
+                    `请求章节 ${i + 1}/${chapters.length}：${chapter.title}（发送 ${chapter.text.length}/${chapter.text.length} 字）`,
+                );
                 let suggestions: AiProofingSuggestion[] = [];
                 try {
-                    const response = await platform.invoke<AiProofingResponse>("run_ai_proofing", {
-                        request: {
-                            config: aiProofingConfig,
-                            systemPrompt: AI_PROOFING_SYSTEM_PROMPT,
-                            userPrompt: buildAiUserPrompt(chapter.title, chapter.text),
+                    const response = await platform.invoke<AiProofingResponse>(
+                        "run_ai_proofing",
+                        {
+                            request: {
+                                config: aiProofingConfig,
+                                systemPrompt: AI_PROOFING_SYSTEM_PROMPT,
+                                userPrompt: buildAiUserPrompt(
+                                    chapter.title,
+                                    chapter.text,
+                                ),
+                            },
                         },
-                    });
+                    );
                     try {
-                        suggestions = parseAiProofingSuggestions(response.content);
+                        suggestions = parseAiProofingSuggestions(
+                            response.content,
+                        );
                     } catch (parseError) {
-                        appendAiProofingLog(`响应 JSON 解析失败：${chapter.title}；${parseError}`);
-                        appendAiProofingLog(`响应片段：${response.content.slice(0, 500).replace(/\s+/g, " ")}`);
+                        appendAiProofingLog(
+                            `响应 JSON 解析失败：${chapter.title}；${parseError}`,
+                        );
+                        appendAiProofingLog(
+                            `响应片段：${response.content.slice(0, 500).replace(/\s+/g, " ")}`,
+                        );
                         throw parseError;
                     }
-                    if (suggestions.length > 0 && !response.content.trim().endsWith("}")) {
-                        appendAiProofingLog(`响应可能被截断，已采用 ${suggestions.length} 条完整建议`);
+                    if (
+                        suggestions.length > 0 &&
+                        !response.content.trim().endsWith("}")
+                    ) {
+                        appendAiProofingLog(
+                            `响应可能被截断，已采用 ${suggestions.length} 条完整建议`,
+                        );
                     }
                     for (const suggestion of suggestions) {
-                        logAiProofingSuggestion("返回", suggestion, chapter.title);
+                        logAiProofingSuggestion(
+                            "返回",
+                            suggestion,
+                            chapter.title,
+                        );
                     }
                 } catch (error) {
                     appendAiProofingLog(`章节失败：${chapter.title}；${error}`);
@@ -2585,16 +3274,28 @@
                 }
                 const chapterRows: AiProofingRow[] = [];
                 const usedOffsets = new Set<number>();
-                const localEllipsisRows = buildLocalEllipsisRows(chapter, lineOffsets);
+                const localEllipsisRows = buildLocalEllipsisRows(
+                    chapter,
+                    lineOffsets,
+                );
                 for (const row of localEllipsisRows) {
                     usedOffsets.add(row.globalStart - chapter.startOffset);
                 }
                 for (const suggestion of suggestions) {
-                    const fullChapterRemoval = isAiFullChapterRemoval(suggestion);
-                    const localStart = fullChapterRemoval ? 0 : chapter.text.indexOf(suggestion.original);
+                    const fullChapterRemoval =
+                        isAiFullChapterRemoval(suggestion);
+                    const localStart = fullChapterRemoval
+                        ? 0
+                        : chapter.text.indexOf(suggestion.original);
                     if (localStart < 0 || usedOffsets.has(localStart)) {
-                        appendAiProofingLog(`忽略未匹配建议：${chapter.title} / ${suggestion.type} / ${suggestion.reason || suggestion.original.slice(0, 20)}`);
-                        logAiProofingSuggestion("未匹配", suggestion, chapter.title);
+                        appendAiProofingLog(
+                            `忽略未匹配建议：${chapter.title} / ${suggestion.type} / ${suggestion.reason || suggestion.original.slice(0, 20)}`,
+                        );
+                        logAiProofingSuggestion(
+                            "未匹配",
+                            suggestion,
+                            chapter.title,
+                        );
                         continue;
                     }
                     usedOffsets.add(localStart);
@@ -2607,12 +3308,22 @@
                         ...suggestion,
                         id: `${chapter.id}-${globalStart}-${chapterRows.length}`,
                         chapterTitle: chapter.title,
-                        original: fullChapterRemoval ? chapter.title : suggestion.original,
-                        replacement: fullChapterRemoval ? "" : suggestion.replacement,
+                        original: fullChapterRemoval
+                            ? chapter.title
+                            : suggestion.original,
+                        replacement: fullChapterRemoval
+                            ? ""
+                            : suggestion.replacement,
                         fullChapterRemoval,
                         lineStart: pos.line,
                         startChar: pos.char,
-                        endChar: fullChapterRemoval ? pos.char + Math.min(chapter.title.length || 1, chapter.text.length) : pos.char + suggestion.original.length,
+                        endChar: fullChapterRemoval
+                            ? pos.char +
+                              Math.min(
+                                  chapter.title.length || 1,
+                                  chapter.text.length,
+                              )
+                            : pos.char + suggestion.original.length,
                         globalStart,
                         globalEnd,
                     });
@@ -2625,30 +3336,64 @@
                     const riskReason = getAiProofingRiskReason(row);
                     if (riskReason && isAiProofingHardBlockedSuggestion(row)) {
                         blockedRows++;
-                        appendAiProofingLog(`拦截高风险建议：${row.original} -> ${row.replacement || "删除"}（${riskReason}）`);
-                        logAiProofingSuggestion("拦截", row, row.chapterTitle, `风险：${riskReason}`);
+                        appendAiProofingLog(
+                            `拦截高风险建议：${row.original} -> ${row.replacement || "删除"}（${riskReason}）`,
+                        );
+                        logAiProofingSuggestion(
+                            "拦截",
+                            row,
+                            row.chapterTitle,
+                            `风险：${riskReason}`,
+                        );
                         blockedManualRows.push(row);
                     } else {
                         safeChapterRows.push(row);
                     }
                 }
-                const autoRows = safeChapterRows.filter((row) => isAiProofingAutoApplySuggestion(row));
-                const manualCandidates = safeChapterRows.filter((row) => !isAiProofingAutoApplySuggestion(row));
-                const approvalResult = await approveAiProofingRows(chapter.title, chapter.text, manualCandidates);
+                const autoRows = safeChapterRows.filter((row) =>
+                    isAiProofingAutoApplySuggestion(row),
+                );
+                const manualCandidates = safeChapterRows.filter(
+                    (row) => !isAiProofingAutoApplySuggestion(row),
+                );
+                const approvalResult = await approveAiProofingRows(
+                    chapter.title,
+                    chapter.text,
+                    manualCandidates,
+                );
                 const approvedRows = approvalResult.approvedRows;
-                const manualRows = [...approvalResult.pendingRows, ...blockedManualRows];
+                const manualRows = [
+                    ...approvalResult.pendingRows,
+                    ...blockedManualRows,
+                ];
                 if (autoRows.length > 0) {
-                    appendAiProofingLog(`自动应用：${chapter.title}，${autoRows.length} 条标点/的地得修正`);
+                    appendAiProofingLog(
+                        `自动应用：${chapter.title}，${autoRows.length} 条标点/的地得修正`,
+                    );
                     for (const row of autoRows) {
-                        appendAiProofingLog(`自动：${row.original} -> ${row.replacement || "删除"}（${row.reason}）`);
-                        logAiProofingSuggestion("自动应用", row, row.chapterTitle);
+                        appendAiProofingLog(
+                            `自动：${row.original} -> ${row.replacement || "删除"}（${row.reason}）`,
+                        );
+                        logAiProofingSuggestion(
+                            "自动应用",
+                            row,
+                            row.chapterTitle,
+                        );
                     }
                 }
                 if (approvedRows.length > 0) {
-                    appendAiProofingLog(`审批通过自动应用：${chapter.title}，${approvedRows.length} 条`);
+                    appendAiProofingLog(
+                        `审批通过自动应用：${chapter.title}，${approvedRows.length} 条`,
+                    );
                     for (const row of approvedRows) {
-                        appendAiProofingLog(`审批通过：${row.original} -> ${row.replacement || "删除"}（${row.reason}）`);
-                        logAiProofingSuggestion("审批通过", row, row.chapterTitle);
+                        appendAiProofingLog(
+                            `审批通过：${row.original} -> ${row.replacement || "删除"}（${row.reason}）`,
+                        );
+                        logAiProofingSuggestion(
+                            "审批通过",
+                            row,
+                            row.chapterTitle,
+                        );
                     }
                 }
                 for (const row of manualRows) {
@@ -2659,18 +3404,29 @@
                 pendingRows = [...pendingRows, ...manualRows];
                 accepted += manualRows.length;
                 aiProofingRows = pendingRows;
-                appendAiProofingLog(`完成章节：${chapter.title}，返回 ${suggestions.length} 条，本地 ${localEllipsisRows.length} 条，自动 ${autoRows.length + approvedRows.length} 条，建议 ${manualRows.length} 条，拦截 ${blockedRows} 条`);
+                appendAiProofingLog(
+                    `完成章节：${chapter.title}，返回 ${suggestions.length} 条，本地 ${localEllipsisRows.length} 条，自动 ${autoRows.length + approvedRows.length} 条，建议 ${manualRows.length} 条，拦截 ${blockedRows} 条`,
+                );
             }
             if (autoApplyRows.length > 0) {
-                const result = applyAiProofingRowsToText(autoApplyRows, fileContent);
+                const result = applyAiProofingRowsToText(
+                    autoApplyRows,
+                    fileContent,
+                );
                 if (result.changed > 0) {
                     await applyProofResult({
                         text: result.text,
                         changedCount: result.changed,
                         message: `已自动应用 ${result.changed} 条标点/的地得修正`,
                     });
-                    pendingRows = shiftAiProofingRowsAfterEdits(pendingRows, result.edits);
-                    approvedApplyRows = shiftAiProofingRowsAfterEdits(approvedApplyRows, result.edits);
+                    pendingRows = shiftAiProofingRowsAfterEdits(
+                        pendingRows,
+                        result.edits,
+                    );
+                    approvedApplyRows = shiftAiProofingRowsAfterEdits(
+                        approvedApplyRows,
+                        result.edits,
+                    );
                     aiProofingRows = pendingRows;
                     appendAiProofingLog(`已自动写入 ${result.changed} 条修正`);
                 } else {
@@ -2679,34 +3435,50 @@
             }
             if (approvedApplyRows.length > 0) {
                 const beforeText = fileContent;
-                const result = applyAiProofingRowsToText(approvedApplyRows, fileContent, { allowUnsafe: true });
+                const result = applyAiProofingRowsToText(
+                    approvedApplyRows,
+                    fileContent,
+                    { allowUnsafe: true },
+                );
                 if (result.changed > 0) {
                     await applyProofResult({
                         text: result.text,
                         changedCount: result.changed,
                         message: `已应用 ${result.changed} 条 AI 审批建议`,
                     });
-                    pendingRows = shiftAiProofingRowsAfterEdits(pendingRows, result.edits);
+                    pendingRows = shiftAiProofingRowsAfterEdits(
+                        pendingRows,
+                        result.edits,
+                    );
                     aiProofingRows = pendingRows;
                     aiApprovalAppliedBatches = [
                         ...aiApprovalAppliedBatches,
                         {
                             id: `approval-${Date.now()}`,
-                            chapterTitle: approvedApplyRows[0]?.chapterTitle || "AI 审批",
-                            rows: approvedApplyRows.filter((row) => result.appliedIds.has(row.id)),
+                            chapterTitle:
+                                approvedApplyRows[0]?.chapterTitle || "AI 审批",
+                            rows: approvedApplyRows.filter((row) =>
+                                result.appliedIds.has(row.id),
+                            ),
                             beforeText,
                             afterText: result.text,
                             appliedAt: Date.now(),
                             reverted: false,
                         },
                     ];
-                    appendAiProofingLog(`已写入 AI 审批修正 ${result.changed} 条，可在审批页撤销`);
+                    appendAiProofingLog(
+                        `已写入 AI 审批修正 ${result.changed} 条，可在审批页撤销`,
+                    );
                 } else {
-                    appendAiProofingLog("AI 审批修正未写入：原文已变化或未匹配");
+                    appendAiProofingLog(
+                        "AI 审批修正未写入：原文已变化或未匹配",
+                    );
                 }
             }
             await updateMd5(fileContent);
-            aiProofingSelectedIds = new Set(aiProofingRows.map((row) => row.id));
+            aiProofingSelectedIds = new Set(
+                aiProofingRows.map((row) => row.id),
+            );
             proofMessage = aiProofingAbortRequested
                 ? `已停止，找到 ${aiProofingRows.length} 条建议`
                 : `智能校对完成，找到 ${accepted} 条建议${skipped ? `，跳过 ${skipped} 个超长章节` : ""}`;
@@ -2722,31 +3494,53 @@
         }
     }
 
-    function applyAiProofingRowsToText(rows: AiProofingRow[], sourceText: string, options: { allowUnsafe?: boolean } = {}) {
+    function applyAiProofingRowsToText(
+        rows: AiProofingRow[],
+        sourceText: string,
+        options: { allowUnsafe?: boolean } = {},
+    ) {
         const sorted = [...rows].sort((a, b) => b.globalStart - a.globalStart);
         let text = sourceText;
         let changed = 0;
         const appliedIds = new Set<string>();
-        const edits: Array<{ start: number; oldLength: number; newLength: number }> = [];
+        const edits: Array<{
+            start: number;
+            oldLength: number;
+            newLength: number;
+        }> = [];
 
         for (const row of sorted) {
-            if (!options.allowUnsafe && isAiProofingUnsafeSuggestion(row)) continue;
+            if (!options.allowUnsafe && isAiProofingUnsafeSuggestion(row))
+                continue;
             const removeLength = row.globalEnd - row.globalStart;
-            const current = text.slice(row.globalStart, row.globalStart + removeLength);
+            const current = text.slice(
+                row.globalStart,
+                row.globalStart + removeLength,
+            );
             if (row.fullChapterRemoval) {
                 continue;
             }
             if (current !== row.original) continue;
-            text = text.slice(0, row.globalStart) + row.replacement + text.slice(row.globalStart + row.original.length);
+            text =
+                text.slice(0, row.globalStart) +
+                row.replacement +
+                text.slice(row.globalStart + row.original.length);
             changed++;
             appliedIds.add(row.id);
-            edits.push({ start: row.globalStart, oldLength: row.original.length, newLength: row.replacement.length });
+            edits.push({
+                start: row.globalStart,
+                oldLength: row.original.length,
+                newLength: row.replacement.length,
+            });
         }
 
         return { text, changed, appliedIds, edits };
     }
 
-    function shiftAiProofingRowsAfterEdits(rows: AiProofingRow[], edits: Array<{ start: number; oldLength: number; newLength: number }>) {
+    function shiftAiProofingRowsAfterEdits(
+        rows: AiProofingRow[],
+        edits: Array<{ start: number; oldLength: number; newLength: number }>,
+    ) {
         if (edits.length === 0) return rows;
         const orderedEdits = [...edits].sort((a, b) => a.start - b.start);
         return rows.map((row) => {
@@ -2801,7 +3595,9 @@
         return compactAiTooltipText(value || "删除", maxLength);
     }
 
-    function aiProofingReasonText(row: Pick<AiProofingSuggestion, "reason" | "type">) {
+    function aiProofingReasonText(
+        row: Pick<AiProofingSuggestion, "reason" | "type">,
+    ) {
         const reason = String(row.reason || "").trim();
         if (reason) return reason;
         const type = String(row.type || "").trim();
@@ -2829,26 +3625,44 @@
             .filter((row) => aiProofingSelectedIds.has(row.id))
             .sort((a, b) => b.globalStart - a.globalStart);
         if (selected.length === 0) return;
-        const result = applyAiProofingRowsToText(selected, fileContent, { allowUnsafe: true });
+        const result = applyAiProofingRowsToText(selected, fileContent, {
+            allowUnsafe: true,
+        });
         await applyProofResult({
             text: result.text,
             changedCount: result.changed,
-            message: result.changed > 0 ? `已应用 ${result.changed} 条智能校对建议` : "原文已变化，未应用任何建议",
+            message:
+                result.changed > 0
+                    ? `已应用 ${result.changed} 条智能校对建议`
+                    : "原文已变化，未应用任何建议",
         });
         if (result.changed > 0) {
-            const remainingRows = aiProofingRows.filter((row) => !result.appliedIds.has(row.id));
-            aiProofingRows = shiftAiProofingRowsAfterEdits(remainingRows, result.edits);
-            aiProofingSelectedIds = new Set(aiProofingRows.map((row) => row.id));
-            appendAiProofingLog(`人工应用：${result.changed} 条，剩余 ${aiProofingRows.length} 条`);
+            const remainingRows = aiProofingRows.filter(
+                (row) => !result.appliedIds.has(row.id),
+            );
+            aiProofingRows = shiftAiProofingRowsAfterEdits(
+                remainingRows,
+                result.edits,
+            );
+            aiProofingSelectedIds = new Set(
+                aiProofingRows.map((row) => row.id),
+            );
+            appendAiProofingLog(
+                `人工应用：${result.changed} 条，剩余 ${aiProofingRows.length} 条`,
+            );
         }
         saveAiProofingCache();
     }
 
     async function revertAiApprovalRow(batchId: string, rowId: string) {
-        const batch = aiApprovalAppliedBatches.find((item) => item.id === batchId);
+        const batch = aiApprovalAppliedBatches.find(
+            (item) => item.id === batchId,
+        );
         if (!batch || batch.reverted || fileContent !== batch.afterText) {
             proofMessage = "当前文本已变化，无法安全撤销该审批";
-            appendAiProofingLog(`审批撤销失败：${batch?.chapterTitle || batchId} / ${rowId}，文本已变化`);
+            appendAiProofingLog(
+                `审批撤销失败：${batch?.chapterTitle || batchId} / ${rowId}，文本已变化`,
+            );
             return;
         }
         const targetRow = batch.rows.find((row) => row.id === rowId);
@@ -2861,11 +3675,18 @@
             return;
         }
         const revertedRows = new Set(batch.revertedRowIds || []);
-        const remainingRows = batch.rows.filter((row) => !revertedRows.has(row.id) && row.id !== rowId);
-        const reapplyResult = applyAiProofingRowsToText(remainingRows, batch.beforeText);
+        const remainingRows = batch.rows.filter(
+            (row) => !revertedRows.has(row.id) && row.id !== rowId,
+        );
+        const reapplyResult = applyAiProofingRowsToText(
+            remainingRows,
+            batch.beforeText,
+        );
         if (reapplyResult.changed !== remainingRows.length) {
             proofMessage = "当前文本已变化，无法安全撤销该审批";
-            appendAiProofingLog(`审批撤销失败：${batch.chapterTitle} / ${targetRow.original}，重建文本未完全匹配`);
+            appendAiProofingLog(
+                `审批撤销失败：${batch.chapterTitle} / ${targetRow.original}，重建文本未完全匹配`,
+            );
             return;
         }
         await applyProofResult({
@@ -2876,22 +3697,28 @@
         aiApprovalAppliedBatches = aiApprovalAppliedBatches.map((item) =>
             item.id === batchId
                 ? {
-                    ...item,
-                    afterText: reapplyResult.text,
-                    reverted: remainingRows.length === 0,
-                    revertedRowIds: [...revertedRows, rowId],
-                }
+                      ...item,
+                      afterText: reapplyResult.text,
+                      reverted: remainingRows.length === 0,
+                      revertedRowIds: [...revertedRows, rowId],
+                  }
                 : item,
         );
-        appendAiProofingLog(`审批撤销：${batch.chapterTitle} / ${targetRow.original}`);
+        appendAiProofingLog(
+            `审批撤销：${batch.chapterTitle} / ${targetRow.original}`,
+        );
         saveAiProofingCache();
     }
 
     async function reapplyAiApprovalRow(batchId: string, rowId: string) {
-        const batch = aiApprovalAppliedBatches.find((item) => item.id === batchId);
+        const batch = aiApprovalAppliedBatches.find(
+            (item) => item.id === batchId,
+        );
         if (!batch || fileContent !== batch.afterText) {
             proofMessage = "当前文本已变化，无法安全恢复该审批";
-            appendAiProofingLog(`审批恢复失败：${batch?.chapterTitle || batchId} / ${rowId}，文本已变化`);
+            appendAiProofingLog(
+                `审批恢复失败：${batch?.chapterTitle || batchId} / ${rowId}，文本已变化`,
+            );
             return;
         }
         const targetRow = batch.rows.find((row) => row.id === rowId);
@@ -2904,12 +3731,21 @@
             proofMessage = "该审批结果当前已处于应用状态";
             return;
         }
-        const activeRows = batch.rows.filter((row) => !revertedRows.has(row.id));
-        const nextRows = [...activeRows, targetRow].sort((a, b) => b.globalStart - a.globalStart);
-        const reapplyResult = applyAiProofingRowsToText(nextRows, batch.beforeText);
+        const activeRows = batch.rows.filter(
+            (row) => !revertedRows.has(row.id),
+        );
+        const nextRows = [...activeRows, targetRow].sort(
+            (a, b) => b.globalStart - a.globalStart,
+        );
+        const reapplyResult = applyAiProofingRowsToText(
+            nextRows,
+            batch.beforeText,
+        );
         if (reapplyResult.changed !== nextRows.length) {
             proofMessage = "当前文本已变化，无法安全恢复该审批";
-            appendAiProofingLog(`审批恢复失败：${batch.chapterTitle} / ${targetRow.original}，重建文本未完全匹配`);
+            appendAiProofingLog(
+                `审批恢复失败：${batch.chapterTitle} / ${targetRow.original}，重建文本未完全匹配`,
+            );
             return;
         }
         await applyProofResult({
@@ -2921,14 +3757,16 @@
         aiApprovalAppliedBatches = aiApprovalAppliedBatches.map((item) =>
             item.id === batchId
                 ? {
-                    ...item,
-                    afterText: reapplyResult.text,
-                    reverted: false,
-                    revertedRowIds: Array.from(revertedRows),
-                }
+                      ...item,
+                      afterText: reapplyResult.text,
+                      reverted: false,
+                      revertedRowIds: Array.from(revertedRows),
+                  }
                 : item,
         );
-        appendAiProofingLog(`审批恢复：${batch.chapterTitle} / ${targetRow.original}`);
+        appendAiProofingLog(
+            `审批恢复：${batch.chapterTitle} / ${targetRow.original}`,
+        );
         saveAiProofingCache();
     }
 
@@ -2955,7 +3793,8 @@
     let proofRegexPreviewRows: ProofRegexPreviewRow[] = [];
     let proofRegexSelectedIds = new Set<string>();
     let builtinRegexMessage = "";
-    let proofConvertDirection: ProofConvertDirection = "traditional-to-simplified";
+    let proofConvertDirection: ProofConvertDirection =
+        "traditional-to-simplified";
     let proofConvertPreviewRows: ProofConvertPreviewRow[] = [];
     let proofConvertSelectedIds = new Set<string>();
     let aiProofingScope: AiProofingScope = "current";
@@ -2998,7 +3837,9 @@
     let apiEditorOpen = false;
     let apiEditorMode: "new" | "edit" = "new";
     let apiEditorDraft: AiProviderConfig | null = null;
-    let txtAiProofingConfig: TxtAiProofingConfig = { ...DEFAULT_TXT_AI_PROOFING };
+    let txtAiProofingConfig: TxtAiProofingConfig = {
+        ...DEFAULT_TXT_AI_PROOFING,
+    };
     let aiSettingsMessage = "";
     let isClosingEditorWindow = false;
 
@@ -3083,7 +3924,9 @@
         const init = async () => {
             const appWindow = platform.getCurrentWindow();
             const label = await platform.getCurrentWindowLabel();
-            const initialFilePath = getUrlFileParam() || await platform.invoke<string | null>("get_launch_args");
+            const initialFilePath =
+                getUrlFileParam() ||
+                (await platform.invoke<string | null>("get_launch_args"));
             if (initialFilePath) {
                 localStorage.removeItem(CRASH_RECOVERY_KEY);
             }
@@ -3101,7 +3944,10 @@
                 // 监听移动并保存
                 platform.onCurrentWindowMoved((pos) => {
                     try {
-                        localStorage.setItem(windowPosKey(label), JSON.stringify(pos));
+                        localStorage.setItem(
+                            windowPosKey(label),
+                            JSON.stringify(pos),
+                        );
                     } catch (e) {}
                 });
             }
@@ -3115,10 +3961,12 @@
 
             // 监听系统文件拖放：将 txt/md/epub 直接拖到窗口即可打开
             try {
-                unlistenDragDrop = await platform.onCurrentWindowFileDrop((paths) => {
-                    if (paths.length === 0) return;
-                    void openDroppedFile(paths);
-                });
+                unlistenDragDrop = await platform.onCurrentWindowFileDrop(
+                    (paths) => {
+                        if (paths.length === 0) return;
+                        void openDroppedFile(paths);
+                    },
+                );
             } catch (e) {
                 console.warn("注册拖放监听失败:", e);
             }
@@ -3139,22 +3987,43 @@
                     if (isLegacyLooseMetaRegex(appSettings.metaRegex)) {
                         appSettings.metaRegex = DEFAULT_META_VOLUME_REGEX;
                     }
-                    
+
                     // 核心初始化：确保 customRegexRules 存在并按照预期结构映射
-                    if (!appSettings.customRegexRules || !Array.isArray(appSettings.customRegexRules)) {
+                    if (
+                        !appSettings.customRegexRules ||
+                        !Array.isArray(appSettings.customRegexRules)
+                    ) {
                         appSettings.customRegexRules = [
-                            { level: 1, pattern: appSettings.metaRegex || DEFAULT_META_VOLUME_REGEX },
-                            { level: 1, pattern: appSettings.volRegex || DEFAULT_SETTINGS.volRegex },
+                            {
+                                level: 1,
+                                pattern:
+                                    appSettings.metaRegex ||
+                                    DEFAULT_META_VOLUME_REGEX,
+                            },
+                            {
+                                level: 1,
+                                pattern:
+                                    appSettings.volRegex ||
+                                    DEFAULT_SETTINGS.volRegex,
+                            },
                             { level: 3, pattern: DEFAULT_META_BODY_REGEX },
-                            { level: 3, pattern: appSettings.chapRegex || DEFAULT_SETTINGS.chapRegex }
+                            {
+                                level: 3,
+                                pattern:
+                                    appSettings.chapRegex ||
+                                    DEFAULT_SETTINGS.chapRegex,
+                            },
                         ].flatMap(normalizeTocRegexRules);
                     } else {
                         // 迁移：如果包含 type，无缝转换为 level
                         appSettings.customRegexRules =
-                            appSettings.customRegexRules.flatMap(normalizeTocRegexRules);
+                            appSettings.customRegexRules.flatMap(
+                                normalizeTocRegexRules,
+                            );
                     }
                     if (!appSettings.selectedStyleTemplateId) {
-                        appSettings.selectedStyleTemplateId = STYLE_TEMPLATE_BUILTIN_ID;
+                        appSettings.selectedStyleTemplateId =
+                            STYLE_TEMPLATE_BUILTIN_ID;
                     }
                 } catch (e) {}
             }
@@ -3163,28 +4032,43 @@
             await loadStyleTemplates();
             if (appSettings.defaultEpubStyles?.["main.css"]?.trim()) {
                 try {
-                    const legacyMainCss = appSettings.defaultEpubStyles["main.css"].trim();
-                    const builtinTemplate = await platform.invoke<StyleTemplateContent>("read_style_template", {
-                        id: STYLE_TEMPLATE_BUILTIN_ID,
-                    });
+                    const legacyMainCss =
+                        appSettings.defaultEpubStyles["main.css"].trim();
+                    const builtinTemplate =
+                        await platform.invoke<StyleTemplateContent>(
+                            "read_style_template",
+                            {
+                                id: STYLE_TEMPLATE_BUILTIN_ID,
+                            },
+                        );
                     if (builtinTemplate.main_css.trim() === legacyMainCss) {
                         await platform.invoke("restore_builtin_style_template");
                         await loadStyleTemplates();
                     }
-                    appSettings.defaultEpubStyles = { "main.css": "", "font.css": "" };
-                    localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings));
+                    appSettings.defaultEpubStyles = {
+                        "main.css": "",
+                        "font.css": "",
+                    };
+                    localStorage.setItem(
+                        APP_SETTINGS_KEY,
+                        JSON.stringify(appSettings),
+                    );
                 } catch (e) {
                     console.warn("清理旧默认样式缓存失败:", e);
                 }
             }
-            await applySelectedStyleTemplate(appSettings.selectedStyleTemplateId);
+            await applySelectedStyleTemplate(
+                appSettings.selectedStyleTemplateId,
+            );
 
             // 应用主题设置
             if (!Number.isFinite(Number(appSettings.wordCountMinThreshold))) {
-                appSettings.wordCountMinThreshold = DEFAULT_SETTINGS.wordCountMinThreshold;
+                appSettings.wordCountMinThreshold =
+                    DEFAULT_SETTINGS.wordCountMinThreshold;
             }
             if (!Number.isFinite(Number(appSettings.wordCountMaxThreshold))) {
-                appSettings.wordCountMaxThreshold = DEFAULT_SETTINGS.wordCountMaxThreshold;
+                appSettings.wordCountMaxThreshold =
+                    DEFAULT_SETTINGS.wordCountMaxThreshold;
             }
             if (!appSettings.uiTheme) appSettings.uiTheme = "modern";
             applyTheme(appSettings.uiTheme);
@@ -3196,16 +4080,26 @@
             if (savedState && !initialFilePath) {
                 try {
                     const state = JSON.parse(savedState);
-                    if (state.filePath && state.filePath !== "请打开一本小说...") {
+                    if (
+                        state.filePath &&
+                        state.filePath !== "请打开一本小说..."
+                    ) {
                         filePath = state.filePath;
                         let diskContent = "";
                         try {
-                            diskContent = await platform.invoke("read_text_file", { path: filePath });
+                            diskContent = await platform.invoke(
+                                "read_text_file",
+                                { path: filePath },
+                            );
                         } catch (e) {
                             console.warn("File read fail:", e);
                         }
 
-                        if (state.isModified && state.content && state.content !== diskContent) {
+                        if (
+                            state.isModified &&
+                            state.content &&
+                            state.content !== diskContent
+                        ) {
                             fileContent = state.content;
                             isModified = true;
                         } else {
@@ -3224,7 +4118,13 @@
                             await updateMd5(fileContent);
                             loadAiProofingCache();
                             if (state.scrollLine) {
-                                setTimeout(() => editorComponent?.scrollToLine(state.scrollLine), 200);
+                                setTimeout(
+                                    () =>
+                                        editorComponent?.scrollToLine(
+                                            state.scrollLine,
+                                        ),
+                                    200,
+                                );
                             }
                         }
                     }
@@ -3235,12 +4135,15 @@
             }
 
             // 5. 文件关联启动 / 由书库子窗口传入的 ?file= 参数
-            setTimeout(async () => {
-                if (initialFilePath) {
-                    await openLocalFile(initialFilePath, true);
-                }
-                hasInitialized = true;
-            }, initialFilePath ? 0 : 500);
+            setTimeout(
+                async () => {
+                    if (initialFilePath) {
+                        await openLocalFile(initialFilePath, true);
+                    }
+                    hasInitialized = true;
+                },
+                initialFilePath ? 0 : 500,
+            );
 
             // 6. 关闭拦截
             await platform.setCurrentWindowTitle("TEpub-Editor-TXT");
@@ -3248,21 +4151,25 @@
                 const sp = new URLSearchParams(window.location.search);
                 openedFromLibrary = sp.get("fromLibrary") === "1";
                 if (!libraryData) await loadSharedLibrarySettings();
-                const action = loadGlobalAppSettings(libraryData?.config || {}).txtEditorCloseAction;
+                const action = loadGlobalAppSettings(
+                    libraryData?.config || {},
+                ).txtEditorCloseAction;
                 if (action === "exit" || action === "library") {
                     txtEditorCloseAction = action;
                 }
             } catch (_) {}
-            unlistenClose = await platform.onCurrentWindowCloseRequested(async (event) => {
-                if (isClosingEditorWindow) return;
-                if (isModified) {
-                    event.preventDefault();
-                    showCloseDialog = true;
-                } else {
-                    event.preventDefault();
-                    await closeTxtEditorWindow();
-                }
-            });
+            unlistenClose = await platform.onCurrentWindowCloseRequested(
+                async (event) => {
+                    if (isClosingEditorWindow) return;
+                    if (isModified) {
+                        event.preventDefault();
+                        showCloseDialog = true;
+                    } else {
+                        event.preventDefault();
+                        await closeTxtEditorWindow();
+                    }
+                },
+            );
         };
 
         init();
@@ -3273,7 +4180,13 @@
         };
         const handleContextMenuAction = (event: Event) => {
             const detail = (event as CustomEvent).detail || {};
-            if (["make-chapter-title", "make-volume-title", "remove-title"].includes(detail.action)) {
+            if (
+                [
+                    "make-chapter-title",
+                    "make-volume-title",
+                    "remove-title",
+                ].includes(detail.action)
+            ) {
                 applyEditorLineTitleAction(detail.action, detail.context);
             }
         };
@@ -3284,7 +4197,10 @@
             if (unlistenClose) unlistenClose();
             if (unlistenDragDrop) unlistenDragDrop();
             window.removeEventListener("editor-select-all", handleSelectAll);
-            window.removeEventListener("context-menu-action", handleContextMenuAction);
+            window.removeEventListener(
+                "context-menu-action",
+                handleContextMenuAction,
+            );
         };
     });
 
@@ -3312,11 +4228,18 @@
         };
 
         // 默认书名
-        const basename = path.split(/[\\/]/).pop()?.replace(/\.[^/.]+$/, "") || "未命名";
+        const basename =
+            path
+                .split(/[\\/]/)
+                .pop()
+                ?.replace(/\.[^/.]+$/, "") || "未命名";
         meta.title = basename;
 
         try {
-            const lines = content.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+            const lines = content
+                .split("\n")
+                .map((l) => l.trim())
+                .filter((l) => l.length > 0);
             if (lines.length > 0) {
                 const firstLine = lines[0];
                 const secondLine = lines.length > 1 ? lines[1] : "";
@@ -3327,33 +4250,50 @@
                     meta.title = bracketMatch[1].trim();
                 }
                 // 规则 2: "书名：" 前缀
-                else if (firstLine.match(/^(?:书名|小说名|Title)[\s:：]+(.*)/i)) {
-                    meta.title = firstLine.replace(/^(?:书名|小说名|Title)[\s:：]+/i, "").trim();
+                else if (
+                    firstLine.match(/^(?:书名|小说名|Title)[\s:：]+(.*)/i)
+                ) {
+                    meta.title = firstLine
+                        .replace(/^(?:书名|小说名|Title)[\s:：]+/i, "")
+                        .trim();
                 }
                 // 规则 3: 双行关联 (如果第二行是作者，第一行通常是书名)
-                else if (secondLine.match(/^(?:作者|Author|By)[\s:：~]*(.*)/i)) {
+                else if (
+                    secondLine.match(/^(?:作者|Author|By)[\s:：~]*(.*)/i)
+                ) {
                     meta.title = firstLine.trim();
                 }
             }
 
             // 提取作者 (严格限制在前 2 行)
             const first2LinesForAuthor = lines.slice(0, 2).join("\n");
-            const authorMatch = first2LinesForAuthor.match(/(?:^|\n)\s*(?:作者|Author|By)[\s:：~]*([^\n\r]+)/i);
+            const authorMatch = first2LinesForAuthor.match(
+                /(?:^|\n)\s*(?:作者|Author|By)[\s:：~]*([^\n\r]+)/i,
+            );
             if (authorMatch && authorMatch[1]) {
                 meta.creator = authorMatch[1].trim();
             }
 
             // 规则 4: 书名兜底（前两行未识别出《》或书名：时）
-            if (!meta.title || meta.title === "书名" || meta.title === meta.creator) {
-                 meta.title = basename;
+            if (
+                !meta.title ||
+                meta.title === "书名" ||
+                meta.title === meta.creator
+            ) {
+                meta.title = basename;
             }
 
             // 3. 简介 (更精准的正则：保留首行缩进)
-            const descMatch = content.match(/(?:^|\n)[^\S\n]*(?:内容)?(?:简介|Intro|Description)[\t ]*[:：]?[\t ]*(?:\r?\n)?([\s\S]+?)(?=\n\s*(?:第[零一二三四五六七八九十百千万0-9]+[卷部章回|卷部]|Chapter\s*\d+)|$)/i);
+            const descMatch = content.match(
+                /(?:^|\n)[^\S\n]*(?:内容)?(?:简介|Intro|Description)[\t ]*[:：]?[\t ]*(?:\r?\n)?([\s\S]+?)(?=\n\s*(?:第[零一二三四五六七八九十百千万0-9]+[卷部章回|卷部]|Chapter\s*\d+)|$)/i,
+            );
             if (descMatch && descMatch[1]) {
                 const desc = descMatch[1].replace(/\s+$/, ""); // 仅修剪尾部空白
                 if (desc.length > 0) {
-                    meta.description = desc.length > 3000 ? desc.substring(0, 3000) + "..." : desc;
+                    meta.description =
+                        desc.length > 3000
+                            ? desc.substring(0, 3000) + "..."
+                            : desc;
                 }
             }
         } catch (e) {
@@ -3365,17 +4305,23 @@
     function refreshEpubMetadata() {
         if (!fileContent) return;
         const fresh = extractMetadata(fileContent, filePath);
-        
+
         // 如果文件内容已修改，或者当前仍是默认占位符，则更新主要字段
         const isTitleDefault = epubMeta.title === "书名" || !epubMeta.title;
-        const isCreatorDefault = epubMeta.creator === "作者" || !epubMeta.creator;
+        const isCreatorDefault =
+            epubMeta.creator === "作者" || !epubMeta.creator;
 
         if (isModified || isTitleDefault) epubMeta.title = fresh.title;
         if (isModified || isCreatorDefault) epubMeta.creator = fresh.creator;
-        if (isModified || !epubMeta.description) epubMeta.description = fresh.description;
-        
+        if (isModified || !epubMeta.description)
+            epubMeta.description = fresh.description;
+
         if (!epubMeta.styles["main.css"]) {
-            epubMeta.styles = { ...epubMeta.styles, "main.css": selectedStyleTemplateCss || getBuiltinStyleTemplateCss() };
+            epubMeta.styles = {
+                ...epubMeta.styles,
+                "main.css":
+                    selectedStyleTemplateCss || getBuiltinStyleTemplateCss(),
+            };
         }
 
         // UUID 保持不变除非为空
@@ -3397,15 +4343,23 @@
             if (normalizedPath !== epubMeta.cover_path) {
                 epubMeta.cover_path = normalizedPath;
             }
-            const data = await platform.invoke<number[]>("read_binary_file", { path: normalizedPath });
-            const ext = normalizedPath.split('.').pop()?.toLowerCase() || 'jpg';
-            const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
-            const mime = mimeMap[ext] || 'image/jpeg';
+            const data = await platform.invoke<number[]>("read_binary_file", {
+                path: normalizedPath,
+            });
+            const ext = normalizedPath.split(".").pop()?.toLowerCase() || "jpg";
+            const mimeMap: Record<string, string> = {
+                jpg: "image/jpeg",
+                jpeg: "image/jpeg",
+                png: "image/png",
+                webp: "image/webp",
+                gif: "image/gif",
+            };
+            const mime = mimeMap[ext] || "image/jpeg";
             const blob = new Blob([new Uint8Array(data)], { type: mime });
             if (coverPreviewUrl) URL.revokeObjectURL(coverPreviewUrl);
             coverPreviewUrl = URL.createObjectURL(blob);
         } catch (e) {
-            console.error('封面预览加载失败:', e);
+            console.error("封面预览加载失败:", e);
             coverPreviewUrl = null;
         }
     }
@@ -3434,7 +4388,12 @@
         let selection: string | string[] | null = null;
         try {
             selection = await platform.openDialog({
-                filters: [{ name: "Image", extensions: ["jpg", "png", "jpeg", "webp"] }],
+                filters: [
+                    {
+                        name: "Image",
+                        extensions: ["jpg", "png", "jpeg", "webp"],
+                    },
+                ],
             });
         } catch (e) {
             // web 端无原生文件选择器（openDialog 抛 PlatformUnsupportedError），
@@ -3448,14 +4407,20 @@
         await loadCoverPreview();
     }
 
-    async function applyRemoteCover(result: CoverSearchResult, automatic = false) {
+    async function applyRemoteCover(
+        result: CoverSearchResult,
+        automatic = false,
+    ) {
         if (isCoverApplying) return;
         isCoverApplying = true;
         try {
-            const localPath = await platform.invoke<string>("download_cover_to_temp", {
-                imageUrl: result.image_url,
-                title: epubMeta.title || result.title || "cover",
-            });
+            const localPath = await platform.invoke<string>(
+                "download_cover_to_temp",
+                {
+                    imageUrl: result.image_url,
+                    title: epubMeta.title || result.title || "cover",
+                },
+            );
             epubMeta.cover_path = localPath;
             await loadCoverPreview();
             coverSearchMessage = automatic
@@ -3486,7 +4451,10 @@
         coverSearchMessage = "正在搜索封面...";
         coverSearchResults = [];
         try {
-            const results = await platform.invoke<CoverSearchResult[]>("search_book_covers", { title, author });
+            const results = await platform.invoke<CoverSearchResult[]>(
+                "search_book_covers",
+                { title, author },
+            );
             coverSearchResults = results;
             if (!results.length) {
                 coverSearchMessage = "没有找到可用封面";
@@ -3509,16 +4477,20 @@
                 return;
             }
 
-            const win = await platform.createWebviewWindow("epub-metadata", "/epub-metadata", {
-                title: "高级选项",
-                width: 540,
-                height: 620,
-                minWidth: 540,
-                minHeight: 620,
-                resizable: true,
-                decorations: true,
-                center: true,
-            });
+            const win = await platform.createWebviewWindow(
+                "epub-metadata",
+                "/epub-metadata",
+                {
+                    title: "高级选项",
+                    width: 540,
+                    height: 620,
+                    minWidth: 540,
+                    minHeight: 620,
+                    resizable: true,
+                    decorations: true,
+                    center: true,
+                },
+            );
 
             win.once("metadata-window-ready", async () => {
                 await platform.emit("init-metadata", {
@@ -3533,15 +4505,21 @@
                 });
             });
 
-            const unlisten = await platform.listen("update-metadata", (event: any) => {
-                const { meta, custom } = event.payload;
-                epubMeta.publisher = meta.publisher;
-                epubMeta.uuid = meta.uuid;
-                epubMeta.md5 = meta.md5;
-                epubMeta.styles = { ...epubMeta.styles, ...(meta.styles || {}) };
-                epubMeta.assets = [...(meta.assets || [])];
-                customMetadata = [...(custom || [])];
-            });
+            const unlisten = await platform.listen(
+                "update-metadata",
+                (event: any) => {
+                    const { meta, custom } = event.payload;
+                    epubMeta.publisher = meta.publisher;
+                    epubMeta.uuid = meta.uuid;
+                    epubMeta.md5 = meta.md5;
+                    epubMeta.styles = {
+                        ...epubMeta.styles,
+                        ...(meta.styles || {}),
+                    };
+                    epubMeta.assets = [...(meta.assets || [])];
+                    customMetadata = [...(custom || [])];
+                },
+            );
 
             win.once("tauri://destroyed", () => {
                 unlisten();
@@ -3574,7 +4552,9 @@
 
                     if (initialLaunch) {
                         // Initial launch: Reuse the main window
-                        await platform.setCurrentWindowTitle("TEpub-Editor-EPUB");
+                        await platform.setCurrentWindowTitle(
+                            "TEpub-Editor-EPUB",
+                        );
                         await platform.setCurrentWindowSize(1200, 800);
                         window.location.href = `/epub-editor?file=${encodedPath}`;
                         return;
@@ -3656,9 +4636,12 @@
                 editorComponent?.resetDoc("");
 
                 // 读取原生文本并施加终极降维打击：强力规范化换行符！
-                let rawContent = await platform.invoke<string>("read_text_file", {
-                    path: filePath,
-                });
+                let rawContent = await platform.invoke<string>(
+                    "read_text_file",
+                    {
+                        path: filePath,
+                    },
+                );
                 let content = rawContent.replace(
                     /\r\n|\r|\u2028|\u2029/g,
                     "\n",
@@ -3712,7 +4695,9 @@
         if (!paths || paths.length === 0) return;
         const firstSupported = paths.find((p) => /\.(txt|md|epub)$/i.test(p));
         if (!firstSupported) {
-            await platform.message("仅支持拖入 TXT/MD/EPUB 文件", { kind: "warning" });
+            await platform.message("仅支持拖入 TXT/MD/EPUB 文件", {
+                kind: "warning",
+            });
             return;
         }
         await openLocalFile(firstSupported);
@@ -3760,10 +4745,12 @@
                 content: fileContent,
             });
             // 调用后端保存历史
-            await platform.invoke("save_history", {
-                originalPath: filePath,
-                content: fileContent,
-            }).catch(() => {});
+            await platform
+                .invoke("save_history", {
+                    originalPath: filePath,
+                    content: fileContent,
+                })
+                .catch(() => {});
 
             isModified = false;
             // Clear crash recovery on explicit save
@@ -3773,9 +4760,12 @@
             await scanToc(fileContent);
             // await platform.message("保存成功！"); // 移除弹窗，保持静默成功
         } catch (e) {
-            await platform.message(`保存失败: ${e}\n请确保已授予“所有文件访问权限”`, {
-                kind: "error",
-            });
+            await platform.message(
+                `保存失败: ${e}\n请确保已授予“所有文件访问权限”`,
+                {
+                    kind: "error",
+                },
+            );
         } finally {
             isSaving = false;
         }
@@ -3799,22 +4789,49 @@
                 Object.entries(parsed).flatMap(([lineKey, value]) => {
                     const line = Number(lineKey);
                     if (!Number.isInteger(line) || line < 1) return [];
-                    if (value === "Volume" || value === "Chapter" || value === "Ignore") {
+                    if (
+                        value === "Volume" ||
+                        value === "Chapter" ||
+                        value === "Ignore"
+                    ) {
                         return [[lineKey, { kind: value, line, title: "" }]];
                     }
                     if (value && typeof value === "object") {
-                        const entry = value as Partial<ManualTitleOverrideEntry>;
-                        if (entry.kind !== "Volume" && entry.kind !== "Chapter" && entry.kind !== "Ignore") {
+                        const entry =
+                            value as Partial<ManualTitleOverrideEntry>;
+                        if (
+                            entry.kind !== "Volume" &&
+                            entry.kind !== "Chapter" &&
+                            entry.kind !== "Ignore"
+                        ) {
                             return [];
                         }
                         const savedLine = Number(entry.line);
-                        return [[lineKey, {
-                            kind: entry.kind,
-                            line: Number.isInteger(savedLine) && savedLine > 0 ? savedLine : line,
-                            title: typeof entry.title === "string" ? entry.title : "",
-                            prevTitle: typeof entry.prevTitle === "string" ? entry.prevTitle : undefined,
-                            nextTitle: typeof entry.nextTitle === "string" ? entry.nextTitle : undefined,
-                        }]];
+                        return [
+                            [
+                                lineKey,
+                                {
+                                    kind: entry.kind,
+                                    line:
+                                        Number.isInteger(savedLine) &&
+                                        savedLine > 0
+                                            ? savedLine
+                                            : line,
+                                    title:
+                                        typeof entry.title === "string"
+                                            ? entry.title
+                                            : "",
+                                    prevTitle:
+                                        typeof entry.prevTitle === "string"
+                                            ? entry.prevTitle
+                                            : undefined,
+                                    nextTitle:
+                                        typeof entry.nextTitle === "string"
+                                            ? entry.nextTitle
+                                            : undefined,
+                                },
+                            ],
+                        ];
                     }
                     return [];
                 }),
@@ -3827,24 +4844,35 @@
     function saveManualTitleOverrides() {
         const key = manualTitleStorageKey();
         if (!key) return;
-        const entries = Object.entries(manualTitleOverrides).filter(([, value]) =>
-            value?.kind === "Volume" || value?.kind === "Chapter" || value?.kind === "Ignore",
+        const entries = Object.entries(manualTitleOverrides).filter(
+            ([, value]) =>
+                value?.kind === "Volume" ||
+                value?.kind === "Chapter" ||
+                value?.kind === "Ignore",
         );
         if (entries.length === 0) {
             localStorage.removeItem(key);
         } else {
-            localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+            localStorage.setItem(
+                key,
+                JSON.stringify(Object.fromEntries(entries)),
+            );
         }
     }
 
     function recomputeChapterWordCounts(text: string, chapters: RawChapter[]) {
         const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
-        const sorted = [...chapters].sort((a, b) => a.line_number - b.line_number);
+        const sorted = [...chapters].sort(
+            (a, b) => a.line_number - b.line_number,
+        );
         for (let i = 0; i < sorted.length; i += 1) {
             const start = Math.min(lines.length, sorted[i].line_number);
             const end = Math.max(
                 start,
-                Math.min(lines.length, (sorted[i + 1]?.line_number ?? lines.length + 1) - 1),
+                Math.min(
+                    lines.length,
+                    (sorted[i + 1]?.line_number ?? lines.length + 1) - 1,
+                ),
             );
             sorted[i].word_count = lines
                 .slice(start, end)
@@ -3868,7 +4896,9 @@
         const start = Math.max(1, Math.min(lines.length, startLine));
         const end = Math.max(start, Math.min(lines.length, endLine));
         for (let lineNumber = start; lineNumber <= end; lineNumber += 1) {
-            if (normalizeManualTitleText(lines[lineNumber - 1] || "") === wanted) {
+            if (
+                normalizeManualTitleText(lines[lineNumber - 1] || "") === wanted
+            ) {
                 return lineNumber;
             }
         }
@@ -3885,19 +4915,25 @@
         const wanted = normalizeManualTitleText(title || "");
         if (!wanted) return null;
         const chapterLines = chapters
-            .filter((chapter) => normalizeManualTitleText(chapter.title) === wanted)
+            .filter(
+                (chapter) => normalizeManualTitleText(chapter.title) === wanted,
+            )
             .map((chapter) => chapter.line_number);
         const textLines = lines
             .map((line, index) => ({ lineNumber: index + 1, text: line }))
             .filter((line) => normalizeManualTitleText(line.text) === wanted)
             .map((line) => line.lineNumber);
         const candidates = [...new Set([...chapterLines, ...textLines])]
-            .filter((lineNumber) => lineNumber >= 1 && lineNumber <= lines.length)
+            .filter(
+                (lineNumber) => lineNumber >= 1 && lineNumber <= lines.length,
+            )
             .sort((a, b) => a - b);
         if (candidates.length === 0) return null;
 
         const directional = candidates.filter((lineNumber) =>
-            side === "prev" ? lineNumber < fallbackLine : lineNumber > fallbackLine,
+            side === "prev"
+                ? lineNumber < fallbackLine
+                : lineNumber > fallbackLine,
         );
         const pool = directional.length > 0 ? directional : candidates;
         return pool.reduce((best, lineNumber) =>
@@ -3914,16 +4950,36 @@
     ) {
         const originalLine = Number.isInteger(entry.line) ? entry.line : 0;
         if (lines.length === 0) return null;
-        const referenceLine = Math.max(1, Math.min(lines.length, originalLine || 1));
+        const referenceLine = Math.max(
+            1,
+            Math.min(lines.length, originalLine || 1),
+        );
         const savedTitle = normalizeManualTitleText(entry.title);
         if (!savedTitle) return referenceLine;
 
-        if (originalLine >= 1 && originalLine <= lines.length && normalizeManualTitleText(lines[originalLine - 1] || "") === savedTitle) {
+        if (
+            originalLine >= 1 &&
+            originalLine <= lines.length &&
+            normalizeManualTitleText(lines[originalLine - 1] || "") ===
+                savedTitle
+        ) {
             return originalLine;
         }
 
-        const prevLine = findManualTitleAnchorLine(chapters, lines, entry.prevTitle, referenceLine, "prev");
-        const nextLine = findManualTitleAnchorLine(chapters, lines, entry.nextTitle, referenceLine, "next");
+        const prevLine = findManualTitleAnchorLine(
+            chapters,
+            lines,
+            entry.prevTitle,
+            referenceLine,
+            "prev",
+        );
+        const nextLine = findManualTitleAnchorLine(
+            chapters,
+            lines,
+            entry.nextTitle,
+            referenceLine,
+            "next",
+        );
         if (prevLine === null || nextLine === null || prevLine < nextLine) {
             const rangeLine = findManualTitleLineInRange(
                 lines,
@@ -3945,11 +5001,18 @@
         return findManualTitleLineInRange(lines, entry.title, 1, lines.length);
     }
 
-    function getResolvedManualTitleOverrideMap(text: string, chapters: RawChapter[]) {
+    function getResolvedManualTitleOverrideMap(
+        text: string,
+        chapters: RawChapter[],
+    ) {
         const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
         const resolved = new Map<number, ManualTitleOverrideEntry>();
         for (const entry of Object.values(manualTitleOverrides)) {
-            const lineNumber = resolveManualTitleOverrideLine(entry, lines, chapters);
+            const lineNumber = resolveManualTitleOverrideLine(
+                entry,
+                lines,
+                chapters,
+            );
             if (lineNumber === null) continue;
             resolved.set(lineNumber, { ...entry, line: lineNumber });
         }
@@ -3959,17 +5022,22 @@
     function mergeManualTitleOverrides(text: string, chapters: RawChapter[]) {
         const lines = text.replace(/\r\n|\r|\u2028|\u2029/g, "\n").split("\n");
         const byLine = new Map<number, RawChapter>();
-        const resolvedOverrides = getResolvedManualTitleOverrideMap(text, chapters);
+        const resolvedOverrides = getResolvedManualTitleOverrideMap(
+            text,
+            chapters,
+        );
 
         for (const chapter of chapters) {
             const override = resolvedOverrides.get(chapter.line_number);
             if (override?.kind === "Ignore") continue;
-            if (override?.kind === "Volume" || override?.kind === "Chapter") continue;
+            if (override?.kind === "Volume" || override?.kind === "Chapter")
+                continue;
             byLine.set(chapter.line_number, chapter);
         }
 
         for (const [lineNumber, override] of resolvedOverrides) {
-            if (override.kind !== "Volume" && override.kind !== "Chapter") continue;
+            if (override.kind !== "Volume" && override.kind !== "Chapter")
+                continue;
             const title = lines[lineNumber - 1]?.trim();
             if (!title) continue;
             byLine.set(lineNumber, {
@@ -3990,15 +5058,29 @@
         try {
             // 调用 Rust 正则扫描
             loadManualTitleOverrides();
-            const rawList = await platform.invoke<RawChapter[]>("scan_chapters", {
-                content: text,
-                rules: appSettings.customRegexRules,
-            });
-            const resolvedManualOverrides = getResolvedManualTitleOverrideMap(text, rawList);
-            const tocItems = mergeManualTitleOverrides(text, rawList).filter((item) => {
-                const override = resolvedManualOverrides.get(item.line_number);
-                return override?.kind === "Volume" || override?.kind === "Chapter" || isLikelyTocTitle(item.title, item.level);
-            });
+            const rawList = await platform.invoke<RawChapter[]>(
+                "scan_chapters",
+                {
+                    content: text,
+                    rules: appSettings.customRegexRules,
+                },
+            );
+            const resolvedManualOverrides = getResolvedManualTitleOverrideMap(
+                text,
+                rawList,
+            );
+            const tocItems = mergeManualTitleOverrides(text, rawList).filter(
+                (item) => {
+                    const override = resolvedManualOverrides.get(
+                        item.line_number,
+                    );
+                    return (
+                        override?.kind === "Volume" ||
+                        override?.kind === "Chapter" ||
+                        isLikelyTocTitle(item.title, item.level)
+                    );
+                },
+            );
 
             const tree: TocNode[] = [];
             flatToc = [];
@@ -4008,8 +5090,12 @@
             // 构建嵌套树
             for (const item of tocItems) {
                 // Determine legacy type for UI styling backward compatibility
-                const computedType = item.is_meta ? "Meta" : (item.level === 1 ? "Volume" : "Chapter");
-                
+                const computedType = item.is_meta
+                    ? "Meta"
+                    : item.level === 1
+                      ? "Volume"
+                      : "Chapter";
+
                 const node: TocNode = {
                     id: `n-${uid++}`,
                     title: item.title,
@@ -4037,11 +5123,15 @@
                 while (parentStack.length > 0) {
                     let top = parentStack[parentStack.length - 1];
                     // If the parent is not Meta, and its level is STRICTLY smaller, it IS a valid parent.
-                    // Wait, our level is 1..5. Smaller number = higher level (like h1). 
+                    // Wait, our level is 1..5. Smaller number = higher level (like h1).
                     // So valid parent must have level < item.level.
                     // Example: Volume is level 1. Chapter is level 3. Parent (1) < Node (3).
                     // If we encounter another Level 1, we pop the previous Level 1 because 1 is not < 1.
-                    if (top.level !== undefined && top.level < item.level && top.type !== "Meta") {
+                    if (
+                        top.level !== undefined &&
+                        top.level < item.level &&
+                        top.type !== "Meta"
+                    ) {
                         break;
                     }
                     if (top.type === "Volume" && item.level > 1) {
@@ -4052,7 +5142,7 @@
 
                 if (parentStack.length > 0) {
                     let parent = parentStack[parentStack.length - 1];
-                    // Only volume nodes act as parents in the tree representation 
+                    // Only volume nodes act as parents in the tree representation
                     node.parentId = parent.id;
                     parent.children.push(node);
                     flatNode.parentId = parent.id;
@@ -4102,7 +5192,9 @@
             if (node.line > state.bottom) break;
         }
 
-        return state.isAtBottom ? beforeBottom || beforeTop : beforeTop || beforeBottom;
+        return state.isAtBottom
+            ? beforeBottom || beforeTop
+            : beforeTop || beforeBottom;
     }
 
     // 编辑器滚动时触发：高亮侧边栏
@@ -4121,7 +5213,8 @@
         if (flatToc.length === 0) return;
         if (isNavigating) return; // 正在手动跳转，忽略滚动监听
         if (lastNavChapterId && Date.now() < navProtectUntil) {
-            const navLineVisible = state.top <= lastNavLine && lastNavLine <= state.bottom;
+            const navLineVisible =
+                state.top <= lastNavLine && lastNavLine <= state.bottom;
             const navLineNearTop = Math.abs(state.top - lastNavLine) <= 12;
             if (navLineVisible || navLineNearTop) {
                 if (activeChapterId !== lastNavChapterId) {
@@ -4186,8 +5279,13 @@
         handleScroll({ top: line, bottom: line, isAtBottom: false });
     }
 
-    function buildManualTitleOverrideEntry(kind: ManualTitleKind, line: { number: number; text: string }) {
-        const prev = [...flatToc].reverse().find((node) => node.line < line.number);
+    function buildManualTitleOverrideEntry(
+        kind: ManualTitleKind,
+        line: { number: number; text: string },
+    ) {
+        const prev = [...flatToc]
+            .reverse()
+            .find((node) => node.line < line.number);
         const next = flatToc.find((node) => node.line > line.number);
         return {
             kind,
@@ -4200,15 +5298,21 @@
 
     async function applyEditorLineTitleAction(action: string, context: any) {
         if (!editorComponent || !context) return;
-        const line = editorComponent.getLineAtClientPos(Number(context.clientX), Number(context.clientY));
+        const line = editorComponent.getLineAtClientPos(
+            Number(context.clientX),
+            Number(context.clientY),
+        );
         if (!line) return;
 
         if (action === "make-volume-title") {
-            manualTitleOverrides[String(line.number)] = buildManualTitleOverrideEntry("Volume", line);
+            manualTitleOverrides[String(line.number)] =
+                buildManualTitleOverrideEntry("Volume", line);
         } else if (action === "make-chapter-title") {
-            manualTitleOverrides[String(line.number)] = buildManualTitleOverrideEntry("Chapter", line);
+            manualTitleOverrides[String(line.number)] =
+                buildManualTitleOverrideEntry("Chapter", line);
         } else if (action === "remove-title") {
-            manualTitleOverrides[String(line.number)] = buildManualTitleOverrideEntry("Ignore", line);
+            manualTitleOverrides[String(line.number)] =
+                buildManualTitleOverrideEntry("Ignore", line);
         } else {
             return;
         }
@@ -4282,8 +5386,10 @@
     function normalizeWordCheckSettings() {
         let min = Number(appSettings.wordCountMinThreshold);
         let max = Number(appSettings.wordCountMaxThreshold);
-        if (!Number.isFinite(min) || min < 0) min = DEFAULT_SETTINGS.wordCountMinThreshold;
-        if (!Number.isFinite(max) || max < 0) max = DEFAULT_SETTINGS.wordCountMaxThreshold;
+        if (!Number.isFinite(min) || min < 0)
+            min = DEFAULT_SETTINGS.wordCountMinThreshold;
+        if (!Number.isFinite(max) || max < 0)
+            max = DEFAULT_SETTINGS.wordCountMaxThreshold;
         appSettings.wordCountMinThreshold = Math.floor(min);
         appSettings.wordCountMaxThreshold = Math.floor(max);
         localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings));
@@ -4424,12 +5530,18 @@
                     });
                 }
 
-                if (node.word_count < appSettings.wordCountMinThreshold || node.word_count > appSettings.wordCountMaxThreshold) {
+                if (
+                    node.word_count < appSettings.wordCountMinThreshold ||
+                    node.word_count > appSettings.wordCountMaxThreshold
+                ) {
                     wordCountErrors.push({
                         id: node.id,
                         title: node.title,
                         line: node.line,
-                        msg: node.word_count < appSettings.wordCountMinThreshold ? `低于 ${appSettings.wordCountMinThreshold}` : `高于 ${appSettings.wordCountMaxThreshold}`,
+                        msg:
+                            node.word_count < appSettings.wordCountMinThreshold
+                                ? `低于 ${appSettings.wordCountMinThreshold}`
+                                : `高于 ${appSettings.wordCountMaxThreshold}`,
                         val: node.word_count,
                     });
                 }
@@ -4499,9 +5611,12 @@
 
     async function performReplaceAll() {
         if (!fileContent || !findPattern) return;
-        const confirmed = await platform.ask("确定执行全书替换吗？此操作无法撤销。", {
-            kind: "warning",
-        });
+        const confirmed = await platform.ask(
+            "确定执行全书替换吗？此操作无法撤销。",
+            {
+                kind: "warning",
+            },
+        );
         if (!confirmed) return;
 
         try {
@@ -4553,16 +5668,30 @@
                 return;
             }
 
-            let chapters = await platform.invoke<RawChapter[]>("scan_chapters", {
-                content: fileContent,
-                rules: appSettings.customRegexRules,
-            });
+            let chapters = await platform.invoke<RawChapter[]>(
+                "scan_chapters",
+                {
+                    content: fileContent,
+                    rules: appSettings.customRegexRules,
+                },
+            );
             loadManualTitleOverrides();
-            const resolvedManualOverrides = getResolvedManualTitleOverrideMap(fileContent, chapters);
-            chapters = mergeManualTitleOverrides(fileContent, chapters).filter((chapter) => {
-                const override = resolvedManualOverrides.get(chapter.line_number);
-                return override?.kind === "Volume" || override?.kind === "Chapter" || isLikelyTocTitle(chapter.title, chapter.level);
-            });
+            const resolvedManualOverrides = getResolvedManualTitleOverrideMap(
+                fileContent,
+                chapters,
+            );
+            chapters = mergeManualTitleOverrides(fileContent, chapters).filter(
+                (chapter) => {
+                    const override = resolvedManualOverrides.get(
+                        chapter.line_number,
+                    );
+                    return (
+                        override?.kind === "Volume" ||
+                        override?.kind === "Chapter" ||
+                        isLikelyTocTitle(chapter.title, chapter.level)
+                    );
+                },
+            );
 
             // 智能清洗
             const cleanRegex =
@@ -4590,7 +5719,9 @@
                     font_css: epubMeta.styles["font.css"],
                     subset_fonts: !!appSettings.subsetFonts,
                     assets: epubMeta.assets,
-                    ...Object.fromEntries(customMetadata.map(m => [m.key, m.value]))
+                    ...Object.fromEntries(
+                        customMetadata.map((m) => [m.key, m.value]),
+                    ),
                 },
             });
             // 制作成功：设置状态为成功，在UI上显示操作按钮
@@ -4706,7 +5837,6 @@
         showEpubModal = false;
         showHistoryPanel = false;
     }
-
 </script>
 
 <svelte:head>
@@ -4717,8 +5847,8 @@
     />
 </svelte:head>
 
-
-<!-- <ContextMenu /> --> <!-- Removed duplicate at top -->
+<!-- <ContextMenu /> -->
+<!-- Removed duplicate at top -->
 
 <Toast />
 
@@ -4806,15 +5936,18 @@
                     >
                     <button
                         class:active={proofActiveTab === "toc"}
-                        on:click={() => (proofActiveTab = "toc")}>目录重排</button
+                        on:click={() => (proofActiveTab = "toc")}
+                        >目录重排</button
                     >
                     <button
                         class:active={proofActiveTab === "builtin"}
-                        on:click={() => (proofActiveTab = "builtin")}>文本检查</button
+                        on:click={() => (proofActiveTab = "builtin")}
+                        >文本检查</button
                     >
                     <button
                         class:active={proofActiveTab === "ai"}
-                        on:click={() => (proofActiveTab = "ai")}>智能校对</button
+                        on:click={() => (proofActiveTab = "ai")}
+                        >智能校对</button
                     >
                 </div>
 
@@ -4823,17 +5956,32 @@
                         <div class="proof-section proof-toc-controls">
                             <div class="proof-row">
                                 <label for="proof-title-scope">范围</label>
-                                <CustomSelect id="proof-title-scope" value={proofTitleScope} options={[
-                                    { value: "all", label: "卷和章" },
-                                    { value: "chapters", label: "只排章节" },
-                                    { value: "volumes", label: "只排卷部" },
-                                    { value: "numbers-only", label: "只转数字" },
-                                    { value: "regex", label: "正则选取" },
-                                ]} on:change={(event) => (proofTitleScope = event.detail as ProofTitleScope)} />
+                                <CustomSelect
+                                    id="proof-title-scope"
+                                    value={proofTitleScope}
+                                    options={[
+                                        { value: "all", label: "卷和章" },
+                                        {
+                                            value: "chapters",
+                                            label: "只排章节",
+                                        },
+                                        { value: "volumes", label: "只排卷部" },
+                                        {
+                                            value: "numbers-only",
+                                            label: "只转数字",
+                                        },
+                                        { value: "regex", label: "正则选取" },
+                                    ]}
+                                    on:change={(event) =>
+                                        (proofTitleScope =
+                                            event.detail as ProofTitleScope)}
+                                />
                             </div>
                             {#if proofTitleScope === "regex"}
                                 <div class="proof-row vertical">
-                                    <label for="proof-title-regex">标题正则</label>
+                                    <label for="proof-title-regex"
+                                        >标题正则</label
+                                    >
                                     <input
                                         id="proof-title-regex"
                                         bind:value={proofTitleRegex}
@@ -4843,18 +5991,51 @@
                             {/if}
                             {#if proofTitleScope === "all" || proofTitleScope === "volumes" || proofTitleScope === "regex" || proofTitleScope === "numbers-only"}
                                 <div class="proof-row">
-                                    <label for="proof-volume-number-style">卷数字</label>
-                                    <CustomSelect id="proof-volume-number-style" value={proofVolumeNumberStyle} options={[{ value: "chinese", label: "一二三四" }, { value: "arabic", label: "1234" }]} on:change={(event) => (proofVolumeNumberStyle = event.detail as ProofNumberStyle)} />
+                                    <label for="proof-volume-number-style"
+                                        >卷数字</label
+                                    >
+                                    <CustomSelect
+                                        id="proof-volume-number-style"
+                                        value={proofVolumeNumberStyle}
+                                        options={[
+                                            {
+                                                value: "chinese",
+                                                label: "一二三四",
+                                            },
+                                            { value: "arabic", label: "1234" },
+                                        ]}
+                                        on:change={(event) =>
+                                            (proofVolumeNumberStyle =
+                                                event.detail as ProofNumberStyle)}
+                                    />
                                 </div>
                             {/if}
                             {#if proofTitleScope === "all" || proofTitleScope === "chapters" || proofTitleScope === "regex" || proofTitleScope === "numbers-only"}
                                 <div class="proof-row">
-                                    <label for="proof-chapter-number-style">章数字</label>
-                                    <CustomSelect id="proof-chapter-number-style" value={proofChapterNumberStyle} options={[{ value: "chinese", label: "一二三四" }, { value: "arabic", label: "1234" }]} on:change={(event) => (proofChapterNumberStyle = event.detail as ProofNumberStyle)} />
+                                    <label for="proof-chapter-number-style"
+                                        >章数字</label
+                                    >
+                                    <CustomSelect
+                                        id="proof-chapter-number-style"
+                                        value={proofChapterNumberStyle}
+                                        options={[
+                                            {
+                                                value: "chinese",
+                                                label: "一二三四",
+                                            },
+                                            { value: "arabic", label: "1234" },
+                                        ]}
+                                        on:change={(event) =>
+                                            (proofChapterNumberStyle =
+                                                event.detail as ProofNumberStyle)}
+                                    />
                                 </div>
                             {/if}
                             <label class="proof-check">
-                                <input type="checkbox" bind:checked={proofPerVolume} />
+                                <input
+                                    type="checkbox"
+                                    bind:checked={proofPerVolume}
+                                />
                                 每卷章节都从第一章开始
                             </label>
                             <button
@@ -4862,7 +6043,9 @@
                                 disabled={proofPreviewRows.length === 0}
                                 on:click={applyProofTitleRewrite}
                             >
-                                {proofTitleScope === "numbers-only" ? "应用数字转换" : "应用目录重排序"}
+                                {proofTitleScope === "numbers-only"
+                                    ? "应用数字转换"
+                                    : "应用目录重排序"}
                             </button>
                         </div>
 
@@ -4880,10 +6063,16 @@
                                         class:sequence-broken={row.sequenceBroken}
                                         role="button"
                                         tabindex="0"
-                                        title={row.sequenceBroken ? `断序：当前应为第 ${row.expectedIndex} 章，原标题为第 ${row.originalIndex} 章` : row.original}
-                                        on:click={() => jumpToProofTitleRow(row)}
+                                        title={row.sequenceBroken
+                                            ? `断序：当前应为第 ${row.expectedIndex} 章，原标题为第 ${row.originalIndex} 章`
+                                            : row.original}
+                                        on:click={() =>
+                                            jumpToProofTitleRow(row)}
                                         on:keydown={(e) => {
-                                            if (e.key === "Enter" || e.key === " ") {
+                                            if (
+                                                e.key === "Enter" ||
+                                                e.key === " "
+                                            ) {
                                                 jumpToProofTitleRow(row);
                                             }
                                         }}
@@ -4891,13 +6080,30 @@
                                         {#if row.kind === "volume"}
                                             <button
                                                 class="proof-volume-toggle"
-                                                title={proofCollapsedVolumeKeys.has(row.volumeKey) ? "展开本卷" : "折叠本卷"}
-                                                on:click|stopPropagation={() => toggleProofVolumeCollapse(row.volumeKey)}
-                                            >{proofCollapsedVolumeKeys.has(row.volumeKey) ? "▶" : "▼"}</button>
+                                                title={proofCollapsedVolumeKeys.has(
+                                                    row.volumeKey,
+                                                )
+                                                    ? "展开本卷"
+                                                    : "折叠本卷"}
+                                                on:click|stopPropagation={() =>
+                                                    toggleProofVolumeCollapse(
+                                                        row.volumeKey,
+                                                    )}
+                                                >{proofCollapsedVolumeKeys.has(
+                                                    row.volumeKey,
+                                                )
+                                                    ? "▶"
+                                                    : "▼"}</button
+                                            >
                                         {/if}
                                         <span>{row.original}</span>
                                     </div>
-                                    <div class:cell-changed={row.changed} title={row.replacement}>{row.replacement}</div>
+                                    <div
+                                        class:cell-changed={row.changed}
+                                        title={row.replacement}
+                                    >
+                                        {row.replacement}
+                                    </div>
                                 </div>
                             {:else}
                                 <div class="proof-empty">暂无预览</div>
@@ -4910,9 +6116,13 @@
                                 <CustomSelect
                                     id="proof-text-tool"
                                     value={proofTextTool}
-                                    options={[{ value: "builtin", label: "内置规则" }, { value: "convert", label: "繁简转换" }]}
+                                    options={[
+                                        { value: "builtin", label: "内置规则" },
+                                        { value: "convert", label: "繁简转换" },
+                                    ]}
                                     on:change={(event) => {
-                                        proofTextTool = event.detail as typeof proofTextTool;
+                                        proofTextTool =
+                                            event.detail as typeof proofTextTool;
                                         proofRegexSelectedIds = new Set();
                                         proofConvertPreviewRows = [];
                                         proofConvertSelectedIds = new Set();
@@ -4920,151 +6130,233 @@
                                 />
                             </div>
                             {#if proofTextTool === "builtin"}
-                            <div class="proof-row">
-                                <label for="proof-builtin-rule">规则</label>
-                                <CustomSelect id="proof-builtin-rule" value={proofBuiltinRule} options={PROOF_BUILTIN_REGEX_RULES.map((rule) => ({ value: rule.id, label: rule.name }))} on:change={(event) => (proofBuiltinRule = event.detail as ProofBuiltinRuleId)} />
-                            </div>
-                            <div class="proof-rule-note">
-                                {PROOF_BUILTIN_REGEX_RULES.find((rule) => rule.id === proofBuiltinRule)?.description}
-                            </div>
-                            <div class="proof-actions-row">
-                                <button on:click={() => setAllProofRegexRows(true)}>全选</button>
-                                <button on:click={() => setAllProofRegexRows(false)}>全不选</button>
-                                <button
-                                    class="proof-primary inline"
-                                    disabled={proofRegexSelectedIds.size === 0}
-                                    on:click={applySelectedBuiltinRegex}
-                                >替换选中</button>
-                                <button
-                                    class="proof-primary inline"
-                                    disabled={proofRegexPreviewRows.length === 0}
-                                    on:click={applyAllBuiltinRegex}
-                                >全部替换</button>
-                            </div>
+                                <div class="proof-row">
+                                    <label for="proof-builtin-rule">规则</label>
+                                    <CustomSelect
+                                        id="proof-builtin-rule"
+                                        value={proofBuiltinRule}
+                                        options={PROOF_BUILTIN_REGEX_RULES.map(
+                                            (rule) => ({
+                                                value: rule.id,
+                                                label: rule.name,
+                                            }),
+                                        )}
+                                        on:change={(event) =>
+                                            (proofBuiltinRule =
+                                                event.detail as ProofBuiltinRuleId)}
+                                    />
+                                </div>
+                                <div class="proof-rule-note">
+                                    {PROOF_BUILTIN_REGEX_RULES.find(
+                                        (rule) => rule.id === proofBuiltinRule,
+                                    )?.description}
+                                </div>
+                                <div class="proof-actions-row">
+                                    <button
+                                        on:click={() =>
+                                            setAllProofRegexRows(true)}
+                                        >全选</button
+                                    >
+                                    <button
+                                        on:click={() =>
+                                            setAllProofRegexRows(false)}
+                                        >全不选</button
+                                    >
+                                    <button
+                                        class="proof-primary inline"
+                                        disabled={proofRegexSelectedIds.size ===
+                                            0}
+                                        on:click={applySelectedBuiltinRegex}
+                                        >替换选中</button
+                                    >
+                                    <button
+                                        class="proof-primary inline"
+                                        disabled={proofRegexPreviewRows.length ===
+                                            0}
+                                        on:click={applyAllBuiltinRegex}
+                                        >全部替换</button
+                                    >
+                                </div>
                             {:else}
-                            <div class="proof-row">
-                                <label for="proof-convert-direction">方向</label>
-                                <CustomSelect
-                                    id="proof-convert-direction"
-                                    value={proofConvertDirection}
-                                    options={[{ value: "traditional-to-simplified", label: "繁体转简体" }, { value: "simplified-to-traditional", label: "简体转繁体" }]}
-                                    on:change={(event) => {
-                                        proofConvertDirection = event.detail as ProofConvertDirection;
-                                        proofConvertPreviewRows = [];
-                                        proofConvertSelectedIds = new Set();
-                                    }}
-                                />
-                            </div>
-                            <div class="proof-actions-row proof-convert-actions">
-                                <button class="proof-primary inline" on:click={runProofConvertPreview}>
-                                    查找
-                                </button>
-                                <button on:click={() => setAllProofConvertRows(true)}>全选</button>
-                                <button on:click={() => setAllProofConvertRows(false)}>全不选</button>
-                                <button
-                                    class="proof-primary inline"
-                                    disabled={proofConvertSelectedIds.size === 0}
-                                    on:click={applySelectedConvertRows}
-                                >替换选中</button>
-                                <button
-                                    class="proof-primary inline"
-                                    disabled={proofConvertPreviewRows.length === 0}
-                                    on:click={applyAllConvertRows}
-                                >全部替换</button>
-                                <button class="proof-primary inline" on:click={runProofFullConvert}>
-                                    转换全文
-                                </button>
-                            </div>
+                                <div class="proof-row">
+                                    <label for="proof-convert-direction"
+                                        >方向</label
+                                    >
+                                    <CustomSelect
+                                        id="proof-convert-direction"
+                                        value={proofConvertDirection}
+                                        options={[
+                                            {
+                                                value: "traditional-to-simplified",
+                                                label: "繁体转简体",
+                                            },
+                                            {
+                                                value: "simplified-to-traditional",
+                                                label: "简体转繁体",
+                                            },
+                                        ]}
+                                        on:change={(event) => {
+                                            proofConvertDirection =
+                                                event.detail as ProofConvertDirection;
+                                            proofConvertPreviewRows = [];
+                                            proofConvertSelectedIds = new Set();
+                                        }}
+                                    />
+                                </div>
+                                <div
+                                    class="proof-actions-row proof-convert-actions"
+                                >
+                                    <button
+                                        class="proof-primary inline"
+                                        on:click={runProofConvertPreview}
+                                    >
+                                        查找
+                                    </button>
+                                    <button
+                                        on:click={() =>
+                                            setAllProofConvertRows(true)}
+                                        >全选</button
+                                    >
+                                    <button
+                                        on:click={() =>
+                                            setAllProofConvertRows(false)}
+                                        >全不选</button
+                                    >
+                                    <button
+                                        class="proof-primary inline"
+                                        disabled={proofConvertSelectedIds.size ===
+                                            0}
+                                        on:click={applySelectedConvertRows}
+                                        >替换选中</button
+                                    >
+                                    <button
+                                        class="proof-primary inline"
+                                        disabled={proofConvertPreviewRows.length ===
+                                            0}
+                                        on:click={applyAllConvertRows}
+                                        >全部替换</button
+                                    >
+                                    <button
+                                        class="proof-primary inline"
+                                        on:click={runProofFullConvert}
+                                    >
+                                        转换全文
+                                    </button>
+                                </div>
                             {/if}
                         </div>
 
                         {#if proofTextTool === "builtin"}
-                        <div class="proof-regex-preview">
-                            <div class="proof-regex-head">
-                                <span></span>
-                                <span>匹配内容</span>
-                                <span>替换后</span>
-                            </div>
-                            {#each proofRegexPreviewRows as row}
-                                <label class="proof-regex-row">
-                                    <input
-                                        type="checkbox"
-                                        checked={proofRegexSelectedIds.has(row.id)}
-                                        on:change={(e) =>
-                                            toggleProofRegexRow(
+                            <div class="proof-regex-preview">
+                                <div class="proof-regex-head">
+                                    <span></span>
+                                    <span>匹配内容</span>
+                                    <span>替换后</span>
+                                </div>
+                                {#each proofRegexPreviewRows as row}
+                                    <label class="proof-regex-row">
+                                        <input
+                                            type="checkbox"
+                                            checked={proofRegexSelectedIds.has(
                                                 row.id,
-                                                (e.currentTarget as HTMLInputElement).checked,
                                             )}
-                                    />
-                                    <span
-                                        role="button"
-                                        tabindex="0"
-                                        title={row.original}
-                                        on:click|preventDefault={() => jumpToProofRegexRow(row)}
-                                        on:keydown|preventDefault={(e) => {
-                                            if (e.key === "Enter" || e.key === " ") {
-                                                jumpToProofRegexRow(row);
-                                            }
-                                        }}
-                                    >
-                                        {row.original}
-                                    </span>
-                                    <span title={row.replacement || "删除"}>
-                                        {row.replacement || "删除"}
-                                    </span>
-                                </label>
-                            {:else}
-                                <div class="proof-empty">暂无匹配</div>
-                            {/each}
-                        </div>
+                                            on:change={(e) =>
+                                                toggleProofRegexRow(
+                                                    row.id,
+                                                    (
+                                                        e.currentTarget as HTMLInputElement
+                                                    ).checked,
+                                                )}
+                                        />
+                                        <span
+                                            role="button"
+                                            tabindex="0"
+                                            title={row.original}
+                                            on:click|preventDefault={() =>
+                                                jumpToProofRegexRow(row)}
+                                            on:keydown|preventDefault={(e) => {
+                                                if (
+                                                    e.key === "Enter" ||
+                                                    e.key === " "
+                                                ) {
+                                                    jumpToProofRegexRow(row);
+                                                }
+                                            }}
+                                        >
+                                            {row.original}
+                                        </span>
+                                        <span title={row.replacement || "删除"}>
+                                            {row.replacement || "删除"}
+                                        </span>
+                                    </label>
+                                {:else}
+                                    <div class="proof-empty">暂无匹配</div>
+                                {/each}
+                            </div>
                         {:else}
-                        <div class="proof-regex-preview">
-                            <div class="proof-regex-head">
-                                <span></span>
-                                <span>原文</span>
-                                <span>转换后</span>
-                            </div>
-                            {#each proofConvertPreviewRows as row}
-                                <label class="proof-regex-row">
-                                    <input
-                                        type="checkbox"
-                                        checked={proofConvertSelectedIds.has(row.id)}
-                                        on:change={(e) =>
-                                            toggleProofConvertRow(
+                            <div class="proof-regex-preview">
+                                <div class="proof-regex-head">
+                                    <span></span>
+                                    <span>原文</span>
+                                    <span>转换后</span>
+                                </div>
+                                {#each proofConvertPreviewRows as row}
+                                    <label class="proof-regex-row">
+                                        <input
+                                            type="checkbox"
+                                            checked={proofConvertSelectedIds.has(
                                                 row.id,
-                                                (e.currentTarget as HTMLInputElement).checked,
                                             )}
-                                    />
-                                    <span
-                                        role="button"
-                                        tabindex="0"
-                                        title={row.original}
-                                        on:click|preventDefault={() => jumpToProofConvertRow(row)}
-                                        on:keydown|preventDefault={(e) => {
-                                            if (e.key === "Enter" || e.key === " ") {
-                                                jumpToProofConvertRow(row);
-                                            }
-                                        }}
-                                    >
-                                        {row.original}
-                                    </span>
-                                    <span title={row.replacement}>{row.replacement}</span>
-                                </label>
-                            {:else}
-                                <div class="proof-empty">点击查找后显示可转换内容</div>
-                            {/each}
-                        </div>
+                                            on:change={(e) =>
+                                                toggleProofConvertRow(
+                                                    row.id,
+                                                    (
+                                                        e.currentTarget as HTMLInputElement
+                                                    ).checked,
+                                                )}
+                                        />
+                                        <span
+                                            role="button"
+                                            tabindex="0"
+                                            title={row.original}
+                                            on:click|preventDefault={() =>
+                                                jumpToProofConvertRow(row)}
+                                            on:keydown|preventDefault={(e) => {
+                                                if (
+                                                    e.key === "Enter" ||
+                                                    e.key === " "
+                                                ) {
+                                                    jumpToProofConvertRow(row);
+                                                }
+                                            }}
+                                        >
+                                            {row.original}
+                                        </span>
+                                        <span title={row.replacement}
+                                            >{row.replacement}</span
+                                        >
+                                    </label>
+                                {:else}
+                                    <div class="proof-empty">
+                                        点击查找后显示可转换内容
+                                    </div>
+                                {/each}
+                            </div>
                         {/if}
                     {:else if proofActiveTab === "check"}
                         <div class="proof-check-panel">
-                            <div class="proof-section proof-word-check-controls">
+                            <div
+                                class="proof-section proof-word-check-controls"
+                            >
                                 <div class="proof-row">
                                     <label for="proof-word-min">低于字数</label>
                                     <input
                                         id="proof-word-min"
                                         type="number"
                                         min="0"
-                                        bind:value={appSettings.wordCountMinThreshold}
+                                        bind:value={
+                                            appSettings.wordCountMinThreshold
+                                        }
                                         on:change={normalizeWordCheckSettings}
                                     />
                                 </div>
@@ -5074,13 +6366,18 @@
                                         id="proof-word-max"
                                         type="number"
                                         min="0"
-                                        bind:value={appSettings.wordCountMaxThreshold}
+                                        bind:value={
+                                            appSettings.wordCountMaxThreshold
+                                        }
                                         on:change={normalizeWordCheckSettings}
                                     />
                                 </div>
                             </div>
                             <div class="proof-actions-row check-actions">
-                                <button class="proof-primary inline" on:click={runFullCheck}>
+                                <button
+                                    class="proof-primary inline"
+                                    on:click={runFullCheck}
+                                >
                                     重新检查
                                 </button>
                             </div>
@@ -5091,22 +6388,41 @@
                                         class="sec-title"
                                         role="button"
                                         tabindex="0"
-                                        on:click={() => (checkCollapseState.seq = !checkCollapseState.seq)}
-                                        on:keydown={(e) => e.key === "Enter" && (checkCollapseState.seq = !checkCollapseState.seq)}
+                                        on:click={() =>
+                                            (checkCollapseState.seq =
+                                                !checkCollapseState.seq)}
+                                        on:keydown={(e) =>
+                                            e.key === "Enter" &&
+                                            (checkCollapseState.seq =
+                                                !checkCollapseState.seq)}
                                     >
-                                        <span>{checkCollapseState.seq ? "▶" : "▼"} 断序检查 ({sequenceErrors.length})</span>
+                                        <span
+                                            >{checkCollapseState.seq
+                                                ? "▶"
+                                                : "▼"} 断序检查 ({sequenceErrors.length})</span
+                                        >
                                     </div>
                                     {#if !checkCollapseState.seq}
                                         <div class="tag-list">
                                             {#each sequenceErrors as e}
                                                 <button
                                                     class="err-tag"
-                                                    on:click={() => handleChapterClick(e.id, e.line)}
+                                                    on:click={() =>
+                                                        handleChapterClick(
+                                                            e.id,
+                                                            e.line,
+                                                        )}
                                                 >
-                                                    <span class="err-tag-msg">{e.msg}</span>
-                                                    <span class="err-tag-title">{e.title}</span>
+                                                    <span class="err-tag-msg"
+                                                        >{e.msg}</span
+                                                    >
+                                                    <span class="err-tag-title"
+                                                        >{e.title}</span
+                                                    >
                                                 </button>
-                                            {:else}<span class="toc-count">无</span>{/each}
+                                            {:else}<span class="toc-count"
+                                                    >无</span
+                                                >{/each}
                                         </div>
                                     {/if}
                                 </div>
@@ -5116,19 +6432,34 @@
                                         class="sec-title"
                                         role="button"
                                         tabindex="0"
-                                        on:click={() => (checkCollapseState.title = !checkCollapseState.title)}
-                                        on:keydown={(e) => e.key === "Enter" && (checkCollapseState.title = !checkCollapseState.title)}
+                                        on:click={() =>
+                                            (checkCollapseState.title =
+                                                !checkCollapseState.title)}
+                                        on:keydown={(e) =>
+                                            e.key === "Enter" &&
+                                            (checkCollapseState.title =
+                                                !checkCollapseState.title)}
                                     >
-                                        <span>{checkCollapseState.title ? "▶" : "▼"} 标题内容 ({titleErrors.length})</span>
+                                        <span
+                                            >{checkCollapseState.title
+                                                ? "▶"
+                                                : "▼"} 标题内容 ({titleErrors.length})</span
+                                        >
                                     </div>
                                     {#if !checkCollapseState.title}
                                         <div class="tag-list">
                                             {#each titleErrors as e}
                                                 <button
                                                     class="err-tag"
-                                                    on:click={() => handleChapterClick(e.id, e.line)}
-                                                >{e.title}</button>
-                                            {:else}<span class="toc-count">无</span>{/each}
+                                                    on:click={() =>
+                                                        handleChapterClick(
+                                                            e.id,
+                                                            e.line,
+                                                        )}>{e.title}</button
+                                                >
+                                            {:else}<span class="toc-count"
+                                                    >无</span
+                                                >{/each}
                                         </div>
                                     {/if}
                                 </div>
@@ -5138,22 +6469,41 @@
                                         class="sec-title"
                                         role="button"
                                         tabindex="0"
-                                        on:click={() => (checkCollapseState.word = !checkCollapseState.word)}
-                                        on:keydown={(e) => e.key === "Enter" && (checkCollapseState.word = !checkCollapseState.word)}
+                                        on:click={() =>
+                                            (checkCollapseState.word =
+                                                !checkCollapseState.word)}
+                                        on:keydown={(e) =>
+                                            e.key === "Enter" &&
+                                            (checkCollapseState.word =
+                                                !checkCollapseState.word)}
                                     >
-                                        <span>{checkCollapseState.word ? "▶" : "▼"} 字数检查 ({wordCountErrors.length})</span>
+                                        <span
+                                            >{checkCollapseState.word
+                                                ? "▶"
+                                                : "▼"} 字数检查 ({wordCountErrors.length})</span
+                                        >
                                     </div>
                                     {#if !checkCollapseState.word}
                                         <div class="tag-list">
                                             {#each wordCountErrors as e}
-                                            <button
-                                                class="err-tag"
-                                                on:click={() => handleChapterClick(e.id, e.line)}
-                                            >
-                                                <span class="err-tag-title">{e.title}</span>
-                                                <span class="err-tag-count">{e.val}</span>
-                                            </button>
-                                            {:else}<span class="toc-count">无</span>{/each}
+                                                <button
+                                                    class="err-tag"
+                                                    on:click={() =>
+                                                        handleChapterClick(
+                                                            e.id,
+                                                            e.line,
+                                                        )}
+                                                >
+                                                    <span class="err-tag-title"
+                                                        >{e.title}</span
+                                                    >
+                                                    <span class="err-tag-count"
+                                                        >{e.val}</span
+                                                    >
+                                                </button>
+                                            {:else}<span class="toc-count"
+                                                    >无</span
+                                                >{/each}
                                         </div>
                                     {/if}
                                 </div>
@@ -5163,164 +6513,261 @@
                         <div class="proof-section">
                             <div class="proof-row">
                                 <label for="ai-proof-scope">范围</label>
-                <CustomSelect id="ai-proof-scope" value={aiProofingScope} disabled={aiProofingRunning} options={[
-                    { value: "current", label: "当前章" },
-                    ...(hasProofVolumeScope ? [{ value: "volume", label: "当前卷" }] : []),
-                    { value: "all", label: "全书逐章" },
-                ]} on:change={(event) => (aiProofingScope = event.detail as AiProofingScope)} />
+                                <CustomSelect
+                                    id="ai-proof-scope"
+                                    value={aiProofingScope}
+                                    disabled={aiProofingRunning}
+                                    options={[
+                                        { value: "current", label: "当前章" },
+                                        ...(hasProofVolumeScope
+                                            ? [
+                                                  {
+                                                      value: "volume",
+                                                      label: "当前卷",
+                                                  },
+                                              ]
+                                            : []),
+                                        { value: "all", label: "全书逐章" },
+                                    ]}
+                                    on:change={(event) =>
+                                        (aiProofingScope =
+                                            event.detail as AiProofingScope)}
+                                />
                             </div>
-                            <div class="proof-actions-row proof-convert-actions proof-ai-actions">
+                            <div
+                                class="proof-actions-row proof-convert-actions proof-ai-actions"
+                            >
                                 <button
                                     class="proof-primary proof-ai-action-btn"
                                     disabled={aiProofingRunning}
                                     on:click={runAiProofing}
-                                >{aiProofingRunning ? "校对中..." : "开始"}</button>
-                                <button class="proof-ai-action-btn" disabled={!aiProofingRunning} on:click={stopAiProofing}>停止</button>
+                                    >{aiProofingRunning
+                                        ? "校对中..."
+                                        : "开始"}</button
+                                >
                                 <button
                                     class="proof-ai-action-btn"
-                                    class:active={aiProofingView === "suggestions"}
-                                    on:click={() => (aiProofingView = "suggestions")}
-                                >建议</button>
+                                    disabled={!aiProofingRunning}
+                                    on:click={stopAiProofing}>停止</button
+                                >
+                                <button
+                                    class="proof-ai-action-btn"
+                                    class:active={aiProofingView ===
+                                        "suggestions"}
+                                    on:click={() =>
+                                        (aiProofingView = "suggestions")}
+                                    >建议</button
+                                >
                                 {#if aiProofingConfig.autoApprove}
-                                <button
-                                    class="proof-ai-action-btn"
-                                    class:active={aiProofingView === "approval"}
-                                    on:click={() => (aiProofingView = "approval")}
-                                >审批</button>
+                                    <button
+                                        class="proof-ai-action-btn"
+                                        class:active={aiProofingView ===
+                                            "approval"}
+                                        on:click={() =>
+                                            (aiProofingView = "approval")}
+                                        >审批</button
+                                    >
                                 {/if}
                                 <button
                                     class="proof-ai-action-btn"
                                     class:active={aiProofingView === "log"}
                                     on:click={() => (aiProofingView = "log")}
-                                >日志</button>
+                                    >日志</button
+                                >
                             </div>
                         </div>
 
                         {#if aiProofingView === "suggestions"}
-                        <div class="proof-regex-preview">
-                            <div class="proof-regex-head">
-                                <span></span>
-                                <span>原文</span>
-                                <span>建议</span>
-                            </div>
-                            <div class="ai-proof-selection-bar">
-                                <span>已选 {aiProofingSelectedIds.size} / {aiProofingRows.length}</span>
-                                <button disabled={aiProofingRunning} on:click={() => setAllAiProofingRows(true)}>全选</button>
-                                <button disabled={aiProofingRunning} on:click={() => setAllAiProofingRows(false)}>全不选</button>
-                                <button
-                                    class="proof-primary inline"
-                                    disabled={aiProofingRunning || aiProofingSelectedIds.size === 0}
-                                    on:click={applySelectedAiProofingRows}
-                                >应用选中</button>
-                            </div>
-                            {#each aiProofingRows as row}
-                                <label class="proof-regex-row">
-                                    <input
-                                        type="checkbox"
-                                        checked={aiProofingSelectedIds.has(row.id)}
-                                        on:change={(e) =>
-                                            toggleAiProofingRow(
+                            <div class="proof-regex-preview">
+                                <div class="proof-regex-head">
+                                    <span></span>
+                                    <span>原文</span>
+                                    <span>建议</span>
+                                </div>
+                                <div class="ai-proof-selection-bar">
+                                    <span
+                                        >已选 {aiProofingSelectedIds.size} / {aiProofingRows.length}</span
+                                    >
+                                    <button
+                                        disabled={aiProofingRunning}
+                                        on:click={() =>
+                                            setAllAiProofingRows(true)}
+                                        >全选</button
+                                    >
+                                    <button
+                                        disabled={aiProofingRunning}
+                                        on:click={() =>
+                                            setAllAiProofingRows(false)}
+                                        >全不选</button
+                                    >
+                                    <button
+                                        class="proof-primary inline"
+                                        disabled={aiProofingRunning ||
+                                            aiProofingSelectedIds.size === 0}
+                                        on:click={applySelectedAiProofingRows}
+                                        >应用选中</button
+                                    >
+                                </div>
+                                {#each aiProofingRows as row}
+                                    <label class="proof-regex-row">
+                                        <input
+                                            type="checkbox"
+                                            checked={aiProofingSelectedIds.has(
                                                 row.id,
-                                                (e.currentTarget as HTMLInputElement).checked,
                                             )}
-                                    />
-                                    <span
-                                        role="button"
-                                        tabindex="0"
-                                        title={`${row.chapterTitle}\n原因：${aiProofingReasonText(row)}\n原文：${row.original}`}
-                                        on:click|preventDefault={() => jumpToAiProofingRow(row)}
-                                        on:keydown|preventDefault={(e) => {
-                                            if (e.key === "Enter" || e.key === " ") {
-                                                jumpToAiProofingRow(row);
-                                            }
-                                        }}
-                                    >
-                                        {compactAiProofingCellText(row.original)}
-                                    </span>
-                                    <span
-                                        class="ai-proof-replacement-cell"
-                                        title={buildAiProofingReplacementTooltip(row)}
-                                        aria-label={buildAiProofingReplacementTooltip(row)}
-                                    >
-                                        <span class="ai-proof-replacement-text">
-                                            {row.fullChapterRemoval ? "移除整章" : compactAiProofingCellText(row.replacement || "删除")}
-                                        </span>
-                                    </span>
-                                </label>
-                            {:else}
-                                <div class="proof-empty">点击开始校对后显示建议</div>
-                            {/each}
-                        </div>
-                        {:else if aiProofingView === "approval"}
-                        <div class="proof-regex-preview">
-                            <div class="proof-regex-head approval-head">
-                                <span>状态</span>
-                                <span>审批通过</span>
-                                <span>操作</span>
-                            </div>
-                            {#each aiApprovalAppliedBatches as batch}
-                                {#each batch.rows as row}
-                                    <div class="proof-regex-row approval-row">
-                                        <span>{(batch.revertedRowIds || []).includes(row.id) ? "已撤销" : "已应用"}</span>
+                                            on:change={(e) =>
+                                                toggleAiProofingRow(
+                                                    row.id,
+                                                    (
+                                                        e.currentTarget as HTMLInputElement
+                                                    ).checked,
+                                                )}
+                                        />
                                         <span
                                             role="button"
                                             tabindex="0"
-                                            class="approval-result-cell approval-result-link"
-                                            on:click|preventDefault={() => jumpToAiProofingRow(row)}
+                                            title={`${row.chapterTitle}\n原因：${aiProofingReasonText(row)}\n原文：${row.original}`}
+                                            on:click|preventDefault={() =>
+                                                jumpToAiProofingRow(row)}
                                             on:keydown|preventDefault={(e) => {
-                                                if (e.key === "Enter" || e.key === " ") {
+                                                if (
+                                                    e.key === "Enter" ||
+                                                    e.key === " "
+                                                ) {
                                                     jumpToAiProofingRow(row);
                                                 }
                                             }}
                                         >
-                                            <small>{row.original} -> {row.replacement || "删除"}（{row.reason}）</small>
+                                            {compactAiProofingCellText(
+                                                row.original,
+                                            )}
                                         </span>
-                                        <span class="approval-action-cell">
-                                            {#if (batch.revertedRowIds || []).includes(row.id)}
-                                                <button
-                                                    type="button"
-                                                    class="mini-action"
-                                                    disabled={aiProofingRunning}
-                                                    on:click={() => reapplyAiApprovalRow(batch.id, row.id)}
-                                                >应用</button>
-                                            {:else}
-                                                <button
-                                                    type="button"
-                                                    class="mini-action"
-                                                    disabled={aiProofingRunning}
-                                                    on:click={() => revertAiApprovalRow(batch.id, row.id)}
-                                                >撤销</button>
-                                            {/if}
+                                        <span
+                                            class="ai-proof-replacement-cell"
+                                            title={buildAiProofingReplacementTooltip(
+                                                row,
+                                            )}
+                                            aria-label={buildAiProofingReplacementTooltip(
+                                                row,
+                                            )}
+                                        >
+                                            <span
+                                                class="ai-proof-replacement-text"
+                                            >
+                                                {row.fullChapterRemoval
+                                                    ? "移除整章"
+                                                    : compactAiProofingCellText(
+                                                          row.replacement ||
+                                                              "删除",
+                                                      )}
+                                            </span>
                                         </span>
+                                    </label>
+                                {:else}
+                                    <div class="proof-empty">
+                                        点击开始校对后显示建议
                                     </div>
                                 {/each}
-                            {:else}
-                                <div class="proof-empty">暂无 AI 审批应用记录</div>
-                            {/each}
-                        </div>
+                            </div>
+                        {:else if aiProofingView === "approval"}
+                            <div class="proof-regex-preview">
+                                <div class="proof-regex-head approval-head">
+                                    <span>状态</span>
+                                    <span>审批通过</span>
+                                    <span>操作</span>
+                                </div>
+                                {#each aiApprovalAppliedBatches as batch}
+                                    {#each batch.rows as row}
+                                        <div
+                                            class="proof-regex-row approval-row"
+                                        >
+                                            <span
+                                                >{(
+                                                    batch.revertedRowIds || []
+                                                ).includes(row.id)
+                                                    ? "已撤销"
+                                                    : "已应用"}</span
+                                            >
+                                            <span
+                                                role="button"
+                                                tabindex="0"
+                                                class="approval-result-cell approval-result-link"
+                                                on:click|preventDefault={() =>
+                                                    jumpToAiProofingRow(row)}
+                                                on:keydown|preventDefault={(
+                                                    e,
+                                                ) => {
+                                                    if (
+                                                        e.key === "Enter" ||
+                                                        e.key === " "
+                                                    ) {
+                                                        jumpToAiProofingRow(
+                                                            row,
+                                                        );
+                                                    }
+                                                }}
+                                            >
+                                                <small
+                                                    >{row.original} -> {row.replacement ||
+                                                        "删除"}（{row.reason}）</small
+                                                >
+                                            </span>
+                                            <span class="approval-action-cell">
+                                                {#if (batch.revertedRowIds || []).includes(row.id)}
+                                                    <button
+                                                        type="button"
+                                                        class="mini-action"
+                                                        disabled={aiProofingRunning}
+                                                        on:click={() =>
+                                                            reapplyAiApprovalRow(
+                                                                batch.id,
+                                                                row.id,
+                                                            )}>应用</button
+                                                    >
+                                                {:else}
+                                                    <button
+                                                        type="button"
+                                                        class="mini-action"
+                                                        disabled={aiProofingRunning}
+                                                        on:click={() =>
+                                                            revertAiApprovalRow(
+                                                                batch.id,
+                                                                row.id,
+                                                            )}>撤销</button
+                                                    >
+                                                {/if}
+                                            </span>
+                                        </div>
+                                    {/each}
+                                {:else}
+                                    <div class="proof-empty">
+                                        暂无 AI 审批应用记录
+                                    </div>
+                                {/each}
+                            </div>
                         {:else}
-                        <div
-                            role="log"
-                            class="ai-proof-log ai-proof-log-view"
-                            data-native-context-menu="true"
-                            on:contextmenu|stopPropagation
-                        >
-                            {#each aiProofingLogs as item}
-                                <div>{item}</div>
-                            {:else}
-                                <div>暂无日志</div>
-                            {/each}
-                        </div>
+                            <div
+                                role="log"
+                                class="ai-proof-log ai-proof-log-view"
+                                data-native-context-menu="true"
+                                on:contextmenu|stopPropagation
+                            >
+                                {#each aiProofingLogs as item}
+                                    <div>{item}</div>
+                                {:else}
+                                    <div>暂无日志</div>
+                                {/each}
+                            </div>
                         {/if}
                     {/if}
                 </div>
 
                 <div class="proof-footer">
-                    {proofMessage || "处理结果会显示在这里，文本修改后可用撤销返回。"}
+                    {proofMessage ||
+                        "处理结果会显示在这里，文本修改后可用撤销返回。"}
                 </div>
             </aside>
         {/if}
-
     </div>
 
     {#if showSettingsPanel}
@@ -5341,9 +6788,12 @@
                         else if (tabId === "styles") openSettingsStylesTab();
                         else if (tabId === "api") openSettingsApiTab();
                         else if (tabId === "ai") openSettingsAiTab();
-                        else if (tabId === "proofLogs") openSettingsProofLogsTab();
+                        else if (tabId === "proofLogs")
+                            openSettingsProofLogsTab();
                         else if (tabId === "history") openSettingsHistoryTab();
-                        else settingsActiveTab = tabId as typeof settingsActiveTab;
+                        else
+                            settingsActiveTab =
+                                tabId as typeof settingsActiveTab;
                     }}
                     onClose={() => (showSettingsPanel = false)}
                     actionLabel="保存并应用"
@@ -5351,16 +6801,20 @@
                     shellClass="editor-settings-modal"
                     contentClass="editor-settings-content"
                 >
-                    {#if settingsActiveTab === 'display'}
+                    {#if settingsActiveTab === "display"}
                         <SettingsDisplayTab
                             bind:wordWrap={appSettings.wordWrap}
                             bind:showWhitespace={appSettings.showWhitespace}
                             bind:showLineBreaks={appSettings.showLineBreaks}
-                            bind:clearHistoryOnSave={appSettings.clearHistoryOnSave}
+                            bind:clearHistoryOnSave={
+                                appSettings.clearHistoryOnSave
+                            }
                             bind:subsetFonts={appSettings.subsetFonts}
-                            bind:wordCountMaxThreshold={appSettings.wordCountMaxThreshold}
+                            bind:wordCountMaxThreshold={
+                                appSettings.wordCountMaxThreshold
+                            }
                         />
-                    {:else if settingsActiveTab === 'fonts'}
+                    {:else if settingsActiveTab === "fonts"}
                         <SettingsFontsTab
                             fonts={importedFonts}
                             message={fontSettingsMessage}
@@ -5371,7 +6825,7 @@
                             onRename={renameImportedFont}
                             onDelete={deleteImportedFont}
                         />
-                    {:else if settingsActiveTab === 'styles'}
+                    {:else if settingsActiveTab === "styles"}
                         <SettingsStylesTab
                             message={styleSettingsMessage}
                             templates={styleTemplates}
@@ -5395,7 +6849,7 @@
                             onUpdateValue={updateToolbarStyleValue}
                             onUpdateColor={updateToolbarColorValue}
                         />
-                    {:else if settingsActiveTab === 'toc'}
+                    {:else if settingsActiveTab === "toc"}
                         <SettingsTocTab
                             rules={appSettings.customRegexRules}
                             presetPatterns={TOC_PRESET_PATTERNS}
@@ -5407,7 +6861,7 @@
                             onResetRules={resetTocRegexRules}
                             onAddRule={addTocRegexRule}
                         />
-                    {:else if settingsActiveTab === 'api'}
+                    {:else if settingsActiveTab === "api"}
                         <SettingsApiTab
                             message={aiSettingsMessage}
                             providers={aiProviders}
@@ -5421,23 +6875,30 @@
                             onCancel={cancelTxtAiProviderEditor}
                             onUpdateDraft={updateSelectedTxtAiProvider}
                         />
-                    {:else if settingsActiveTab === 'ai'}
+                    {:else if settingsActiveTab === "ai"}
                         <SettingsAiTab
                             message={aiSettingsMessage}
                             providers={aiProviders}
                             proofProviderId={txtAiProofingConfig.providerId}
                             approvalProviderId={txtAiProofingConfig.approvalProviderId}
-                            bind:maxChapterChars={aiProofingConfig.maxChapterChars}
-                            bind:responseTimeoutSec={aiProofingConfig.responseTimeoutSec}
+                            bind:maxChapterChars={
+                                aiProofingConfig.maxChapterChars
+                            }
+                            bind:responseTimeoutSec={
+                                aiProofingConfig.responseTimeoutSec
+                            }
                             bind:autoApprove={aiProofingConfig.autoApprove}
                             bind:extraPrompt={aiProofingConfig.extraPrompt}
                             onProofProviderChange={(providerId) => {
                                 txtAiProofingConfig.providerId = providerId;
-                                aiProofingConfig = proofingConfigForProvider(providerId);
+                                aiProofingConfig =
+                                    proofingConfigForProvider(providerId);
                             }}
-                            onApprovalProviderChange={(providerId) => (txtAiProofingConfig.approvalProviderId = providerId)}
+                            onApprovalProviderChange={(providerId) =>
+                                (txtAiProofingConfig.approvalProviderId =
+                                    providerId)}
                         />
-                    {:else if settingsActiveTab === 'proofLogs'}
+                    {:else if settingsActiveTab === "proofLogs"}
                         <SettingsProofLogsTab
                             logs={proofLogList}
                             message={proofLogMessage}
@@ -5476,7 +6937,9 @@
                 {#if showEpubModal}
                     <div class="p-header">
                         <span>制作 EPUB</span>
-                        <button class="icon-close" on:click={closeAllPanels}>✕</button>
+                        <button class="icon-close" on:click={closeAllPanels}
+                            >✕</button
+                        >
                     </div>
                     <div class="p-body epub-modal-body">
                         <div class="epub-main-layout">
@@ -5484,11 +6947,21 @@
                             <div class="epub-fields-column">
                                 <div class="set-row compact">
                                     <label for="et">书名:</label>
-                                    <input id="et" type="text" bind:value={epubMeta.title} class="epub-input-small" />
+                                    <input
+                                        id="et"
+                                        type="text"
+                                        bind:value={epubMeta.title}
+                                        class="epub-input-small"
+                                    />
                                 </div>
                                 <div class="set-row compact">
                                     <label for="ec">作者:</label>
-                                    <input id="ec" type="text" bind:value={epubMeta.creator} class="epub-input-small" />
+                                    <input
+                                        id="ec"
+                                        type="text"
+                                        bind:value={epubMeta.creator}
+                                        class="epub-input-small"
+                                    />
                                 </div>
                                 <div class="set-row compact align-start">
                                     <label for="ed">简介:</label>
@@ -5502,7 +6975,10 @@
                                 </div>
                                 <div class="set-row compact align-start">
                                     <span class="set-label">标签:</span>
-                                    <TagsEditor bind:tags={epubMeta.tags} suggestions={[]} />
+                                    <TagsEditor
+                                        bind:tags={epubMeta.tags}
+                                        suggestions={[]}
+                                    />
                                 </div>
                             </div>
 
@@ -5513,11 +6989,18 @@
                                     on:click={pickLocalCover}
                                     role="button"
                                     tabindex="0"
-                                    on:keydown={(e) => e.key === 'Enter' && (e.target as HTMLElement).click()}
+                                    on:keydown={(e) =>
+                                        e.key === "Enter" &&
+                                        (e.target as HTMLElement).click()}
                                 >
                                     {#if coverPreviewUrl}
-                                        <img src={coverPreviewUrl} alt="封面预检" />
-                                        <div class="cover-hint">点击更换封面</div>
+                                        <img
+                                            src={coverPreviewUrl}
+                                            alt="封面预检"
+                                        />
+                                        <div class="cover-hint">
+                                            点击更换封面
+                                        </div>
                                     {:else if epubMeta.cover_path}
                                         <div class="no-cover">
                                             <span>⏳</span>
@@ -5533,10 +7016,13 @@
                                 <div class="cover-source-actions">
                                     <button
                                         class="cover-source-btn primary"
-                                        disabled={isCoverSearching || isCoverApplying}
+                                        disabled={isCoverSearching ||
+                                            isCoverApplying}
                                         on:click={searchCovers}
                                     >
-                                        {isCoverSearching ? "搜索中..." : "搜索封面"}
+                                        {isCoverSearching
+                                            ? "搜索中..."
+                                            : "搜索封面"}
                                     </button>
                                     <button
                                         class="cover-source-btn"
@@ -5547,7 +7033,9 @@
                                     </button>
                                 </div>
                                 {#if coverSearchMessage}
-                                    <div class="cover-search-status">{coverSearchMessage}</div>
+                                    <div class="cover-search-status">
+                                        {coverSearchMessage}
+                                    </div>
                                 {/if}
                             </div>
                         </div>
@@ -5556,22 +7044,42 @@
                             <div class="cover-results-panel">
                                 <div class="cover-results-head">
                                     <span>封面结果</span>
-                                    <small>点击图片使用，结果按书名和封面来源排序</small>
+                                    <small
+                                        >点击图片使用，结果按书名和封面来源排序</small
+                                    >
                                 </div>
-                                <div class="cover-result-grid" aria-label="封面搜索结果">
+                                <div
+                                    class="cover-result-grid"
+                                    aria-label="封面搜索结果"
+                                >
                                     {#each coverSearchResults as result (result.image_url)}
                                         <button
                                             class="cover-result-card"
                                             disabled={isCoverApplying}
                                             title={`${result.title}${result.source ? ` / ${result.source}` : ""}`}
-                                            on:click={() => applyRemoteCover(result)}
+                                            on:click={() =>
+                                                applyRemoteCover(result)}
                                         >
-                                            <span class="cover-result-image-wrap">
-                                                <img src={result.image_url} alt="" loading="lazy" aria-hidden="true" />
+                                            <span
+                                                class="cover-result-image-wrap"
+                                            >
+                                                <img
+                                                    src={result.image_url}
+                                                    alt=""
+                                                    loading="lazy"
+                                                    aria-hidden="true"
+                                                />
                                             </span>
                                             <span class="cover-result-info">
-                                                <span class="cover-result-title">{result.title || "未命名"}</span>
-                                                <span class="cover-result-source">{result.source || "未知来源"}</span>
+                                                <span class="cover-result-title"
+                                                    >{result.title ||
+                                                        "未命名"}</span
+                                                >
+                                                <span
+                                                    class="cover-result-source"
+                                                    >{result.source ||
+                                                        "未知来源"}</span
+                                                >
                                             </span>
                                         </button>
                                     {/each}
@@ -5580,22 +7088,37 @@
                         {/if}
 
                         {#if epubGenerationStatus !== "idle"}
-                            <div class="epub-status-line" class:success={epubGenerationStatus === "success"}>
-                                {epubGenerationStatus === "generating" ? "正在制作 EPUB..." : "EPUB 制作完成"}
+                            <div
+                                class="epub-status-line"
+                                class:success={epubGenerationStatus ===
+                                    "success"}
+                            >
+                                {epubGenerationStatus === "generating"
+                                    ? "正在制作 EPUB..."
+                                    : "EPUB 制作完成"}
                             </div>
                         {/if}
 
                         <div class="epub-modal-footer">
                             {#if epubGenerationStatus !== "success"}
-                                <button class="epub-cancel" on:click={openAdvancedEpubMetadata}>
+                                <button
+                                    class="epub-cancel"
+                                    on:click={openAdvancedEpubMetadata}
+                                >
                                     高级选项
                                 </button>
                             {/if}
                             {#if epubGenerationStatus === "success"}
-                                <button class="epub-cancel" on:click={openGeneratedEpubInEditor}>
+                                <button
+                                    class="epub-cancel"
+                                    on:click={openGeneratedEpubInEditor}
+                                >
                                     用 EPUB 编辑器打开
                                 </button>
-                                <button class="epub-cancel" on:click={revealGeneratedEpub}>
+                                <button
+                                    class="epub-cancel"
+                                    on:click={revealGeneratedEpub}
+                                >
                                     打开文件位置
                                 </button>
                             {/if}
@@ -5636,13 +7159,14 @@
                                     showRestoreConfirm = true;
                                 }}
                             >
-                                <span
-                                    class="hist-time"
+                                <span class="hist-time"
                                     >{new Date(
                                         h.timestamp * 1000,
                                     ).toLocaleString()}</span
                                 >
-                                <span class="hist-size">{(h.size / 1024).toFixed(1)}KB</span>
+                                <span class="hist-size"
+                                    >{(h.size / 1024).toFixed(1)}KB</span
+                                >
                             </button>
                         {:else}
                             <div class="empty-msg">暂无历史快照</div>
@@ -5729,17 +7253,23 @@
                         class="sec-title"
                         role="button"
                         tabindex="0"
-                        on:click={() => (checkCollapseState.seq = !checkCollapseState.seq)}
-                        on:keydown={(e) => e.key === 'Enter' && (checkCollapseState.seq = !checkCollapseState.seq)}
+                        on:click={() =>
+                            (checkCollapseState.seq = !checkCollapseState.seq)}
+                        on:keydown={(e) =>
+                            e.key === "Enter" &&
+                            (checkCollapseState.seq = !checkCollapseState.seq)}
                     >
-                        <span>{checkCollapseState.seq ? "▶" : "▼"} 断序检查 ({sequenceErrors.length})</span>
+                        <span
+                            >{checkCollapseState.seq ? "▶" : "▼"} 断序检查 ({sequenceErrors.length})</span
+                        >
                     </div>
                     {#if !checkCollapseState.seq}
                         <div class="tag-list">
                             {#each sequenceErrors as e}
                                 <button
                                     class="err-tag"
-                                    on:click={() => handleChapterClick(e.id, e.line)}
+                                    on:click={() =>
+                                        handleChapterClick(e.id, e.line)}
                                 >
                                     <span class="err-tag-msg">{e.msg}</span>
                                     <span class="err-tag-title">{e.title}</span>
@@ -5755,18 +7285,27 @@
                         class="sec-title"
                         role="button"
                         tabindex="0"
-                        on:click={() => (checkCollapseState.title = !checkCollapseState.title)}
-                        on:keydown={(e) => e.key === 'Enter' && (checkCollapseState.title = !checkCollapseState.title)}
+                        on:click={() =>
+                            (checkCollapseState.title =
+                                !checkCollapseState.title)}
+                        on:keydown={(e) =>
+                            e.key === "Enter" &&
+                            (checkCollapseState.title =
+                                !checkCollapseState.title)}
                     >
-                        <span>{checkCollapseState.title ? "▶" : "▼"} 标题内容 ({titleErrors.length})</span>
+                        <span
+                            >{checkCollapseState.title ? "▶" : "▼"} 标题内容 ({titleErrors.length})</span
+                        >
                     </div>
                     {#if !checkCollapseState.title}
                         <div class="tag-list">
                             {#each titleErrors as e}
                                 <button
                                     class="err-tag"
-                                    on:click={() => handleChapterClick(e.id, e.line)}
-                                >{e.title}</button>
+                                    on:click={() =>
+                                        handleChapterClick(e.id, e.line)}
+                                    >{e.title}</button
+                                >
                             {:else}<span class="toc-count">无</span>{/each}
                         </div>
                     {/if}
@@ -5778,18 +7317,26 @@
                         class="sec-title"
                         role="button"
                         tabindex="0"
-                        on:click={() => (checkCollapseState.word = !checkCollapseState.word)}
-                        on:keydown={(e) => e.key === 'Enter' && (checkCollapseState.word = !checkCollapseState.word)}
+                        on:click={() =>
+                            (checkCollapseState.word =
+                                !checkCollapseState.word)}
+                        on:keydown={(e) =>
+                            e.key === "Enter" &&
+                            (checkCollapseState.word =
+                                !checkCollapseState.word)}
                     >
-                        <span>{checkCollapseState.word ? "▶" : "▼"} 字数检查 ({wordCountErrors.length})</span>
+                        <span
+                            >{checkCollapseState.word ? "▶" : "▼"} 字数检查 ({wordCountErrors.length})</span
+                        >
                     </div>
                     {#if !checkCollapseState.word}
                         <div class="tag-list">
                             {#each wordCountErrors as e}
                                 <button
                                     class="err-tag"
-                                    on:click={() => handleChapterClick(e.id, e.line)}
-                                >{e.title} ({e.val})</button
+                                    on:click={() =>
+                                        handleChapterClick(e.id, e.line)}
+                                    >{e.title} ({e.val})</button
                                 >
                             {:else}<span class="toc-count">无</span>{/each}
                         </div>
@@ -6760,7 +8307,7 @@
         bottom: 8px;
         width: auto;
         border-radius: 999px;
-        background: rgba(0,0,0,0.58);
+        background: rgba(0, 0, 0, 0.58);
         color: white;
         font-size: 11px;
         padding: 4px 8px;
@@ -7053,7 +8600,7 @@
         font-weight: 700;
         font-family: monospace;
     }
-    
+
     .find-header {
         padding: 10px 14px;
         background: #f8fafc;
@@ -7170,7 +8717,11 @@
     .proof-header,
     .proof-tabs,
     .proof-footer {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 252, 0.9));
+        background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.92),
+            rgba(246, 249, 252, 0.9)
+        );
         border-color: var(--color-border);
     }
 
@@ -7186,7 +8737,11 @@
     }
 
     .proof-body {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(246, 249, 252, 0.64));
+        background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.44),
+            rgba(246, 249, 252, 0.64)
+        );
     }
 
     .proof-tabs button {
@@ -7321,7 +8876,11 @@
 
     .p-header,
     .find-header {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 252, 0.9));
+        background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.92),
+            rgba(246, 249, 252, 0.9)
+        );
         border-bottom: 1px solid var(--color-border);
     }
 
@@ -7352,7 +8911,11 @@
     .epub-cover-preview {
         border-color: var(--color-border);
         border-radius: var(--radius-md);
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(226, 243, 255, 0.54));
+        background: linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.78),
+            rgba(226, 243, 255, 0.54)
+        );
     }
 
     .epub-cover-preview:hover {

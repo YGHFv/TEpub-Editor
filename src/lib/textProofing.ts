@@ -1,6 +1,8 @@
-export type ProofTitleScope = "all" | "volumes" | "chapters" | "regex" | "numbers-only";
+export type ProofTitleScope =
+  "all" | "volumes" | "chapters" | "regex" | "numbers-only";
 export type ProofNumberStyle = "arabic" | "chinese";
-export type ProofConvertDirection = "simplified-to-traditional" | "traditional-to-simplified";
+export type ProofConvertDirection =
+  "simplified-to-traditional" | "traditional-to-simplified";
 export type ProofBuiltinRuleId = "title-brackets" | "ads" | "pinyin" | "indent";
 
 export interface ProofTocNode {
@@ -76,7 +78,8 @@ export interface ProofChineseScriptProfile {
 
 type ChineseConverter = (text: string) => string;
 
-const converterCache: Partial<Record<ProofConvertDirection, ChineseConverter>> = {};
+const converterCache: Partial<Record<ProofConvertDirection, ChineseConverter>> =
+  {};
 
 async function getChineseConverter(direction: ProofConvertDirection) {
   if (converterCache[direction]) return converterCache[direction]!;
@@ -89,7 +92,6 @@ async function getChineseConverter(direction: ProofConvertDirection) {
   converterCache[direction] = converter;
   return converter;
 }
-
 
 const CHINESE_DIGITS = [
   "零",
@@ -155,13 +157,14 @@ const PINYIN_FINALS = new Set([
   "ve",
   "vn",
 ]);
-const PINYIN_MARK_RE =
-  /[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿẁẃẅÿ]/i;
+const PINYIN_MARK_RE = /[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿẁẃẅÿ]/i;
 const PINYIN_WORD_RE = /^[A-Za-züÜvVāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿ'’\-\s0-9]+$/;
 const PINYIN_LATIN_RE = /[A-Za-züÜvVāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿ]/;
 const PINYIN_TONE_RE = /[A-Za-züÜvVāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿ][1-5]\b/;
-const TRAILING_PINYIN_RE = /\s+([A-Za-züÜvVāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿ'’\-\s0-9]+)$/;
-const AD_LINE_RE = /(月票|求票|求推荐票|推荐票|订阅|本章完|求收藏|求打赏|打赏)/i;
+const TRAILING_PINYIN_RE =
+  /\s+([A-Za-züÜvVāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜńňḿ'’\-\s0-9]+)$/;
+const AD_LINE_RE =
+  /(月票|求票|求推荐票|推荐票|订阅|本章完|求收藏|求打赏|打赏)/i;
 const AD_BLOCK_START_RE =
   /^\s*(?:(?:请假条|请假|上架感言|上架通知|完本感言|作者的话|本书上架)|(?:PS\d*|P\.S\.?\d*|ps\d*)\s*(?:[:：.．、\-—]|$))/i;
 const TRADITIONAL_ONLY_RE =
@@ -193,7 +196,10 @@ export const PROOF_BUILTIN_REGEX_RULES: ProofBuiltinRegexRule[] = [
 ];
 
 function normalizeSpaces(text: string) {
-  return text.replace(/\u3000/g, " ").replace(/[ \t]+/g, " ").trim();
+  return text
+    .replace(/\u3000/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim();
 }
 
 function buildLineOffsets(lines: string[]) {
@@ -220,14 +226,22 @@ function shouldPreviewChineseConversion(
 
   if (direction === "traditional-to-simplified") {
     if (!TRADITIONAL_ONLY_RE.test(original)) return false;
-    return countMatches(replacement, TRADITIONAL_ONLY_RE) <= countMatches(original, TRADITIONAL_ONLY_RE);
+    return (
+      countMatches(replacement, TRADITIONAL_ONLY_RE) <=
+      countMatches(original, TRADITIONAL_ONLY_RE)
+    );
   }
 
   if (!SIMPLIFIED_ONLY_RE.test(original)) return false;
-  return countMatches(replacement, SIMPLIFIED_ONLY_RE) <= countMatches(original, SIMPLIFIED_ONLY_RE);
+  return (
+    countMatches(replacement, SIMPLIFIED_ONLY_RE) <=
+    countMatches(original, SIMPLIFIED_ONLY_RE)
+  );
 }
 
-export function getChineseScriptProfile(content: string): ProofChineseScriptProfile {
+export function getChineseScriptProfile(
+  content: string,
+): ProofChineseScriptProfile {
   const simplified = countMatches(content, SIMPLIFIED_ONLY_RE);
   const traditional = countMatches(content, TRADITIONAL_ONLY_RE);
   let dominant: ProofChineseScriptProfile["dominant"] = "unknown";
@@ -250,8 +264,10 @@ function shouldSkipConvertPreviewByProfile(
   direction: ProofConvertDirection,
 ) {
   return (
-    (profile.dominant === "simplified" && direction === "simplified-to-traditional") ||
-    (profile.dominant === "traditional" && direction === "traditional-to-simplified")
+    (profile.dominant === "simplified" &&
+      direction === "simplified-to-traditional") ||
+    (profile.dominant === "traditional" &&
+      direction === "traditional-to-simplified")
   );
 }
 
@@ -294,7 +310,8 @@ function isValidPinyinSyllable(raw: string) {
   if (token.length < 1 || token.length > 7) return false;
   if (token === "r" || token === "x" || token === "y") return false;
 
-  const initial = token.match(/^(?:zh|ch|sh|[bpmfdtnlgkhjqxzcsrwy])/)?.[0] ?? "";
+  const initial =
+    token.match(/^(?:zh|ch|sh|[bpmfdtnlgkhjqxzcsrwy])/)?.[0] ?? "";
   const finalPart = token.slice(initial.length);
   if (!finalPart) return false;
 
@@ -326,8 +343,9 @@ function stripTrailingPinyin(text: string) {
 
 function cleanTitleBracketsLine(line: string) {
   const cleaned = line
-    .replace(/[\uFF08(\u3010\[]([^\uFF08\uFF09()\[\]\u3010\u3011]*)[\uFF09)\u3011\]]/g, (match, inner: string) =>
-      isTrivialBracketContent(inner) ? match : "",
+    .replace(
+      /[\uFF08(\u3010\[]([^\uFF08\uFF09()\[\]\u3010\u3011]*)[\uFF09)\u3011\]]/g,
+      (match, inner: string) => (isTrivialBracketContent(inner) ? match : ""),
     )
     .replace(/[ \t\u3000]+/g, " ")
     .replace(/\s*([\uFF1A:\u3001\uFF0C,.\uFF0E\-\u2014])\s*/g, "$1")
@@ -410,8 +428,16 @@ function isTitleLikeLine(line: string) {
     return true;
   }
 
-  if (/^\d{1,5}(?:\s*[\.\．、:：\-—]\s*|\s+|(?=[\u4e00-\u9fff])).+/.test(trimmed)) return true;
-  if (/^[一二三四五六七八九十百千万零〇两]{1,6}(?:\s*[\.\．、:：\-—]\s*|\s+).+/.test(trimmed)) return true;
+  if (
+    /^\d{1,5}(?:\s*[\.\．、:：\-—]\s*|\s+|(?=[\u4e00-\u9fff])).+/.test(trimmed)
+  )
+    return true;
+  if (
+    /^[一二三四五六七八九十百千万零〇两]{1,6}(?:\s*[\.\．、:：\-—]\s*|\s+).+/.test(
+      trimmed,
+    )
+  )
+    return true;
   return false;
 }
 
@@ -422,7 +448,9 @@ function normalizeParagraphIndent(line: string) {
 }
 
 function hasNormalParagraphIndent(line: string) {
-  return /^(?:\u3000\u3000| {2,}|\t+)\S/.test(line) || /^[ \t]{2,}\S/.test(line);
+  return (
+    /^(?:\u3000\u3000| {2,}|\t+)\S/.test(line) || /^[ \t]{2,}\S/.test(line)
+  );
 }
 
 function toChineseNumber(num: number): string {
@@ -521,14 +549,20 @@ function parseTitleNumber(original: string): number | null {
   if (chapter) return Number.parseInt(chapter[1], 10);
 
   const sequence = text.match(
-    new RegExp(String.raw`^序列\s*(${PROOF_TITLE_NUMBER})${PROOF_TITLE_BOUNDARY}`),
+    new RegExp(
+      String.raw`^序列\s*(${PROOF_TITLE_NUMBER})${PROOF_TITLE_BOUNDARY}`,
+    ),
   );
   if (sequence) return parseChineseNumber(sequence[1]);
 
-  const bracketed = text.match(/^[（(【\[]?\s*(\d{1,5})\s*[）)】\]]?(?:\s*[\.\．、:：\-—]\s*|\s+|(?=[\u4e00-\u9fff]))/);
+  const bracketed = text.match(
+    /^[（(【\[]?\s*(\d{1,5})\s*[）)】\]]?(?:\s*[\.\．、:：\-—]\s*|\s+|(?=[\u4e00-\u9fff]))/,
+  );
   if (bracketed) return Number.parseInt(bracketed[1], 10);
 
-  const chinese = text.match(/^([一二三四五六七八九十百千万零〇两]{1,8})(?:\s*[\.\．、:：\-—]\s*|\s+)/);
+  const chinese = text.match(
+    /^([一二三四五六七八九十百千万零〇两]{1,8})(?:\s*[\.\．、:：\-—]\s*|\s+)/,
+  );
   if (chinese) return parseChineseNumber(chinese[1]);
 
   return null;
@@ -563,7 +597,10 @@ function extractTitleBody(original: string) {
     }
   }
 
-  text = text.replace(new RegExp(String.raw`^(?:\s|${PROOF_TITLE_SEPARATOR})+`), "");
+  text = text.replace(
+    new RegExp(String.raw`^(?:\s|${PROOF_TITLE_SEPARATOR})+`),
+    "",
+  );
   return text.trim();
 }
 
@@ -697,7 +734,7 @@ export function buildTitleRewritePreview(
     const nextIndex =
       options.scope === "numbers-only" && originalIndex !== null
         ? originalIndex
-        : chapterCounters.get(groupKey) ?? 1;
+        : (chapterCounters.get(groupKey) ?? 1);
     if (options.scope !== "numbers-only") {
       chapterCounters.set(groupKey, nextIndex + 1);
     }
@@ -798,7 +835,10 @@ export function removeBracketContentFromTitles(
   return {
     text: lines.join("\n"),
     changedCount,
-    message: changedCount > 0 ? `已清理 ${changedCount} 个标题括号` : "没有找到括号内容",
+    message:
+      changedCount > 0
+        ? `已清理 ${changedCount} 个标题括号`
+        : "没有找到括号内容",
   };
 }
 
@@ -844,11 +884,16 @@ export function removeCommonAds(content: string): ProofTransformResult {
     text: output.join("\n"),
     changedCount,
     message:
-      changedCount > 0 ? `已移除 ${changedCount} 行广告/说明` : "没有找到广告内容",
+      changedCount > 0
+        ? `已移除 ${changedCount} 行广告/说明`
+        : "没有找到广告内容",
   };
 }
 
-export function removePinyin(content: string, tocNodes: ProofTocNode[]): ProofTransformResult {
+export function removePinyin(
+  content: string,
+  tocNodes: ProofTocNode[],
+): ProofTransformResult {
   const normalized = content.replace(/\r\n|\r|\u2028|\u2029/g, "\n");
   const lines = normalized.split("\n");
   let changedCount = 0;
@@ -890,7 +935,8 @@ export function removePinyin(content: string, tocNodes: ProofTocNode[]): ProofTr
   return {
     text: lines.join("\n"),
     changedCount,
-    message: changedCount > 0 ? `已清理 ${changedCount} 处拼音` : "没有找到拼音内容",
+    message:
+      changedCount > 0 ? `已清理 ${changedCount} 处拼音` : "没有找到拼音内容",
   };
 }
 
@@ -911,7 +957,8 @@ export function buildBuiltinRegexPreview(
   ) => {
     const startOffset = lineOffsets[lineStart - 1] ?? 0;
     let endOffset =
-      (lineOffsets[lineEnd - 1] ?? startOffset) + (lines[lineEnd - 1]?.length ?? 0);
+      (lineOffsets[lineEnd - 1] ?? startOffset) +
+      (lines[lineEnd - 1]?.length ?? 0);
     if (!replacement && lineEnd < lines.length) {
       endOffset += 1;
     }
@@ -932,7 +979,12 @@ export function buildBuiltinRegexPreview(
     for (const node of tocNodes) {
       const lineNumber = node.line;
       const lineIndex = lineNumber - 1;
-      if (seenLines.has(lineNumber) || lineIndex < 0 || lineIndex >= lines.length) continue;
+      if (
+        seenLines.has(lineNumber) ||
+        lineIndex < 0 ||
+        lineIndex >= lines.length
+      )
+        continue;
       seenLines.add(lineNumber);
       const original = lines[lineIndex];
       const replacement = cleanTitleBracketsLine(original);
@@ -978,7 +1030,11 @@ export function buildBuiltinRegexPreview(
     for (let index = 0; index < lines.length; index++) {
       const lineNumber = index + 1;
       const original = lines[index];
-      if (!original.trim() || titleLines.has(lineNumber) || isTitleLikeLine(original)) {
+      if (
+        !original.trim() ||
+        titleLines.has(lineNumber) ||
+        isTitleLikeLine(original)
+      ) {
         continue;
       }
       if (hasNormalParagraphIndent(original)) {
@@ -1008,7 +1064,8 @@ export function applyBuiltinRegexPreview(
   rows: ProofRegexPreviewRow[],
   selectedIds: Set<string> | string[],
 ): ProofTransformResult {
-  const selected = selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
+  const selected =
+    selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
   const targets = rows
     .filter((row) => selected.has(row.id))
     .sort((a, b) => a.startOffset - b.startOffset || a.endOffset - b.endOffset);
@@ -1027,7 +1084,11 @@ export function applyBuiltinRegexPreview(
   let changedCount = 0;
 
   for (const row of targets) {
-    if (row.startOffset < 0 || row.endOffset < row.startOffset || row.startOffset > normalized.length) {
+    if (
+      row.startOffset < 0 ||
+      row.endOffset < row.startOffset ||
+      row.startOffset > normalized.length
+    ) {
       continue;
     }
     if (row.startOffset < cursor) {
@@ -1043,7 +1104,10 @@ export function applyBuiltinRegexPreview(
   return {
     text: chunks.join(""),
     changedCount,
-    message: changedCount > 0 ? `已替换 ${changedCount} 个匹配项` : "没有可替换的匹配项",
+    message:
+      changedCount > 0
+        ? `已替换 ${changedCount} 个匹配项`
+        : "没有可替换的匹配项",
   };
 }
 
@@ -1109,7 +1173,14 @@ export async function buildChineseConvertPreview(
       const end = cursor;
       const originalText = chars.slice(start, end).join("");
       const replacementText = converter(originalText);
-      if (!shouldPreviewChineseConversion(originalText, replacementText, direction)) continue;
+      if (
+        !shouldPreviewChineseConversion(
+          originalText,
+          replacementText,
+          direction,
+        )
+      )
+        continue;
       const context = buildConvertContext(chars, start, end, replacementText);
       rows.push({
         id: `convert:${index + 1}:${start}:${end}`,
@@ -1133,7 +1204,8 @@ export function applyChineseConvertPreview(
   rows: ProofConvertPreviewRow[],
   selectedIds: Set<string> | string[],
 ): ProofTransformResult {
-  const selected = selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
+  const selected =
+    selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
   const targets = rows
     .filter((row) => selected.has(row.id))
     .sort((a, b) => b.lineStart - a.lineStart || b.startChar - a.startChar);
@@ -1154,10 +1226,23 @@ export function applyChineseConvertPreview(
     const index = row.lineStart - 1;
     if (index < 0 || index >= lines.length) continue;
     const chars = Array.from(lines[index]);
-    if (row.startChar < 0 || row.endChar <= row.startChar || row.startChar >= chars.length) continue;
+    if (
+      row.startChar < 0 ||
+      row.endChar <= row.startChar ||
+      row.startChar >= chars.length
+    )
+      continue;
     const originalText = chars.slice(row.startChar, row.endChar).join("");
-    if (originalText !== row.originalText || row.replacementText === originalText) continue;
-    chars.splice(row.startChar, row.endChar - row.startChar, row.replacementText);
+    if (
+      originalText !== row.originalText ||
+      row.replacementText === originalText
+    )
+      continue;
+    chars.splice(
+      row.startChar,
+      row.endChar - row.startChar,
+      row.replacementText,
+    );
     lines[index] = chars.join("");
     changedCount++;
   }
@@ -1165,7 +1250,8 @@ export function applyChineseConvertPreview(
   return {
     text: lines.join("\n"),
     changedCount,
-    message: changedCount > 0 ? `已转换 ${changedCount} 处` : "没有可转换的内容",
+    message:
+      changedCount > 0 ? `已转换 ${changedCount} 处` : "没有可转换的内容",
   };
 }
 
@@ -1237,7 +1323,8 @@ export function replaceByRegex(
     return {
       text: lines.join("\n"),
       changedCount,
-      message: changedCount > 0 ? `已替换 ${changedCount} 处标题` : "没有匹配到标题",
+      message:
+        changedCount > 0 ? `已替换 ${changedCount} 处标题` : "没有匹配到标题",
     };
   }
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { hasUnsavedEpubChanges, hasUnsavedMakeChanges, hasUnsavedTextChanges } from "./unsavedChanges";
+import {
+  hasUnsavedEpubChanges,
+  hasUnsavedMakeChanges,
+  hasUnsavedTextChanges,
+} from "./unsavedChanges";
 
 describe("unsaved change guards", () => {
   it("tracks text against its saved baseline", () => {
@@ -17,6 +21,8 @@ describe("unsaved change guards", () => {
   it("keeps the make flow dirty until an export exists", () => {
     expect(hasUnsavedMakeChanges("", "")).toBe(false);
     expect(hasUnsavedMakeChanges("web-local:book.txt", "")).toBe(true);
-    expect(hasUnsavedMakeChanges("web-local:book.txt", "book.epub")).toBe(false);
+    expect(hasUnsavedMakeChanges("web-local:book.txt", "book.epub")).toBe(
+      false,
+    );
   });
 });

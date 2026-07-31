@@ -84,14 +84,19 @@ export const EPUB_STYLE_INTERFACE = {
 
 export type EpubStyleInterfaceSlot = keyof typeof EPUB_STYLE_INTERFACE;
 
-export const EPUB_STYLE_INTERFACE_NOTES: Record<EpubStyleInterfaceSlot, string> = {
+export const EPUB_STYLE_INTERFACE_NOTES: Record<
+  EpubStyleInterfaceSlot,
+  string
+> = {
   headerFigure: "章节头图容器，负责贴边、卡片、边距和遮罩等外层效果。",
   headerImage: "章节头图图片本体，制作 EPUB 时把生成好的头图放到这里。",
   headerCaption: "头图说明文字接口；默认不显示，只有样式明确需要说明时再开启。",
-  introTitle: "简介、前言、后记等元信息页标题接口，后续会单独放到元信息样式列表。",
+  introTitle:
+    "简介、前言、后记等元信息页标题接口，后续会单独放到元信息样式列表。",
   volumeTitle: "卷首页标题接口，后续会单独放到卷标题样式列表。",
   volumeSubtitle: "卷首页副标题接口，和卷标题样式一起管理。",
-  chapterTitle: "章节标题外层接口，单行标题直接套用到这里，双行标题作为 number/name 的容器。",
+  chapterTitle:
+    "章节标题外层接口，单行标题直接套用到这里，双行标题作为 number/name 的容器。",
   chapterNumber: "双行章节标题的章节序号部分，例如“第三章”。",
   chapterName: "双行章节标题的章节名称部分，例如“计划不如变化”。",
   paragraph: "正文段落接口，预览用来观察标题和头图与正文的间距。",
@@ -102,7 +107,8 @@ export const EPUB_STYLE_INTERFACE_NOTES: Record<EpubStyleInterfaceSlot, string> 
   annotationPopup: "注释插图弹层，使用 CSS :target 实现无脚本打开和关闭。",
   transition: "章节内转场容器；制作时默认替换前后都有正文的单段孤立省略号。",
   transitionText: "带文字的转场内容，例如“与此同时”或时间地点提示。",
-  transitionImage: "图片转场容器与图片本体，对应制作模板的 dividerImage 资源位。",
+  transitionImage:
+    "图片转场容器与图片本体，对应制作模板的 dividerImage 资源位。",
 };
 
 const sampleParagraphs = `
@@ -153,26 +159,60 @@ function titlePreview(titleMarkup = splitTitleMarkup()) {
   `;
 }
 
-const fixedPreviewHeader = new URL("./assets/epub-style-library/fixed-preview-header.png", import.meta.url).href;
+const fixedPreviewHeader = new URL(
+  "./assets/epub-style-library/fixed-preview-header.png",
+  import.meta.url,
+).href;
 
 const headerTemplateSamples = {
-  bottomFade: new URL("./assets/epub-style-library/sample-character-gallery.png", import.meta.url).href,
-  tornEdge: new URL("./assets/epub-style-library/sample-sword-duel.png", import.meta.url).href,
-  scatterEdge: new URL("./assets/epub-style-library/sample-harbor-studio.png", import.meta.url).href,
-  inkEdge: new URL("./assets/epub-style-library/sample-night-guard.png", import.meta.url).href,
-  diagonalBrush: new URL("./assets/epub-style-library/sample-court-lineup.png", import.meta.url).href,
-  rightMemoryCollage: new URL("./assets/epub-style-library/sample-right-memory-collage.png", import.meta.url).href,
-  deliveryBikeCollage: new URL("./assets/epub-style-library/sample-delivery-bike-collage.png", import.meta.url).href,
-  deliveryBikeCollageTemplate: new URL("./assets/epub-style-library/template-delivery-bike-collage.png", import.meta.url).href,
-  cloudGateInkBanner: new URL("./assets/epub-style-library/sample-cloud-gate-ink-banner.png", import.meta.url).href,
-  cloudGateInkBannerTemplate: new URL("./assets/epub-style-library/template-cloud-gate-ink-banner.png", import.meta.url).href,
+  bottomFade: new URL(
+    "./assets/epub-style-library/sample-character-gallery.png",
+    import.meta.url,
+  ).href,
+  tornEdge: new URL(
+    "./assets/epub-style-library/sample-sword-duel.png",
+    import.meta.url,
+  ).href,
+  scatterEdge: new URL(
+    "./assets/epub-style-library/sample-harbor-studio.png",
+    import.meta.url,
+  ).href,
+  inkEdge: new URL(
+    "./assets/epub-style-library/sample-night-guard.png",
+    import.meta.url,
+  ).href,
+  diagonalBrush: new URL(
+    "./assets/epub-style-library/sample-court-lineup.png",
+    import.meta.url,
+  ).href,
+  rightMemoryCollage: new URL(
+    "./assets/epub-style-library/sample-right-memory-collage.png",
+    import.meta.url,
+  ).href,
+  deliveryBikeCollage: new URL(
+    "./assets/epub-style-library/sample-delivery-bike-collage.png",
+    import.meta.url,
+  ).href,
+  deliveryBikeCollageTemplate: new URL(
+    "./assets/epub-style-library/template-delivery-bike-collage.png",
+    import.meta.url,
+  ).href,
+  cloudGateInkBanner: new URL(
+    "./assets/epub-style-library/sample-cloud-gate-ink-banner.png",
+    import.meta.url,
+  ).href,
+  cloudGateInkBannerTemplate: new URL(
+    "./assets/epub-style-library/template-cloud-gate-ink-banner.png",
+    import.meta.url,
+  ).href,
 } as const;
 
 function svgDataUrl(svg: string) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-const rightMemoryCollageMask = svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720">
+const rightMemoryCollageMask =
+  svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720">
   <defs>
     <filter id="soft-edge" x="-8%" y="-8%" width="116%" height="116%">
       <feGaussianBlur stdDeviation="1.1"/>
@@ -306,7 +346,8 @@ export const EPUB_HEADER_STYLES: EpubStyleModule[] = [
       EPUB_STYLE_INTERFACE.headerImage,
       EPUB_STYLE_INTERFACE.headerCaption,
     ],
-    usage: "制作 EPUB 时把生成好的头图放入 .te-header-figure > img.te-header-image，图片贴页面上沿显示。",
+    usage:
+      "制作 EPUB 时把生成好的头图放入 .te-header-figure > img.te-header-image，图片贴页面上沿显示。",
     css: headerEdgeCss,
     previewHtml: headerPreview(fixedPreviewHeader),
     sampleDataUrl: fixedPreviewHeader,
@@ -375,14 +416,16 @@ export const EPUB_HEADER_STYLES: EpubStyleModule[] = [
     kind: "header",
     target: "header-image",
     name: "右侧散边留白头图",
-    description: "主体集中在右侧，左侧保留大片留白，并带碎片、颗粒和旧照散边效果。",
+    description:
+      "主体集中在右侧，左侧保留大片留白，并带碎片、颗粒和旧照散边效果。",
     selectors: [
       "body.te-chapter-page",
       EPUB_STYLE_INTERFACE.headerFigure,
       EPUB_STYLE_INTERFACE.headerImage,
       EPUB_STYLE_INTERFACE.headerCaption,
     ],
-    usage: "使用透明样板把用户头图裁成右侧旧照散边形状，适合年代感、群像、生活流或回忆章节。",
+    usage:
+      "使用透明样板把用户头图裁成右侧旧照散边形状，适合年代感、群像、生活流或回忆章节。",
     css: `.te-header-figure {
   margin: 0 -1.5em 1.65em;
   padding: 0;
@@ -490,14 +533,16 @@ export const EPUB_HEADER_STYLES: EpubStyleModule[] = [
     kind: "header",
     target: "header-image",
     name: "暗角遮罩贴边头图",
-    description: "贴边显示并在头图底部增加暗色压底，标题仍按所选标题样式单独渲染。",
+    description:
+      "贴边显示并在头图底部增加暗色压底，标题仍按所选标题样式单独渲染。",
     selectors: [
       "body.te-chapter-page",
       EPUB_STYLE_INTERFACE.headerFigure,
       EPUB_STYLE_INTERFACE.headerImage,
       EPUB_STYLE_INTERFACE.headerCaption,
     ],
-    usage: "章节 XHTML 中先输出 .te-header-figure，再输出章节标题；该样式只处理头图本身。",
+    usage:
+      "章节 XHTML 中先输出 .te-header-figure，再输出章节标题；该样式只处理头图本身。",
     css: `.te-header-figure {
   margin: 0 -1.5em 1.2em;
   min-height: 14em;
@@ -542,14 +587,16 @@ export const EPUB_HEADER_STYLES: EpubStyleModule[] = [
     kind: "header",
     target: "header-image",
     name: "细线装帧头图",
-    description: "图片贴近页顶，底部以细线和留白收束，适合文艺、悬疑、现代题材。",
+    description:
+      "图片贴近页顶，底部以细线和留白收束，适合文艺、悬疑、现代题材。",
     selectors: [
       "body.te-chapter-page",
       EPUB_STYLE_INTERFACE.headerFigure,
       EPUB_STYLE_INTERFACE.headerImage,
       EPUB_STYLE_INTERFACE.headerCaption,
     ],
-    usage: "章节开头先输出 .te-header-figure，图片会以装帧细线收束，标题在下方独立排版。",
+    usage:
+      "章节开头先输出 .te-header-figure，图片会以装帧细线收束，标题在下方独立排版。",
     css: `.te-header-figure {
   margin: 0 -1.2em 1.9em;
   padding: 0 0 0.42em;
@@ -596,7 +643,8 @@ export const EPUB_HEADER_STYLES: EpubStyleModule[] = [
     kind: "header",
     target: "header-image",
     name: "浮印留白头图",
-    description: "保留四周留白和轻微投影，像插页版画，适合古风、奇幻和人物向章节。",
+    description:
+      "保留四周留白和轻微投影，像插页版画，适合古风、奇幻和人物向章节。",
     selectors: [
       "body.te-chapter-page",
       EPUB_STYLE_INTERFACE.headerFigure,
@@ -641,7 +689,8 @@ export const EPUB_HEADER_STYLES: EpubStyleModule[] = [
     kind: "header",
     target: "header-image",
     name: "电影裁幅头图",
-    description: "固定横幅高度，顶部贴边并加深色压边，适合动作、悬疑、科幻章节。",
+    description:
+      "固定横幅高度，顶部贴边并加深色压边，适合动作、悬疑、科幻章节。",
     selectors: [
       "body.te-chapter-page",
       EPUB_STYLE_INTERFACE.headerFigure,
@@ -712,7 +761,8 @@ export const EPUB_TITLE_STYLES: EpubStyleModule[] = [
       EPUB_STYLE_INTERFACE.chapterNumber,
       EPUB_STYLE_INTERFACE.chapterName,
     ],
-    usage: "自动套用到双行章节标题：.te-chapter-title / .te-chapter-number / .te-chapter-name。",
+    usage:
+      "自动套用到双行章节标题：.te-chapter-title / .te-chapter-number / .te-chapter-name。",
     css: `.te-chapter-title {
   font-family: "Microsoft YaHei", sans-serif;
   text-align: center;
@@ -820,7 +870,8 @@ color: #c2181e;`,
       EPUB_STYLE_INTERFACE.chapterNumber,
       EPUB_STYLE_INTERFACE.chapterName,
     ],
-    usage: "由 h2.head / h2.head span 转换为标准章节标题接口，适合低装饰章节开头。",
+    usage:
+      "由 h2.head / h2.head span 转换为标准章节标题接口，适合低装饰章节开头。",
     css: `.te-chapter-title {
   font-size: 1.1em;
   line-height: 1.2;
@@ -872,7 +923,8 @@ color: #02586d;`,
       EPUB_STYLE_INTERFACE.chapterNumber,
       EPUB_STYLE_INTERFACE.chapterName,
     ],
-    usage: "由 h2.chapter-title / .chapter-number 转换为标准章节标题接口，自动套用到双行章题。",
+    usage:
+      "由 h2.chapter-title / .chapter-number 转换为标准章节标题接口，自动套用到双行章题。",
     css: `.te-chapter-title {
   margin-top: 0;
   margin-bottom: 1.5em;
@@ -918,7 +970,8 @@ font-family: "zdy1";`,
       EPUB_STYLE_INTERFACE.chapterNumber,
       EPUB_STYLE_INTERFACE.chapterName,
     ],
-    usage: "由 h2.head / span.num 转换为标准章节标题接口，编号块自动套用到 number。",
+    usage:
+      "由 h2.head / span.num 转换为标准章节标题接口，编号块自动套用到 number。",
     css: `.te-chapter-title {
   font-size: 1em;
   color: #0d335d;
@@ -965,13 +1018,15 @@ font-family: "zdy5";`,
     kind: "title",
     target: "chapter-title",
     name: "电影字幕章题",
-    description: "深蓝主标题配金色序号线，克制、有画面感，适合悬疑、都市、科幻。",
+    description:
+      "深蓝主标题配金色序号线，克制、有画面感，适合悬疑、都市、科幻。",
     selectors: [
       EPUB_STYLE_INTERFACE.chapterTitle,
       EPUB_STYLE_INTERFACE.chapterNumber,
       EPUB_STYLE_INTERFACE.chapterName,
     ],
-    usage: "使用标准双行章节标题结构，序号作为上方小标题，章名作为醒目的主标题。",
+    usage:
+      "使用标准双行章节标题结构，序号作为上方小标题，章名作为醒目的主标题。",
     css: `.te-chapter-title {
   width: 82%;
   margin: 1.5em auto 2.6em;
@@ -1014,7 +1069,8 @@ font-weight: 900;`,
     kind: "title",
     target: "chapter-title",
     name: "书卷双线章题",
-    description: "暖色双线和居中标题，像纸本装帧页，适合古风、奇幻、文学向作品。",
+    description:
+      "暖色双线和居中标题，像纸本装帧页，适合古风、奇幻、文学向作品。",
     selectors: [
       EPUB_STYLE_INTERFACE.chapterTitle,
       EPUB_STYLE_INTERFACE.chapterNumber,
@@ -1261,7 +1317,8 @@ font-weight: 700;`,
   },
 ];
 
-const illustrationPreviewImage = svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600">
+const illustrationPreviewImage =
+  svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600">
   <rect width="900" height="600" fill="#dcecf4"/>
   <rect y="365" width="900" height="235" fill="#8eb5a2"/>
   <circle cx="720" cy="120" r="54" fill="#fff4c7"/>
@@ -1274,7 +1331,8 @@ const illustrationPreviewImage = svgDataUrl(`<svg xmlns="http://www.w3.org/2000/
   <rect x="302" y="422" width="44" height="48" fill="#f6d787"/>
   <path d="M545 488c24-80 72-118 142-118s118 38 142 118" fill="none" stroke="#fffdf7" stroke-width="14"/>
 </svg>`);
-const illustrationWidePreviewImage = svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520">
+const illustrationWidePreviewImage =
+  svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520">
   <rect width="1200" height="520" fill="#cadde9"/>
   <circle cx="940" cy="118" r="62" fill="#fff1b8"/>
   <path d="M0 350L165 210l125 90 170-188 168 196 135-118 177 142 130-95 120 113v170H0z" fill="#6f8792"/>
@@ -1282,7 +1340,8 @@ const illustrationWidePreviewImage = svgDataUrl(`<svg xmlns="http://www.w3.org/2
   <path d="M0 455h1200v65H0z" fill="#547a70"/>
   <path d="M90 420h1020" stroke="#f6edd8" stroke-width="8" stroke-dasharray="24 16"/>
 </svg>`);
-const transitionDividerPreview = svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 90">
+const transitionDividerPreview =
+  svgDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 90">
   <g fill="none" stroke="#8a6a3d" stroke-width="2">
     <path d="M35 45h205M360 45h205"/>
     <path d="M262 45l18-18 18 18-18 18zM302 45l18-18 18 18-18 18z"/>
@@ -1318,7 +1377,8 @@ export const EPUB_ILLUSTRATION_STYLES: EpubStyleModule[] = [
       EPUB_STYLE_INTERFACE.illustrationImage,
       EPUB_STYLE_INTERFACE.illustrationCaption,
     ],
-    usage: "将 XHTML 中的图片路径、替代文字和图注替换为实际内容，适合人物、场景和资料图。",
+    usage:
+      "将 XHTML 中的图片路径、替代文字和图注替换为实际内容，适合人物、场景和资料图。",
     css: `.te-illustration {
   width: 86%;
   margin: 1.6em auto;
@@ -1360,7 +1420,8 @@ export const EPUB_ILLUSTRATION_STYLES: EpubStyleModule[] = [
     kind: "illustration",
     target: "illustration",
     name: "纸张卡片插图",
-    description: "带留白、细边框和轻阴影的卡片式插图，适合信件、档案和回忆画面。",
+    description:
+      "带留白、细边框和轻阴影的卡片式插图，适合信件、档案和回忆画面。",
     selectors: [
       EPUB_STYLE_INTERFACE.illustrationFigure,
       EPUB_STYLE_INTERFACE.illustrationImage,
@@ -1409,8 +1470,12 @@ export const EPUB_ILLUSTRATION_STYLES: EpubStyleModule[] = [
     target: "illustration",
     name: "通栏出血插图",
     description: "横向铺满版心并向两侧出血，适合章节中段的大场景和地图。",
-    selectors: [EPUB_STYLE_INTERFACE.illustrationFigure, EPUB_STYLE_INTERFACE.illustrationImage],
-    usage: "使用横幅图片；部分阅读器不支持 duokan-bleed 时仍会按容器宽度正常显示。",
+    selectors: [
+      EPUB_STYLE_INTERFACE.illustrationFigure,
+      EPUB_STYLE_INTERFACE.illustrationImage,
+    ],
+    usage:
+      "使用横幅图片；部分阅读器不支持 duokan-bleed 时仍会按容器宽度正常显示。",
     css: `.te-illustration {
   margin: 1.8em -1.5em;
   padding: 0;
@@ -1443,8 +1508,12 @@ export const EPUB_ILLUSTRATION_STYLES: EpubStyleModule[] = [
     target: "annotation-illustration",
     name: "注释点击弹图",
     description: "点击正文词语或注释链接，以无脚本弹层显示对应插图。",
-    selectors: [EPUB_STYLE_INTERFACE.annotationTrigger, EPUB_STYLE_INTERFACE.annotationPopup],
-    usage: "checkbox 的 id 必须与所有 label 的 for 一致；点击文字、注释、遮罩或关闭按钮即可打开或收起图片。",
+    selectors: [
+      EPUB_STYLE_INTERFACE.annotationTrigger,
+      EPUB_STYLE_INTERFACE.annotationPopup,
+    ],
+    usage:
+      "checkbox 的 id 必须与所有 label 的 for 一致；点击文字、注释、遮罩或关闭按钮即可打开或收起图片。",
     css: `.te-annotation-trigger {
   color: #17699a;
   text-decoration: none;
@@ -1566,7 +1635,8 @@ export const EPUB_TRANSITION_STYLES: EpubStyleModule[] = [
     kind: "transition",
     target: "transition",
     name: "居中三星转场",
-    description: "制作功能内置的经典居中 ※※※，兼容旧 class fg1 与标准 te-divider-line。",
+    description:
+      "制作功能内置的经典居中 ※※※，兼容旧 class fg1 与标准 te-divider-line。",
     selectors: [EPUB_STYLE_INTERFACE.transition],
     usage: "制作 EPUB 时默认用它替换前后都有正文的单段孤立省略号。",
     replacementMode: "isolated-ellipsis",
@@ -1592,7 +1662,8 @@ p.te-divider-line {
     name: "CSS 菱形转场",
     description: "不使用文字和图片，仅用伪元素绘制三枚渐次菱形。",
     selectors: [EPUB_STYLE_INTERFACE.transition],
-    usage: "纯 CSS 转场，可直接替换孤立省略号，黑白屏和电子墨水设备也能保持清晰。",
+    usage:
+      "纯 CSS 转场，可直接替换孤立省略号，黑白屏和电子墨水设备也能保持清晰。",
     replacementMode: "isolated-ellipsis",
     css: `.te-transition--diamond {
   margin: 1.7em 0;
@@ -1610,7 +1681,9 @@ p.te-divider-line {
   letter-spacing: 0.5em;
 }`,
     markup: `<p class="te-transition te-transition--diamond" aria-label="场景转换"></p>`,
-    previewHtml: transitionPreview(`<p class="te-transition te-transition--diamond" aria-label="场景转换"></p>`),
+    previewHtml: transitionPreview(
+      `<p class="te-transition te-transition--diamond" aria-label="场景转换"></p>`,
+    ),
   },
   {
     id: "transition-text-label",
@@ -1618,7 +1691,10 @@ p.te-divider-line {
     target: "transition",
     name: "文字线条转场",
     description: "在左右细线之间显示“与此同时”等短文本。",
-    selectors: [EPUB_STYLE_INTERFACE.transition, EPUB_STYLE_INTERFACE.transitionText],
+    selectors: [
+      EPUB_STYLE_INTERFACE.transition,
+      EPUB_STYLE_INTERFACE.transitionText,
+    ],
     usage: "替换 te-transition-text 的文字即可表达时间、地点或叙事视角转换。",
     replacementMode: "isolated-ellipsis",
     css: `.te-transition--text {
@@ -1645,7 +1721,9 @@ p.te-divider-line {
   white-space: nowrap;
 }`,
     markup: `<p class="te-transition te-transition--text"><span class="te-transition-text">与此同时</span></p>`,
-    previewHtml: transitionPreview(`<p class="te-transition te-transition--text"><span class="te-transition-text">与此同时</span></p>`),
+    previewHtml: transitionPreview(
+      `<p class="te-transition te-transition--text"><span class="te-transition-text">与此同时</span></p>`,
+    ),
   },
   {
     id: "transition-css-fade-line",
@@ -1666,7 +1744,9 @@ p.te-divider-line {
   text-indent: 0;
 }`,
     markup: `<p class="te-transition te-transition--fade-line" aria-label="场景转换"></p>`,
-    previewHtml: transitionPreview(`<p class="te-transition te-transition--fade-line" aria-label="场景转换"></p>`),
+    previewHtml: transitionPreview(
+      `<p class="te-transition te-transition--fade-line" aria-label="场景转换"></p>`,
+    ),
   },
   {
     id: "transition-image-divider",
@@ -1675,7 +1755,8 @@ p.te-divider-line {
     name: "图片装饰转场",
     description: "使用独立 PNG、JPG 或 SVG 小图替代孤立省略号。",
     selectors: [EPUB_STYLE_INTERFACE.transitionImage],
-    usage: "把图片导入制作模板的 dividerImage 资源位，制作时会自动以该图片替换孤立省略号。",
+    usage:
+      "把图片导入制作模板的 dividerImage 资源位，制作时会自动以该图片替换孤立省略号。",
     replacementMode: "isolated-ellipsis",
     css: `.te-divider-image {
   margin: 1.6em 0;

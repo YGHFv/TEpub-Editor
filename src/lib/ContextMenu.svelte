@@ -1,356 +1,412 @@
 ﻿<script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+    import { onMount, onDestroy } from "svelte";
 
-  let showMenu = false;
-  let pos = { x: 0, y: 0 };
-  let menuElement: HTMLDivElement;
-  export let enableTitleActions = false;
+    let showMenu = false;
+    let pos = { x: 0, y: 0 };
+    let menuElement: HTMLDivElement;
+    export let enableTitleActions = false;
 
-  // Define menu items structure
-  interface MenuItem {
-    label: string;
-    action: string;
-    icon?: string;
-    separator?: boolean;
-    danger?: boolean;
-  }
+    // Define menu items structure
+    interface MenuItem {
+        label: string;
+        action: string;
+        icon?: string;
+        separator?: boolean;
+        danger?: boolean;
+    }
 
-  let currentItems: MenuItem[] = [];
-  let currentContext: any = null;
+    let currentItems: MenuItem[] = [];
+    let currentContext: any = null;
 
-  async function handleAction(action: string) {
-    showMenu = false;
+    async function handleAction(action: string) {
+        showMenu = false;
 
-    // Editor actions
-    if (["copy", "cut", "paste", "select-all"].includes(action)) {
-      try {
-        const selectedText = window.getSelection()?.toString() || "";
-        switch (action) {
-          case "copy":
-            if (selectedText) await navigator.clipboard.writeText(selectedText);
-            break;
-          case "cut":
-            if (selectedText) {
-              await navigator.clipboard.writeText(selectedText);
-              document.execCommand("cut");
+        // Editor actions
+        if (["copy", "cut", "paste", "select-all"].includes(action)) {
+            try {
+                const selectedText = window.getSelection()?.toString() || "";
+                switch (action) {
+                    case "copy":
+                        if (selectedText)
+                            await navigator.clipboard.writeText(selectedText);
+                        break;
+                    case "cut":
+                        if (selectedText) {
+                            await navigator.clipboard.writeText(selectedText);
+                            document.execCommand("cut");
+                        }
+                        break;
+                    case "paste":
+                        const text = await navigator.clipboard.readText();
+                        document.execCommand("insertText", false, text);
+                        break;
+                    case "select-all":
+                        const activeEl = document.activeElement as HTMLElement;
+                        if (
+                            activeEl instanceof HTMLInputElement ||
+                            activeEl instanceof HTMLTextAreaElement
+                        ) {
+                            activeEl.select();
+                        } else {
+                            window.dispatchEvent(
+                                new CustomEvent("editor-select-all"),
+                            );
+                        }
+                        break;
+                }
+            } catch (err) {
+                console.error(err);
             }
-            break;
-          case "paste":
-            const text = await navigator.clipboard.readText();
-            document.execCommand("insertText", false, text);
-            break;
-          case "select-all":
-            const activeEl = document.activeElement as HTMLElement;
-            if (
-              activeEl instanceof HTMLInputElement ||
-              activeEl instanceof HTMLTextAreaElement
-            ) {
-              activeEl.select();
+            return;
+        }
+
+        // File/Folder/TOC actions
+        // Dispatch event with context data
+        window.dispatchEvent(
+            new CustomEvent("context-menu-action", {
+                detail: {
+                    action,
+                    context: currentContext,
+                },
+            }),
+        );
+    }
+
+    function handleMenuItemKeydown(e: KeyboardEvent, action: string) {
+        if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleAction(action);
+        }
+    }
+
+    function onContextMenu(e: MouseEvent) {
+        // 1. Check for Context Data Attribute (File Tree / TOC)
+        const target = e.target as HTMLElement;
+        if (target.closest("[data-native-context-menu='true']")) return;
+        const contextNode = target.closest(
+            "[data-context-type]",
+        ) as HTMLElement;
+
+        // 2. Check for Editor
+        const isInEditor =
+            target.closest(".cm-content") || target.closest(".cm-editor");
+        const isInput =
+            target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable;
+        if (isInput && !isInEditor && !contextNode) return;
+        const hasSelection =
+            (window.getSelection()?.toString().length ?? 0) > 0;
+
+        if (contextNode) {
+            e.preventDefault();
+            const type = contextNode.dataset.contextType;
+            currentContext = { ...contextNode.dataset }; // Copy all data attributes
+
+            // Define menus based on type
+            if (type === "folder") {
+                const folderName = (
+                    currentContext.folderType || ""
+                ).toLowerCase(); // defined in FileTreeItem as node.name
+                // User requested: Text, Style, OEBPS only
+                const allowedFolders = ["text", "style", "styles", "oebps"];
+
+                if (allowedFolders.includes(folderName)) {
+                    currentItems = [
+                        { label: "新建文件", action: "new-file", icon: "📄" },
+                        {
+                            label: "导入文件",
+                            action: "import-file",
+                            icon: "📥",
+                        },
+                    ];
+                } else {
+                    // For other folders, maybe just Import? Or nothing?
+                    // User said "remove New File". Let's keep "Import" or remove both?
+                    // "remove right-click New File" implies Import might stay or whole menu changes.
+                    // Let's safe-bet: allow Import, disallow New. Or just nothing if it's a structural folder?
+                    // Actually, usually you can import into Images/Fonts.
+                    // Let's show Import for others, but New only for allowed.
+                    currentItems = [
+                        {
+                            label: "导入文件",
+                            action: "import-file",
+                            icon: "📥",
+                        },
+                    ];
+                }
+            } else if (type === "file") {
+                currentItems = [
+                    {
+                        label: "多选/取消多选 (Ctrl+Click)",
+                        action: "toggle-select",
+                        icon: "☑️",
+                    },
+                    { separator: true, label: "", action: "" },
+                ];
+
+                // 如果是 HTML/XHTML 文件，添加额外选项
+                const path = currentContext.path || "";
+                if (path.endsWith(".xhtml") || path.endsWith(".html")) {
+                    currentItems.push(
+                        { label: "另存为...", action: "save-as", icon: "💾" },
+                        { label: "添加副本", action: "duplicate", icon: "👯" },
+                        {
+                            label: "添加现有文件...",
+                            action: "import-sibling",
+                            icon: "📥",
+                        },
+                        {
+                            label: "添加空白HTML",
+                            action: "new-sibling-html",
+                            icon: "📄",
+                        },
+                        { label: "", action: "", separator: true },
+                    );
+                }
+
+                currentItems.push(
+                    {
+                        label: "重命名 (自动重构)",
+                        action: "rename",
+                        icon: "✏️",
+                    },
+                    {
+                        label: "删除",
+                        action: "delete",
+                        icon: "🗑️",
+                        danger: true,
+                    },
+                );
+            } else if (type === "toc") {
+                const hasChildren = currentContext.hasChildren === "true"; // 只检查data-has-children属性
+
+                currentItems = [
+                    {
+                        label: "在文件树中选中",
+                        action: "select-in-tree",
+                        icon: "🔍",
+                    },
+                    {
+                        label: "选中当前卷所有文件",
+                        action: "select-children",
+                        icon: "📑",
+                    },
+                ];
+
+                // 如果有子节点，添加折叠选项
+                if (hasChildren) {
+                    currentItems.push(
+                        { separator: true, label: "", action: "" },
+                        {
+                            label: "折叠当前卷",
+                            action: "collapse-this",
+                            icon: "📁",
+                        },
+                        {
+                            label: "折叠全部卷",
+                            action: "collapse-all",
+                            icon: "📂",
+                        },
+                    );
+                }
             } else {
-              window.dispatchEvent(new CustomEvent("editor-select-all"));
+                return; // Unknown context
             }
-            break;
-        }
-      } catch (err) {
-        console.error(err);
-      }
-      return;
-    }
-
-    // File/Folder/TOC actions
-    // Dispatch event with context data
-    window.dispatchEvent(
-      new CustomEvent("context-menu-action", {
-        detail: {
-          action,
-          context: currentContext,
-        },
-      }),
-    );
-  }
-
-  function handleMenuItemKeydown(e: KeyboardEvent, action: string) {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      handleAction(action);
-    }
-  }
-
-  function onContextMenu(e: MouseEvent) {
-    // 1. Check for Context Data Attribute (File Tree / TOC)
-    const target = e.target as HTMLElement;
-    if (target.closest("[data-native-context-menu='true']")) return;
-    const contextNode = target.closest("[data-context-type]") as HTMLElement;
-
-    // 2. Check for Editor
-    const isInEditor =
-      target.closest(".cm-content") || target.closest(".cm-editor");
-    const isInput =
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable;
-    if (isInput && !isInEditor && !contextNode) return;
-    const hasSelection =
-      (window.getSelection()?.toString().length ?? 0) > 0;
-
-    if (contextNode) {
-      e.preventDefault();
-      const type = contextNode.dataset.contextType;
-      currentContext = { ...contextNode.dataset }; // Copy all data attributes
-
-      // Define menus based on type
-      if (type === "folder") {
-        const folderName = (currentContext.folderType || "").toLowerCase(); // defined in FileTreeItem as node.name
-        // User requested: Text, Style, OEBPS only
-        const allowedFolders = ["text", "style", "styles", "oebps"];
-
-        if (allowedFolders.includes(folderName)) {
-          currentItems = [
-            { label: "新建文件", action: "new-file", icon: "📄" },
-            { label: "导入文件", action: "import-file", icon: "📥" },
-          ];
+        } else if (isInEditor || isInput || hasSelection) {
+            if (!isInEditor && !isInput && !hasSelection) return;
+            e.preventDefault();
+            currentContext = {
+                type: "editor",
+                clientX: e.clientX,
+                clientY: e.clientY,
+            };
+            currentItems = [];
+            if (enableTitleActions) {
+                currentItems.push(
+                    {
+                        label: "设为章节标题",
+                        action: "make-chapter-title",
+                        icon: "H",
+                    },
+                    {
+                        label: "设为卷标题",
+                        action: "make-volume-title",
+                        icon: "H1",
+                    },
+                    { label: "取消标题", action: "remove-title", icon: "T" },
+                    { separator: true, label: "", action: "" },
+                );
+            }
+            currentItems.push(
+                { label: "剪切", action: "cut", icon: "✂" },
+                { label: "复制", action: "copy", icon: "C" },
+                { label: "粘贴", action: "paste", icon: "P" },
+                { separator: true, label: "", action: "" },
+                { label: "全选", action: "select-all", icon: "A" },
+            );
         } else {
-          // For other folders, maybe just Import? Or nothing?
-          // User said "remove New File". Let's keep "Import" or remove both?
-          // "remove right-click New File" implies Import might stay or whole menu changes.
-          // Let's safe-bet: allow Import, disallow New. Or just nothing if it's a structural folder?
-          // Actually, usually you can import into Images/Fonts.
-          // Let's show Import for others, but New only for allowed.
-          currentItems = [
-            { label: "导入文件", action: "import-file", icon: "📥" },
-          ];
-        }
-      } else if (type === "file") {
-        currentItems = [
-          {
-            label: "多选/取消多选 (Ctrl+Click)",
-            action: "toggle-select",
-            icon: "☑️",
-          },
-          { separator: true, label: "", action: "" },
-        ];
-
-        // 如果是 HTML/XHTML 文件，添加额外选项
-        const path = currentContext.path || "";
-        if (path.endsWith(".xhtml") || path.endsWith(".html")) {
-          currentItems.push(
-            { label: "另存为...", action: "save-as", icon: "💾" },
-            { label: "添加副本", action: "duplicate", icon: "👯" },
-            { label: "添加现有文件...", action: "import-sibling", icon: "📥" },
-            { label: "添加空白HTML", action: "new-sibling-html", icon: "📄" },
-            { label: "", action: "", separator: true },
-          );
+            // 空白区域 - 阻止默认菜单，不显示自定义菜单
+            e.preventDefault();
+            if (showMenu) showMenu = false;
+            return;
         }
 
-        currentItems.push(
-          { label: "重命名 (自动重构)", action: "rename", icon: "✏️" },
-          { label: "删除", action: "delete", icon: "🗑️", danger: true },
-        );
-      } else if (type === "toc") {
-        const hasChildren = currentContext.hasChildren === "true"; // 只检查data-has-children属性
+        // Position logic
+        let x = e.clientX;
+        let y = e.clientY;
 
-        currentItems = [
-          { label: "在文件树中选中", action: "select-in-tree", icon: "🔍" },
-          {
-            label: "选中当前卷所有文件",
-            action: "select-children",
-            icon: "📑",
-          },
-        ];
+        // Simple measurement (can be improved)
+        const menuWidth = 160;
+        const menuHeight = currentItems.length * 36 + 10;
 
-        // 如果有子节点，添加折叠选项
-        if (hasChildren) {
-          currentItems.push(
-            { separator: true, label: "", action: "" },
-            { label: "折叠当前卷", action: "collapse-this", icon: "📁" },
-            { label: "折叠全部卷", action: "collapse-all", icon: "📂" },
-          );
-        }
-      } else {
-        return; // Unknown context
-      }
-    } else if (isInEditor || isInput || hasSelection) {
-      if (!isInEditor && !isInput && !hasSelection) return;
-      e.preventDefault();
-      currentContext = { type: "editor", clientX: e.clientX, clientY: e.clientY };
-      currentItems = [];
-      if (enableTitleActions) {
-        currentItems.push(
-          { label: "设为章节标题", action: "make-chapter-title", icon: "H" },
-          { label: "设为卷标题", action: "make-volume-title", icon: "H1" },
-          { label: "取消标题", action: "remove-title", icon: "T" },
-          { separator: true, label: "", action: "" },
-        );
-      }
-      currentItems.push(
-        { label: "剪切", action: "cut", icon: "✂" },
-        { label: "复制", action: "copy", icon: "C" },
-        { label: "粘贴", action: "paste", icon: "P" },
-        { separator: true, label: "", action: "" },
-        { label: "全选", action: "select-all", icon: "A" },
-      );
-    } else {
-      // 空白区域 - 阻止默认菜单，不显示自定义菜单
-      e.preventDefault();
-      if (showMenu) showMenu = false;
-      return;
+        if (x + menuWidth > window.innerWidth) x -= menuWidth;
+        if (y + menuHeight > window.innerHeight) y -= menuHeight;
+
+        pos = { x, y };
+        showMenu = true;
     }
 
-    // Position logic
-    let x = e.clientX;
-    let y = e.clientY;
-
-    // Simple measurement (can be improved)
-    const menuWidth = 160;
-    const menuHeight = currentItems.length * 36 + 10;
-
-    if (x + menuWidth > window.innerWidth) x -= menuWidth;
-    if (y + menuHeight > window.innerHeight) y -= menuHeight;
-
-    pos = { x, y };
-    showMenu = true;
-  }
-
-  function onGlobalClick() {
-    if (showMenu) showMenu = false;
-  }
-
-  function onScroll() {
-    if (showMenu) showMenu = false;
-  }
-
-  onMount(() => {
-    window.addEventListener("contextmenu", onContextMenu);
-    window.addEventListener("click", onGlobalClick);
-    window.addEventListener("scroll", onScroll, true);
-  });
-
-  onDestroy(() => {
-    if (typeof window !== "undefined") {
-      window.removeEventListener("contextmenu", onContextMenu);
-      window.removeEventListener("click", onGlobalClick);
-      window.removeEventListener("scroll", onScroll, true);
+    function onGlobalClick() {
+        if (showMenu) showMenu = false;
     }
-  });
+
+    function onScroll() {
+        if (showMenu) showMenu = false;
+    }
+
+    onMount(() => {
+        window.addEventListener("contextmenu", onContextMenu);
+        window.addEventListener("click", onGlobalClick);
+        window.addEventListener("scroll", onScroll, true);
+    });
+
+    onDestroy(() => {
+        if (typeof window !== "undefined") {
+            window.removeEventListener("contextmenu", onContextMenu);
+            window.removeEventListener("click", onGlobalClick);
+            window.removeEventListener("scroll", onScroll, true);
+        }
+    });
 </script>
 
 {#if showMenu}
-  <div
-    class="context-menu"
-    bind:this={menuElement}
-    style="top: {pos.y}px; left: {pos.x}px;"
-    role="menu"
-    aria-label="上下文菜单"
-    tabindex="-1"
-  >
-    {#each currentItems as item}
-      {#if item.separator}
-        <div class="separator"></div>
-      {:else}
-        <div
-          class="menu-item"
-          class:danger={item.danger}
-          role="menuitem"
-          tabindex="0"
-          on:click={() => handleAction(item.action)}
-          on:keydown={(e) => handleMenuItemKeydown(e, item.action)}
-        >
-          <span class="icon">{item.icon}</span>
-          <span>{item.label}</span>
-        </div>
-      {/if}
-    {/each}
-  </div>
+    <div
+        class="context-menu"
+        bind:this={menuElement}
+        style="top: {pos.y}px; left: {pos.x}px;"
+        role="menu"
+        aria-label="上下文菜单"
+        tabindex="-1"
+    >
+        {#each currentItems as item}
+            {#if item.separator}
+                <div class="separator"></div>
+            {:else}
+                <div
+                    class="menu-item"
+                    class:danger={item.danger}
+                    role="menuitem"
+                    tabindex="0"
+                    on:click={() => handleAction(item.action)}
+                    on:keydown={(e) => handleMenuItemKeydown(e, item.action)}
+                >
+                    <span class="icon">{item.icon}</span>
+                    <span>{item.label}</span>
+                </div>
+            {/if}
+        {/each}
+    </div>
 {/if}
 
 <style>
-  .context-menu {
-    position: fixed;
-    z-index: 999999;
-    min-width: 160px;
-    background: #ffffff;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    padding: 6px 0;
-    font-family: system-ui, sans-serif;
-    font-size: 13px;
-    color: #333;
-    cursor: default;
-    user-select: none;
-  }
+    .context-menu {
+        position: fixed;
+        z-index: 999999;
+        min-width: 160px;
+        background: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        padding: 6px 0;
+        font-family: system-ui, sans-serif;
+        font-size: 13px;
+        color: #333;
+        cursor: default;
+        user-select: none;
+    }
 
-  .menu-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 14px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
+    .menu-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 14px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
 
-  .menu-item:hover {
-    background: #f0f0f0;
-  }
+    .menu-item:hover {
+        background: #f0f0f0;
+    }
 
-  .menu-item.danger {
-    color: #d32f2f;
-  }
-  .menu-item.danger:hover {
-    background: #ffebee;
-  }
+    .menu-item.danger {
+        color: #d32f2f;
+    }
+    .menu-item.danger:hover {
+        background: #ffebee;
+    }
 
-  .menu-item .icon {
-    font-size: 14px;
-    width: 18px;
-    display: inline-block;
-    text-align: center;
-  }
+    .menu-item .icon {
+        font-size: 14px;
+        width: 18px;
+        display: inline-block;
+        text-align: center;
+    }
 
-  .separator {
-    height: 1px;
-    background: #eee;
-    margin: 4px 0;
-  }
+    .separator {
+        height: 1px;
+        background: #eee;
+        margin: 4px 0;
+    }
 
-  /* Modern UI overrides */
-  .context-menu {
-    min-width: 176px;
-    padding: 6px;
-    background: var(--color-surface-raised);
-    border: 1px solid rgba(255, 255, 255, 0.78);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-pop);
-    font-family: var(--font-ui);
-    color: var(--color-text);
-    backdrop-filter: blur(18px) saturate(1.08);
-  }
+    /* Modern UI overrides */
+    .context-menu {
+        min-width: 176px;
+        padding: 6px;
+        background: var(--color-surface-raised);
+        border: 1px solid rgba(255, 255, 255, 0.78);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-pop);
+        font-family: var(--font-ui);
+        color: var(--color-text);
+        backdrop-filter: blur(18px) saturate(1.08);
+    }
 
-  .menu-item {
-    padding: 8px 10px;
-    border-radius: var(--radius-sm);
-    color: var(--color-text-soft);
-  }
+    .menu-item {
+        padding: 8px 10px;
+        border-radius: var(--radius-sm);
+        color: var(--color-text-soft);
+    }
 
-  .menu-item:hover {
-    background: var(--color-hover);
-    color: var(--color-text);
-  }
+    .menu-item:hover {
+        background: var(--color-hover);
+        color: var(--color-text);
+    }
 
-  .menu-item.danger {
-    color: var(--color-danger);
-  }
+    .menu-item.danger {
+        color: var(--color-danger);
+    }
 
-  .menu-item.danger:hover {
-    background: var(--color-danger-soft);
-  }
+    .menu-item.danger:hover {
+        background: var(--color-danger-soft);
+    }
 
-  .menu-item .icon {
-    color: var(--color-muted);
-  }
+    .menu-item .icon {
+        color: var(--color-muted);
+    }
 
-  .separator {
-    background: var(--color-border);
-    margin: 5px 4px;
-  }
+    .separator {
+        background: var(--color-border);
+        margin: 5px 4px;
+    }
 </style>

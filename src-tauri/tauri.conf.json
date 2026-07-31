@@ -42,17 +42,13 @@
     ],
     "fileAssociations": [
       {
-        "ext": [
-          "txt"
-        ],
+        "ext": ["txt"],
         "name": "Text File",
         "description": "用 TEpub-Editor 打开文本文件",
         "role": "Editor"
       },
       {
-        "ext": [
-          "epub"
-        ],
+        "ext": ["epub"],
         "name": "EPUB File",
         "description": "用 TEpub-Editor 打开 EPUB 文件",
         "role": "Editor"

@@ -33,7 +33,16 @@
 
 <div class="rules-header">正则表达式</div>
 <div class="rule-helper-row">
-    <CustomSelect className="rule-type rule-type-helper" value={String(prefixLevel)} options={[1, 2, 3, 4, 5].map((level) => ({ value: String(level), label: `层级 ${level}` }))} ariaLabel="前缀层级" on:change={(event) => (prefixLevel = Number(event.detail))} />
+    <CustomSelect
+        className="rule-type rule-type-helper"
+        value={String(prefixLevel)}
+        options={[1, 2, 3, 4, 5].map((level) => ({
+            value: String(level),
+            label: `层级 ${level}`,
+        }))}
+        ariaLabel="前缀层级"
+        on:change={(event) => (prefixLevel = Number(event.detail))}
+    />
     <input
         class="rule-prefix-input"
         bind:value={prefixText}
@@ -48,39 +57,70 @@
             onAddPrefix(prefixLevel, prefix);
             prefixText = "";
             prefixLevel = 3;
-        }}
-    >＋ 前缀</button>
+        }}>＋ 前缀</button
+    >
 </div>
 <div class="rules-list">
     {#each rules as rule, idx}
         <div class="rule-item" style="gap: 8px; align-items: center;">
-            <CustomSelect className="rule-type" value={String(rule.level)} options={[1, 2, 3, 4, 5].map((level) => ({ value: String(level), label: `层级 ${level}` }))} ariaLabel="目录层级" on:change={(event) => onUpdateRule(idx, { level: Number(event.detail) })} />
+            <CustomSelect
+                className="rule-type"
+                value={String(rule.level)}
+                options={[1, 2, 3, 4, 5].map((level) => ({
+                    value: String(level),
+                    label: `层级 ${level}`,
+                }))}
+                ariaLabel="目录层级"
+                on:change={(event) =>
+                    onUpdateRule(idx, { level: Number(event.detail) })}
+            />
 
             <div class="rule-input-group">
                 <input
                     class="rule-input"
                     type="text"
                     value={rule.pattern}
-                    oninput={(event) => onUpdateRule(idx, { pattern: event.currentTarget.value })}
+                    oninput={(event) =>
+                        onUpdateRule(idx, {
+                            pattern: event.currentTarget.value,
+                        })}
                     placeholder="输入正则表达式"
                 />
                 <CustomSelect
                     className="rule-preset-select"
                     value=""
                     placeholder="预设"
-                    options={presetPatterns.map((pattern) => ({ value: pattern, label: pattern }))}
+                    options={presetPatterns.map((pattern) => ({
+                        value: pattern,
+                        label: pattern,
+                    }))}
                     ariaLabel="选择预设正则"
-                    on:change={(event) => { if (event.detail) onUpdateRule(idx, { pattern: event.detail }); }}
+                    on:change={(event) => {
+                        if (event.detail)
+                            onUpdateRule(idx, { pattern: event.detail });
+                    }}
                 />
             </div>
 
-            <button class="rule-btn remove" onclick={() => onRemoveRule(idx)}>－</button>
+            <button class="rule-btn remove" onclick={() => onRemoveRule(idx)}
+                >－</button
+            >
         </div>
     {/each}
 </div>
-<div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-    <button class="grid-btn" style="padding: 4px 10px; font-size: 13px;" onclick={onResetRules}>↺ 还原正则</button>
-    <button class="grid-btn" style="padding: 4px 10px; font-size: 13px; color: #0066b8; border-color: #0066b8;" onclick={onAddRule}>＋ 新增正则</button>
+<div
+    style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;"
+>
+    <button
+        class="grid-btn"
+        style="padding: 4px 10px; font-size: 13px;"
+        onclick={onResetRules}>↺ 还原正则</button
+    >
+    <button
+        class="grid-btn"
+        style="padding: 4px 10px; font-size: 13px; color: #0066b8; border-color: #0066b8;"
+        onclick={onAddRule}>＋ 新增正则</button
+    >
 </div>
 
 <style>

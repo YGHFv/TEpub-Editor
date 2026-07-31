@@ -18,7 +18,10 @@
     type MobileTab = "home" | "config" | "about";
 
     const appVersion = "0.6.1";
-    const appIconUrl = new URL("../../../src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png", import.meta.url).href;
+    const appIconUrl = new URL(
+        "../../../src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png",
+        import.meta.url,
+    ).href;
     const developerUrl = "https://github.com/YGHFv";
 
     const modules: MobileModule[] = [
@@ -80,7 +83,12 @@
     let activeTab: MobileTab = "home";
     let status = "点击功能入口后直接选择文件。";
 
-    $: pageTitle = activeTab === "home" ? "TEpub Editor" : activeTab === "config" ? "配置" : "";
+    $: pageTitle =
+        activeTab === "home"
+            ? "TEpub Editor"
+            : activeTab === "config"
+              ? "配置"
+              : "";
     $: showHeader = activeTab !== "about";
     $: pageSubtitle = "";
 
@@ -118,7 +126,10 @@
         try {
             busy = true;
             status = `正在导入 ${file.name}...`;
-            const cachedPath = await cacheBrowserFileStable(file, item.fallbackExt);
+            const cachedPath = await cacheBrowserFileStable(
+                file,
+                item.fallbackExt,
+            );
             if (token !== pickToken) return;
             busy = false;
             await goto(
@@ -130,7 +141,10 @@
         } catch (err) {
             if (token !== pickToken) return;
             status = "导入文件失败";
-            await platform.message(`导入文件失败：${err}`, { title: item.title, kind: "error" });
+            await platform.message(`导入文件失败：${err}`, {
+                title: item.title,
+                kind: "error",
+            });
         } finally {
             if (token === pickToken) busy = false;
         }
@@ -148,9 +162,27 @@
 </svelte:head>
 
 <main class:about-mode={activeTab === "about"} class="mobile-shell">
-    <input bind:this={makeInputEl} class="file-input" type="file" accept={modules[0].accept} on:change={(event) => handlePick(modules[0], event)} />
-    <input bind:this={decryptInputEl} class="file-input" type="file" accept={modules[1].accept} on:change={(event) => handlePick(modules[1], event)} />
-    <input bind:this={editInputEl} class="file-input" type="file" accept={modules[2].accept} on:change={(event) => handlePick(modules[2], event)} />
+    <input
+        bind:this={makeInputEl}
+        class="file-input"
+        type="file"
+        accept={modules[0].accept}
+        on:change={(event) => handlePick(modules[0], event)}
+    />
+    <input
+        bind:this={decryptInputEl}
+        class="file-input"
+        type="file"
+        accept={modules[1].accept}
+        on:change={(event) => handlePick(modules[1], event)}
+    />
+    <input
+        bind:this={editInputEl}
+        class="file-input"
+        type="file"
+        accept={modules[2].accept}
+        on:change={(event) => handlePick(modules[2], event)}
+    />
 
     <section class:about-screen={activeTab === "about"} class="screen">
         {#if showHeader}
@@ -172,11 +204,25 @@
                     >
                         <span class="entry-icon" aria-hidden="true">
                             {#if item.icon === "make"}
-                                <svg viewBox="0 0 24 24"><path d="M6 4h8l4 4v12H6z"></path><path d="M14 4v5h5"></path><path d="M9 13h6M9 16h4"></path></svg>
+                                <svg viewBox="0 0 24 24"
+                                    ><path d="M6 4h8l4 4v12H6z"></path><path
+                                        d="M14 4v5h5"
+                                    ></path><path d="M9 13h6M9 16h4"
+                                    ></path></svg
+                                >
                             {:else if item.icon === "decrypt"}
-                                <svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 0 1 10 0v3"></path><path d="M6 11h12v9H6z"></path><path d="M12 15v2"></path></svg>
+                                <svg viewBox="0 0 24 24"
+                                    ><path d="M7 11V8a5 5 0 0 1 10 0v3"
+                                    ></path><path d="M6 11h12v9H6z"></path><path
+                                        d="M12 15v2"
+                                    ></path></svg
+                                >
                             {:else}
-                                <svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z"></path><path d="M9 9h6M9 12h6M9 15h3"></path></svg>
+                                <svg viewBox="0 0 24 24"
+                                    ><path d="M5 5h14v14H5z"></path><path
+                                        d="M9 9h6M9 12h6M9 15h3"
+                                    ></path></svg
+                                >
                             {/if}
                         </span>
                         <span>{item.kicker}</span>
@@ -191,7 +237,9 @@
                     <div>
                         <span>界面风格</span>
                         <strong>澎湃新 UI</strong>
-                        <small>入口页使用大圆角卡片和贴底导航；功能流程保持原有稳定逻辑。</small>
+                        <small
+                            >入口页使用大圆角卡片和贴底导航；功能流程保持原有稳定逻辑。</small
+                        >
                     </div>
                     <span class="setting-orb" aria-hidden="true"></span>
                 </div>
@@ -206,26 +254,38 @@
                     <p>{appVersion}-mobile-release</p>
                 </div>
 
-                <button class="developer-card" type="button" on:click={() => openExternal(developerUrl)}>
+                <button
+                    class="developer-card"
+                    type="button"
+                    on:click={() => openExternal(developerUrl)}
+                >
                     <img src="https://github.com/YGHFv.png" alt="" />
                     <span>
                         <strong>源谷绘</strong>
                         <small>@YGHFv</small>
                     </span>
                     <i aria-hidden="true">
-                        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"></path></svg>
+                        <svg viewBox="0 0 24 24"
+                            ><path d="M9 5l7 7-7 7"></path></svg
+                        >
                     </i>
                 </button>
 
                 <div class="about-list" aria-label="关于链接">
                     {#each aboutLinks as item}
-                        <button class="about-row" type="button" on:click={() => openExternal(item.href)}>
+                        <button
+                            class="about-row"
+                            type="button"
+                            on:click={() => openExternal(item.href)}
+                        >
                             <span>
                                 <strong>{item.title}</strong>
                                 <small>{item.description}</small>
                             </span>
                             <i aria-hidden="true">
-                                <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"></path></svg>
+                                <svg viewBox="0 0 24 24"
+                                    ><path d="M9 5l7 7-7 7"></path></svg
+                                >
                             </i>
                         </button>
                     {/each}
@@ -235,16 +295,37 @@
     </section>
 
     <nav class="bottom-tabs" aria-label="底部导航">
-        <button class:active={activeTab === "home"} type="button" on:click={() => setTab("home")}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 4l8 7.5V20h-5v-6H9v6H4z"></path></svg>
+        <button
+            class:active={activeTab === "home"}
+            type="button"
+            on:click={() => setTab("home")}
+        >
+            <svg viewBox="0 0 24 24" aria-hidden="true"
+                ><path d="M4 11.5 12 4l8 7.5V20h-5v-6H9v6H4z"></path></svg
+            >
             <span>主页</span>
         </button>
-        <button class:active={activeTab === "config"} type="button" on:click={() => setTab("config")}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"></path><path d="M4 12h2m12 0h2M12 4v2m0 12v2M6.6 6.6 8 8m8 8 1.4 1.4M17.4 6.6 16 8m-8 8-1.4 1.4"></path></svg>
+        <button
+            class:active={activeTab === "config"}
+            type="button"
+            on:click={() => setTab("config")}
+        >
+            <svg viewBox="0 0 24 24" aria-hidden="true"
+                ><path d="M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"></path><path
+                    d="M4 12h2m12 0h2M12 4v2m0 12v2M6.6 6.6 8 8m8 8 1.4 1.4M17.4 6.6 16 8m-8 8-1.4 1.4"
+                ></path></svg
+            >
             <span>配置</span>
         </button>
-        <button class:active={activeTab === "about"} type="button" on:click={() => setTab("about")}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v7"></path><path d="M12 7h.01"></path></svg>
+        <button
+            class:active={activeTab === "about"}
+            type="button"
+            on:click={() => setTab("about")}
+        >
+            <svg viewBox="0 0 24 24" aria-hidden="true"
+                ><circle cx="12" cy="12" r="9"></circle><path d="M12 10v7"
+                ></path><path d="M12 7h.01"></path></svg
+            >
             <span>关于</span>
         </button>
     </nav>
@@ -279,7 +360,11 @@
 
     .mobile-shell.about-mode {
         background:
-            radial-gradient(circle at 52% 20%, rgba(255, 255, 255, 0.88), transparent 30%),
+            radial-gradient(
+                circle at 52% 20%,
+                rgba(255, 255, 255, 0.88),
+                transparent 30%
+            ),
             linear-gradient(155deg, #f4ecff 0%, #fdf3f6 45%, #edf5ff 100%);
     }
 
@@ -303,16 +388,32 @@
         top: 8vh;
         left: -26vw;
         background:
-            radial-gradient(circle at 44% 46%, rgba(255, 198, 219, 0.92), transparent 58%),
-            radial-gradient(circle at 72% 42%, rgba(157, 201, 255, 0.72), transparent 54%);
+            radial-gradient(
+                circle at 44% 46%,
+                rgba(255, 198, 219, 0.92),
+                transparent 58%
+            ),
+            radial-gradient(
+                circle at 72% 42%,
+                rgba(157, 201, 255, 0.72),
+                transparent 54%
+            );
     }
 
     .mobile-shell.about-mode::after {
         right: -24vw;
         bottom: 10vh;
         background:
-            radial-gradient(circle at 44% 46%, rgba(236, 223, 255, 0.92), transparent 56%),
-            radial-gradient(circle at 22% 74%, rgba(255, 222, 176, 0.72), transparent 50%);
+            radial-gradient(
+                circle at 44% 46%,
+                rgba(236, 223, 255, 0.92),
+                transparent 56%
+            ),
+            radial-gradient(
+                circle at 22% 74%,
+                rgba(255, 222, 176, 0.72),
+                transparent 50%
+            );
         animation-delay: -4s;
     }
 
@@ -333,7 +434,8 @@
         box-sizing: border-box;
         max-width: 780px;
         margin: 0 auto;
-        padding: max(46px, calc(env(safe-area-inset-top) + 28px)) 18px calc(96px + env(safe-area-inset-bottom));
+        padding: max(46px, calc(env(safe-area-inset-top) + 28px)) 18px
+            calc(96px + env(safe-area-inset-bottom));
     }
 
     .screen.about-screen {
@@ -404,7 +506,11 @@
         align-self: center;
         border-radius: 16px;
         color: #fff;
-        background: linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent) 68%, #fff));
+        background: linear-gradient(
+            145deg,
+            var(--accent),
+            color-mix(in srgb, var(--accent) 68%, #fff)
+        );
     }
 
     .entry-icon svg,

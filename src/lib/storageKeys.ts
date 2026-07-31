@@ -129,7 +129,8 @@ export const TEXT_EDITOR_DRAFT_KEY = "tepub-web-text-editor-draft";
  * toolbox/text-editor 页写入后跳转 /toolbox/make-epub；
  * 注意：目前代码库内没有读取方（make-epub 复用的 mobile/make 组件尚未消费）。
  */
-export const TEXT_EDITOR_EPUB_HANDOFF_KEY = "tepub-web-text-editor-epub-handoff";
+export const TEXT_EDITOR_EPUB_HANDOFF_KEY =
+  "tepub-web-text-editor-epub-handoff";
 
 // ===================== Web 客户端档案 =====================
 

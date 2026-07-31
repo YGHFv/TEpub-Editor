@@ -128,7 +128,8 @@
         background: transparent;
         color: #999;
         font-size: 16px;
-        font-family: "Segoe UI Symbol", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+        font-family:
+            "Segoe UI Symbol", "Segoe UI", "Microsoft YaHei UI", sans-serif;
         font-weight: 400;
         line-height: 1;
         cursor: pointer;

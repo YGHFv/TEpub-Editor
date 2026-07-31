@@ -70,9 +70,14 @@ function escapeXml(value: string) {
 }
 
 function attributeValue(tag: string, name: string) {
-  const pattern = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
+  const pattern = new RegExp(
+    `\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    "i",
+  );
   const match = pattern.exec(tag);
-  return decodeHtmlEntities(match?.[1] ?? match?.[2] ?? match?.[3] ?? "").trim();
+  return decodeHtmlEntities(
+    match?.[1] ?? match?.[2] ?? match?.[3] ?? "",
+  ).trim();
 }
 
 function imageTagInfo(tag: string, encoded = false): ImageTagInfo | null {
@@ -108,11 +113,14 @@ export async function scanWebEpubRemoteImages(doc: WebEpubDocument) {
       };
       current.occurrences += 1;
       if (tag.encoded) current.encodedOccurrences += 1;
-      if (!current.filePaths.includes(file.path)) current.filePaths.push(file.path);
+      if (!current.filePaths.includes(file.path))
+        current.filePaths.push(file.path);
       references.set(tag.url, current);
     }
   }
-  return [...references.values()].sort((left, right) => left.url.localeCompare(right.url));
+  return [...references.values()].sort((left, right) =>
+    left.url.localeCompare(right.url),
+  );
 }
 
 function dirname(path: string) {
@@ -132,38 +140,65 @@ function relativeHref(fromFile: string, targetPath: string) {
 
 function mediaTypeFromBytes(bytes: Uint8Array, declared: string, url: string) {
   const mediaType = declared.split(";", 1)[0].trim().toLowerCase();
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) return { mediaType: "image/jpeg", extension: "jpg" };
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return { mediaType: "image/png", extension: "png" };
-  if (String.fromCharCode(...bytes.slice(0, 4)) === "GIF8") return { mediaType: "image/gif", extension: "gif" };
-  if (String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8)
+    return { mediaType: "image/jpeg", extension: "jpg" };
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  )
+    return { mediaType: "image/png", extension: "png" };
+  if (String.fromCharCode(...bytes.slice(0, 4)) === "GIF8")
+    return { mediaType: "image/gif", extension: "gif" };
+  if (
+    String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+    String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
+  ) {
     return { mediaType: "image/webp", extension: "webp" };
   }
-  throw new Error(`响应不是支持的 JPG、PNG、WebP 或 GIF 图片（${mediaType || new URL(url).pathname.split(".").pop() || "未知类型"}）`);
+  throw new Error(
+    `响应不是支持的 JPG、PNG、WebP 或 GIF 图片（${mediaType || new URL(url).pathname.split(".").pop() || "未知类型"}）`,
+  );
 }
 
 function safeUrlStem(url: string) {
   try {
-    const raw = decodeURIComponent(new URL(url).pathname.split("/").pop() || "").replace(/\.[^.]+$/, "");
-    const clean = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+    const raw = decodeURIComponent(
+      new URL(url).pathname.split("/").pop() || "",
+    ).replace(/\.[^.]+$/, "");
+    const clean = raw
+      .replace(/[^A-Za-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
     return clean || "online-image";
   } catch {
     return "online-image";
   }
 }
 
-function uniqueImagePath(doc: WebEpubDocument, url: string, extension: string, reserved: Set<string>) {
+function uniqueImagePath(
+  doc: WebEpubDocument,
+  url: string,
+  extension: string,
+  reserved: Set<string>,
+) {
   const directory = normalizeZipPath(`${doc.opfDir}Images/online`);
   const stem = safeUrlStem(url);
   let path = `${directory}/${stem}.${extension}`;
   let suffix = 2;
-  while (doc.zip.file(path) || reserved.has(path)) path = `${directory}/${stem}-${suffix++}.${extension}`;
+  while (doc.zip.file(path) || reserved.has(path))
+    path = `${directory}/${stem}-${suffix++}.${extension}`;
   reserved.add(path);
   return path;
 }
 
 function replaceAttribute(tag: string, name: string, value: string) {
   const encoded = escapeXml(value);
-  const pattern = new RegExp(`\\b${name}\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)`, "i");
+  const pattern = new RegExp(
+    `\\b${name}\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>]+)`,
+    "i",
+  );
   if (pattern.test(tag)) return tag.replace(pattern, `${name}="${encoded}"`);
   return tag.replace(/\s*\/?\s*>$/, (end) => ` ${name}="${encoded}"${end}`);
 }
@@ -171,9 +206,14 @@ function replaceAttribute(tag: string, name: string, value: string) {
 function ensureImageClass(tag: string) {
   const classPattern = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
   const match = classPattern.exec(tag);
-  if (!match) return tag.replace(/\s*\/?\s*>$/, (end) => ` class="te-illustration-image"${end}`);
+  if (!match)
+    return tag.replace(
+      /\s*\/?\s*>$/,
+      (end) => ` class="te-illustration-image"${end}`,
+    );
   const classes = (match[1] ?? match[2] ?? "").split(/\s+/).filter(Boolean);
-  if (!classes.includes("te-illustration-image")) classes.push("te-illustration-image");
+  if (!classes.includes("te-illustration-image"))
+    classes.push("te-illustration-image");
   return tag.replace(match[0], `class="${classes.join(" ")}"`);
 }
 
@@ -185,15 +225,25 @@ function localImageTag(sourceTag: string, localHref: string, alt: string) {
   return tag.replace(/\s*\/?\s*>$/, " />");
 }
 
-function illustrationMarkup(style: EpubStyleModule, localHref: string, alt: string, originalTag: string) {
+function illustrationMarkup(
+  style: EpubStyleModule,
+  localHref: string,
+  alt: string,
+  originalTag: string,
+) {
   const fallback = `<figure class="te-illustration">\n  ${localImageTag(originalTag, localHref, alt)}\n</figure>`;
   const template = style.markup?.trim() || fallback;
   const imageMatch = template.match(/<img\b[^>]*>/i);
   if (!imageMatch) return fallback;
-  let output = template.replace(imageMatch[0], localImageTag(imageMatch[0], localHref, alt));
+  let output = template.replace(
+    imageMatch[0],
+    localImageTag(imageMatch[0], localHref, alt),
+  );
   const captionPattern = /<figcaption\b[^>]*>[\s\S]*?<\/figcaption>/i;
   if (alt) {
-    output = output.replace(captionPattern, (caption) => caption.replace(/>[^<]*(<\/figcaption>)/i, `>${escapeXml(alt)}$1`));
+    output = output.replace(captionPattern, (caption) =>
+      caption.replace(/>[^<]*(<\/figcaption>)/i, `>${escapeXml(alt)}$1`),
+    );
   } else {
     output = output.replace(captionPattern, "");
   }
@@ -212,11 +262,22 @@ function rewriteRemoteImages(
     const localPath = info ? localPathByUrl.get(info.url) : "";
     if (!info || !localPath) return match;
     replacements += 1;
-    return illustrationMarkup(style, relativeHref(xhtmlPath, localPath), info.alt, tag);
+    return illustrationMarkup(
+      style,
+      relativeHref(xhtmlPath, localPath),
+      info.alt,
+      tag,
+    );
   };
 
-  let output = source.replace(/<p\b[^>]*>\s*(<img\b[^>]*>)\s*<\/p>/gi, (match, tag) => replaceStandalone(match, tag, false));
-  output = output.replace(/<p\b[^>]*>\s*(&lt;img\b[\s\S]*?&gt;)\s*<\/p>/gi, (match, tag) => replaceStandalone(match, tag, true));
+  let output = source.replace(
+    /<p\b[^>]*>\s*(<img\b[^>]*>)\s*<\/p>/gi,
+    (match, tag) => replaceStandalone(match, tag, false),
+  );
+  output = output.replace(
+    /<p\b[^>]*>\s*(&lt;img\b[\s\S]*?&gt;)\s*<\/p>/gi,
+    (match, tag) => replaceStandalone(match, tag, true),
+  );
   output = output.replace(ACTUAL_IMAGE_PATTERN, (tag) => {
     const info = imageTagInfo(tag);
     const localPath = info ? localPathByUrl.get(info.url) : "";
@@ -234,26 +295,46 @@ function rewriteRemoteImages(
   return { output, replacements };
 }
 
-function injectStylesheetLink(source: string, xhtmlPath: string, cssPath: string) {
-  const existingPattern = new RegExp(`<link\\b[^>]*${ONLINE_STYLE_LINK_ATTRIBUTE}\\s*=\\s*(["'])1\\1[^>]*\\/?\\s*>`, "gi");
+function injectStylesheetLink(
+  source: string,
+  xhtmlPath: string,
+  cssPath: string,
+) {
+  const existingPattern = new RegExp(
+    `<link\\b[^>]*${ONLINE_STYLE_LINK_ATTRIBUTE}\\s*=\\s*(["'])1\\1[^>]*\\/?\\s*>`,
+    "gi",
+  );
   const cleaned = source.replace(existingPattern, "");
   const href = escapeXml(relativeHref(xhtmlPath, cssPath));
   const link = `<link rel="stylesheet" type="text/css" href="${href}" ${ONLINE_STYLE_LINK_ATTRIBUTE}="1" />`;
-  if (/<\/head\s*>/i.test(cleaned)) return cleaned.replace(/<\/head\s*>/i, `  ${link}\n</head>`);
+  if (/<\/head\s*>/i.test(cleaned))
+    return cleaned.replace(/<\/head\s*>/i, `  ${link}\n</head>`);
   return `${link}\n${cleaned}`;
 }
 
-async function installIllustrationStylesheet(doc: WebEpubDocument, style: EpubStyleModule) {
-  let cssPath = normalizeZipPath(`${doc.opfDir}Styles/tepub-online-illustrations.css`);
+async function installIllustrationStylesheet(
+  doc: WebEpubDocument,
+  style: EpubStyleModule,
+) {
+  let cssPath = normalizeZipPath(
+    `${doc.opfDir}Styles/tepub-online-illustrations.css`,
+  );
   let suffix = 2;
   while (doc.zip.file(cssPath)) {
     const content = await doc.zip.file(cssPath)!.async("string");
     if (content.includes(ONLINE_STYLE_MARKER)) break;
-    cssPath = normalizeZipPath(`${doc.opfDir}Styles/tepub-online-illustrations-${suffix++}.css`);
+    cssPath = normalizeZipPath(
+      `${doc.opfDir}Styles/tepub-online-illustrations-${suffix++}.css`,
+    );
   }
   const css = `/* ${ONLINE_STYLE_MARKER} */\n\n${style.css.trim()}\n`;
   if (doc.zip.file(cssPath)) updateWebEpubText(doc, cssPath, css);
-  else await addWebEpubResource(doc, { path: cssPath, content: css, mediaType: "text/css" });
+  else
+    await addWebEpubResource(doc, {
+      path: cssPath,
+      content: css,
+      mediaType: "text/css",
+    });
   return cssPath;
 }
 
@@ -270,9 +351,14 @@ export async function embedWebEpubRemoteImages(
   onProgress?: (progress: RemoteImageProgress) => void,
   retryDelayMs = 1500,
 ): Promise<RemoteImageEmbedResult> {
-  const selectedUrls = [...new Set(urls.filter((url) => /^https?:\/\//i.test(url)))];
+  const selectedUrls = [
+    ...new Set(urls.filter((url) => /^https?:\/\//i.test(url))),
+  ];
   if (!selectedUrls.length) throw new Error("没有选择需要下载的在线图片。");
-  if (style.kind !== "illustration" || style.target === "annotation-illustration") {
+  if (
+    style.kind !== "illustration" ||
+    style.target === "annotation-illustration"
+  ) {
     throw new Error("请选择普通插图样式。");
   }
 
@@ -280,7 +366,13 @@ export async function embedWebEpubRemoteImages(
   const localPathByUrl = new Map<string, string>();
   const failures: RemoteImageDownloadFailure[] = [];
   for (const [index, url] of selectedUrls.entries()) {
-    onProgress?.({ index, total: selectedUrls.length, url, stage: "downloading", message: `正在下载 ${index + 1} / ${selectedUrls.length}` });
+    onProgress?.({
+      index,
+      total: selectedUrls.length,
+      url,
+      stage: "downloading",
+      message: `正在下载 ${index + 1} / ${selectedUrls.length}`,
+    });
     let downloaded: DownloadedRemoteImage | null = null;
     let type: ReturnType<typeof mediaTypeFromBytes> | null = null;
     try {
@@ -288,8 +380,13 @@ export async function embedWebEpubRemoteImages(
         try {
           downloaded = await downloader(url);
           if (!downloaded.bytes.byteLength) throw new Error("图片响应为空");
-          if (downloaded.bytes.byteLength > MAX_REMOTE_IMAGE_BYTES) throw new Error("图片超过 32 MB 限制");
-          type = mediaTypeFromBytes(downloaded.bytes, downloaded.mediaType, downloaded.finalUrl || url);
+          if (downloaded.bytes.byteLength > MAX_REMOTE_IMAGE_BYTES)
+            throw new Error("图片超过 32 MB 限制");
+          type = mediaTypeFromBytes(
+            downloaded.bytes,
+            downloaded.mediaType,
+            downloaded.finalUrl || url,
+          );
           break;
         } catch (error) {
           if (attempt === 1) throw error;
@@ -301,18 +398,40 @@ export async function embedWebEpubRemoteImages(
             stage: "retrying",
             message: `第 ${index + 1} 张下载失败，${(retryDelayMs / 1000).toFixed(1)} 秒后慢速重试：${reason}`,
           });
-          if (retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+          if (retryDelayMs > 0)
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         }
       }
       if (!downloaded || !type) throw new Error("图片下载失败");
-      const path = uniqueImagePath(doc, downloaded.finalUrl || url, type.extension, reservedPaths);
-      await addWebEpubResource(doc, { path, content: downloaded.bytes, mediaType: type.mediaType });
+      const path = uniqueImagePath(
+        doc,
+        downloaded.finalUrl || url,
+        type.extension,
+        reservedPaths,
+      );
+      await addWebEpubResource(doc, {
+        path,
+        content: downloaded.bytes,
+        mediaType: type.mediaType,
+      });
       localPathByUrl.set(url, path);
-      onProgress?.({ index: index + 1, total: selectedUrls.length, url, stage: "downloaded", message: `已下载 ${index + 1} / ${selectedUrls.length}` });
+      onProgress?.({
+        index: index + 1,
+        total: selectedUrls.length,
+        url,
+        stage: "downloaded",
+        message: `已下载 ${index + 1} / ${selectedUrls.length}`,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       failures.push({ url, message });
-      onProgress?.({ index: index + 1, total: selectedUrls.length, url, stage: "failed", message });
+      onProgress?.({
+        index: index + 1,
+        total: selectedUrls.length,
+        url,
+        stage: "failed",
+        message,
+      });
     }
   }
   if (!localPathByUrl.size) {
@@ -329,12 +448,27 @@ export async function embedWebEpubRemoteImages(
   const cssPath = await installIllustrationStylesheet(doc, style);
   let replacedOccurrences = 0;
   let changedFiles = 0;
-  onProgress?.({ index: selectedUrls.length, total: selectedUrls.length, url: "", stage: "rewriting", message: "正在更新 XHTML 与 OPF" });
+  onProgress?.({
+    index: selectedUrls.length,
+    total: selectedUrls.length,
+    url: "",
+    stage: "rewriting",
+    message: "正在更新 XHTML 与 OPF",
+  });
   for (const file of doc.files.filter((entry) => entry.kind === "xhtml")) {
     const source = await readWebEpubText(doc, file.path);
-    const rewritten = rewriteRemoteImages(source, file.path, localPathByUrl, style);
+    const rewritten = rewriteRemoteImages(
+      source,
+      file.path,
+      localPathByUrl,
+      style,
+    );
     if (!rewritten.replacements) continue;
-    updateWebEpubText(doc, file.path, injectStylesheetLink(rewritten.output, file.path, cssPath));
+    updateWebEpubText(
+      doc,
+      file.path,
+      injectStylesheetLink(rewritten.output, file.path, cssPath),
+    );
     replacedOccurrences += rewritten.replacements;
     changedFiles += 1;
   }

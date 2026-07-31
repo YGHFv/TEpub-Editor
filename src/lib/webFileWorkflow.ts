@@ -10,14 +10,22 @@ export type FileValidationResult = {
   message: string;
 };
 
-export function validateBrowserFiles(files: Iterable<File>, options: FileValidationOptions = {}): FileValidationResult {
+export function validateBrowserFiles(
+  files: Iterable<File>,
+  options: FileValidationOptions = {},
+): FileValidationResult {
   const source = Array.from(files);
-  const extensions = (options.extensions || []).map((item) => item.toLowerCase().replace(/^\./, ""));
+  const extensions = (options.extensions || []).map((item) =>
+    item.toLowerCase().replace(/^\./, ""),
+  );
   const mimeTypes = (options.mimeTypes || []).map((item) => item.toLowerCase());
   const matches = (file: File) => {
     if (!extensions.length && !mimeTypes.length) return true;
     const extension = file.name.split(".").pop()?.toLowerCase() || "";
-    return extensions.includes(extension) || mimeTypes.includes(file.type.toLowerCase());
+    return (
+      extensions.includes(extension) ||
+      mimeTypes.includes(file.type.toLowerCase())
+    );
   };
   const accepted = source.filter(matches);
   const rejected = source.filter((file) => !matches(file));

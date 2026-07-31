@@ -64,27 +64,18 @@
                 id={`toc-${node.id}`}
                 class="toc-item {node.type === 'Volume'
                     ? 'vol-title'
-                    : ''} {activeChapterId === node.id
-                    ? 'active'
-                    : ''}"
+                    : ''} {activeChapterId === node.id ? 'active' : ''}"
                 onclick={() =>
                     node.type === "Volume"
                         ? onToggleVolume(node)
-                        : onChapterClick(
-                              node.id,
-                              node.line_number,
-                          )}
+                        : onChapterClick(node.id, node.line_number)}
                 onkeydown={() => {}}
             >
                 {#if node.type === "Volume"}
-                    <span class="arrow"
-                        >{node.expanded ? "▼" : "▶"}</span
-                    >
+                    <span class="arrow">{node.expanded ? "▼" : "▶"}</span>
                 {/if}
                 <span
-                    class="toc-title {invalidSequenceIds.has(
-                        node.id,
-                    )
+                    class="toc-title {invalidSequenceIds.has(node.id)
                         ? 'text-error'
                         : ''}">{node.title}</span
                 >
@@ -101,26 +92,19 @@
                         role="button"
                         tabindex="0"
                         id={`toc-${child.id}`}
-                        class="toc-item indent {activeChapterId ===
-                        child.id
+                        class="toc-item indent {activeChapterId === child.id
                             ? 'active'
                             : ''}"
                         onclick={() =>
-                            onChapterClick(
-                                child.id,
-                                child.line_number,
-                            )}
+                            onChapterClick(child.id, child.line_number)}
                         onkeydown={() => {}}
                     >
                         <span
-                            class="toc-title {invalidSequenceIds.has(
-                                child.id,
-                            )
+                            class="toc-title {invalidSequenceIds.has(child.id)
                                 ? 'text-error'
-                                : ''}">{child.title}</span>
-                        <span class="toc-count"
-                            >{child.word_count}</span
+                                : ''}">{child.title}</span
                         >
+                        <span class="toc-count">{child.word_count}</span>
                     </div>
                 {/each}
             {/if}
@@ -295,7 +279,11 @@
     }
 
     .sidebar-header-fixed {
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 252, 0.92));
+        background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.92),
+            rgba(246, 249, 252, 0.92)
+        );
         border-bottom: 1px solid var(--color-border);
     }
 
@@ -334,7 +322,11 @@
 
     .toc-list {
         padding: 8px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(246, 249, 252, 0.64));
+        background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.42),
+            rgba(246, 249, 252, 0.64)
+        );
     }
 
     .toc-item {

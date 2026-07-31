@@ -36,7 +36,10 @@ export function createTauriPlatform(): PlatformAdapter {
     isWeb: false,
     apiBaseUrl: "",
 
-    async invoke<T = unknown>(command: string, args: Record<string, unknown> = {}) {
+    async invoke<T = unknown>(
+      command: string,
+      args: Record<string, unknown> = {},
+    ) {
       const { invoke } = await import("@tauri-apps/api/core");
       return invoke<T>(command, args);
     },
@@ -118,7 +121,9 @@ export function createTauriPlatform(): PlatformAdapter {
     getCurrentWindow() {
       const lazyWindow = {
         get value() {
-          return import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow());
+          return import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
+            getCurrentWindow(),
+          );
         },
       };
       return {
@@ -166,12 +171,14 @@ export function createTauriPlatform(): PlatformAdapter {
     },
 
     async setCurrentWindowPosition(x, y) {
-      const { getCurrentWindow, LogicalPosition } = await import("@tauri-apps/api/window");
+      const { getCurrentWindow, LogicalPosition } =
+        await import("@tauri-apps/api/window");
       await getCurrentWindow().setPosition(new LogicalPosition(x, y));
     },
 
     async setCurrentWindowSize(width, height) {
-      const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+      const { getCurrentWindow, LogicalSize } =
+        await import("@tauri-apps/api/window");
       await getCurrentWindow().setSize(new LogicalSize(width, height));
     },
 
@@ -196,7 +203,9 @@ export function createTauriPlatform(): PlatformAdapter {
 
     async createWebviewWindow(label, url, options = {}) {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      return wrapTauriWindow(new WebviewWindow(label, { url, ...(options as any) }));
+      return wrapTauriWindow(
+        new WebviewWindow(label, { url, ...(options as any) }),
+      );
     },
   };
 }

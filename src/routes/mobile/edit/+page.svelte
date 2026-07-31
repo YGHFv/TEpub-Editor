@@ -3,14 +3,20 @@
     import { goto } from "$app/navigation";
     import { invoke } from "@tauri-apps/api/core";
     import { message } from "@tauri-apps/plugin-dialog";
-    import { buildMobileRoute, cacheBrowserFileStable, readMobileSelection, selectionName } from "$lib/mobileFlow";
+    import {
+        buildMobileRoute,
+        cacheBrowserFileStable,
+        readMobileSelection,
+        selectionName,
+    } from "$lib/mobileFlow";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
 
     interface EpubFileNode {
         name: string;
         path: string;
-        file_type: "folder" | "html" | "css" | "xml" | "image" | "font" | "other";
+        file_type:
+            "folder" | "html" | "css" | "xml" | "image" | "font" | "other";
         size?: number;
         title?: string;
         resolution?: string;
@@ -117,7 +123,8 @@
     let replaceScope: "current" | "html" | "all" = "html";
     let replaceStatus = "";
     let replacePanelOpen = false;
-    let currentMatch: { from: number; to: number; filePath: string } | null = null;
+    let currentMatch: { from: number; to: number; filePath: string } | null =
+        null;
     let currentMatchIndex = 0;
     let currentMatchCount = 0;
     let thumbnailUrls = new Map<string, string>();
@@ -165,19 +172,27 @@
             selectedPath = epubPath;
             bookTitle = selectionName(selectedName).replace(/\.epub$/i, "");
             try {
-                const meta = await invoke<MobileEpubMetadata>("mobile_read_epub_metadata", { epubPath });
+                const meta = await invoke<MobileEpubMetadata>(
+                    "mobile_read_epub_metadata",
+                    { epubPath },
+                );
                 if (meta.title?.trim()) bookTitle = meta.title.trim();
             } catch (_) {
                 // metadata is a nice-to-have for the mobile header
             }
-            fileTree = await invoke<EpubFileNode[]>("extract_epub", { epubPath });
+            fileTree = await invoke<EpubFileNode[]>("extract_epub", {
+                epubPath,
+            });
             refreshFlatFiles(fileTree);
             status = `已解包 ${flatFiles.length} 个文件。`;
             // 后台补全 HTML 标题与图片分辨率，不阻塞首屏
             loadFileMetaInBackground(epubPath);
         } catch (err) {
             status = "EPUB 解包失败";
-            await message(`EPUB 解包失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`EPUB 解包失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -194,7 +209,10 @@
             await loadEpub(cachedPath, file.name);
         } catch (err) {
             status = "导入 EPUB 失败";
-            await message(`导入 EPUB 失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`导入 EPUB 失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         }
     }
 
@@ -204,12 +222,17 @@
                 flattenFiles(node.children, out);
             } else if (node.file_type !== "folder") {
                 const parts = node.path.split("/");
-                const groupPath = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+                const groupPath =
+                    parts.length > 1 ? parts.slice(0, -1).join("/") : "";
                 const group = groupPath ? groupPath.toUpperCase() : "ROOT";
                 out.push({ ...node, group, groupPath });
             }
         }
-        return out.sort((a, b) => a.group.localeCompare(b.group) || naturalName(a.name).localeCompare(naturalName(b.name)));
+        return out.sort(
+            (a, b) =>
+                a.group.localeCompare(b.group) ||
+                naturalName(a.name).localeCompare(naturalName(b.name)),
+        );
     }
 
     function clearThumbnailUrls() {
@@ -220,7 +243,13 @@
     }
 
     async function loadThumbnail(file: FlatFile, epoch = thumbnailEpoch) {
-        if (!selectedPath || !isImageFile(file) || thumbnailUrls.has(file.path) || thumbnailLoading.has(file.path)) return;
+        if (
+            !selectedPath ||
+            !isImageFile(file) ||
+            thumbnailUrls.has(file.path) ||
+            thumbnailLoading.has(file.path)
+        )
+            return;
         const loading = new Set(thumbnailLoading);
         loading.add(file.path);
         thumbnailLoading = loading;
@@ -231,7 +260,9 @@
             });
             const bytes = bytesFromInvoke(data);
             if (!bytes.length) return;
-            const url = URL.createObjectURL(new Blob([bytes], { type: imageMimeFor(file, bytes) }));
+            const url = URL.createObjectURL(
+                new Blob([bytes], { type: imageMimeFor(file, bytes) }),
+            );
             if (epoch !== thumbnailEpoch) {
                 URL.revokeObjectURL(url);
                 return;
@@ -256,12 +287,19 @@
         }
     }
 
-    function refreshFlatFiles(tree: EpubFileNode[], preservedOpenGroups?: Set<string>) {
+    function refreshFlatFiles(
+        tree: EpubFileNode[],
+        preservedOpenGroups?: Set<string>,
+    ) {
         const nextFlatFiles = flattenFiles(tree);
         const nextGroups = buildGroups(nextFlatFiles);
         flatFiles = nextFlatFiles;
         openGroups = preservedOpenGroups
-            ? new Set(nextGroups.map((group) => group.name).filter((name) => preservedOpenGroups.has(name)))
+            ? new Set(
+                  nextGroups
+                      .map((group) => group.name)
+                      .filter((name) => preservedOpenGroups.has(name)),
+              )
             : new Set(nextGroups.map((group) => group.name));
         clearThumbnailUrls();
         preloadThumbnails(nextFlatFiles, thumbnailEpoch);
@@ -274,7 +312,12 @@
     function buildGroups(files: FlatFile[]): FileGroup[] {
         const map = new Map<string, FileGroup>();
         for (const file of files) {
-            if (!map.has(file.group)) map.set(file.group, { name: file.group, path: file.groupPath, files: [] });
+            if (!map.has(file.group))
+                map.set(file.group, {
+                    name: file.group,
+                    path: file.groupPath,
+                    files: [],
+                });
             map.get(file.group)?.files.push(file);
         }
         return [...map.values()];
@@ -291,10 +334,16 @@
     }
 
     function fileDetail(file: FlatFile) {
-        if (file.file_type === "html") return file.title?.trim() || "未命名章节";
+        if (file.file_type === "html")
+            return file.title?.trim() || "未命名章节";
         if (file.file_type === "css") return "层叠样式表";
-        if (file.file_type === "xml") return file.name.toLowerCase().includes("toc") || file.name.endsWith(".ncx") ? "目录结构" : "元数据";
-        if (file.file_type === "font") return `字体${file.size ? `  ${formatSize(file.size)}` : ""}`;
+        if (file.file_type === "xml")
+            return file.name.toLowerCase().includes("toc") ||
+                file.name.endsWith(".ncx")
+                ? "目录结构"
+                : "元数据";
+        if (file.file_type === "font")
+            return `字体${file.size ? `  ${formatSize(file.size)}` : ""}`;
         if (isImageFile(file)) {
             return `图片${file.resolution ? `  ${file.resolution}` : ""}${file.size ? `  ${formatSize(file.size)}` : ""}`;
         }
@@ -311,7 +360,8 @@
         if (isImageFile(file)) return "img";
         if (file.file_type === "font") return "T";
         if (file.file_type === "css") return "{}";
-        if (file.file_type === "xml") return file.name.toLowerCase().includes("content") ? "db" : "≡";
+        if (file.file_type === "xml")
+            return file.name.toLowerCase().includes("content") ? "db" : "≡";
         if (file.file_type === "html") return "</>";
         return "•";
     }
@@ -321,23 +371,35 @@
     }
 
     function isEditable(file: FlatFile) {
-        return !isImageFile(file) && ["html", "css", "xml", "other"].includes(file.file_type);
+        return (
+            !isImageFile(file) &&
+            ["html", "css", "xml", "other"].includes(file.file_type)
+        );
     }
 
     function isFontFile(file: FlatFile) {
-        return file.file_type === "font" || /\.(?:ttf|otf|woff2?)$/i.test(file.name) || /\.(?:ttf|otf|woff2?)$/i.test(file.path);
+        return (
+            file.file_type === "font" ||
+            /\.(?:ttf|otf|woff2?)$/i.test(file.name) ||
+            /\.(?:ttf|otf|woff2?)$/i.test(file.path)
+        );
     }
 
     function isSearchableTextFile(file: FlatFile) {
         return (
             !isImageFile(file) &&
             file.file_type !== "font" &&
-            (["html", "css", "xml"].includes(file.file_type) || /\.(?:txt|js|json|opf|ncx)$/i.test(file.name))
+            (["html", "css", "xml"].includes(file.file_type) ||
+                /\.(?:txt|js|json|opf|ncx)$/i.test(file.name))
         );
     }
 
     function isImageFile(file: FlatFile) {
-        return file.file_type === "image" || /\.(?:jpe?g|png|gif|webp|bmp|svg)$/i.test(file.name) || /\.(?:jpe?g|png|gif|webp|bmp|svg)$/i.test(file.path);
+        return (
+            file.file_type === "image" ||
+            /\.(?:jpe?g|png|gif|webp|bmp|svg)$/i.test(file.name) ||
+            /\.(?:jpe?g|png|gif|webp|bmp|svg)$/i.test(file.path)
+        );
     }
 
     function mimeFor(file: FlatFile) {
@@ -352,9 +414,19 @@
 
     function bytesFromInvoke(data: unknown) {
         if (data instanceof ArrayBuffer) return new Uint8Array(data);
-        if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        if (ArrayBuffer.isView(data))
+            return new Uint8Array(
+                data.buffer,
+                data.byteOffset,
+                data.byteLength,
+            );
         if (Array.isArray(data)) return new Uint8Array(data);
-        if (data && typeof data === "object" && "data" in data && Array.isArray((data as { data: unknown }).data)) {
+        if (
+            data &&
+            typeof data === "object" &&
+            "data" in data &&
+            Array.isArray((data as { data: unknown }).data)
+        ) {
             return new Uint8Array((data as { data: number[] }).data);
         }
         return new Uint8Array();
@@ -367,8 +439,15 @@
             if (riff === "RIFF" && webp === "WEBP") return "image/webp";
         }
         if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
-        if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
-        if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif";
+        if (
+            bytes[0] === 0x89 &&
+            bytes[1] === 0x50 &&
+            bytes[2] === 0x4e &&
+            bytes[3] === 0x47
+        )
+            return "image/png";
+        if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46)
+            return "image/gif";
         if (bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";
         return mimeFor(file);
     }
@@ -393,23 +472,43 @@
         fontPreviewFamily = "";
     }
 
-    async function reloadTree(preserve = new Set(openGroups), focusGroup?: string) {
+    async function reloadTree(
+        preserve = new Set(openGroups),
+        focusGroup?: string,
+    ) {
         if (!selectedPath) return;
         if (focusGroup) preserve.add(focusGroup);
-        fileTree = await invoke<EpubFileNode[]>("extract_epub", { epubPath: selectedPath });
+        fileTree = await invoke<EpubFileNode[]>("extract_epub", {
+            epubPath: selectedPath,
+        });
         refreshFlatFiles(fileTree, preserve);
         loadFileMetaInBackground(selectedPath);
     }
 
     function hasFileLayerState(state?: unknown) {
-        const historyState = state === undefined ? (typeof window !== "undefined" ? window.history.state : null) : state;
-        return Boolean(historyState && typeof historyState === "object" && FILE_LAYER_STATE_KEY in (historyState as Record<string, unknown>));
+        const historyState =
+            state === undefined
+                ? typeof window !== "undefined"
+                    ? window.history.state
+                    : null
+                : state;
+        return Boolean(
+            historyState &&
+            typeof historyState === "object" &&
+            FILE_LAYER_STATE_KEY in (historyState as Record<string, unknown>),
+        );
     }
 
     function pushFileLayerState() {
         if (typeof window === "undefined" || hasFileLayerState()) return;
-        const state = window.history.state && typeof window.history.state === "object" ? window.history.state : {};
-        window.history.pushState({ ...state, [FILE_LAYER_STATE_KEY]: true }, "");
+        const state =
+            window.history.state && typeof window.history.state === "object"
+                ? window.history.state
+                : {};
+        window.history.pushState(
+            { ...state, [FILE_LAYER_STATE_KEY]: true },
+            "",
+        );
     }
 
     function requestCloseFileViaHistory() {
@@ -420,7 +519,12 @@
     }
 
     function restoreFileLayerState() {
-        if (typeof window === "undefined" || hasFileLayerState() || !editingFile) return;
+        if (
+            typeof window === "undefined" ||
+            hasFileLayerState() ||
+            !editingFile
+        )
+            return;
         restoringFileLayer = true;
         pushFileLayerState();
         restoringFileLayer = false;
@@ -510,12 +614,17 @@
                 });
                 const bytes = bytesFromInvoke(data);
                 if (!bytes.length) throw new Error("图片数据为空");
-                const blob = new Blob([bytes], { type: imageMimeFor(file, bytes) });
+                const blob = new Blob([bytes], {
+                    type: imageMimeFor(file, bytes),
+                });
                 previewUrl = URL.createObjectURL(blob);
                 status = `正在预览：${file.path}`;
             } catch (err) {
                 status = "读取图片失败";
-                await message(`读取图片失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+                await message(`读取图片失败：${err}`, {
+                    title: "编辑 EPUB",
+                    kind: "error",
+                });
             } finally {
                 busy = false;
             }
@@ -532,22 +641,31 @@
                 const bytes = bytesFromInvoke(data);
                 if (!bytes.length) throw new Error("字体数据为空");
                 const ext = file.name.split(".").pop()?.toLowerCase();
-                const mime = ext === "otf"
-                    ? "font/otf"
-                    : ext === "woff"
-                      ? "font/woff"
-                      : ext === "woff2"
-                        ? "font/woff2"
-                        : "font/ttf";
-                previewUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
+                const mime =
+                    ext === "otf"
+                        ? "font/otf"
+                        : ext === "woff"
+                          ? "font/woff"
+                          : ext === "woff2"
+                            ? "font/woff2"
+                            : "font/ttf";
+                previewUrl = URL.createObjectURL(
+                    new Blob([bytes], { type: mime }),
+                );
                 fontPreviewFamily = `mobile-font-preview-${Date.now()}`;
-                const face = new FontFace(fontPreviewFamily, `url(${previewUrl})`);
+                const face = new FontFace(
+                    fontPreviewFamily,
+                    `url(${previewUrl})`,
+                );
                 fontPreviewFace = await face.load();
                 document.fonts.add(fontPreviewFace);
                 status = `正在预览：${file.path}`;
             } catch (err) {
                 status = "读取字体失败";
-                await message(`读取字体失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+                await message(`读取字体失败：${err}`, {
+                    title: "编辑 EPUB",
+                    kind: "error",
+                });
             } finally {
                 busy = false;
             }
@@ -568,7 +686,10 @@
             status = `正在编辑：${file.path}`;
         } catch (err) {
             status = "读取文件失败";
-            await message(`读取文件失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`读取文件失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -586,7 +707,15 @@
         replacePanelOpen = true;
         status = `正在编辑：${match.file.path}`;
         await tick();
-        setTimeout(() => applyMatchToEditor({ from: match.from, to: match.to, filePath: match.file.path }), 0);
+        setTimeout(
+            () =>
+                applyMatchToEditor({
+                    from: match.from,
+                    to: match.to,
+                    filePath: match.file.path,
+                }),
+            0,
+        );
     }
 
     async function saveEditingFile() {
@@ -602,7 +731,10 @@
             status = `已保存：${editingFile.path}`;
         } catch (err) {
             status = "保存文件失败";
-            await message(`保存文件失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`保存文件失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -615,7 +747,8 @@
     }
 
     async function promptStashEditingFile() {
-        if (!editingFile || isImageFile(editingFile) || !editorDirty) return true;
+        if (!editingFile || isImageFile(editingFile) || !editorDirty)
+            return true;
 
         const result = await openConfirmSheet({
             title: "暂存当前文件修改？",
@@ -642,11 +775,17 @@
         const nextName = renameSheet.value.trim();
         if (!selectedPath || !file) return;
         if (!nextName) {
-            await message("文件名不能为空。", { title: "重命名文件", kind: "warning" });
+            await message("文件名不能为空。", {
+                title: "重命名文件",
+                kind: "warning",
+            });
             return;
         }
         if (/[\\/]/.test(nextName)) {
-            await message("文件名不能包含斜杠。", { title: "重命名文件", kind: "warning" });
+            await message("文件名不能包含斜杠。", {
+                title: "重命名文件",
+                kind: "warning",
+            });
             return;
         }
         if (nextName === file.name) {
@@ -654,10 +793,16 @@
             return;
         }
 
-        const newPath = file.groupPath ? `${file.groupPath}/${nextName}` : nextName;
+        const newPath = file.groupPath
+            ? `${file.groupPath}/${nextName}`
+            : nextName;
         try {
             busy = true;
-            if (editingFile?.path === file.path && editorDirty && !isImageFile(editingFile)) {
+            if (
+                editingFile?.path === file.path &&
+                editorDirty &&
+                !isImageFile(editingFile)
+            ) {
                 await saveEditingFile();
             }
             await invoke("rename_epub_file", {
@@ -676,7 +821,10 @@
             closeRenameSheet();
             await reloadTree(new Set(openGroups), file.group);
         } catch (err) {
-            await message(`重命名失败：${err}`, { title: "重命名文件", kind: "error" });
+            await message(`重命名失败：${err}`, {
+                title: "重命名文件",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -713,7 +861,10 @@
             status = `已删除：${file.path}`;
             await reloadTree(new Set(openGroups), file.group);
         } catch (err) {
-            await message(`删除文件失败：${err}`, { title: "删除文件", kind: "error" });
+            await message(`删除文件失败：${err}`, {
+                title: "删除文件",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -724,10 +875,13 @@
             return flatFiles.filter((file) => file.file_type === "html");
         }
         if (replaceScope === "current") {
-            return editingFile && isSearchableTextFile(editingFile) ? [editingFile] : [];
+            return editingFile && isSearchableTextFile(editingFile)
+                ? [editingFile]
+                : [];
         }
         const candidates = flatFiles.filter(isSearchableTextFile);
-        if (replaceScope === "html") return candidates.filter((file) => file.file_type === "html");
+        if (replaceScope === "html")
+            return candidates.filter((file) => file.file_type === "html");
         return candidates;
     }
 
@@ -743,7 +897,11 @@
             const char = content[index];
             if (char === "<") {
                 if (!inTag && start !== -1 && start < index) {
-                    segments.push({ from: start, to: index, text: content.slice(start, index) });
+                    segments.push({
+                        from: start,
+                        to: index,
+                        text: content.slice(start, index),
+                    });
                 }
                 inTag = true;
                 start = -1;
@@ -755,7 +913,11 @@
             }
         }
         if (!inTag && start !== -1 && start < content.length) {
-            segments.push({ from: start, to: content.length, text: content.slice(start) });
+            segments.push({
+                from: start,
+                to: content.length,
+                text: content.slice(start),
+            });
         }
         return segments.filter((segment) => segment.text.trim().length > 0);
     }
@@ -774,12 +936,18 @@
                         regex.lastIndex += 1;
                         continue;
                     }
-                    matches.push({ from: offset + match.index, to: offset + match.index + match[0].length });
+                    matches.push({
+                        from: offset + match.index,
+                        to: offset + match.index + match[0].length,
+                    });
                 }
             } else {
                 let pos = 0;
                 while ((pos = text.indexOf(findPattern, pos)) !== -1) {
-                    matches.push({ from: offset + pos, to: offset + pos + findPattern.length });
+                    matches.push({
+                        from: offset + pos,
+                        to: offset + pos + findPattern.length,
+                    });
                     pos += findPattern.length || 1;
                 }
             }
@@ -793,10 +961,15 @@
     function buildMatchList(content: string, file?: FlatFile) {
         if (!replaceOnlyText) return buildRawMatchList(content);
         if (file?.file_type !== "html") return [];
-        return htmlTextSegments(content).flatMap((segment) => buildRawMatchList(segment.text, segment.from));
+        return htmlTextSegments(content).flatMap((segment) =>
+            buildRawMatchList(segment.text, segment.from),
+        );
     }
 
-    function applyMatchToEditor(match: { from: number; to: number; filePath: string }, focusEditor = false) {
+    function applyMatchToEditor(
+        match: { from: number; to: number; filePath: string },
+        focusEditor = false,
+    ) {
         if (!epubEditorComponent) return;
         const view = epubEditorComponent.getView();
         if (!view) return;
@@ -818,7 +991,10 @@
         }
 
         const currentPath = editingFile.path;
-        const currentText = epubEditorComponent?.getView()?.state.doc.toString() || editingContent || "";
+        const currentText =
+            epubEditorComponent?.getView()?.state.doc.toString() ||
+            editingContent ||
+            "";
         const currentMatches = buildMatchList(currentText, editingFile);
         currentMatchCount = currentMatches.length;
         if (!currentMatches.length) {
@@ -840,7 +1016,10 @@
         for (const file of files) {
             let content = "";
             if (editingFile?.path === file.path) {
-                content = epubEditorComponent?.getView()?.state.doc.toString() || editingContent || "";
+                content =
+                    epubEditorComponent?.getView()?.state.doc.toString() ||
+                    editingContent ||
+                    "";
             } else {
                 content = await invoke<string>("read_epub_file_content", {
                     epubPath: selectedPath,
@@ -855,15 +1034,24 @@
     }
 
     function replaceCurrentMatch() {
-        if (!currentMatch || !editingFile || editingFile.path !== currentMatch.filePath) {
+        if (
+            !currentMatch ||
+            !editingFile ||
+            editingFile.path !== currentMatch.filePath
+        ) {
             replaceStatus = "请先定位到当前匹配项。";
             return;
         }
         const view = epubEditorComponent?.getView();
         if (!view) return;
 
-        const selectedText = view.state.doc.sliceString(currentMatch.from, currentMatch.to);
-        const replacement = replaceIsRegex ? selectedText.replace(new RegExp(findPattern), replacePattern) : replacePattern;
+        const selectedText = view.state.doc.sliceString(
+            currentMatch.from,
+            currentMatch.to,
+        );
+        const replacement = replaceIsRegex
+            ? selectedText.replace(new RegExp(findPattern), replacePattern)
+            : replacePattern;
         view.dispatch({
             changes: {
                 from: currentMatch.from,
@@ -896,21 +1084,33 @@
                 return;
             }
 
-            const activeIndex = matches.findIndex((match) =>
-                match.file.path === currentMatch?.filePath &&
-                match.from === currentMatch?.from &&
-                match.to === currentMatch?.to
+            const activeIndex = matches.findIndex(
+                (match) =>
+                    match.file.path === currentMatch?.filePath &&
+                    match.from === currentMatch?.from &&
+                    match.to === currentMatch?.to,
             );
-            const currentFileIndex = activeIndex === -1
-                ? matches.findIndex((match) => match.file.path === editingFile?.path)
-                : activeIndex;
+            const currentFileIndex =
+                activeIndex === -1
+                    ? matches.findIndex(
+                          (match) => match.file.path === editingFile?.path,
+                      )
+                    : activeIndex;
             const baseIndex = currentFileIndex === -1 ? 0 : currentFileIndex;
-            const nextIndex = direction === "next"
-                ? (baseIndex + (activeIndex === -1 ? 0 : 1)) % matches.length
-                : (baseIndex > 0 ? baseIndex - 1 : matches.length - 1);
+            const nextIndex =
+                direction === "next"
+                    ? (baseIndex + (activeIndex === -1 ? 0 : 1)) %
+                      matches.length
+                    : baseIndex > 0
+                      ? baseIndex - 1
+                      : matches.length - 1;
             const nextMatch = matches[nextIndex];
 
-            currentMatch = { from: nextMatch.from, to: nextMatch.to, filePath: nextMatch.file.path };
+            currentMatch = {
+                from: nextMatch.from,
+                to: nextMatch.to,
+                filePath: nextMatch.file.path,
+            };
             currentMatchIndex = nextIndex + 1;
             currentMatchCount = matches.length;
             if (editingFile?.path !== nextMatch.file.path) {
@@ -921,7 +1121,10 @@
             replaceStatus = `第 ${currentMatchIndex}/${currentMatchCount} 处：${nextMatch.file.name}`;
         } catch (err) {
             replaceStatus = "定位失败";
-            await message(`定位失败：${err}`, { title: "查找替换", kind: "error" });
+            await message(`定位失败：${err}`, {
+                title: "查找替换",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -954,7 +1157,8 @@
     }
 
     function replaceInText(content: string, file?: FlatFile) {
-        if (!replaceOnlyText || file?.file_type !== "html") return replaceInTextSegment(content);
+        if (!replaceOnlyText || file?.file_type !== "html")
+            return replaceInTextSegment(content);
 
         let nextContent = content;
         let count = 0;
@@ -988,15 +1192,18 @@
             const count = replaceOnlyText
                 ? (await collectSearchMatches()).length
                 : await invoke<number>("search_in_files", {
-                    epubPath: selectedPath,
-                    files: files.map((file) => file.path),
-                    pattern: findPattern,
-                    isRegex: replaceIsRegex,
-                });
+                      epubPath: selectedPath,
+                      files: files.map((file) => file.path),
+                      pattern: findPattern,
+                      isRegex: replaceIsRegex,
+                  });
             replaceStatus = `共 ${count} 处匹配，范围 ${files.length} 个文件。`;
         } catch (err) {
             replaceStatus = "查找失败";
-            await message(`查找失败：${err}`, { title: "批量查找替换", kind: "error" });
+            await message(`查找失败：${err}`, {
+                title: "批量查找替换",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -1044,7 +1251,9 @@
                 const result = replaceInText(content, file);
                 if (result.count > 0 && result.text !== content) {
                     total += result.count;
-                    changedFiles[file.path] = Array.from(encoder.encode(result.text));
+                    changedFiles[file.path] = Array.from(
+                        encoder.encode(result.text),
+                    );
                     if (editingFile?.path === file.path) {
                         editingContent = result.text;
                         epubEditorComponent?.resetDoc(result.text);
@@ -1054,7 +1263,10 @@
             }
 
             if (Object.keys(changedFiles).length) {
-                await invoke("save_epub_files_batch", { epubPath: selectedPath, files: changedFiles });
+                await invoke("save_epub_files_batch", {
+                    epubPath: selectedPath,
+                    files: changedFiles,
+                });
             }
 
             replaceStatus = `已替换 ${total} 处，修改 ${Object.keys(changedFiles).length} 个文件。`;
@@ -1062,7 +1274,10 @@
             refreshCurrentMatch();
         } catch (err) {
             replaceStatus = "批量替换失败";
-            await message(`批量替换失败：${err}`, { title: "批量查找替换", kind: "error" });
+            await message(`批量替换失败：${err}`, {
+                title: "批量查找替换",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -1107,7 +1322,11 @@
 
         try {
             busy = true;
-            const targetPath = `${addTargetGroup.path ? `${addTargetGroup.path}/` : ""}${file.name}`.replace(/^\/+/, "");
+            const targetPath =
+                `${addTargetGroup.path ? `${addTargetGroup.path}/` : ""}${file.name}`.replace(
+                    /^\/+/,
+                    "",
+                );
             const bytes = new Uint8Array(await file.arrayBuffer());
             await invoke("add_epub_file_binary", {
                 epubPath: selectedPath,
@@ -1118,7 +1337,10 @@
             status = `已添加：${targetPath}`;
         } catch (err) {
             status = "添加文件失败";
-            await message(`添加文件失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`添加文件失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
             addTargetGroup = null;
@@ -1137,7 +1359,10 @@
             await invoke("save_epub_to_disk", { epubPath: selectedPath });
             await goto(metadataRoute(String(Date.now())));
         } catch (err) {
-            await message(`返回编辑元数据页失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`返回编辑元数据页失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -1150,7 +1375,8 @@
         }
 
         const handlePopState = () => {
-            if (restoringFileLayer || !editingFile || hasFileLayerState()) return;
+            if (restoringFileLayer || !editingFile || hasFileLayerState())
+                return;
             void (async () => {
                 if (busy) {
                     restoreFileLayerState();
@@ -1185,11 +1411,27 @@
 </svelte:head>
 
 <main class:editing={!!editingFile} class="editor-page">
-    <input bind:this={fileInputEl} class="file-input" type="file" accept=".epub" on:change={onFileChange} />
-    <input bind:this={addFileInputEl} class="file-input" type="file" on:change={onAddFileChange} />
+    <input
+        bind:this={fileInputEl}
+        class="file-input"
+        type="file"
+        accept=".epub"
+        on:change={onFileChange}
+    />
+    <input
+        bind:this={addFileInputEl}
+        class="file-input"
+        type="file"
+        on:change={onAddFileChange}
+    />
 
     <header class="topbar">
-        <button class="back-button" type="button" aria-label="返回" on:click={leaveEditorPage}>
+        <button
+            class="back-button"
+            type="button"
+            aria-label="返回"
+            on:click={leaveEditorPage}
+        >
             <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M15 6L9 12L15 18"></path>
             </svg>
@@ -1199,7 +1441,9 @@
 
     {#if !selectedPath}
         <section class="empty">
-            <button type="button" on:click={openPicker} disabled={busy}>{busy ? "处理中" : "选择 EPUB"}</button>
+            <button type="button" on:click={openPicker} disabled={busy}
+                >{busy ? "处理中" : "选择 EPUB"}</button
+            >
             <p>{status}</p>
         </section>
     {:else}
@@ -1209,18 +1453,38 @@
             {#each groups as group}
                 <div class="group">
                     <div class="group-head">
-                        <button class="group-title" type="button" on:click={() => toggleGroup(group.name)}>
+                        <button
+                            class="group-title"
+                            type="button"
+                            on:click={() => toggleGroup(group.name)}
+                        >
                             <span>{group.name}</span>
                         </button>
                         <div class="group-actions">
-                            <button class="group-icon group-add" type="button" aria-label={`向 ${group.name} 添加文件`} on:click={() => openAddFilePicker(group)}>
+                            <button
+                                class="group-icon group-add"
+                                type="button"
+                                aria-label={`向 ${group.name} 添加文件`}
+                                on:click={() => openAddFilePicker(group)}
+                            >
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M12 5V19"></path>
                                     <path d="M5 12H19"></path>
                                 </svg>
                             </button>
-                            <button class="group-icon group-toggle" type="button" aria-label={openGroups.has(group.name) ? "折叠" : "展开"} on:click={() => toggleGroup(group.name)}>
-                                <svg class:open={openGroups.has(group.name)} viewBox="0 0 24 24" aria-hidden="true">
+                            <button
+                                class="group-icon group-toggle"
+                                type="button"
+                                aria-label={openGroups.has(group.name)
+                                    ? "折叠"
+                                    : "展开"}
+                                on:click={() => toggleGroup(group.name)}
+                            >
+                                <svg
+                                    class:open={openGroups.has(group.name)}
+                                    viewBox="0 0 24 24"
+                                    aria-hidden="true"
+                                >
                                     <path d="M9 6L15 12L9 18"></path>
                                 </svg>
                             </button>
@@ -1229,28 +1493,51 @@
                     {#if openGroups.has(group.name)}
                         {#each group.files as file}
                             <div class="file-row">
-                                <button class="file-open" type="button" on:click={() => openFile(file)}>
+                                <button
+                                    class="file-open"
+                                    type="button"
+                                    on:click={() => openFile(file)}
+                                >
                                     {#if isImageFile(file)}
                                         <span class="thumb-shell">
                                             {#if thumbnailUrls.get(file.path)}
-                                                <img class="thumb" src={thumbnailUrls.get(file.path)} alt={file.name} />
+                                                <img
+                                                    class="thumb"
+                                                    src={thumbnailUrls.get(
+                                                        file.path,
+                                                    )}
+                                                    alt={file.name}
+                                                />
                                             {:else}
-                                                <span class={iconClass(file)}>{iconFor(file)}</span>
+                                                <span class={iconClass(file)}
+                                                    >{iconFor(file)}</span
+                                                >
                                             {/if}
                                         </span>
                                     {:else}
-                                        <span class={iconClass(file)}>{iconFor(file)}</span>
+                                        <span class={iconClass(file)}
+                                            >{iconFor(file)}</span
+                                        >
                                     {/if}
                                     <span class="file-copy">
                                         <strong>{fileStem(file.name)}</strong>
                                         <small>{fileDetail(file)}</small>
                                     </span>
                                 </button>
-                                <button class="file-more" type="button" aria-label={`${file.name} 更多操作`} on:click={(event) => openFileActions(file, event)}>
+                                <button
+                                    class="file-more"
+                                    type="button"
+                                    aria-label={`${file.name} 更多操作`}
+                                    on:click={(event) =>
+                                        openFileActions(file, event)}
+                                >
                                     <svg viewBox="0 0 24 24" aria-hidden="true">
-                                        <circle cx="12" cy="5" r="1.75"></circle>
-                                        <circle cx="12" cy="12" r="1.75"></circle>
-                                        <circle cx="12" cy="19" r="1.75"></circle>
+                                        <circle cx="12" cy="5" r="1.75"
+                                        ></circle>
+                                        <circle cx="12" cy="12" r="1.75"
+                                        ></circle>
+                                        <circle cx="12" cy="19" r="1.75"
+                                        ></circle>
                                     </svg>
                                 </button>
                             </div>
@@ -1261,8 +1548,16 @@
         </section>
 
         {#if editingFile}
-            <section class={replacePanelOpen ? "mobile-editor replace-open" : "mobile-editor"}>
-                <div class:image-head={isImageFile(editingFile) || isFontFile(editingFile)} class="editor-head">
+            <section
+                class={replacePanelOpen
+                    ? "mobile-editor replace-open"
+                    : "mobile-editor"}
+            >
+                <div
+                    class:image-head={isImageFile(editingFile) ||
+                        isFontFile(editingFile)}
+                    class="editor-head"
+                >
                     {#if !isImageFile(editingFile) && !isFontFile(editingFile)}
                         <div>
                             <strong>{editingFile.name}</strong>
@@ -1276,8 +1571,12 @@
                             class:active={replacePanelOpen}
                             class="icon-tool"
                             type="button"
-                            aria-label={replacePanelOpen ? "收起查找替换" : "打开查找替换"}
-                            title={replacePanelOpen ? "收起查找替换" : "打开查找替换"}
+                            aria-label={replacePanelOpen
+                                ? "收起查找替换"
+                                : "打开查找替换"}
+                            title={replacePanelOpen
+                                ? "收起查找替换"
+                                : "打开查找替换"}
                             on:click={toggleReplacePanel}
                             disabled={isImageFile(editingFile)}
                         >
@@ -1292,7 +1591,9 @@
                             aria-label={editorDirty ? "保存文件" : "文件已保存"}
                             title={editorDirty ? "保存文件" : "文件已保存"}
                             on:click={saveEditingFile}
-                            disabled={busy || !editorDirty || isImageFile(editingFile)}
+                            disabled={busy ||
+                                !editorDirty ||
+                                isImageFile(editingFile)}
                         >
                             <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M5 4H16L19 7V20H5Z"></path>
@@ -1324,10 +1625,15 @@
                     </div>
                 {:else if isFontFile(editingFile)}
                     <div class="font-preview">
-                        <div class="font-preview-card" style:font-family={fontPreviewFamily || "inherit"}>
+                        <div
+                            class="font-preview-card"
+                            style:font-family={fontPreviewFamily || "inherit"}
+                        >
                             <p class="font-sample-cn">字体预览 ABC abc 12345</p>
                             <p class="font-sample-cn">古龙世界里的吃瓜剑客</p>
-                            <p class="font-sample-cn">风起云涌，江湖夜雨十年灯。</p>
+                            <p class="font-sample-cn">
+                                风起云涌，江湖夜雨十年灯。
+                            </p>
                         </div>
                     </div>
                 {:else}
@@ -1347,24 +1653,62 @@
                         <section class="replace-panel">
                             <div class="replace-title">
                                 <strong>查找替换</strong>
-                                <small>{replaceOnlyText ? `${activeSearchFiles().length} 个 HTML` : replaceScope === "current" ? "当前文件" : `${activeSearchFiles().length} 个文件`}</small>
+                                <small
+                                    >{replaceOnlyText
+                                        ? `${activeSearchFiles().length} 个 HTML`
+                                        : replaceScope === "current"
+                                          ? "当前文件"
+                                          : `${activeSearchFiles().length} 个文件`}</small
+                                >
                             </div>
                             <div class="replace-grid">
                                 <label>
                                     <span>查找</span>
-                                    <input bind:value={findPattern} autocomplete="off" placeholder="输入查找内容" />
+                                    <input
+                                        bind:value={findPattern}
+                                        autocomplete="off"
+                                        placeholder="输入查找内容"
+                                    />
                                 </label>
                                 <label>
                                     <span>替换为</span>
-                                    <input bind:value={replacePattern} autocomplete="off" placeholder="留空则删除" />
+                                    <input
+                                        bind:value={replacePattern}
+                                        autocomplete="off"
+                                        placeholder="留空则删除"
+                                    />
                                 </label>
                             </div>
                             <div class="replace-actions">
-                                <button type="button" on:click={() => gotoCurrentMatch("prev")} disabled={busy || !findPattern}>上一个</button>
-                                <button type="button" on:click={countBatchMatches} disabled={busy || !findPattern}>计数</button>
-                                <button type="button" on:click={() => gotoCurrentMatch("next")} disabled={busy || !findPattern}>下一个</button>
-                                <button type="button" on:click={replaceCurrentMatch} disabled={busy || !findPattern}>替换当前</button>
-                                <button type="button" on:click={replaceBatchMatches} disabled={busy || !findPattern}>替换全部</button>
+                                <button
+                                    type="button"
+                                    on:click={() => gotoCurrentMatch("prev")}
+                                    disabled={busy || !findPattern}
+                                    >上一个</button
+                                >
+                                <button
+                                    type="button"
+                                    on:click={countBatchMatches}
+                                    disabled={busy || !findPattern}>计数</button
+                                >
+                                <button
+                                    type="button"
+                                    on:click={() => gotoCurrentMatch("next")}
+                                    disabled={busy || !findPattern}
+                                    >下一个</button
+                                >
+                                <button
+                                    type="button"
+                                    on:click={replaceCurrentMatch}
+                                    disabled={busy || !findPattern}
+                                    >替换当前</button
+                                >
+                                <button
+                                    type="button"
+                                    on:click={replaceBatchMatches}
+                                    disabled={busy || !findPattern}
+                                    >替换全部</button
+                                >
                             </div>
                             <div class="replace-options">
                                 <CustomSelect
@@ -1376,18 +1720,31 @@
                                     ]}
                                     disabled={replaceOnlyText}
                                     ariaLabel="查找范围"
-                                    on:change={(event) => (replaceScope = event.detail as typeof replaceScope)}
+                                    on:change={(event) =>
+                                        (replaceScope =
+                                            event.detail as typeof replaceScope)}
                                 />
                                 <label class="replace-check">
-                                    <input type="checkbox" bind:checked={replaceIsRegex} />
+                                    <input
+                                        type="checkbox"
+                                        bind:checked={replaceIsRegex}
+                                    />
                                     <span>正则</span>
                                 </label>
                                 <label class="replace-check">
-                                    <input type="checkbox" bind:checked={replaceOnlyText} />
+                                    <input
+                                        type="checkbox"
+                                        bind:checked={replaceOnlyText}
+                                    />
                                     <span>仅文本</span>
                                 </label>
                             </div>
-                            <p>{replaceStatus || (currentMatchCount ? `第 ${currentMatchIndex}/${currentMatchCount} 处` : "在当前文件内定位，或按范围批量替换。")}</p>
+                            <p>
+                                {replaceStatus ||
+                                    (currentMatchCount
+                                        ? `第 ${currentMatchIndex}/${currentMatchCount} 处`
+                                        : "在当前文件内定位，或按范围批量替换。")}
+                            </p>
                         </section>
                     {/if}
                 {/if}
@@ -1396,7 +1753,11 @@
     {/if}
 
     {#if confirmSheet.open}
-        <div class="confirm-sheet-backdrop" role="presentation" on:click={() => resolveConfirmSheet("cancel")}></div>
+        <div
+            class="confirm-sheet-backdrop"
+            role="presentation"
+            on:click={() => resolveConfirmSheet("cancel")}
+        ></div>
         <div
             class="confirm-sheet"
             role="dialog"
@@ -1409,11 +1770,19 @@
                 <p id="mobile-confirm-message">{confirmSheet.message}</p>
             </div>
             <div class="confirm-sheet-actions">
-                <button class="sheet-cancel" type="button" on:click={() => resolveConfirmSheet("cancel")}>
+                <button
+                    class="sheet-cancel"
+                    type="button"
+                    on:click={() => resolveConfirmSheet("cancel")}
+                >
                     {confirmSheet.cancelLabel}
                 </button>
                 {#if confirmSheet.secondaryLabel}
-                    <button class="sheet-secondary" type="button" on:click={() => resolveConfirmSheet("secondary")}>
+                    <button
+                        class="sheet-secondary"
+                        type="button"
+                        on:click={() => resolveConfirmSheet("secondary")}
+                    >
                         {confirmSheet.secondaryLabel}
                     </button>
                 {/if}
@@ -1430,20 +1799,43 @@
     {/if}
 
     {#if fileActionTarget}
-        <div class="confirm-sheet-backdrop" role="presentation" on:click={closeFileActions}></div>
-        <div class="action-sheet" role="dialog" aria-modal="true" aria-labelledby="file-actions-title">
+        <div
+            class="confirm-sheet-backdrop"
+            role="presentation"
+            on:click={closeFileActions}
+        ></div>
+        <div
+            class="action-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="file-actions-title"
+        >
             <div class="confirm-sheet-copy">
                 <strong id="file-actions-title">{fileActionTarget.name}</strong>
                 <p>{fileActionTarget.path}</p>
             </div>
             <div class="action-sheet-actions">
-                <button class="sheet-confirm" type="button" on:click={() => fileActionTarget && openRenameSheet(fileActionTarget)}>
+                <button
+                    class="sheet-confirm"
+                    type="button"
+                    on:click={() =>
+                        fileActionTarget && openRenameSheet(fileActionTarget)}
+                >
                     重命名
                 </button>
-                <button class="sheet-secondary danger" type="button" on:click={() => fileActionTarget && requestDeleteFile(fileActionTarget)}>
+                <button
+                    class="sheet-secondary danger"
+                    type="button"
+                    on:click={() =>
+                        fileActionTarget && requestDeleteFile(fileActionTarget)}
+                >
                     删除文件
                 </button>
-                <button class="sheet-cancel" type="button" on:click={closeFileActions}>
+                <button
+                    class="sheet-cancel"
+                    type="button"
+                    on:click={closeFileActions}
+                >
                     取消
                 </button>
             </div>
@@ -1451,8 +1843,17 @@
     {/if}
 
     {#if renameSheet.open}
-        <div class="confirm-sheet-backdrop" role="presentation" on:click={closeRenameSheet}></div>
-        <div class="rename-sheet" role="dialog" aria-modal="true" aria-labelledby="rename-file-title">
+        <div
+            class="confirm-sheet-backdrop"
+            role="presentation"
+            on:click={closeRenameSheet}
+        ></div>
+        <div
+            class="rename-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rename-file-title"
+        >
             <div class="confirm-sheet-copy">
                 <strong id="rename-file-title">重命名文件</strong>
                 <p>{renameSheet.file?.path}</p>
@@ -1462,8 +1863,17 @@
                 <input bind:value={renameSheet.value} autocomplete="off" />
             </label>
             <div class="confirm-sheet-actions">
-                <button class="sheet-cancel" type="button" on:click={closeRenameSheet}>取消</button>
-                <button class="sheet-confirm" type="button" on:click={submitRenameFile} disabled={busy}>保存名称</button>
+                <button
+                    class="sheet-cancel"
+                    type="button"
+                    on:click={closeRenameSheet}>取消</button
+                >
+                <button
+                    class="sheet-confirm"
+                    type="button"
+                    on:click={submitRenameFile}
+                    disabled={busy}>保存名称</button
+                >
             </div>
         </div>
     {/if}
@@ -1479,7 +1889,8 @@
         height: 100dvh;
         min-height: 100dvh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 0 max(44px, env(safe-area-inset-bottom));
+        padding: max(10px, env(safe-area-inset-top)) 0
+            max(44px, env(safe-area-inset-bottom));
         overflow-y: auto;
         background: #f2f3f8;
         color: #151923;
@@ -1950,7 +2361,11 @@
         overflow: hidden;
         padding: 0;
         background:
-            radial-gradient(circle at top, rgba(255, 255, 255, 0.88), rgba(242, 243, 248, 0.96) 40%),
+            radial-gradient(
+                circle at top,
+                rgba(255, 255, 255, 0.88),
+                rgba(242, 243, 248, 0.96) 40%
+            ),
             #f2f3f8;
     }
 

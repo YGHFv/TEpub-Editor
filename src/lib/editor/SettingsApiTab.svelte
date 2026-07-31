@@ -34,7 +34,10 @@
         onRemove: (providerId: string) => void;
         onSave: () => void;
         onCancel: () => void;
-        onUpdateDraft: (field: keyof AiProviderConfig, value: string | number) => void;
+        onUpdateDraft: (
+            field: keyof AiProviderConfig,
+            value: string | number,
+        ) => void;
     } = $props();
 </script>
 
@@ -45,10 +48,14 @@
     <div class="font-settings-head ai-provider-head">
         <div>
             <div class="font-settings-title">API 配置</div>
-            <div class="font-settings-note">可添加多个 OpenAI 兼容 API，分别供校对和自动审批选择。</div>
+            <div class="font-settings-note">
+                可添加多个 OpenAI 兼容 API，分别供校对和自动审批选择。
+            </div>
         </div>
         <div class="style-settings-actions">
-            <button class="mini-action" type="button" onclick={onAdd}>新增</button>
+            <button class="mini-action" type="button" onclick={onAdd}
+                >新增</button
+            >
         </div>
     </div>
 
@@ -66,12 +73,24 @@
                         <div class="api-item-meta">
                             <span>{provider.model || "未填写模型"}</span>
                             <span>{provider.baseUrl || "未填写 API 地址"}</span>
-                            <span>{provider.apiKey ? "已保存 Key" : "未填写 Key"}</span>
+                            <span
+                                >{provider.apiKey
+                                    ? "已保存 Key"
+                                    : "未填写 Key"}</span
+                            >
                         </div>
                     </div>
                     <div class="api-item-actions">
-                        <button class="mini-action" type="button" onclick={() => onEdit(provider)}>编辑</button>
-                        <button class="mini-action danger" type="button" onclick={() => onRemove(provider.id)}>删除</button>
+                        <button
+                            class="mini-action"
+                            type="button"
+                            onclick={() => onEdit(provider)}>编辑</button
+                        >
+                        <button
+                            class="mini-action danger"
+                            type="button"
+                            onclick={() => onRemove(provider.id)}>删除</button
+                        >
                     </div>
                 </div>
             {/each}
@@ -79,35 +98,81 @@
     {/if}
 
     {#if editorOpen && editorDraft}
-    <div class="api-editor">
-        <div class="api-editor-head">
-            <strong>{editorMode === "new" ? "新增 API" : "编辑 API"}</strong>
-            <div class="api-editor-actions">
-                <button class="mini-action primary" type="button" onclick={onSave}>保存</button>
-                <button class="mini-action" type="button" onclick={onCancel}>取消</button>
+        <div class="api-editor">
+            <div class="api-editor-head">
+                <strong>{editorMode === "new" ? "新增 API" : "编辑 API"}</strong
+                >
+                <div class="api-editor-actions">
+                    <button
+                        class="mini-action primary"
+                        type="button"
+                        onclick={onSave}>保存</button
+                    >
+                    <button class="mini-action" type="button" onclick={onCancel}
+                        >取消</button
+                    >
+                </div>
+            </div>
+            <div class="set-row">
+                <label for="aiProviderName">名称:</label>
+                <input
+                    id="aiProviderName"
+                    type="text"
+                    value={editorDraft.name || ""}
+                    oninput={(e) =>
+                        onUpdateDraft("name", e.currentTarget.value)}
+                />
+            </div>
+            <div class="set-row">
+                <label for="aiProviderBaseUrl">API 地址:</label>
+                <input
+                    id="aiProviderBaseUrl"
+                    type="text"
+                    value={editorDraft.baseUrl || ""}
+                    oninput={(e) =>
+                        onUpdateDraft("baseUrl", e.currentTarget.value)}
+                    placeholder="https://api.openai.com/v1"
+                />
+            </div>
+            <div class="set-row">
+                <label for="aiProviderKey">API Key:</label>
+                <input
+                    id="aiProviderKey"
+                    type="password"
+                    value={editorDraft.apiKey || ""}
+                    oninput={(e) =>
+                        onUpdateDraft("apiKey", e.currentTarget.value)}
+                    placeholder="sk-..."
+                />
+            </div>
+            <div class="set-row">
+                <label for="aiProviderModel">模型:</label>
+                <input
+                    id="aiProviderModel"
+                    type="text"
+                    value={editorDraft.model || ""}
+                    oninput={(e) =>
+                        onUpdateDraft("model", e.currentTarget.value)}
+                    placeholder="deepseek-chat / gpt-4o-mini"
+                />
+            </div>
+            <div class="set-row">
+                <label for="aiProviderTemperature">温度:</label>
+                <input
+                    id="aiProviderTemperature"
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={editorDraft.temperature ?? 0.1}
+                    oninput={(e) =>
+                        onUpdateDraft(
+                            "temperature",
+                            Number(e.currentTarget.value),
+                        )}
+                />
             </div>
         </div>
-        <div class="set-row">
-            <label for="aiProviderName">名称:</label>
-            <input id="aiProviderName" type="text" value={editorDraft.name || ""} oninput={(e) => onUpdateDraft("name", e.currentTarget.value)} />
-        </div>
-        <div class="set-row">
-            <label for="aiProviderBaseUrl">API 地址:</label>
-            <input id="aiProviderBaseUrl" type="text" value={editorDraft.baseUrl || ""} oninput={(e) => onUpdateDraft("baseUrl", e.currentTarget.value)} placeholder="https://api.openai.com/v1" />
-        </div>
-        <div class="set-row">
-            <label for="aiProviderKey">API Key:</label>
-            <input id="aiProviderKey" type="password" value={editorDraft.apiKey || ""} oninput={(e) => onUpdateDraft("apiKey", e.currentTarget.value)} placeholder="sk-..." />
-        </div>
-        <div class="set-row">
-            <label for="aiProviderModel">模型:</label>
-            <input id="aiProviderModel" type="text" value={editorDraft.model || ""} oninput={(e) => onUpdateDraft("model", e.currentTarget.value)} placeholder="deepseek-chat / gpt-4o-mini" />
-        </div>
-        <div class="set-row">
-            <label for="aiProviderTemperature">温度:</label>
-            <input id="aiProviderTemperature" type="number" min="0" max="1" step="0.1" value={editorDraft.temperature ?? 0.1} oninput={(e) => onUpdateDraft("temperature", Number(e.currentTarget.value))} />
-        </div>
-    </div>
     {/if}
 </div>
 

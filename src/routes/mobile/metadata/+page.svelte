@@ -66,7 +66,10 @@
     }
 
     function splitTags(text: string) {
-        return text.split(/[,，;；\n]/).map((item) => item.trim()).filter(Boolean);
+        return text
+            .split(/[,，;；\n]/)
+            .map((item) => item.trim())
+            .filter(Boolean);
     }
 
     function clearCoverPreview() {
@@ -80,18 +83,43 @@
             const webp = String.fromCharCode(...bytes.slice(8, 12));
             if (riff === "RIFF" && webp === "WEBP") return "image/webp";
         }
-        if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
-        if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
-        if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif";
-        if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";
-        if (bytes.length >= 4 && bytes[0] === 0x3c && bytes[1] === 0x73 && bytes[2] === 0x76 && bytes[3] === 0x67) return "image/svg+xml";
+        if (
+            bytes.length >= 4 &&
+            bytes[0] === 0x89 &&
+            bytes[1] === 0x50 &&
+            bytes[2] === 0x4e &&
+            bytes[3] === 0x47
+        )
+            return "image/png";
+        if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8)
+            return "image/jpeg";
+        if (
+            bytes.length >= 3 &&
+            bytes[0] === 0x47 &&
+            bytes[1] === 0x49 &&
+            bytes[2] === 0x46
+        )
+            return "image/gif";
+        if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d)
+            return "image/bmp";
+        if (
+            bytes.length >= 4 &&
+            bytes[0] === 0x3c &&
+            bytes[1] === 0x73 &&
+            bytes[2] === 0x76 &&
+            bytes[3] === 0x67
+        )
+            return "image/svg+xml";
         return "image/jpeg";
     }
 
     async function loadCover(epubPath: string) {
         clearCoverPreview();
         try {
-            const cover = await invoke<MobileEpubCover>("mobile_read_epub_cover", { epubPath });
+            const cover = await invoke<MobileEpubCover>(
+                "mobile_read_epub_cover",
+                { epubPath },
+            );
             const bytes = new Uint8Array(cover.bytes ?? []);
             if (!bytes.length) return;
             const blob = new Blob([bytes], { type: detectImageMime(bytes) });
@@ -104,7 +132,10 @@
     function exportName() {
         const title = metadata.title.trim();
         const author = metadata.author.trim();
-        const base = title && author ? `${title}-${author}` : title || selectionName(selectedName || "book");
+        const base =
+            title && author
+                ? `${title}-${author}`
+                : title || selectionName(selectedName || "book");
         return safeFileName(base, "epub");
     }
 
@@ -123,7 +154,10 @@
             selectedName = name || selectionName(epubPath);
             exportPath = "";
             status = "正在读取元数据...";
-            metadata = await invoke<MobileEpubMetadata>("mobile_read_epub_metadata", { epubPath });
+            metadata = await invoke<MobileEpubMetadata>(
+                "mobile_read_epub_metadata",
+                { epubPath },
+            );
             await loadCover(epubPath);
             tagsText = metadata.tags.join(", ");
             loaded = true;
@@ -132,7 +166,10 @@
         } catch (err) {
             loaded = false;
             status = "读取元数据失败";
-            await message(`读取元数据失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`读取元数据失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -149,7 +186,10 @@
             await loadMetadata(cachedPath, file.name);
         } catch (err) {
             status = "导入 EPUB 失败";
-            await message(`导入 EPUB 失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`导入 EPUB 失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         }
     }
 
@@ -162,14 +202,19 @@
         try {
             busy = true;
             const bytes = new Uint8Array(await file.arrayBuffer());
-            const cover = await invoke<MobileEpubCover>("mobile_update_epub_cover", {
-                epubPath: selectedPath,
-                coverData: Array.from(bytes),
-            });
+            const cover = await invoke<MobileEpubCover>(
+                "mobile_update_epub_cover",
+                {
+                    epubPath: selectedPath,
+                    coverData: Array.from(bytes),
+                },
+            );
             const nextBytes = new Uint8Array(cover.bytes ?? []);
             clearCoverPreview();
             if (nextBytes.length) {
-                const blob = new Blob([nextBytes], { type: detectImageMime(nextBytes) });
+                const blob = new Blob([nextBytes], {
+                    type: detectImageMime(nextBytes),
+                });
                 coverPreviewUrl = URL.createObjectURL(blob);
             }
             dirty = false;
@@ -177,7 +222,10 @@
             status = "封面已更新到应用缓存副本。";
         } catch (err) {
             status = "更换封面失败";
-            await message(`更换封面失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`更换封面失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -185,15 +233,19 @@
 
     async function saveMetadata(showDialog = true) {
         if (!selectedPath || !loaded) return;
-        const saved = await invoke<MobileEpubMetadata>("mobile_update_epub_metadata", {
-            epubPath: selectedPath,
-            metadata: { ...metadata, tags: splitTags(tagsText) },
-        });
+        const saved = await invoke<MobileEpubMetadata>(
+            "mobile_update_epub_metadata",
+            {
+                epubPath: selectedPath,
+                metadata: { ...metadata, tags: splitTags(tagsText) },
+            },
+        );
         metadata = saved;
         tagsText = saved.tags.join(", ");
         dirty = false;
         status = "元数据已保存到应用缓存副本。";
-        if (showDialog) await message(status, { title: "编辑 EPUB", kind: "info" });
+        if (showDialog)
+            await message(status, { title: "编辑 EPUB", kind: "info" });
     }
 
     async function openStructureEditor() {
@@ -203,7 +255,10 @@
             if (dirty) await saveMetadata(false);
             await goto(editRoute());
         } catch (err) {
-            await message(`进入 EPUB 文件结构失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`进入 EPUB 文件结构失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -227,7 +282,10 @@
             status = result.message;
         } catch (err) {
             status = "保存并导出 EPUB 失败";
-            await message(`保存并导出 EPUB 失败：${err}`, { title: "编辑 EPUB", kind: "error" });
+            await message(`保存并导出 EPUB 失败：${err}`, {
+                title: "编辑 EPUB",
+                kind: "error",
+            });
         } finally {
             busy = false;
         }
@@ -267,8 +325,20 @@
 </svelte:head>
 
 <main class="page">
-    <input bind:this={fileInputEl} class="file-input" type="file" accept=".epub" on:change={onFileChange} />
-    <input bind:this={coverInputEl} class="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml" on:change={onCoverChange} />
+    <input
+        bind:this={fileInputEl}
+        class="file-input"
+        type="file"
+        accept=".epub"
+        on:change={onFileChange}
+    />
+    <input
+        bind:this={coverInputEl}
+        class="file-input"
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml"
+        on:change={onCoverChange}
+    />
     <header class="topbar">
         <a href="/mobile" aria-label="返回">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -280,7 +350,9 @@
 
     {#if !loaded}
         <section class="picker">
-            <button type="button" on:click={openPicker} disabled={busy}>{busy ? "处理中" : "选择 EPUB"}</button>
+            <button type="button" on:click={openPicker} disabled={busy}
+                >{busy ? "处理中" : "选择 EPUB"}</button
+            >
             <p>{status}</p>
         </section>
     {/if}
@@ -291,14 +363,29 @@
                 <div class="hero-main">
                     <label class="hero-field">
                         <span>书名</span>
-                        <input bind:value={metadata.title} on:input={markDirty} autocomplete="off" />
+                        <input
+                            bind:value={metadata.title}
+                            on:input={markDirty}
+                            autocomplete="off"
+                        />
                     </label>
                     <label class="hero-field">
                         <span>作者</span>
-                        <input bind:value={metadata.author} on:input={markDirty} autocomplete="off" />
+                        <input
+                            bind:value={metadata.author}
+                            on:input={markDirty}
+                            autocomplete="off"
+                        />
                     </label>
                 </div>
-                <button class="cover-panel" type="button" aria-label="更换封面" title="更换封面" on:click={openCoverPicker} disabled={busy}>
+                <button
+                    class="cover-panel"
+                    type="button"
+                    aria-label="更换封面"
+                    title="更换封面"
+                    on:click={openCoverPicker}
+                    disabled={busy}
+                >
                     {#if coverPreviewUrl}
                         <img src={coverPreviewUrl} alt="EPUB 封面" />
                     {:else}
@@ -306,22 +393,73 @@
                     {/if}
                 </button>
             </div>
-            <label><span>副标题</span><input bind:value={metadata.subtitle} on:input={markDirty} autocomplete="off" /></label>
-            <label><span>出版社</span><input bind:value={metadata.publisher} on:input={markDirty} autocomplete="off" /></label>
-            <label><span>制作信息</span><input bind:value={metadata.maker} on:input={markDirty} autocomplete="off" /></label>
-            <label><span>系列</span><input bind:value={metadata.series} on:input={markDirty} autocomplete="off" /></label>
-            <label class="full"><span>标签</span><input bind:value={tagsText} on:input={markDirty} autocomplete="off" /></label>
-            <label class="full"><span>UUID / 标识符</span><input bind:value={metadata.epub_uuid} on:input={markDirty} autocomplete="off" /></label>
-            <label class="full"><span>简介</span><textarea bind:value={metadata.description} on:input={markDirty} rows="5"></textarea></label>
+            <label
+                ><span>副标题</span><input
+                    bind:value={metadata.subtitle}
+                    on:input={markDirty}
+                    autocomplete="off"
+                /></label
+            >
+            <label
+                ><span>出版社</span><input
+                    bind:value={metadata.publisher}
+                    on:input={markDirty}
+                    autocomplete="off"
+                /></label
+            >
+            <label
+                ><span>制作信息</span><input
+                    bind:value={metadata.maker}
+                    on:input={markDirty}
+                    autocomplete="off"
+                /></label
+            >
+            <label
+                ><span>系列</span><input
+                    bind:value={metadata.series}
+                    on:input={markDirty}
+                    autocomplete="off"
+                /></label
+            >
+            <label class="full"
+                ><span>标签</span><input
+                    bind:value={tagsText}
+                    on:input={markDirty}
+                    autocomplete="off"
+                /></label
+            >
+            <label class="full"
+                ><span>UUID / 标识符</span><input
+                    bind:value={metadata.epub_uuid}
+                    on:input={markDirty}
+                    autocomplete="off"
+                /></label
+            >
+            <label class="full"
+                ><span>简介</span><textarea
+                    bind:value={metadata.description}
+                    on:input={markDirty}
+                    rows="5"></textarea></label
+            >
             <div class="action-row full">
-                <button class="secondary" type="button" on:click={openStructureEditor} disabled={busy}>
+                <button
+                    class="secondary"
+                    type="button"
+                    on:click={openStructureEditor}
+                    disabled={busy}
+                >
                     {busy ? "处理中" : "编辑 EPUB 文件"}
                 </button>
-                <button type="button" on:click={onSaveAndExport} disabled={busy}>
+                <button
+                    type="button"
+                    on:click={onSaveAndExport}
+                    disabled={busy}
+                >
                     {busy ? "处理中" : "保存并导出"}
                 </button>
             </div>
-            {#if exportPath}<code class="export-path full">{exportPath}</code>{/if}
+            {#if exportPath}<code class="export-path full">{exportPath}</code
+                >{/if}
         </section>
     {/if}
 </main>
@@ -335,7 +473,8 @@
     .page {
         min-height: 100vh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 14px max(44px, env(safe-area-inset-bottom));
+        padding: max(10px, env(safe-area-inset-top)) 14px
+            max(44px, env(safe-area-inset-bottom));
         background: #f4f5f8;
         color: #171b24;
     }

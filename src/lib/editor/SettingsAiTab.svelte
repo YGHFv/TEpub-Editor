@@ -33,19 +33,48 @@
     {/if}
     <div class="set-row">
         <label for="aiProofProvider">校对 API:</label>
-        <CustomSelect id="aiProofProvider" value={proofProviderId} options={providers.map((provider) => ({ value: provider.id, label: provider.name || provider.model }))} on:change={(event) => onProofProviderChange(event.detail)} />
+        <CustomSelect
+            id="aiProofProvider"
+            value={proofProviderId}
+            options={providers.map((provider) => ({
+                value: provider.id,
+                label: provider.name || provider.model,
+            }))}
+            on:change={(event) => onProofProviderChange(event.detail)}
+        />
     </div>
     <div class="set-row">
         <label for="aiApprovalProvider">审批 API:</label>
-        <CustomSelect id="aiApprovalProvider" value={approvalProviderId} options={providers.map((provider) => ({ value: provider.id, label: provider.name || provider.model }))} on:change={(event) => onApprovalProviderChange(event.detail)} />
+        <CustomSelect
+            id="aiApprovalProvider"
+            value={approvalProviderId}
+            options={providers.map((provider) => ({
+                value: provider.id,
+                label: provider.name || provider.model,
+            }))}
+            on:change={(event) => onApprovalProviderChange(event.detail)}
+        />
     </div>
     <div class="set-row">
         <label for="aiMaxChars">单章上限:</label>
-        <input id="aiMaxChars" type="number" min="1000" step="1000" bind:value={maxChapterChars} />
+        <input
+            id="aiMaxChars"
+            type="number"
+            min="1000"
+            step="1000"
+            bind:value={maxChapterChars}
+        />
     </div>
     <div class="set-row">
         <label for="aiTimeoutSec">最长响应时间:</label>
-        <input id="aiTimeoutSec" type="number" min="30" max="1800" step="30" bind:value={responseTimeoutSec} />
+        <input
+            id="aiTimeoutSec"
+            type="number"
+            min="30"
+            max="1800"
+            step="30"
+            bind:value={responseTimeoutSec}
+        />
     </div>
     <label class="set-row ai-toggle-row" for="aiAutoApprove">
         <span>自动审批:</span>
@@ -54,7 +83,11 @@
     </label>
     <div class="set-row ai-textarea-row">
         <label for="aiExtraPrompt">额外要求:</label>
-        <textarea id="aiExtraPrompt" rows="4" bind:value={extraPrompt} placeholder="例如：保留作者口癖，不做风格润色。"></textarea>
+        <textarea
+            id="aiExtraPrompt"
+            rows="4"
+            bind:value={extraPrompt}
+            placeholder="例如：保留作者口癖，不做风格润色。"></textarea>
     </div>
 </div>
 

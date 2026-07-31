@@ -1,5 +1,11 @@
 import { createServer } from "node:http";
-import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
@@ -13,7 +19,8 @@ const maxAiImageResponseBytes = 64 * 1024 * 1024;
 const maxAiImageInputBytes = 20 * 1024 * 1024;
 const aiImageUserAgent = "TEpub-Editor/web-image-tools";
 const maxRemoteImageBytes = 32 * 1024 * 1024;
-const remoteImageUserAgent = "Mozilla/5.0 (compatible; TEpub-Editor/1.0; +https://github.com/YGHFv/TEpub-Editor)";
+const remoteImageUserAgent =
+  "Mozilla/5.0 (compatible; TEpub-Editor/1.0; +https://github.com/YGHFv/TEpub-Editor)";
 const maxAuthBodyBytes = 1 * 1024 * 1024;
 const maxCommandBodyBytes = 128 * 1024 * 1024;
 const authRateLimitWindowMs = 5 * 60 * 1000;
@@ -106,7 +113,10 @@ function authUser(req, db) {
   const header = String(req.headers.authorization || "");
   const token = header.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-  return Object.values(db.users).find((user) => user.sessions?.includes(token)) || null;
+  return (
+    Object.values(db.users).find((user) => user.sessions?.includes(token)) ||
+    null
+  );
 }
 
 function requestIp(req) {
@@ -133,11 +143,15 @@ function checkAuthRateLimit(req) {
 }
 
 function normalizeAiBaseUrl(value) {
-  return String(value || "").trim().replace(/\/+$/, "");
+  return String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
 }
 
 function removeSuffixIgnoreCase(value, suffix) {
-  return value.toLowerCase().endsWith(suffix.toLowerCase()) ? value.slice(0, -suffix.length) : value;
+  return value.toLowerCase().endsWith(suffix.toLowerCase())
+    ? value.slice(0, -suffix.length)
+    : value;
 }
 
 function isVersionedAiBaseUrl(baseUrl) {
@@ -151,8 +165,10 @@ function aiImageGenerationUrl(baseUrl) {
   if (!base) throw new Error("Base URL 不能为空");
   const lower = base.toLowerCase();
   if (lower.endsWith("/images/generations")) return base;
-  if (lower.endsWith("/chat/completions")) return `${removeSuffixIgnoreCase(base, "/chat/completions")}/images/generations`;
-  if (lower.endsWith("/v1") || isVersionedAiBaseUrl(base)) return `${base}/images/generations`;
+  if (lower.endsWith("/chat/completions"))
+    return `${removeSuffixIgnoreCase(base, "/chat/completions")}/images/generations`;
+  if (lower.endsWith("/v1") || isVersionedAiBaseUrl(base))
+    return `${base}/images/generations`;
   return `${base}/v1/images/generations`;
 }
 
@@ -161,9 +177,12 @@ function aiImageEditsUrl(baseUrl) {
   if (!base) throw new Error("Base URL 不能为空");
   const lower = base.toLowerCase();
   if (lower.endsWith("/images/edits")) return base;
-  if (lower.endsWith("/images/generations")) return `${removeSuffixIgnoreCase(base, "/images/generations")}/images/edits`;
-  if (lower.endsWith("/chat/completions")) return `${removeSuffixIgnoreCase(base, "/chat/completions")}/images/edits`;
-  if (lower.endsWith("/v1") || isVersionedAiBaseUrl(base)) return `${base}/images/edits`;
+  if (lower.endsWith("/images/generations"))
+    return `${removeSuffixIgnoreCase(base, "/images/generations")}/images/edits`;
+  if (lower.endsWith("/chat/completions"))
+    return `${removeSuffixIgnoreCase(base, "/chat/completions")}/images/edits`;
+  if (lower.endsWith("/v1") || isVersionedAiBaseUrl(base))
+    return `${base}/images/edits`;
   return `${base}/v1/images/edits`;
 }
 
@@ -171,11 +190,20 @@ function imageMimeFromBytes(bytes) {
   if (bytes.length >= 12) {
     const riff = Buffer.from(bytes.slice(0, 4)).toString("ascii");
     const webp = Buffer.from(bytes.slice(8, 12)).toString("ascii");
-    if (riff === "RIFF" && webp === "WEBP") return { extension: "webp", mime: "image/webp" };
+    if (riff === "RIFF" && webp === "WEBP")
+      return { extension: "webp", mime: "image/webp" };
   }
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return { extension: "png", mime: "image/png" };
-  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return { extension: "gif", mime: "image/gif" };
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) return { extension: "jpg", mime: "image/jpeg" };
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  )
+    return { extension: "png", mime: "image/png" };
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46)
+    return { extension: "gif", mime: "image/gif" };
+  if (bytes[0] === 0xff && bytes[1] === 0xd8)
+    return { extension: "jpg", mime: "image/jpeg" };
   return { extension: "jpg", mime: "image/jpeg" };
 }
 
@@ -188,7 +216,9 @@ function validateAiImageBytes(bytes, label) {
 
 function decodeAiBase64Image(value) {
   const trimmed = String(value || "").trim();
-  const encoded = trimmed.toLowerCase().startsWith("data:image/") ? trimmed.split(",").slice(1).join(",").trim() : trimmed;
+  const encoded = trimmed.toLowerCase().startsWith("data:image/")
+    ? trimmed.split(",").slice(1).join(",").trim()
+    : trimmed;
   if (encoded.length < 80 || /\s/.test(encoded)) return null;
   try {
     const bytes = Buffer.from(encoded, "base64");
@@ -216,9 +246,21 @@ function aiJsonErrorPreview(text) {
 }
 
 function imageSizeCandidates(requested, target) {
-  const fallback = target === "banner" ? "1536x768" : target === "standard" ? "1200x1600" : "1024x1792";
-  const secondary = target === "banner" ? "1280x640" : target === "standard" ? "1024x1365" : "1400x2400";
-  return [...new Set([String(requested || "").trim(), fallback, secondary, ""])];
+  const fallback =
+    target === "banner"
+      ? "1536x768"
+      : target === "standard"
+        ? "1200x1600"
+        : "1024x1792";
+  const secondary =
+    target === "banner"
+      ? "1280x640"
+      : target === "standard"
+        ? "1024x1365"
+        : "1400x2400";
+  return [
+    ...new Set([String(requested || "").trim(), fallback, secondary, ""]),
+  ];
 }
 
 function renderAiImagePrompt(template, titleValue, authorValue) {
@@ -226,7 +268,12 @@ function renderAiImagePrompt(template, titleValue, authorValue) {
   const rawAuthor = String(authorValue || "").trim();
   let prompt = String(template || "").trim();
   if (!rawAuthor) {
-    for (const marker of ["作者{author}的", "作者{{author}}的", "作者 {author} 的", "作者 {{author}} 的"]) {
+    for (const marker of [
+      "作者{author}的",
+      "作者{{author}}的",
+      "作者 {author} 的",
+      "作者 {{author}} 的",
+    ]) {
       prompt = prompt.replaceAll(marker, "");
     }
   }
@@ -236,7 +283,13 @@ function renderAiImagePrompt(template, titleValue, authorValue) {
     .replaceAll("{{text}}", title)
     .replaceAll("{author}", rawAuthor)
     .replaceAll("{{author}}", rawAuthor);
-  if (prompt.includes("{title}") || prompt.includes("{{title}}") || prompt.includes("{{text}}") || prompt.includes("{author}") || prompt.includes("{{author}}")) {
+  if (
+    prompt.includes("{title}") ||
+    prompt.includes("{{title}}") ||
+    prompt.includes("{{text}}") ||
+    prompt.includes("{author}") ||
+    prompt.includes("{{author}}")
+  ) {
     return replaced;
   }
   return `${replaced}\n\n书籍信息：${rawAuthor ? `${title} / ${rawAuthor}` : title}`;
@@ -250,10 +303,18 @@ function buildAiImageRequestBodies(model, prompt, size, referenceDataUrl) {
   };
   const bodies = [];
   if (referenceDataUrl) {
-    for (const variant of ["image_array", "image_string", "image_urls_array", "image_array_no_format", "image_string_no_format", "image_urls_array_no_format"]) {
+    for (const variant of [
+      "image_array",
+      "image_string",
+      "image_urls_array",
+      "image_array_no_format",
+      "image_string_no_format",
+      "image_urls_array_no_format",
+    ]) {
       const body = baseBody();
       if (variant.startsWith("image_array")) body.image = [referenceDataUrl];
-      else if (variant.startsWith("image_string")) body.image = referenceDataUrl;
+      else if (variant.startsWith("image_string"))
+        body.image = referenceDataUrl;
       else body.image_urls = [referenceDataUrl];
       if (!variant.endsWith("_no_format")) body.response_format = "b64_json";
       bodies.push(body);
@@ -281,8 +342,12 @@ async function downloadAiImageUrl(url) {
     if (response.status >= 300 && response.status < 400) {
       if (redirectCount === 3) throw new Error("生成图片地址重定向次数过多");
       const location = response.headers.get("location");
-      if (!location) throw new Error(`生成图片地址返回了无目标的重定向 ${response.status}`);
-      current = await validatePublicHttpUrl(new URL(location, current).toString(), "生成图片地址");
+      if (!location)
+        throw new Error(`生成图片地址返回了无目标的重定向 ${response.status}`);
+      current = await validatePublicHttpUrl(
+        new URL(location, current).toString(),
+        "生成图片地址",
+      );
       continue;
     }
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -298,7 +363,10 @@ async function extractAiImageBytes(value, keyHint = "") {
     const decoded = decodeAiBase64Image(value);
     if (decoded) return decoded;
     const key = String(keyHint || "").toLowerCase();
-    if ((key.includes("url") || key === "uri" || key === "href") && isRemoteAiUrl(value)) {
+    if (
+      (key.includes("url") || key === "uri" || key === "href") &&
+      isRemoteAiUrl(value)
+    ) {
       try {
         return await downloadAiImageUrl(value);
       } catch {
@@ -315,7 +383,17 @@ async function extractAiImageBytes(value, keyHint = "") {
     return null;
   }
   if (value && typeof value === "object") {
-    for (const key of ["b64_json", "base64", "image_base64", "data", "content", "url", "image_url", "uri", "href"]) {
+    for (const key of [
+      "b64_json",
+      "base64",
+      "image_base64",
+      "data",
+      "content",
+      "url",
+      "image_url",
+      "uri",
+      "href",
+    ]) {
       if (key in value) {
         const bytes = await extractAiImageBytes(value[key], key);
         if (bytes) return bytes;
@@ -330,7 +408,10 @@ async function extractAiImageBytes(value, keyHint = "") {
 }
 
 async function requestAiImageGeneration(request, body) {
-  const endpoint = await validatePublicHttpUrl(aiImageGenerationUrl(request.baseUrl), "生图接口地址");
+  const endpoint = await validatePublicHttpUrl(
+    aiImageGenerationUrl(request.baseUrl),
+    "生图接口地址",
+  );
   const response = await fetch(endpoint, {
     method: "POST",
     signal: AbortSignal.timeout(300_000),
@@ -345,7 +426,10 @@ async function requestAiImageGeneration(request, body) {
   const contentType = response.headers.get("content-type") || "";
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.length > maxAiImageResponseBytes) throw new Error("生图响应过大");
-  if (!response.ok) throw new Error(`生图接口返回 ${response.status}: ${aiJsonErrorPreview(bytes.toString("utf8"))}`);
+  if (!response.ok)
+    throw new Error(
+      `生图接口返回 ${response.status}: ${aiJsonErrorPreview(bytes.toString("utf8"))}`,
+    );
   if (contentType.startsWith("image/")) {
     validateAiImageBytes(bytes, "生成图片");
     return bytes;
@@ -354,7 +438,9 @@ async function requestAiImageGeneration(request, body) {
   try {
     value = JSON.parse(bytes.toString("utf8"));
   } catch (error) {
-    throw new Error(`生图接口未返回有效 JSON: ${error.message}; ${bytes.toString("utf8").slice(0, 180)}`);
+    throw new Error(
+      `生图接口未返回有效 JSON: ${error.message}; ${bytes.toString("utf8").slice(0, 180)}`,
+    );
   }
   const out = await extractAiImageBytes(value);
   if (!out) throw new Error("生图接口返回中没有图片数据");
@@ -369,8 +455,15 @@ async function requestAiImageEdit(request, prompt, size, referenceBytes) {
   form.set("n", "1");
   form.set("response_format", "b64_json");
   if (String(size || "").trim()) form.set("size", String(size).trim());
-  form.set("image", new Blob([referenceBytes], { type: mime }), `reference.${extension}`);
-  const endpoint = await validatePublicHttpUrl(aiImageEditsUrl(request.baseUrl), "图片编辑接口地址");
+  form.set(
+    "image",
+    new Blob([referenceBytes], { type: mime }),
+    `reference.${extension}`,
+  );
+  const endpoint = await validatePublicHttpUrl(
+    aiImageEditsUrl(request.baseUrl),
+    "图片编辑接口地址",
+  );
   const response = await fetch(endpoint, {
     method: "POST",
     signal: AbortSignal.timeout(300_000),
@@ -383,8 +476,12 @@ async function requestAiImageEdit(request, prompt, size, referenceBytes) {
   });
   const contentType = response.headers.get("content-type") || "";
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > maxAiImageResponseBytes) throw new Error("图片编辑响应过大");
-  if (!response.ok) throw new Error(`图片编辑接口返回 ${response.status}: ${aiJsonErrorPreview(bytes.toString("utf8"))}`);
+  if (bytes.length > maxAiImageResponseBytes)
+    throw new Error("图片编辑响应过大");
+  if (!response.ok)
+    throw new Error(
+      `图片编辑接口返回 ${response.status}: ${aiJsonErrorPreview(bytes.toString("utf8"))}`,
+    );
   if (contentType.startsWith("image/")) {
     validateAiImageBytes(bytes, "生成图片");
     return bytes;
@@ -393,7 +490,9 @@ async function requestAiImageEdit(request, prompt, size, referenceBytes) {
   try {
     value = JSON.parse(bytes.toString("utf8"));
   } catch (error) {
-    throw new Error(`图片编辑接口未返回有效 JSON: ${error.message}; ${bytes.toString("utf8").slice(0, 180)}`);
+    throw new Error(
+      `图片编辑接口未返回有效 JSON: ${error.message}; ${bytes.toString("utf8").slice(0, 180)}`,
+    );
   }
   const out = await extractAiImageBytes(value);
   if (!out) throw new Error("图片编辑接口返回中没有图片数据");
@@ -410,32 +509,54 @@ function sanitizeFilenamePart(value) {
 
 async function generateAiImageCommand(payload) {
   const request = payload?.request || {};
-  if (!String(request.baseUrl || "").trim() || !String(request.apiKey || "").trim() || !String(request.model || "").trim()) {
+  if (
+    !String(request.baseUrl || "").trim() ||
+    !String(request.apiKey || "").trim() ||
+    !String(request.model || "").trim()
+  ) {
     throw new Error("请先填写 Base URL、API Key 和模型");
   }
   if (!String(request.prompt || "").trim()) throw new Error("提示词不能为空");
-  const target = ["duokan", "cover"].includes(String(request.target || "").trim())
+  const target = ["duokan", "cover"].includes(
+    String(request.target || "").trim(),
+  )
     ? "duokan"
     : String(request.target || "").trim() === "standard"
       ? "standard"
       : String(request.target || "").trim() === "banner"
         ? "banner"
         : "duokan";
-  const referenceBytes = Array.isArray(request.referenceData) ? Buffer.from(request.referenceData) : null;
+  const referenceBytes = Array.isArray(request.referenceData)
+    ? Buffer.from(request.referenceData)
+    : null;
   if (referenceBytes?.length) {
-    if (referenceBytes.length > maxAiImageInputBytes) throw new Error("参考封面图片过大");
+    if (referenceBytes.length > maxAiImageInputBytes)
+      throw new Error("参考封面图片过大");
     validateAiImageBytes(referenceBytes, "参考封面");
   }
-  const prompt = renderAiImagePrompt(request.prompt, request.title, request.author);
-  const referenceDataUrl = referenceBytes?.length ? `data:${imageMimeFromBytes(referenceBytes).mime};base64,${referenceBytes.toString("base64")}` : "";
+  const prompt = renderAiImagePrompt(
+    request.prompt,
+    request.title,
+    request.author,
+  );
+  const referenceDataUrl = referenceBytes?.length
+    ? `data:${imageMimeFromBytes(referenceBytes).mime};base64,${referenceBytes.toString("base64")}`
+    : "";
   const sizes = imageSizeCandidates(request.size, target);
-  const isGptImage = String(request.model || "").toLowerCase().includes("gpt-image");
+  const isGptImage = String(request.model || "")
+    .toLowerCase()
+    .includes("gpt-image");
   let lastError = null;
 
   if (isGptImage && referenceBytes?.length) {
     for (const size of sizes) {
       try {
-        const out = await requestAiImageEdit(request, prompt, size, referenceBytes);
+        const out = await requestAiImageEdit(
+          request,
+          prompt,
+          size,
+          referenceBytes,
+        );
         return formatAiImageResult(out, request.title, target, prompt, size);
       } catch (error) {
         lastError = error;
@@ -444,7 +565,12 @@ async function generateAiImageCommand(payload) {
   }
 
   for (const size of sizes) {
-    for (const body of buildAiImageRequestBodies(request.model, prompt, size, referenceDataUrl)) {
+    for (const body of buildAiImageRequestBodies(
+      request.model,
+      prompt,
+      size,
+      referenceDataUrl,
+    )) {
       try {
         const out = await requestAiImageGeneration(request, body);
         return formatAiImageResult(out, request.title, target, prompt, size);
@@ -471,34 +597,64 @@ function formatAiImageResult(bytes, title, target, prompt, size) {
 }
 
 function strictRasterMimeFromBytes(bytes) {
-  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
-  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
-  if (bytes.length >= 6 && ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"))) return "image/gif";
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+    bytes.subarray(8, 12).toString("ascii") === "WEBP"
+  )
+    return "image/webp";
+  if (
+    bytes.length >= 8 &&
+    bytes
+      .subarray(0, 8)
+      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  )
+    return "image/png";
+  if (
+    bytes.length >= 6 &&
+    ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"))
+  )
+    return "image/gif";
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  )
+    return "image/jpeg";
   return "";
 }
 
 function blockedIpv4(address) {
   const parts = address.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+  )
+    return true;
   const [a, b] = parts;
-  return a === 0
-    || a === 10
-    || a === 127
-    || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31)
-    || (a === 192 && b === 168)
-    || (a === 100 && b >= 64 && b <= 127)
-    || (a === 198 && (b === 18 || b === 19))
-    || a >= 224;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
 }
 
 function blockedIpAddress(address) {
-  const normalized = String(address || "").toLowerCase().replace(/^\[|\]$/g, "");
+  const normalized = String(address || "")
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
   if (isIP(normalized) === 4) return blockedIpv4(normalized);
   if (isIP(normalized) !== 6) return true;
   if (normalized === "::" || normalized === "::1") return true;
-  if (/^(?:fc|fd)/.test(normalized) || /^fe[89ab]/.test(normalized)) return true;
+  if (/^(?:fc|fd)/.test(normalized) || /^fe[89ab]/.test(normalized))
+    return true;
   const mapped = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
   return mapped ? blockedIpv4(mapped) : false;
 }
@@ -510,14 +666,29 @@ async function validatePublicHttpUrl(value, label = "地址") {
   } catch (error) {
     throw new Error(`${label}无效：${error.message}`);
   }
-  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error(`${label}仅支持 HTTP 或 HTTPS`);
-  if (parsed.username || parsed.password) throw new Error(`${label}不能包含用户名或密码`);
-  const host = parsed.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
-  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
+  if (!["http:", "https:"].includes(parsed.protocol))
+    throw new Error(`${label}仅支持 HTTP 或 HTTPS`);
+  if (parsed.username || parsed.password)
+    throw new Error(`${label}不能包含用户名或密码`);
+  const host = parsed.hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase();
+  if (
+    !host ||
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local")
+  ) {
     throw new Error(`${label}不允许指向本机或局域网`);
   }
-  const addresses = isIP(host) ? [{ address: host }] : await lookup(host, { all: true, verbatim: true });
-  if (!addresses.length || addresses.some((item) => blockedIpAddress(item.address))) {
+  const addresses = isIP(host)
+    ? [{ address: host }]
+    : await lookup(host, { all: true, verbatim: true });
+  if (
+    !addresses.length ||
+    addresses.some((item) => blockedIpAddress(item.address))
+  ) {
     throw new Error(`${label}不允许指向本机、私有网络或链路本地地址`);
   }
   return parsed;
@@ -529,7 +700,8 @@ async function validateRemoteImageUrl(value) {
 
 async function readLimitedResponse(response) {
   const declaredLength = Number(response.headers.get("content-length") || 0);
-  if (declaredLength > maxRemoteImageBytes) throw new Error("图片超过 32 MB 限制");
+  if (declaredLength > maxRemoteImageBytes)
+    throw new Error("图片超过 32 MB 限制");
   if (!response.body) throw new Error("图片响应为空");
   const chunks = [];
   let total = 0;
@@ -551,7 +723,8 @@ async function downloadRemoteImageCommand(payload) {
       redirect: "manual",
       signal: AbortSignal.timeout(30_000),
       headers: {
-        accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8,*/*;q=0.5",
+        accept:
+          "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8,*/*;q=0.5",
         referer: origin,
         "user-agent": remoteImageUserAgent,
       },
@@ -559,14 +732,16 @@ async function downloadRemoteImageCommand(payload) {
     if (response.status >= 300 && response.status < 400) {
       if (redirectCount === 5) throw new Error("图片地址重定向次数超过 5 次");
       const location = response.headers.get("location");
-      if (!location) throw new Error(`图片服务器返回了无目标的重定向 ${response.status}`);
+      if (!location)
+        throw new Error(`图片服务器返回了无目标的重定向 ${response.status}`);
       current = new URL(location, current);
       continue;
     }
     if (!response.ok) throw new Error(`图片服务器返回 ${response.status}`);
     const bytes = await readLimitedResponse(response);
     const contentType = strictRasterMimeFromBytes(bytes);
-    if (!contentType) throw new Error("响应不是支持的 JPG、PNG、WebP 或 GIF 图片");
+    if (!contentType)
+      throw new Error("响应不是支持的 JPG、PNG、WebP 或 GIF 图片");
     return {
       dataBase64: bytes.toString("base64"),
       contentType,
@@ -579,21 +754,37 @@ async function downloadRemoteImageCommand(payload) {
 async function runAiProofingCommand(payload) {
   const request = payload?.request || {};
   const config = request.config || {};
-  const base = String(config.baseUrl || "").trim().replace(/\/+$/, "");
+  const base = String(config.baseUrl || "")
+    .trim()
+    .replace(/\/+$/, "");
   const apiKey = String(config.apiKey || "").trim();
   const model = String(config.model || "").trim();
-  if (!base || !apiKey || !model) throw new Error("请先填写文字模型 API 地址、API Key 和模型名");
-  const endpoint = base.toLowerCase().endsWith("/chat/completions") ? base : `${base}/chat/completions`;
+  if (!base || !apiKey || !model)
+    throw new Error("请先填写文字模型 API 地址、API Key 和模型名");
+  const endpoint = base.toLowerCase().endsWith("/chat/completions")
+    ? base
+    : `${base}/chat/completions`;
   await validatePublicHttpUrl(endpoint, "文字模型接口地址");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(30, Math.min(1800, Number(config.responseTimeoutSec) || 300)) * 1000);
+  const timer = setTimeout(
+    () => controller.abort(),
+    Math.max(30, Math.min(1800, Number(config.responseTimeoutSec) || 300)) *
+      1000,
+  );
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
         model,
-        temperature: Math.max(0, Math.min(1, Number(config.temperature) || 0.1)),
+        temperature: Math.max(
+          0,
+          Math.min(1, Number(config.temperature) || 0.1),
+        ),
         max_tokens: 8192,
         stream: false,
         messages: [
@@ -605,11 +796,25 @@ async function runAiProofingCommand(payload) {
     });
     const text = await response.text();
     let value;
-    try { value = JSON.parse(text); } catch { throw new Error(`文字模型未返回有效 JSON：${text.slice(0, 180)}`); }
-    if (!response.ok) throw new Error(value?.error?.message || value?.error || value?.message || `文字模型返回 ${response.status}`);
+    try {
+      value = JSON.parse(text);
+    } catch {
+      throw new Error(`文字模型未返回有效 JSON：${text.slice(0, 180)}`);
+    }
+    if (!response.ok)
+      throw new Error(
+        value?.error?.message ||
+          value?.error ||
+          value?.message ||
+          `文字模型返回 ${response.status}`,
+      );
     const raw = value?.choices?.[0]?.message?.content;
     const content = Array.isArray(raw)
-      ? raw.map((item) => typeof item === "string" ? item : item?.text || item?.content || "").join("")
+      ? raw
+          .map((item) =>
+            typeof item === "string" ? item : item?.text || item?.content || "",
+          )
+          .join("")
       : String(raw || "");
     if (!content.trim()) throw new Error("文字模型响应中没有可用内容");
     return { content };
@@ -635,7 +840,9 @@ async function handleCommand(req, res, command, db) {
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {
-    return json(res, Number(error?.status) || 400, { error: String(error?.message || error) });
+    return json(res, Number(error?.status) || 400, {
+      error: String(error?.message || error),
+    });
   }
 }
 
@@ -644,11 +851,17 @@ async function handleApi(req, res, url) {
     const db = loadDb();
 
     if (url.pathname.startsWith("/api/commands/")) {
-      return handleCommand(req, res, decodeURIComponent(url.pathname.slice("/api/commands/".length)), db);
+      return handleCommand(
+        req,
+        res,
+        decodeURIComponent(url.pathname.slice("/api/commands/".length)),
+        db,
+      );
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/register") {
-      if (!checkAuthRateLimit(req)) return json(res, 429, { error: "尝试过于频繁，请稍后再试。" });
+      if (!checkAuthRateLimit(req))
+        return json(res, 429, { error: "尝试过于频繁，请稍后再试。" });
       const body = await readBody(req);
       const username = normalizeUsername(body.username);
       const password = normalizePassword(body.password);
@@ -667,7 +880,8 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/login") {
-      if (!checkAuthRateLimit(req)) return json(res, 429, { error: "尝试过于频繁，请稍后再试。" });
+      if (!checkAuthRateLimit(req))
+        return json(res, 429, { error: "尝试过于频繁，请稍后再试。" });
       const body = await readBody(req);
       const username = normalizeUsername(body.username);
       const password = normalizePassword(body.password);
@@ -695,10 +909,14 @@ async function handleApi(req, res, url) {
     if (url.pathname === "/api/settings") {
       const user = authUser(req, db);
       if (!user) return json(res, 401, { error: "未登录。" });
-      if (req.method === "GET") return json(res, 200, { settings: user.settings || {} });
+      if (req.method === "GET")
+        return json(res, 200, { settings: user.settings || {} });
       if (req.method === "PUT") {
         const body = await readBody(req);
-        user.settings = body.settings && typeof body.settings === "object" ? body.settings : {};
+        user.settings =
+          body.settings && typeof body.settings === "object"
+            ? body.settings
+            : {};
         user.updatedAt = new Date().toISOString();
         saveDb(db);
         return json(res, 200, { settings: user.settings });
@@ -707,14 +925,20 @@ async function handleApi(req, res, url) {
 
     return json(res, 404, { error: "Not found" });
   } catch (error) {
-    return json(res, Number(error?.status) || 400, { error: String(error?.message || error) });
+    return json(res, Number(error?.status) || 400, {
+      error: String(error?.message || error),
+    });
   }
 }
 
 function serveStatic(req, res, url) {
   if (url.pathname === "/mobile/make" || url.pathname === "/mobile/make/") {
-    const next = new URL("/toolbox/make-epub", `http://${req.headers.host || "localhost"}`);
-    for (const [key, value] of url.searchParams.entries()) next.searchParams.set(key, value);
+    const next = new URL(
+      "/toolbox/make-epub",
+      `http://${req.headers.host || "localhost"}`,
+    );
+    for (const [key, value] of url.searchParams.entries())
+      next.searchParams.set(key, value);
     next.searchParams.set("view", "desktop");
     res.writeHead(302, { location: `${next.pathname}${next.search}` });
     res.end();
@@ -735,9 +959,19 @@ function serveStatic(req, res, url) {
   }
   const candidate = normalize(join(root, requestPath));
   const insideRoot = candidate === root || candidate.startsWith(root + sep);
-  const file = insideRoot && existsSync(candidate) && !candidate.endsWith("/") && !candidate.endsWith(sep) ? candidate : join(root, "index.html");
-  const type = contentTypes[extname(file).toLowerCase()] || "application/octet-stream";
-  res.writeHead(200, { "content-type": type, "x-content-type-options": "nosniff" });
+  const file =
+    insideRoot &&
+    existsSync(candidate) &&
+    !candidate.endsWith("/") &&
+    !candidate.endsWith(sep)
+      ? candidate
+      : join(root, "index.html");
+  const type =
+    contentTypes[extname(file).toLowerCase()] || "application/octet-stream";
+  res.writeHead(200, {
+    "content-type": type,
+    "x-content-type-options": "nosniff",
+  });
   createReadStream(file).pipe(res);
 }
 

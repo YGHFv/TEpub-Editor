@@ -67,7 +67,10 @@ export function stripQueryAndHash(path: string): string {
 }
 
 /** 以 basePath 所在目录为基准解析相对路径（"." / ".." 归一化）。 */
-export function resolveRelativePath(basePath: string, relativePath: string): string {
+export function resolveRelativePath(
+  basePath: string,
+  relativePath: string,
+): string {
   const stack = basePath.split("/");
   stack.pop();
 
@@ -84,13 +87,21 @@ export function resolveRelativePath(basePath: string, relativePath: string): str
 }
 
 /** 把 HTML/CSS 中的相对引用解析成 zip 内规范路径（去 query/hash、统一分隔符）。 */
-export function resolveCssHrefToZipPath(basePath: string, href: string): string {
-  return normalizeZipPath(stripQueryAndHash(resolveRelativePath(basePath, href)));
+export function resolveCssHrefToZipPath(
+  basePath: string,
+  href: string,
+): string {
+  return normalizeZipPath(
+    stripQueryAndHash(resolveRelativePath(basePath, href)),
+  );
 }
 
 /** 规范化单个 font-family 名：去首尾引号、trim、转小写。 */
 export function normalizeFontFamilyName(name: string): string {
-  return name.replace(/^['"]|['"]$/g, "").trim().toLowerCase();
+  return name
+    .replace(/^['"]|['"]$/g, "")
+    .trim()
+    .toLowerCase();
 }
 
 /** 解析 font-family 属性值为规范化的 family 列表（引号内的逗号不分隔）。 */
@@ -199,7 +210,9 @@ export interface FontFamilyAliasOptions {
  * 主 family、文件名去扩展名、额外别名、以及各 CSS 中
  * src 指向该字体文件的 @font-face 声明的 family。
  */
-export function buildFontFamilyAliases(options: FontFamilyAliasOptions): Set<string> {
+export function buildFontFamilyAliases(
+  options: FontFamilyAliasOptions,
+): Set<string> {
   const aliases = new Set<string>();
   aliases.add(normalizeFontFamilyName(options.fontFamily));
   aliases.add(normalizeFontFamilyName(fontFileStem(options.fontFileName)));
@@ -209,9 +222,11 @@ export function buildFontFamilyAliases(options: FontFamilyAliasOptions): Set<str
 
   if (options.cssContents && options.fontPath) {
     for (const [cssPath, cssContent] of Object.entries(options.cssContents)) {
-      collectFontFaceFamiliesByFontPath(cssPath, cssContent || "", options.fontPath).forEach(
-        (family) => aliases.add(normalizeFontFamilyName(family)),
-      );
+      collectFontFaceFamiliesByFontPath(
+        cssPath,
+        cssContent || "",
+        options.fontPath,
+      ).forEach((family) => aliases.add(normalizeFontFamilyName(family)));
     }
   }
 
@@ -229,7 +244,10 @@ export function styleAttributeUsesFont(
 }
 
 /** 把一段文本的非空白字符逐个累加进使用计数表（Unicode 空白按 \s 判定）。 */
-export function accumulateCharUsage(text: string, usageMap: Map<string, number>): void {
+export function accumulateCharUsage(
+  text: string,
+  usageMap: Map<string, number>,
+): void {
   for (const ch of text) {
     if (/\s/u.test(ch)) continue;
     usageMap.set(ch, (usageMap.get(ch) || 0) + 1);
@@ -263,5 +281,7 @@ export function summarizeGlyphUsage(
 
 /** 生成预览用的一次性 font-family 名（避免与文档内已有 family 冲突）。 */
 export function createFontPreviewFamily(): string {
-  return "tepub-font-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  return (
+    "tepub-font-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8)
+  );
 }

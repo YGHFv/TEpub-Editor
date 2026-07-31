@@ -7,7 +7,12 @@ function checksum(bytes: Uint8Array) {
 }
 
 function uint32Bytes(value: number) {
-  return new Uint8Array([(value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]);
+  return new Uint8Array([
+    (value >>> 24) & 255,
+    (value >>> 16) & 255,
+    (value >>> 8) & 255,
+    value & 255,
+  ]);
 }
 
 function payload(text: string) {
@@ -39,11 +44,28 @@ describe("web image data worker", () => {
     await import("./webImageData.worker");
 
     const pixels = new Uint8ClampedArray(64 * 64 * 4).fill(128);
-    scope.onmessage?.({ data: { id: 1, mode: "embed", width: 64, height: 64, pixels: pixels.buffer, payload: payload("测试水印").buffer } } as MessageEvent);
+    scope.onmessage?.({
+      data: {
+        id: 1,
+        mode: "embed",
+        width: 64,
+        height: 64,
+        pixels: pixels.buffer,
+        payload: payload("测试水印").buffer,
+      },
+    } as MessageEvent);
     const embedded = replies.shift();
     expect(embedded).toMatchObject({ id: 1, ok: true });
 
-    scope.onmessage?.({ data: { id: 2, mode: "extract", width: 64, height: 64, pixels: embedded?.pixels } } as MessageEvent);
+    scope.onmessage?.({
+      data: {
+        id: 2,
+        mode: "extract",
+        width: 64,
+        height: 64,
+        pixels: embedded?.pixels,
+      },
+    } as MessageEvent);
     expect(replies.shift()).toMatchObject({ id: 2, text: "测试水印" });
   });
 });

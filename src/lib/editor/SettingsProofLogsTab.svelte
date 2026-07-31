@@ -28,7 +28,9 @@
 <div class="proof-log-settings">
     <div class="proof-log-toolbar">
         <span>{message || `共 ${logs.length} 个日志文件`}</span>
-        <button class="mini-action" type="button" onclick={onRefresh}>刷新</button>
+        <button class="mini-action" type="button" onclick={onRefresh}
+            >刷新</button
+        >
     </div>
     <div class="proof-log-browser">
         <div class="proof-log-list">
@@ -40,7 +42,9 @@
                 >
                     <span class="proof-log-name">{log.fileName}</span>
                     <span class="proof-log-meta">
-                        {new Date(log.timestamp * 1000).toLocaleString()} · {(log.size / 1024).toFixed(1)}KB
+                        {new Date(log.timestamp * 1000).toLocaleString()} · {(
+                            log.size / 1024
+                        ).toFixed(1)}KB
                     </span>
                 </button>
             {:else}
@@ -52,8 +56,7 @@
             readonly
             value={selectedContent || "选择左侧日志后查看完整内容"}
             data-native-context-menu="true"
-            oncontextmenu={(event) => event.stopPropagation()}
-        ></textarea>
+            oncontextmenu={(event) => event.stopPropagation()}></textarea>
     </div>
 </div>
 

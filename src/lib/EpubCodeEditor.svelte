@@ -255,8 +255,7 @@
                         backgroundColor: "var(--color-surface)",
                     },
                     ".cm-content": {
-                        fontFamily:
-                            "var(--font-code)",
+                        fontFamily: "var(--font-code)",
                         lineHeight: "1.6",
                     },
                     ".cm-gutters": {

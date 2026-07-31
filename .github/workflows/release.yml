@@ -2,7 +2,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 jobs:
@@ -52,12 +52,12 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: setup node
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          
+
       - uses: pnpm/action-setup@v4
         name: Install pnpm
         with:
@@ -74,7 +74,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      
+
       - name: install frontend dependencies
         run: pnpm install --frozen-lockfile
 
@@ -84,8 +84,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: v__VERSION__ # the action automatically replaces __VERSION__ with the app version
-          releaseName: 'TEpub-Editor v__VERSION__'
-          releaseBody: 'Automated build release. Download installers from Assets.'
+          releaseName: "TEpub-Editor v__VERSION__"
+          releaseBody: "Automated build release. Download installers from Assets."
           releaseDraft: true
           prerelease: false
 

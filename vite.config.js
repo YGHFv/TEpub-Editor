@@ -35,62 +35,62 @@ export default defineConfig(async ({ mode }) => {
   const isWebMode = mode === "web" || process.env.TEPUB_TARGET === "web";
 
   return {
-  plugins: [sveltekit()],
+    plugins: [sveltekit()],
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent Vite from obscuring rust errors
-  clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
-  server: {
-    port: isWebMode ? 5233 : 1420,
-    strictPort: !isWebMode,
-    host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      // 3. generated native and static build output must not reload the Web dev page
-      ignored: ["**/src-tauri/**", "**/build/**"],
+    // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
+    //
+    // 1. prevent Vite from obscuring rust errors
+    clearScreen: false,
+    // 2. tauri expects a fixed port, fail if that port is not available
+    server: {
+      port: isWebMode ? 5233 : 1420,
+      strictPort: !isWebMode,
+      host: host || false,
+      hmr: host
+        ? {
+            protocol: "ws",
+            host,
+            port: 1421,
+          }
+        : undefined,
+      watch: {
+        // 3. generated native and static build output must not reload the Web dev page
+        ignored: ["**/src-tauri/**", "**/build/**"],
+      },
     },
-  },
-  optimizeDeps: {
-    // Scan every toolbox dependency up front instead of reloading once per first-used route.
-    include: optimizedDependencies,
-  },
-  build: {
-    chunkSizeWarningLimit: 900,
-    rollupOptions: {
-      output: {
-        manualChunks(/** @type {string} */ id) {
-          if (typeof id !== "string" || !id.includes("node_modules")) return;
-          if (id.includes("@codemirror") || id.includes("codemirror")) {
-            return "codemirror";
-          }
-          if (id.includes("opencc-js")) {
-            return "opencc";
-          }
+    optimizeDeps: {
+      // Scan every toolbox dependency up front instead of reloading once per first-used route.
+      include: optimizedDependencies,
+    },
+    build: {
+      chunkSizeWarningLimit: 900,
+      rollupOptions: {
+        output: {
+          manualChunks(/** @type {string} */ id) {
+            if (typeof id !== "string" || !id.includes("node_modules")) return;
+            if (id.includes("@codemirror") || id.includes("codemirror")) {
+              return "codemirror";
+            }
+            if (id.includes("opencc-js")) {
+              return "opencc";
+            }
+          },
         },
       },
     },
-  },
-  define: {
-    __TEPUB_TARGET__: JSON.stringify(isWebMode ? "web" : "tauri"),
-  },
-  test: {
-    // Node by default; DOM-dependent suites opt in via `// @vitest-environment happy-dom`.
-    environment: "node",
-    include: ["src/**/*.test.ts"],
-    coverage: {
-      provider: "v8",
-      reporter: ["text", "html"],
-      include: ["src/lib/**/*.ts"],
-      exclude: ["src/lib/**/*.test.ts", "src/lib/**/*.d.ts"],
+    define: {
+      __TEPUB_TARGET__: JSON.stringify(isWebMode ? "web" : "tauri"),
     },
-  },
+    test: {
+      // Node by default; DOM-dependent suites opt in via `// @vitest-environment happy-dom`.
+      environment: "node",
+      include: ["src/**/*.test.ts"],
+      coverage: {
+        provider: "v8",
+        reporter: ["text", "html"],
+        include: ["src/lib/**/*.ts"],
+        exclude: ["src/lib/**/*.test.ts", "src/lib/**/*.d.ts"],
+      },
+    },
   };
 });

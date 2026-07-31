@@ -56,8 +56,7 @@
                 <path d="m14.2 16.7 2.05 2.05L20.8 14.2" />
                 <path d="M4.5 3.5h11.2a3.8 3.8 0 0 1 3.8 3.8v2.2" />
             </svg>
-        </button
-        >
+        </button>
         <button class="btn-secondary" title="偏好设置" onclick={onOpenSettings}
             >⚙️</button
         >

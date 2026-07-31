@@ -26,43 +26,56 @@
 
     function handlePreviewIframeLoad() {
         const iframeDoc = previewIframe?.contentDocument;
-        if (!iframeDoc || iframeDoc.documentElement.dataset.tepubFootnotesBound === "1") return;
+        if (
+            !iframeDoc ||
+            iframeDoc.documentElement.dataset.tepubFootnotesBound === "1"
+        )
+            return;
         iframeDoc.documentElement.dataset.tepubFootnotesBound = "1";
-        iframeDoc.addEventListener("click", (event) => {
-            const clicked = event.target as Element | null;
-            const trigger = clicked?.closest<HTMLAnchorElement>("a");
-            if (!trigger) return;
-            if (trigger.classList.contains("duokan-footnote-back")) {
+        iframeDoc.addEventListener(
+            "click",
+            (event) => {
+                const clicked = event.target as Element | null;
+                const trigger = clicked?.closest<HTMLAnchorElement>("a");
+                if (!trigger) return;
+                if (trigger.classList.contains("duokan-footnote-back")) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    trigger.closest(".footnote-popup-backdrop")?.remove();
+                    return;
+                }
+                const epubType = trigger.getAttribute("epub:type") || "";
+                const isNoteref =
+                    trigger.getAttribute("role") === "doc-noteref" ||
+                    trigger.classList.contains("duokan-footnote") ||
+                    epubType.split(/\s+/).includes("noteref");
+                if (!isNoteref) return;
+                const href = trigger.getAttribute("href") || "";
+                if (!href.startsWith("#")) return;
+                const note = iframeDoc.getElementById(
+                    decodeURIComponent(href.slice(1)),
+                );
+                if (!note) return;
                 event.preventDefault();
                 event.stopPropagation();
-                trigger.closest(".footnote-popup-backdrop")?.remove();
-                return;
-            }
-            const epubType = trigger.getAttribute("epub:type") || "";
-            const isNoteref = trigger.getAttribute("role") === "doc-noteref"
-                || trigger.classList.contains("duokan-footnote")
-                || epubType.split(/\s+/).includes("noteref");
-            if (!isNoteref) return;
-            const href = trigger.getAttribute("href") || "";
-            if (!href.startsWith("#")) return;
-            const note = iframeDoc.getElementById(decodeURIComponent(href.slice(1)));
-            if (!note) return;
-            event.preventDefault();
-            event.stopPropagation();
-            iframeDoc.querySelector(".footnote-popup-backdrop")?.remove();
-            const backdrop = iframeDoc.createElement("div");
-            backdrop.className = "footnote-popup-backdrop";
-            backdrop.style.cssText = "position:fixed;inset:0;z-index:9998;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box";
-            const popup = iframeDoc.createElement("div");
-            popup.className = "footnote-popup";
-            popup.innerHTML = note.innerHTML;
-            popup.style.cssText = "position:relative;width:min(90vw,720px);max-height:88vh;overflow:auto;background:#fff;padding:16px;box-sizing:border-box;border-radius:8px";
-            backdrop.appendChild(popup);
-            backdrop.addEventListener("click", (closeEvent) => {
-                if (closeEvent.target === backdrop) backdrop.remove();
-            });
-            iframeDoc.body.appendChild(backdrop);
-        }, true);
+                iframeDoc.querySelector(".footnote-popup-backdrop")?.remove();
+                const backdrop = iframeDoc.createElement("div");
+                backdrop.className = "footnote-popup-backdrop";
+                backdrop.style.cssText =
+                    "position:fixed;inset:0;z-index:9998;background:rgba(15,23,42,.72);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box";
+                const popup = iframeDoc.createElement("div");
+                popup.className = "footnote-popup";
+                popup.innerHTML = note.innerHTML;
+                popup.style.cssText =
+                    "position:relative;width:min(90vw,720px);max-height:88vh;overflow:auto;background:#fff;padding:16px;box-sizing:border-box;border-radius:8px";
+                backdrop.appendChild(popup);
+                backdrop.addEventListener("click", (closeEvent) => {
+                    if (closeEvent.target === backdrop) backdrop.remove();
+                });
+                iframeDoc.body.appendChild(backdrop);
+            },
+            true,
+        );
     }
 
     $effect(() => {
@@ -80,8 +93,7 @@
                             preventContextMenu,
                         );
                     }
-                } catch (err) {
-                }
+                } catch (err) {}
             };
 
             const preventContextMenu = (e: Event) => {
@@ -98,7 +110,10 @@
         <div class="preview-error">
             <div class="error-header">
                 <span class="error-icon">!</span>
-                <span>&#39044;&#35272;&#36807;&#31243;&#20013;&#20986;&#29616;&#20102; {errors.length} &#20010;&#38169;&#35823;</span>
+                <span
+                    >&#39044;&#35272;&#36807;&#31243;&#20013;&#20986;&#29616;&#20102;
+                    {errors.length} &#20010;&#38169;&#35823;</span
+                >
             </div>
             <div class="error-content">
                 {#each errors as err}
@@ -120,9 +135,7 @@
         </div>
     {:else}
         <div class="placeholder">
-            {hasSelectedFile
-                ? "少女祈祷中······"
-                : "请从左侧选择一个文件"}
+            {hasSelectedFile ? "少女祈祷中······" : "请从左侧选择一个文件"}
         </div>
     {/if}
 </div>
@@ -261,7 +274,11 @@
 
     /* Modern UI overrides */
     .preview-container {
-        background: linear-gradient(180deg, rgba(231, 240, 247, 0.88), rgba(239, 245, 249, 0.94));
+        background: linear-gradient(
+            180deg,
+            rgba(231, 240, 247, 0.88),
+            rgba(239, 245, 249, 0.94)
+        );
         padding: 12px;
         box-sizing: border-box;
     }

@@ -71,8 +71,16 @@
         onSelectTemplate: (template: StyleTemplateInfo) => void;
         onRestoreBuiltin: () => void;
         onSourceInput: (value: string) => void;
-        onUpdateValue: (blockId: string, propName: string, value: string) => void;
-        onUpdateColor: (blockId: string, propName: string, value: string) => void;
+        onUpdateValue: (
+            blockId: string,
+            propName: string,
+            value: string,
+        ) => void;
+        onUpdateColor: (
+            blockId: string,
+            propName: string,
+            value: string,
+        ) => void;
     } = $props();
 
     const visibleBlocks = $derived(
@@ -80,12 +88,20 @@
             .filter((block) => !block.hiddenInBlockEditor)
             .map((block) => ({
                 ...block,
-                properties: block.properties.filter((prop) => !prop.hiddenInBlockEditor),
+                properties: block.properties.filter(
+                    (prop) => !prop.hiddenInBlockEditor,
+                ),
             })),
     );
-    const activeBlock = $derived(visibleBlocks.find((block) => block.id === activeBlockId) || visibleBlocks[0]);
+    const activeBlock = $derived(
+        visibleBlocks.find((block) => block.id === activeBlockId) ||
+            visibleBlocks[0],
+    );
     $effect(() => {
-        if (visibleBlocks.length > 0 && !visibleBlocks.some((block) => block.id === activeBlockId)) {
+        if (
+            visibleBlocks.length > 0 &&
+            !visibleBlocks.some((block) => block.id === activeBlockId)
+        ) {
             activeBlockId = visibleBlocks[0].id;
         }
     });
@@ -95,15 +111,31 @@
     <div class="font-settings-head">
         <div>
             <div class="font-settings-title">样式模板</div>
-            <div class="font-settings-note">选择默认 CSS 模板，并直接编辑当前 EPUB 输出样式。</div>
+            <div class="font-settings-note">
+                选择默认 CSS 模板，并直接编辑当前 EPUB 输出样式。
+            </div>
         </div>
         <div class="style-settings-actions">
-            <button class="mini-action style-toolbar-btn style-toolbar-btn-primary" disabled={isImporting} onclick={onImport}>
+            <button
+                class="mini-action style-toolbar-btn style-toolbar-btn-primary"
+                disabled={isImporting}
+                onclick={onImport}
+            >
                 {isImporting ? "导入中..." : "导入 CSS"}
             </button>
-            <button class="mini-action style-toolbar-btn" onclick={onToggleSourceEditor}>{showSourceEditor ? "块编辑" : "源码"}</button>
-            <button class="mini-action style-toolbar-btn" onclick={onReset}>重置</button>
-            <button class="mini-action primary style-toolbar-btn" disabled={isSaving} onclick={onSave}>{isSaving ? "保存中..." : "保存模板"}</button>
+            <button
+                class="mini-action style-toolbar-btn"
+                onclick={onToggleSourceEditor}
+                >{showSourceEditor ? "块编辑" : "源码"}</button
+            >
+            <button class="mini-action style-toolbar-btn" onclick={onReset}
+                >重置</button
+            >
+            <button
+                class="mini-action primary style-toolbar-btn"
+                disabled={isSaving}
+                onclick={onSave}>{isSaving ? "保存中..." : "保存模板"}</button
+            >
         </div>
     </div>
     {#if message}
@@ -111,7 +143,11 @@
     {/if}
     <div class="style-template-list">
         {#each templates as template}
-            <label class="style-template-item {selectedTemplateId === template.id ? 'active' : ''}">
+            <label
+                class="style-template-item {selectedTemplateId === template.id
+                    ? 'active'
+                    : ''}"
+            >
                 <div class="style-template-main">
                     <input
                         type="radio"
@@ -121,11 +157,22 @@
                     />
                     <div class="style-template-meta">
                         <strong>{template.name}</strong>
-                        <span>{template.is_builtin ? "内置模板（始终置顶）" : template.file_name}</span>
+                        <span
+                            >{template.is_builtin
+                                ? "内置模板（始终置顶）"
+                                : template.file_name}</span
+                        >
                     </div>
                 </div>
                 {#if template.is_builtin}
-                    <button class="mini-action" type="button" onclick={(event) => { event.stopPropagation(); onRestoreBuiltin(); }}>恢复默认样式</button>
+                    <button
+                        class="mini-action"
+                        type="button"
+                        onclick={(event) => {
+                            event.stopPropagation();
+                            onRestoreBuiltin();
+                        }}>恢复默认样式</button
+                    >
                 {/if}
             </label>
         {/each}
@@ -134,7 +181,9 @@
         <div class="style-panel-header in-settings">
             <div>
                 <div class="style-panel-title">样式编辑</div>
-                <div class="style-panel-subtitle">当前模板：{currentTemplateName}</div>
+                <div class="style-panel-subtitle">
+                    当前模板：{currentTemplateName}
+                </div>
             </div>
         </div>
         {#if showSourceEditor}
@@ -142,80 +191,122 @@
                 <textarea
                     spellcheck="false"
                     value={sourceDraft}
-                    oninput={(event) => onSourceInput(event.currentTarget.value)}
-                ></textarea>
+                    oninput={(event) =>
+                        onSourceInput(event.currentTarget.value)}></textarea>
             </div>
         {:else}
             <div class="style-block-editor-layout">
                 <nav class="style-block-nav" aria-label="样式块">
-                {#each visibleBlocks as block}
-                    <button
-                        type="button"
-                        class:active={activeBlockId === block.id}
-                        style={`--block-accent:${block.accent}`}
-                        onclick={() => (activeBlockId = block.id)}
-                    >
-                        <strong>{block.title}</strong>
-                        <span>{block.note}</span>
-                    </button>
-                {/each}
+                    {#each visibleBlocks as block}
+                        <button
+                            type="button"
+                            class:active={activeBlockId === block.id}
+                            style={`--block-accent:${block.accent}`}
+                            onclick={() => (activeBlockId = block.id)}
+                        >
+                            <strong>{block.title}</strong>
+                            <span>{block.note}</span>
+                        </button>
+                    {/each}
                 </nav>
                 <div class="style-block-detail">
-                {#if activeBlock}
-                    <section class="style-block-card" style={`--block-accent:${activeBlock.accent}`}>
-                        <header class="style-block-head">
-                            <div>
-                                <strong>{activeBlock.title}</strong>
-                                <span>{activeBlock.note}</span>
-                            </div>
-                            <code>
-                                {#each activeBlock.selector.split(",").map((item) => item.trim()).filter(Boolean) as selector}
-                                    <span>{selector}</span>
-                                {/each}
-                            </code>
-                        </header>
-                        <div class="style-prop-list">
-                            {#each activeBlock.properties as prop}
-                                <label class="style-prop-row">
-                                    <span class="prop-title">
-                                        <span class="prop-label">{prop.label}</span>
-                                        <span class="prop-name">{prop.name}</span>
-                                    </span>
-                                    {#if prop.options}
-                                        <CustomSelect
-                                            value={prop.value}
-                                            options={(prop.name === "font-family" ? fontFamilyOptions : prop.options).map((option) => ({ value: option.value, label: option.label }))}
-                                            ariaLabel={prop.label}
-                                            on:change={(event) => onUpdateValue(activeBlock.id, prop.name, event.detail)}
-                                        />
-                                    {:else if prop.color}
-                                        {@const parsedColor = parseColor(prop.value)}
-                                        <span class="color-value-control">
-                                            <input
-                                                class="color-swatch"
-                                                type="color"
-                                                value={parsedColor.swatch}
-                                                title={prop.value}
-                                                oninput={(event) => onUpdateColor(activeBlock.id, prop.name, event.currentTarget.value)}
-                                            />
-                                            <input
-                                                class="color-hex-input"
-                                                value={parsedColor.hex}
-                                                placeholder="#RRGGBB / #RRGGBBAA"
-                                                oninput={(event) => onUpdateColor(activeBlock.id, prop.name, event.currentTarget.value)}
-                                            />
+                    {#if activeBlock}
+                        <section
+                            class="style-block-card"
+                            style={`--block-accent:${activeBlock.accent}`}
+                        >
+                            <header class="style-block-head">
+                                <div>
+                                    <strong>{activeBlock.title}</strong>
+                                    <span>{activeBlock.note}</span>
+                                </div>
+                                <code>
+                                    {#each activeBlock.selector
+                                        .split(",")
+                                        .map((item) => item.trim())
+                                        .filter(Boolean) as selector}
+                                        <span>{selector}</span>
+                                    {/each}
+                                </code>
+                            </header>
+                            <div class="style-prop-list">
+                                {#each activeBlock.properties as prop}
+                                    <label class="style-prop-row">
+                                        <span class="prop-title">
+                                            <span class="prop-label"
+                                                >{prop.label}</span
+                                            >
+                                            <span class="prop-name"
+                                                >{prop.name}</span
+                                            >
                                         </span>
-                                    {:else}
-                                        <input
-                                            value={prop.value}
-                                            oninput={(event) => onUpdateValue(activeBlock.id, prop.name, event.currentTarget.value)}
-                                        />
-                                    {/if}
-                                </label>
-                            {/each}
-                        </div>
-                    </section>
-                {/if}
+                                        {#if prop.options}
+                                            <CustomSelect
+                                                value={prop.value}
+                                                options={(prop.name ===
+                                                "font-family"
+                                                    ? fontFamilyOptions
+                                                    : prop.options
+                                                ).map((option) => ({
+                                                    value: option.value,
+                                                    label: option.label,
+                                                }))}
+                                                ariaLabel={prop.label}
+                                                on:change={(event) =>
+                                                    onUpdateValue(
+                                                        activeBlock.id,
+                                                        prop.name,
+                                                        event.detail,
+                                                    )}
+                                            />
+                                        {:else if prop.color}
+                                            {@const parsedColor = parseColor(
+                                                prop.value,
+                                            )}
+                                            <span class="color-value-control">
+                                                <input
+                                                    class="color-swatch"
+                                                    type="color"
+                                                    value={parsedColor.swatch}
+                                                    title={prop.value}
+                                                    oninput={(event) =>
+                                                        onUpdateColor(
+                                                            activeBlock.id,
+                                                            prop.name,
+                                                            event.currentTarget
+                                                                .value,
+                                                        )}
+                                                />
+                                                <input
+                                                    class="color-hex-input"
+                                                    value={parsedColor.hex}
+                                                    placeholder="#RRGGBB / #RRGGBBAA"
+                                                    oninput={(event) =>
+                                                        onUpdateColor(
+                                                            activeBlock.id,
+                                                            prop.name,
+                                                            event.currentTarget
+                                                                .value,
+                                                        )}
+                                                />
+                                            </span>
+                                        {:else}
+                                            <input
+                                                value={prop.value}
+                                                oninput={(event) =>
+                                                    onUpdateValue(
+                                                        activeBlock.id,
+                                                        prop.name,
+                                                        event.currentTarget
+                                                            .value,
+                                                    )}
+                                            />
+                                        {/if}
+                                    </label>
+                                {/each}
+                            </div>
+                        </section>
+                    {/if}
                 </div>
             </div>
         {/if}

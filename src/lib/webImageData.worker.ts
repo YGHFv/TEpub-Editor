@@ -1,6 +1,19 @@
 type WorkerRequest =
-  | { id: number; mode: "embed"; width: number; height: number; pixels: ArrayBuffer; payload: ArrayBuffer }
-  | { id: number; mode: "extract"; width: number; height: number; pixels: ArrayBuffer };
+  | {
+      id: number;
+      mode: "embed";
+      width: number;
+      height: number;
+      pixels: ArrayBuffer;
+      payload: ArrayBuffer;
+    }
+  | {
+      id: number;
+      mode: "extract";
+      width: number;
+      height: number;
+      pixels: ArrayBuffer;
+    };
 
 export {};
 
@@ -17,7 +30,13 @@ function checksum(bytes: Uint8Array) {
 }
 
 function readUint32(bytes: Uint8Array, offset: number) {
-  return (((bytes[offset] << 24) >>> 0) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+  return (
+    (((bytes[offset] << 24) >>> 0) |
+      (bytes[offset + 1] << 16) |
+      (bytes[offset + 2] << 8) |
+      bytes[offset + 3]) >>>
+    0
+  );
 }
 
 workerScope.onmessage = (event: MessageEvent<WorkerRequest>) => {
@@ -27,17 +46,24 @@ workerScope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   if (request.mode === "embed") {
     const payload = new Uint8Array(request.payload);
     if (capacity < payload.length) {
-      workerScope.postMessage({ id: request.id, ok: false, pixels: request.pixels }, [request.pixels]);
+      workerScope.postMessage(
+        { id: request.id, ok: false, pixels: request.pixels },
+        [request.pixels],
+      );
       return;
     }
     for (let bitIndex = 0; bitIndex < payload.length * 8; bitIndex += 1) {
       const pixel = Math.floor(bitIndex / 3);
       const channel = bitIndex % 3;
-      const bit = (payload[Math.floor(bitIndex / 8)] >>> (7 - (bitIndex % 8))) & 1;
+      const bit =
+        (payload[Math.floor(bitIndex / 8)] >>> (7 - (bitIndex % 8))) & 1;
       const offset = pixel * 4 + channel;
       pixels[offset] = (pixels[offset] & 0xfe) | bit;
     }
-    workerScope.postMessage({ id: request.id, ok: true, pixels: pixels.buffer }, [pixels.buffer as ArrayBuffer]);
+    workerScope.postMessage(
+      { id: request.id, ok: true, pixels: pixels.buffer },
+      [pixels.buffer as ArrayBuffer],
+    );
     return;
   }
 
@@ -69,5 +95,11 @@ workerScope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     return;
   }
   const data = read(length);
-  workerScope.postMessage({ id: request.id, text: data && checksum(data) === expected ? new TextDecoder().decode(data) : null });
+  workerScope.postMessage({
+    id: request.id,
+    text:
+      data && checksum(data) === expected
+        ? new TextDecoder().decode(data)
+        : null,
+  });
 };

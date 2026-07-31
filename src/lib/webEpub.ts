@@ -88,18 +88,23 @@ function parseXml(source: string, label: string) {
 }
 
 function byLocalName(root: ParentNode, localName: string) {
-  return Array.from(root.querySelectorAll("*")).filter((node) => node.localName === localName);
+  return Array.from(root.querySelectorAll("*")).filter(
+    (node) => node.localName === localName,
+  );
 }
 
 function directChildrenByLocalName(root: ParentNode, localName: string) {
-  return Array.from(root.children || []).filter((node) => node.localName === localName) as Element[];
+  return Array.from(root.children || []).filter(
+    (node) => node.localName === localName,
+  ) as Element[];
 }
 
 function firstText(root: ParentNode, localName: string) {
   return byLocalName(root, localName)[0]?.textContent?.trim() || "";
 }
 
-const UUID_PATTERN = /\burn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
+const UUID_PATTERN =
+  /\burn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
 const MD5_PATTERN = /\b[a-f0-9]{32}\b/i;
 const YUEWEI_MD5_CONTEXT = /md5|yuewei|yuewen|阅微/i;
 
@@ -110,10 +115,20 @@ type IdentifierCandidate = {
 };
 
 function getAttributeCaseInsensitive(element: Element, name: string) {
-  return element.getAttribute(name) || element.getAttribute(name.toLowerCase()) || element.getAttribute(name.toUpperCase()) || "";
+  return (
+    element.getAttribute(name) ||
+    element.getAttribute(name.toLowerCase()) ||
+    element.getAttribute(name.toUpperCase()) ||
+    ""
+  );
 }
 
-function pushIdentifierCandidate(candidates: IdentifierCandidate[], value: string, context = "", priority = 0) {
+function pushIdentifierCandidate(
+  candidates: IdentifierCandidate[],
+  value: string,
+  context = "",
+  priority = 0,
+) {
   const cleanValue = value.trim();
   if (!cleanValue) return;
   candidates.push({
@@ -125,15 +140,26 @@ function pushIdentifierCandidate(candidates: IdentifierCandidate[], value: strin
 
 function collectIdentifierCandidates(opfDoc: XMLDocument) {
   const candidates: IdentifierCandidate[] = [];
-  const packageElement = byLocalName(opfDoc, "package")[0] as Element | undefined;
-  const uniqueIdentifierId = packageElement?.getAttribute("unique-identifier") || "";
+  const packageElement = byLocalName(opfDoc, "package")[0] as
+    Element | undefined;
+  const uniqueIdentifierId =
+    packageElement?.getAttribute("unique-identifier") || "";
 
   for (const node of byLocalName(opfDoc, "identifier")) {
     const element = node as Element;
-    const id = element.getAttribute("id") || element.getAttribute("xml:id") || "";
-    const scheme = element.getAttribute("opf:scheme") || element.getAttribute("scheme") || "";
+    const id =
+      element.getAttribute("id") || element.getAttribute("xml:id") || "";
+    const scheme =
+      element.getAttribute("opf:scheme") ||
+      element.getAttribute("scheme") ||
+      "";
     const text = element.textContent?.trim() || "";
-    pushIdentifierCandidate(candidates, text, `${id} ${scheme}`, id && id === uniqueIdentifierId ? 100 : 80);
+    pushIdentifierCandidate(
+      candidates,
+      text,
+      `${id} ${scheme}`,
+      id && id === uniqueIdentifierId ? 100 : 80,
+    );
   }
 
   for (const node of byLocalName(opfDoc, "meta")) {
@@ -144,8 +170,18 @@ function collectIdentifierCandidates(opfDoc: XMLDocument) {
     const refines = getAttributeCaseInsensitive(element, "refines");
     const text = element.textContent?.trim() || "";
     const context = `${name} ${property} ${refines}`;
-    pushIdentifierCandidate(candidates, content, context, YUEWEI_MD5_CONTEXT.test(`${context} ${content}`) ? 90 : 40);
-    pushIdentifierCandidate(candidates, text, context, YUEWEI_MD5_CONTEXT.test(`${context} ${text}`) ? 90 : 30);
+    pushIdentifierCandidate(
+      candidates,
+      content,
+      context,
+      YUEWEI_MD5_CONTEXT.test(`${context} ${content}`) ? 90 : 40,
+    );
+    pushIdentifierCandidate(
+      candidates,
+      text,
+      context,
+      YUEWEI_MD5_CONTEXT.test(`${context} ${text}`) ? 90 : 30,
+    );
   }
 
   return candidates.sort((a, b) => b.priority - a.priority);
@@ -153,15 +189,23 @@ function collectIdentifierCandidates(opfDoc: XMLDocument) {
 
 function preferredIdentifier(opfDoc: XMLDocument) {
   const candidates = collectIdentifierCandidates(opfDoc);
-  const uuidCandidate = candidates.find((candidate) => UUID_PATTERN.test(candidate.value));
+  const uuidCandidate = candidates.find((candidate) =>
+    UUID_PATTERN.test(candidate.value),
+  );
   const uuid = uuidCandidate?.value.match(UUID_PATTERN)?.[0];
   if (uuid) return uuid;
 
-  const contextualMd5Candidate = candidates.find((candidate) => YUEWEI_MD5_CONTEXT.test(candidate.context) && MD5_PATTERN.test(candidate.value));
+  const contextualMd5Candidate = candidates.find(
+    (candidate) =>
+      YUEWEI_MD5_CONTEXT.test(candidate.context) &&
+      MD5_PATTERN.test(candidate.value),
+  );
   const contextualMd5 = contextualMd5Candidate?.value.match(MD5_PATTERN)?.[0];
   if (contextualMd5) return contextualMd5;
 
-  const md5Candidate = candidates.find((candidate) => MD5_PATTERN.test(candidate.value));
+  const md5Candidate = candidates.find((candidate) =>
+    MD5_PATTERN.test(candidate.value),
+  );
   const md5 = md5Candidate?.value.match(MD5_PATTERN)?.[0];
   if (md5) return md5;
 
@@ -184,7 +228,10 @@ export function normalizeZipPath(path: string) {
 }
 
 function resolveZipPath(baseDir: string, href: string) {
-  const cleanHref = decodeURIComponent(href.split("#")[0] || "").replace(/^\//, "");
+  const cleanHref = decodeURIComponent(href.split("#")[0] || "").replace(
+    /^\//,
+    "",
+  );
   return normalizeZipPath(`${baseDir}${cleanHref}`);
 }
 
@@ -198,7 +245,8 @@ function extension(path: string) {
 
 export function guessWebEpubMediaType(path: string) {
   const ext = extension(path);
-  if (ext === "xhtml" || ext === "html" || ext === "htm") return "application/xhtml+xml";
+  if (ext === "xhtml" || ext === "html" || ext === "htm")
+    return "application/xhtml+xml";
   if (ext === "css") return "text/css";
   if (ext === "opf" || ext === "xml") return "application/xml";
   if (ext === "ncx") return "application/x-dtbncx+xml";
@@ -217,17 +265,52 @@ export function guessWebEpubMediaType(path: string) {
 
 function kindFor(path: string, mediaType = ""): WebEpubFileEntry["kind"] {
   const ext = extension(path);
-  if (mediaType === "application/xhtml+xml" || ext === "xhtml" || ext === "html" || ext === "htm") return "xhtml";
+  if (
+    mediaType === "application/xhtml+xml" ||
+    ext === "xhtml" ||
+    ext === "html" ||
+    ext === "htm"
+  )
+    return "xhtml";
   if (mediaType === "text/css" || ext === "css") return "css";
-  if (mediaType.includes("xml") || ext === "xml" || ext === "opf" || ext === "ncx") return "xml";
-  if (mediaType.startsWith("image/") || ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext)) return "image";
-  if (mediaType.includes("font") || ["ttf", "otf", "woff", "woff2"].includes(ext)) return "font";
-  if (mediaType.startsWith("text/") || ["txt", "md"].includes(ext)) return "text";
+  if (
+    mediaType.includes("xml") ||
+    ext === "xml" ||
+    ext === "opf" ||
+    ext === "ncx"
+  )
+    return "xml";
+  if (
+    mediaType.startsWith("image/") ||
+    ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext)
+  )
+    return "image";
+  if (
+    mediaType.includes("font") ||
+    ["ttf", "otf", "woff", "woff2"].includes(ext)
+  )
+    return "font";
+  if (mediaType.startsWith("text/") || ["txt", "md"].includes(ext))
+    return "text";
   return "other";
 }
 
 function isEditable(path: string, mediaType = "") {
-  return TEXT_MEDIA_TYPES.has(mediaType) || ["xhtml", "html", "htm", "css", "xml", "opf", "ncx", "txt", "md", "svg"].includes(extension(path));
+  return (
+    TEXT_MEDIA_TYPES.has(mediaType) ||
+    [
+      "xhtml",
+      "html",
+      "htm",
+      "css",
+      "xml",
+      "opf",
+      "ncx",
+      "txt",
+      "md",
+      "svg",
+    ].includes(extension(path))
+  );
 }
 
 function parseManifest(opfDoc: XMLDocument, opfDir: string) {
@@ -254,7 +337,9 @@ function parseSpine(opfDoc: XMLDocument, manifest: WebEpubManifestItem[]) {
       idref,
       linear: element.getAttribute("linear") || "yes",
       manifest: manifestItem,
-      title: manifestItem ? fileNameOf(manifestItem.fullPath) : `spine-${index + 1}`,
+      title: manifestItem
+        ? fileNameOf(manifestItem.fullPath)
+        : `spine-${index + 1}`,
     };
   });
 }
@@ -263,12 +348,15 @@ export function parseNavDocument(source: string, navPath: string) {
   const navDoc = parseXml(source, "NAV");
   const navDir = dirname(navPath);
   const navs = byLocalName(navDoc, "nav") as Element[];
-  const tocNav = navs.find((node) => {
-    const type = `${node.getAttribute("epub:type") || ""} ${node.getAttribute("type") || ""}`;
-    return /\btoc\b/i.test(type);
-  }) || navs[0];
-  const rootOl = directChildrenByLocalName(tocNav || navDoc.documentElement, "ol")[0]
-    || byLocalName(tocNav || navDoc.documentElement, "ol")[0] as Element | undefined;
+  const tocNav =
+    navs.find((node) => {
+      const type = `${node.getAttribute("epub:type") || ""} ${node.getAttribute("type") || ""}`;
+      return /\btoc\b/i.test(type);
+    }) || navs[0];
+  const rootOl =
+    directChildrenByLocalName(tocNav || navDoc.documentElement, "ol")[0] ||
+    (byLocalName(tocNav || navDoc.documentElement, "ol")[0] as
+      Element | undefined);
 
   function parseLi(li: Element): WebEpubNavItem | null {
     const link = directChildrenByLocalName(li, "a")[0];
@@ -277,7 +365,11 @@ export function parseNavDocument(source: string, navPath: string) {
     const href = link?.getAttribute("href") || "";
     const label = labelNode?.textContent?.replace(/\s+/g, " ").trim() || href;
     const childOl = directChildrenByLocalName(li, "ol")[0];
-    const children = childOl ? directChildrenByLocalName(childOl, "li").map(parseLi).filter((item): item is WebEpubNavItem => !!item) : [];
+    const children = childOl
+      ? directChildrenByLocalName(childOl, "li")
+          .map(parseLi)
+          .filter((item): item is WebEpubNavItem => !!item)
+      : [];
     if (!label && children.length === 0) return null;
     return {
       label,
@@ -288,7 +380,9 @@ export function parseNavDocument(source: string, navPath: string) {
   }
 
   if (!rootOl) return [];
-  return directChildrenByLocalName(rootOl, "li").map(parseLi).filter((item): item is WebEpubNavItem => !!item);
+  return directChildrenByLocalName(rootOl, "li")
+    .map(parseLi)
+    .filter((item): item is WebEpubNavItem => !!item);
 }
 
 export function parseNcxDocument(source: string, ncxPath: string) {
@@ -296,10 +390,14 @@ export function parseNcxDocument(source: string, ncxPath: string) {
   const ncxDir = dirname(ncxPath);
   function parseNavPoint(node: Element): WebEpubNavItem | null {
     const navLabel = directChildrenByLocalName(node, "navLabel")[0];
-    const label = navLabel ? firstText(navLabel, "text") : firstText(node, "text");
+    const label = navLabel
+      ? firstText(navLabel, "text")
+      : firstText(node, "text");
     const content = directChildrenByLocalName(node, "content")[0];
     const href = content?.getAttribute("src") || "";
-    const children = directChildrenByLocalName(node, "navPoint").map(parseNavPoint).filter((item): item is WebEpubNavItem => !!item);
+    const children = directChildrenByLocalName(node, "navPoint")
+      .map(parseNavPoint)
+      .filter((item): item is WebEpubNavItem => !!item);
     if (!href && !label && children.length === 0) return null;
     return {
       label: label || href,
@@ -310,18 +408,26 @@ export function parseNcxDocument(source: string, ncxPath: string) {
   }
 
   const navMap = byLocalName(ncxDoc, "navMap")[0] as Element | undefined;
-  const roots = navMap ? directChildrenByLocalName(navMap, "navPoint") : directChildrenByLocalName(ncxDoc.documentElement, "navPoint");
-  return roots.map(parseNavPoint).filter((item): item is WebEpubNavItem => !!item);
+  const roots = navMap
+    ? directChildrenByLocalName(navMap, "navPoint")
+    : directChildrenByLocalName(ncxDoc.documentElement, "navPoint");
+  return roots
+    .map(parseNavPoint)
+    .filter((item): item is WebEpubNavItem => !!item);
 }
 
 async function parseNavigation(zip: JSZip, manifest: WebEpubManifestItem[]) {
-  const navItem = manifest.find((item) => item.properties.split(/\s+/).includes("nav"));
+  const navItem = manifest.find((item) =>
+    item.properties.split(/\s+/).includes("nav"),
+  );
   if (navItem) {
     const source = await zip.file(navItem.fullPath)?.async("string");
     if (source) return parseNavDocument(source, navItem.fullPath);
   }
 
-  const ncxItem = manifest.find((item) => item.mediaType === "application/x-dtbncx+xml");
+  const ncxItem = manifest.find(
+    (item) => item.mediaType === "application/x-dtbncx+xml",
+  );
   if (ncxItem) {
     const source = await zip.file(ncxItem.fullPath)?.async("string");
     if (source) return parseNcxDocument(source, ncxItem.fullPath);
@@ -344,7 +450,9 @@ function parseMetadata(opfDoc: XMLDocument): WebEpubMetadata {
 }
 
 function collectFiles(zip: JSZip, manifest: WebEpubManifestItem[]) {
-  const mediaByPath = new Map(manifest.map((item) => [item.fullPath, item.mediaType]));
+  const mediaByPath = new Map(
+    manifest.map((item) => [item.fullPath, item.mediaType]),
+  );
   return Object.values(zip.files)
     .filter((entry) => !entry.dir)
     .map((entry) => {
@@ -375,7 +483,11 @@ async function refreshPackageState(doc: WebEpubDocument) {
 function relativeHref(fromDir: string, targetPath: string) {
   const fromParts = normalizeZipPath(fromDir).split("/").filter(Boolean);
   const targetParts = normalizeZipPath(targetPath).split("/").filter(Boolean);
-  while (fromParts.length && targetParts.length && fromParts[0] === targetParts[0]) {
+  while (
+    fromParts.length &&
+    targetParts.length &&
+    fromParts[0] === targetParts[0]
+  ) {
     fromParts.shift();
     targetParts.shift();
   }
@@ -384,8 +496,12 @@ function relativeHref(fromDir: string, targetPath: string) {
 
 function manifestIdBase(path: string) {
   const base = fileNameOf(path).replace(/\.[^.]+$/, "") || "item";
-  const normalized = base.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  return /^[A-Za-z_]/.test(normalized) ? normalized : `item_${normalized || "resource"}`;
+  const normalized = base
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return /^[A-Za-z_]/.test(normalized)
+    ? normalized
+    : `item_${normalized || "resource"}`;
 }
 
 function uniqueManifestId(opfDoc: XMLDocument, path: string) {
@@ -410,10 +526,17 @@ function opfManifestElement(opfDoc: XMLDocument) {
   return manifest;
 }
 
-function findManifestElementByPath(opfDoc: XMLDocument, opfDir: string, path: string) {
+function findManifestElementByPath(
+  opfDoc: XMLDocument,
+  opfDir: string,
+  path: string,
+) {
   return byLocalName(opfDoc, "item")
     .map((node) => node as Element)
-    .find((item) => resolveZipPath(opfDir, item.getAttribute("href") || "") === path);
+    .find(
+      (item) =>
+        resolveZipPath(opfDir, item.getAttribute("href") || "") === path,
+    );
 }
 
 function contentSize(content: WebEpubResourceContent) {
@@ -424,7 +547,9 @@ function contentSize(content: WebEpubResourceContent) {
 
 export async function loadWebEpub(file: File): Promise<WebEpubDocument> {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
-  const containerSource = await zip.file("META-INF/container.xml")?.async("string");
+  const containerSource = await zip
+    .file("META-INF/container.xml")
+    ?.async("string");
   if (!containerSource) throw new Error("缺少 META-INF/container.xml");
 
   const opfPath = parseContainerRootfilePath(containerSource);
@@ -432,7 +557,10 @@ export async function loadWebEpub(file: File): Promise<WebEpubDocument> {
   const opfSource = await zip.file(opfPath)?.async("string");
   if (!opfSource) throw new Error(`找不到 OPF 文件：${opfPath}`);
 
-  const { opfDir, metadata, manifest, spine } = parseOpfPackage(opfSource, opfPath);
+  const { opfDir, metadata, manifest, spine } = parseOpfPackage(
+    opfSource,
+    opfPath,
+  );
   const navItems = await parseNavigation(zip, manifest);
 
   return {
@@ -450,7 +578,8 @@ export async function loadWebEpub(file: File): Promise<WebEpubDocument> {
 
 export function parseContainerRootfilePath(source: string) {
   const containerDoc = parseXml(source, "container.xml");
-  const rootfile = byLocalName(containerDoc, "rootfile")[0] as Element | undefined;
+  const rootfile = byLocalName(containerDoc, "rootfile")[0] as
+    Element | undefined;
   const opfPath = rootfile?.getAttribute("full-path") || "";
   if (!opfPath) throw new Error("container.xml 未声明 OPF 路径");
   return opfPath;
@@ -470,14 +599,22 @@ export async function readWebEpubText(doc: WebEpubDocument, path: string) {
   return file.async("string");
 }
 
-export async function readWebEpubBlob(doc: WebEpubDocument, path: string, fallbackType = "application/octet-stream") {
+export async function readWebEpubBlob(
+  doc: WebEpubDocument,
+  path: string,
+  fallbackType = "application/octet-stream",
+) {
   const file = doc.zip.file(path);
   if (!file) throw new Error(`文件不存在：${path}`);
   const blob = await file.async("blob");
   return blob.type ? blob : new Blob([blob], { type: fallbackType });
 }
 
-export function updateWebEpubText(doc: WebEpubDocument, path: string, content: string) {
+export function updateWebEpubText(
+  doc: WebEpubDocument,
+  path: string,
+  content: string,
+) {
   doc.zip.file(path, content);
   const file = doc.files.find((entry) => entry.path === path);
   if (file) file.size = new Blob([content]).size;
@@ -489,7 +626,12 @@ function metadataElement(opfDoc: XMLDocument) {
   return element;
 }
 
-function setFirstText(opfDoc: XMLDocument, parent: Element, localName: string, value: string) {
+function setFirstText(
+  opfDoc: XMLDocument,
+  parent: Element,
+  localName: string,
+  value: string,
+) {
   let element = byLocalName(parent, localName)[0] as Element | undefined;
   if (!element) {
     element = opfDoc.createElementNS(DC_NS, `dc:${localName}`);
@@ -499,12 +641,20 @@ function setFirstText(opfDoc: XMLDocument, parent: Element, localName: string, v
   return element;
 }
 
-function ensurePackageIdentifier(opfDoc: XMLDocument, identifierElement: Element) {
-  const packageElement = byLocalName(opfDoc, "package")[0] as Element | undefined;
+function ensurePackageIdentifier(
+  opfDoc: XMLDocument,
+  identifierElement: Element,
+) {
+  const packageElement = byLocalName(opfDoc, "package")[0] as
+    Element | undefined;
   if (!packageElement) return;
-  if (!identifierElement.getAttribute("id")) identifierElement.setAttribute("id", "BookId");
+  if (!identifierElement.getAttribute("id"))
+    identifierElement.setAttribute("id", "BookId");
   if (!packageElement.getAttribute("unique-identifier")) {
-    packageElement.setAttribute("unique-identifier", identifierElement.getAttribute("id") || "BookId");
+    packageElement.setAttribute(
+      "unique-identifier",
+      identifierElement.getAttribute("id") || "BookId",
+    );
   }
 }
 
@@ -516,14 +666,22 @@ function serializeXml(doc: XMLDocument, originalSource: string) {
     : serialized;
 }
 
-export async function updateWebEpubMetadata(doc: WebEpubDocument, metadata: WebEpubMetadata) {
+export async function updateWebEpubMetadata(
+  doc: WebEpubDocument,
+  metadata: WebEpubMetadata,
+) {
   const opfSource = await readWebEpubText(doc, doc.opfPath);
   const opfDoc = parseXml(opfSource, "OPF");
   const metaNode = metadataElement(opfDoc);
   setFirstText(opfDoc, metaNode, "title", metadata.title || "未命名 EPUB");
   setFirstText(opfDoc, metaNode, "creator", metadata.creator);
   setFirstText(opfDoc, metaNode, "language", metadata.language || "zh-CN");
-  const identifier = setFirstText(opfDoc, metaNode, "identifier", metadata.identifier);
+  const identifier = setFirstText(
+    opfDoc,
+    metaNode,
+    "identifier",
+    metadata.identifier,
+  );
   ensurePackageIdentifier(opfDoc, identifier);
   setFirstText(opfDoc, metaNode, "description", metadata.description);
   setFirstText(opfDoc, metaNode, "publisher", metadata.publisher);
@@ -536,7 +694,11 @@ export async function updateWebEpubMetadata(doc: WebEpubDocument, metadata: WebE
   return doc.metadata;
 }
 
-async function updateManifestMediaType(doc: WebEpubDocument, path: string, mediaType: string) {
+async function updateManifestMediaType(
+  doc: WebEpubDocument,
+  path: string,
+  mediaType: string,
+) {
   const manifestItem = doc.manifest.find((item) => item.fullPath === path);
   if (!manifestItem) return;
 
@@ -550,7 +712,12 @@ async function updateManifestMediaType(doc: WebEpubDocument, path: string, media
   manifestItem.mediaType = mediaType;
 }
 
-export async function updateWebEpubBinary(doc: WebEpubDocument, path: string, content: Blob | ArrayBuffer | Uint8Array, mediaType = "") {
+export async function updateWebEpubBinary(
+  doc: WebEpubDocument,
+  path: string,
+  content: Blob | ArrayBuffer | Uint8Array,
+  mediaType = "",
+) {
   doc.zip.file(path, content);
   const file = doc.files.find((entry) => entry.path === path);
   const size = content instanceof Blob ? content.size : content.byteLength;
@@ -564,7 +731,10 @@ export async function updateWebEpubBinary(doc: WebEpubDocument, path: string, co
   if (mediaType) await updateManifestMediaType(doc, path, mediaType);
 }
 
-export async function addWebEpubResource(doc: WebEpubDocument, options: WebEpubAddResourceOptions) {
+export async function addWebEpubResource(
+  doc: WebEpubDocument,
+  options: WebEpubAddResourceOptions,
+) {
   const path = normalizeZipPath(options.path);
   if (!path || path.endsWith("/")) throw new Error("资源路径无效");
   if (doc.zip.file(path)) throw new Error(`资源已存在：${path}`);
@@ -590,12 +760,17 @@ export async function addWebEpubResource(doc: WebEpubDocument, options: WebEpubA
       if (spine) {
         const itemRef = opfDoc.createElementNS(OPF_NS, "itemref");
         itemRef.setAttribute("idref", id);
-        const afterItem = options.afterPath ? findManifestElementByPath(opfDoc, doc.opfDir, options.afterPath) : undefined;
+        const afterItem = options.afterPath
+          ? findManifestElementByPath(opfDoc, doc.opfDir, options.afterPath)
+          : undefined;
         const afterId = afterItem?.getAttribute("id") || "";
         const afterRef = afterId
-          ? byLocalName(spine, "itemref").find((node) => (node as Element).getAttribute("idref") === afterId)
+          ? byLocalName(spine, "itemref").find(
+              (node) => (node as Element).getAttribute("idref") === afterId,
+            )
           : undefined;
-        if (afterRef?.nextSibling) spine.insertBefore(itemRef, afterRef.nextSibling);
+        if (afterRef?.nextSibling)
+          spine.insertBefore(itemRef, afterRef.nextSibling);
         else spine.appendChild(itemRef);
       }
     }
@@ -620,10 +795,17 @@ export async function addWebEpubResource(doc: WebEpubDocument, options: WebEpubA
   return doc.files.find((entry) => entry.path === path);
 }
 
-export async function deleteWebEpubResource(doc: WebEpubDocument, path: string) {
+export async function deleteWebEpubResource(
+  doc: WebEpubDocument,
+  path: string,
+) {
   const cleanPath = normalizeZipPath(path);
   if (!cleanPath) throw new Error("资源路径无效");
-  if (cleanPath === doc.opfPath || cleanPath === "mimetype" || cleanPath === "META-INF/container.xml") {
+  if (
+    cleanPath === doc.opfPath ||
+    cleanPath === "mimetype" ||
+    cleanPath === "META-INF/container.xml"
+  ) {
     throw new Error("不能删除 EPUB 核心文件");
   }
 
@@ -636,7 +818,8 @@ export async function deleteWebEpubResource(doc: WebEpubDocument, path: string) 
   if (id) {
     for (const itemRef of byLocalName(opfDoc, "itemref")) {
       const element = itemRef as Element;
-      if (element.getAttribute("idref") === id) element.parentNode?.removeChild(element);
+      if (element.getAttribute("idref") === id)
+        element.parentNode?.removeChild(element);
     }
   }
 
@@ -645,15 +828,26 @@ export async function deleteWebEpubResource(doc: WebEpubDocument, path: string) 
   await refreshPackageState(doc);
 }
 
-export async function renameWebEpubResource(doc: WebEpubDocument, path: string, newPath: string) {
+export async function renameWebEpubResource(
+  doc: WebEpubDocument,
+  path: string,
+  newPath: string,
+) {
   const cleanPath = normalizeZipPath(path);
   const cleanNewPath = normalizeZipPath(newPath);
-  if (!cleanPath || !cleanNewPath || cleanNewPath.endsWith("/")) throw new Error("资源路径无效");
-  if (cleanPath === cleanNewPath) return doc.files.find((entry) => entry.path === cleanPath);
-  if (cleanPath === doc.opfPath || cleanPath === "mimetype" || cleanPath === "META-INF/container.xml") {
+  if (!cleanPath || !cleanNewPath || cleanNewPath.endsWith("/"))
+    throw new Error("资源路径无效");
+  if (cleanPath === cleanNewPath)
+    return doc.files.find((entry) => entry.path === cleanPath);
+  if (
+    cleanPath === doc.opfPath ||
+    cleanPath === "mimetype" ||
+    cleanPath === "META-INF/container.xml"
+  ) {
     throw new Error("不能重命名 EPUB 核心文件");
   }
-  if (doc.zip.file(cleanNewPath)) throw new Error(`资源已存在：${cleanNewPath}`);
+  if (doc.zip.file(cleanNewPath))
+    throw new Error(`资源已存在：${cleanNewPath}`);
 
   const zipFile = doc.zip.file(cleanPath);
   if (!zipFile) throw new Error(`文件不存在：${cleanPath}`);

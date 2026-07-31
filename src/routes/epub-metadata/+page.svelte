@@ -67,7 +67,9 @@
         while ((match = re.exec(css || ""))) {
             const role = match[1];
             const attrs = match[2] || "";
-            const getAttr = (name: string) => attrs.match(new RegExp(`${name}=["']([^"']+)["']`, "i"))?.[1] || "";
+            const getAttr = (name: string) =>
+                attrs.match(new RegExp(`${name}=["']([^"']+)["']`, "i"))?.[1] ||
+                "";
             const type = getAttr("type") || "image";
             if (type !== "image" || seen.has(role)) continue;
             seen.add(role);
@@ -86,7 +88,9 @@
 
     async function loadTemplateRepositories() {
         try {
-            templateRepositories = await invoke<TemplateRepository[]>("list_epub_template_repositories");
+            templateRepositories = await invoke<TemplateRepository[]>(
+                "list_epub_template_repositories",
+            );
             if (!selectedRepositoryId && templateRepositories.length) {
                 selectedRepositoryId = templateRepositories[0].id;
             }
@@ -103,12 +107,16 @@
         templateRepoBusy = true;
         templateRepoMessage = "正在添加仓库...";
         try {
-            templateRepositories = await invoke<TemplateRepository[]>("add_epub_template_repository", {
-                name: repoName.trim(),
-                url: repoUrl.trim(),
-                branch: repoBranch.trim() || "main",
-            });
-            selectedRepositoryId = templateRepositories[templateRepositories.length - 1]?.id || "";
+            templateRepositories = await invoke<TemplateRepository[]>(
+                "add_epub_template_repository",
+                {
+                    name: repoName.trim(),
+                    url: repoUrl.trim(),
+                    branch: repoBranch.trim() || "main",
+                },
+            );
+            selectedRepositoryId =
+                templateRepositories[templateRepositories.length - 1]?.id || "";
             repoName = "";
             repoUrl = "";
             repoBranch = "main";
@@ -128,9 +136,12 @@
         templateRepoBusy = true;
         templateRepoMessage = "正在同步模板索引...";
         try {
-            const index = await invoke<{ templates: RemoteTemplate[] }>("sync_epub_template_repository", {
-                repositoryId: selectedRepositoryId,
-            });
+            const index = await invoke<{ templates: RemoteTemplate[] }>(
+                "sync_epub_template_repository",
+                {
+                    repositoryId: selectedRepositoryId,
+                },
+            );
             remoteTemplates = index.templates || [];
             await loadTemplateRepositories();
             templateRepoMessage = `已同步 ${remoteTemplates.length} 个模板`;
@@ -146,7 +157,10 @@
         templateRepoBusy = true;
         templateRepoMessage = `正在安装 ${template.name}...`;
         try {
-            const result = await invoke<{ local_path: string; file_count: number }>("install_remote_epub_template", {
+            const result = await invoke<{
+                local_path: string;
+                file_count: number;
+            }>("install_remote_epub_template", {
                 repositoryId: selectedRepositoryId,
                 template,
             });
@@ -206,8 +220,14 @@
         if (!ext) return;
         const stem = assetSlotFileStem(slot.role);
         const escapedStem = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const re = new RegExp(`\\.\\./Images/${escapedStem}\\.[A-Za-z0-9]+`, "g");
-        metadata.styles["main.css"] = metadata.styles["main.css"].replace(re, `../Images/${stem}.${ext}`);
+        const re = new RegExp(
+            `\\.\\./Images/${escapedStem}\\.[A-Za-z0-9]+`,
+            "g",
+        );
+        metadata.styles["main.css"] = metadata.styles["main.css"].replace(
+            re,
+            `../Images/${stem}.${ext}`,
+        );
     }
 
     async function addAsset(category: string, slot?: AssetSlot) {
@@ -215,11 +235,28 @@
             const { open } = await import("@tauri-apps/plugin-dialog");
             const selected = await open({
                 multiple: !slot,
-                filters: category === "fonts"
-                    ? [{ name: "Fonts", extensions: ["ttf", "otf", "woff", "woff2"] }]
-                    : category === "images"
-                        ? [{ name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "svg"] }]
-                        : [],
+                filters:
+                    category === "fonts"
+                        ? [
+                              {
+                                  name: "Fonts",
+                                  extensions: ["ttf", "otf", "woff", "woff2"],
+                              },
+                          ]
+                        : category === "images"
+                          ? [
+                                {
+                                    name: "Images",
+                                    extensions: [
+                                        "jpg",
+                                        "jpeg",
+                                        "png",
+                                        "gif",
+                                        "svg",
+                                    ],
+                                },
+                            ]
+                          : [],
             });
 
             if (selected) {
@@ -228,7 +265,9 @@
                     name: (p as string).split(/[/\\]/).pop() || "",
                     path: p as string,
                     category,
-                    ...(slot ? { role: slot.role, slot_label: slot.label } : {}),
+                    ...(slot
+                        ? { role: slot.role, slot_label: slot.label }
+                        : {}),
                 }));
                 metadata.assets = [...metadata.assets, ...newAssets];
                 if (slot && newAssets[0]?.name) {
@@ -261,11 +300,19 @@
 
 <div class="metadata-container">
     <div class="tabs">
-        <button class="tab-btn" class:active={activeTab === 'meta'} on:click={() => activeTab = 'meta'}>元数据</button>
-        <button class="tab-btn" class:active={activeTab === 'files'} on:click={() => activeTab = 'files'}>文件</button>
+        <button
+            class="tab-btn"
+            class:active={activeTab === "meta"}
+            on:click={() => (activeTab = "meta")}>元数据</button
+        >
+        <button
+            class="tab-btn"
+            class:active={activeTab === "files"}
+            on:click={() => (activeTab = "files")}>文件</button
+        >
     </div>
 
-    {#if activeTab === 'meta'}
+    {#if activeTab === "meta"}
         <div class="tab-content scroll-p compact-top">
             <div class="form-section">
                 <div class="input-group">
@@ -300,15 +347,20 @@
                 <div class="custom-list">
                     {#each customMetadata as item, i}
                         <div class="custom-row">
-                            <input type="text" placeholder="键 (Key)" bind:value={item.key} />
+                            <input
+                                type="text"
+                                placeholder="键 (Key)"
+                                bind:value={item.key}
+                            />
                             <span>:</span>
                             <input
                                 type="text"
                                 placeholder="值 (Value)"
                                 bind:value={item.value}
                             />
-                            <button class="remove-btn" on:click={() => removeCustom(i)}
-                                >×</button
+                            <button
+                                class="remove-btn"
+                                on:click={() => removeCustom(i)}>×</button
                             >
                         </div>
                     {/each}
@@ -318,34 +370,62 @@
                 </div>
             </div>
         </div>
-    {:else if activeTab === 'files'}
+    {:else if activeTab === "files"}
         <div class="tab-content scroll-p compact-top">
             <div class="asset-manager">
-                {#each ['fonts', 'images', 'others'] as cat}
+                {#each ["fonts", "images", "others"] as cat}
                     <div class="asset-group">
                         <div class="section-header">
-                            <h3>{cat === 'fonts' ? '字体' : cat === 'images' ? '图片' : '其他'}</h3>
+                            <h3>
+                                {cat === "fonts"
+                                    ? "字体"
+                                    : cat === "images"
+                                      ? "图片"
+                                      : "其他"}
+                            </h3>
                             <div class="asset-add-actions">
-                                {#if cat === 'images'}
+                                {#if cat === "images"}
                                     {#each imageAssetSlots as slot}
-                                        <button class="mini-btn" on:click={() => addAsset(cat, slot)}>添加{slot.label}</button>
+                                        <button
+                                            class="mini-btn"
+                                            on:click={() => addAsset(cat, slot)}
+                                            >添加{slot.label}</button
+                                        >
                                     {/each}
                                 {/if}
-                                <button class="add-btn small" on:click={() => addAsset(cat)}>+</button>
+                                <button
+                                    class="add-btn small"
+                                    on:click={() => addAsset(cat)}>+</button
+                                >
                             </div>
                         </div>
                         <div class="asset-list">
-                            {#each metadata.assets.filter(a => a.category === cat) as asset, idx}
+                            {#each metadata.assets.filter((a) => a.category === cat) as asset, idx}
                                 <div class="asset-item">
                                     <span class="file-name" title={asset.path}>
                                         {asset.name}
-                                        {#if asset.role}<em>{asset.slot_label || asset.role}</em>{/if}
+                                        {#if asset.role}<em
+                                                >{asset.slot_label ||
+                                                    asset.role}</em
+                                            >{/if}
                                     </span>
-                                    <button class="remove-btn" on:click={() => removeAsset(metadata.assets.indexOf(asset))}>×</button>
+                                    <button
+                                        class="remove-btn"
+                                        on:click={() =>
+                                            removeAsset(
+                                                metadata.assets.indexOf(asset),
+                                            )}>×</button
+                                    >
                                 </div>
                             {/each}
-                            {#if metadata.assets.filter(a => a.category === cat).length === 0}
-                                <p class="empty-hint">未添加{cat === 'fonts' ? '字体' : cat === 'images' ? '图片' : '文件'}</p>
+                            {#if metadata.assets.filter((a) => a.category === cat).length === 0}
+                                <p class="empty-hint">
+                                    未添加{cat === "fonts"
+                                        ? "字体"
+                                        : cat === "images"
+                                          ? "图片"
+                                          : "文件"}
+                                </p>
                             {/if}
                         </div>
                     </div>
@@ -353,23 +433,56 @@
                 <div class="template-repo-panel">
                     <div class="section-header">
                         <h3>GitHub 模板仓库</h3>
-                        <button class="mini-btn" on:click={loadTemplateRepositories} disabled={templateRepoBusy}>刷新</button>
+                        <button
+                            class="mini-btn"
+                            on:click={loadTemplateRepositories}
+                            disabled={templateRepoBusy}>刷新</button
+                        >
                     </div>
                     <div class="repo-form">
-                        <input bind:value={repoName} placeholder="仓库名称" disabled={templateRepoBusy} />
-                        <input bind:value={repoUrl} placeholder="https://github.com/owner/repo" disabled={templateRepoBusy} />
-                        <input bind:value={repoBranch} placeholder="分支 main" disabled={templateRepoBusy} />
-                        <button class="mini-btn" on:click={addTemplateRepository} disabled={templateRepoBusy}>添加</button>
+                        <input
+                            bind:value={repoName}
+                            placeholder="仓库名称"
+                            disabled={templateRepoBusy}
+                        />
+                        <input
+                            bind:value={repoUrl}
+                            placeholder="https://github.com/owner/repo"
+                            disabled={templateRepoBusy}
+                        />
+                        <input
+                            bind:value={repoBranch}
+                            placeholder="分支 main"
+                            disabled={templateRepoBusy}
+                        />
+                        <button
+                            class="mini-btn"
+                            on:click={addTemplateRepository}
+                            disabled={templateRepoBusy}>添加</button
+                        >
                     </div>
                     <div class="repo-actions">
                         <CustomSelect
                             value={selectedRepositoryId}
-                            options={[{ value: "", label: "选择模板仓库" }, ...templateRepositories.map((repo) => ({ value: repo.id, label: `${repo.name} / ${repo.branch}` }))]}
-                            disabled={templateRepoBusy || !templateRepositories.length}
+                            options={[
+                                { value: "", label: "选择模板仓库" },
+                                ...templateRepositories.map((repo) => ({
+                                    value: repo.id,
+                                    label: `${repo.name} / ${repo.branch}`,
+                                })),
+                            ]}
+                            disabled={templateRepoBusy ||
+                                !templateRepositories.length}
                             ariaLabel="模板仓库"
-                            on:change={(event) => (selectedRepositoryId = event.detail)}
+                            on:change={(event) =>
+                                (selectedRepositoryId = event.detail)}
                         />
-                        <button class="mini-btn" on:click={syncTemplateRepository} disabled={templateRepoBusy || !selectedRepositoryId}>同步索引</button>
+                        <button
+                            class="mini-btn"
+                            on:click={syncTemplateRepository}
+                            disabled={templateRepoBusy || !selectedRepositoryId}
+                            >同步索引</button
+                        >
                     </div>
                     {#if templateRepoMessage}
                         <p class="repo-message">{templateRepoMessage}</p>
@@ -380,9 +493,15 @@
                                 <div>
                                     <strong>{tpl.name}</strong>
                                     <span>{tpl.version || tpl.id}</span>
-                                    {#if tpl.description}<p>{tpl.description}</p>{/if}
+                                    {#if tpl.description}<p>
+                                            {tpl.description}
+                                        </p>{/if}
                                 </div>
-                                <button class="mini-btn" on:click={() => installRemoteTemplate(tpl)} disabled={templateRepoBusy}>安装</button>
+                                <button
+                                    class="mini-btn"
+                                    on:click={() => installRemoteTemplate(tpl)}
+                                    disabled={templateRepoBusy}>安装</button
+                                >
                             </div>
                         {/each}
                     </div>
@@ -643,7 +762,10 @@
     .repo-form,
     .repo-actions {
         display: grid;
-        grid-template-columns: minmax(90px, 0.8fr) minmax(170px, 1.5fr) minmax(80px, 0.6fr) auto;
+        grid-template-columns: minmax(90px, 0.8fr) minmax(170px, 1.5fr) minmax(
+                80px,
+                0.6fr
+            ) auto;
         gap: 8px;
         align-items: center;
     }
@@ -902,7 +1024,11 @@
 
     .add-btn:hover,
     .btn-save:hover {
-        background: linear-gradient(135deg, var(--color-accent-deep), var(--color-teal));
+        background: linear-gradient(
+            135deg,
+            var(--color-accent-deep),
+            var(--color-teal)
+        );
         transform: translateY(-1px);
     }
 

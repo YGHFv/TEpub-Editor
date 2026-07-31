@@ -10,9 +10,12 @@
     ) => void;
     export let getFileIcon: (type: string) => string;
     export let getFileDescription: (node: any) => string;
-    export let onFolderAdd: ((node: any, event?: MouseEvent) => void) | undefined = undefined;
-    export let onFolderDrop: ((node: any, files: FileList) => void) | undefined = undefined;
-    export let onFileMenu: ((node: any, event: MouseEvent) => void) | undefined = undefined;
+    export let onFolderAdd:
+        ((node: any, event?: MouseEvent) => void) | undefined = undefined;
+    export let onFolderDrop:
+        ((node: any, files: FileList) => void) | undefined = undefined;
+    export let onFileMenu:
+        ((node: any, event: MouseEvent) => void) | undefined = undefined;
 
     $: isExpanded = expandedFolders.has(node.path);
     $: isSelected =
@@ -32,7 +35,9 @@
             on:click={() => toggleFolder(node.path)}
             on:keydown={(e) => e.key === "Enter" && toggleFolder(node.path)}
             on:dragover|preventDefault
-            on:drop|preventDefault={(e) => e.dataTransfer?.files?.length && onFolderDrop?.(node, e.dataTransfer.files)}
+            on:drop|preventDefault={(e) =>
+                e.dataTransfer?.files?.length &&
+                onFolderDrop?.(node, e.dataTransfer.files)}
             role="button"
             tabindex="0"
         >

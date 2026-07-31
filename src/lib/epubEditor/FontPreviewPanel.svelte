@@ -30,22 +30,25 @@
                 <span class="font-internal-name">({internalName})</span>
             {/if}
         </div>
-        <div class="font-preview-tip">&#20351;&#29992;&#23884;&#20837;&#23383;&#20307;&#23454;&#26102;&#39044;&#35272;</div>
+        <div class="font-preview-tip">
+            &#20351;&#29992;&#23884;&#20837;&#23383;&#20307;&#23454;&#26102;&#39044;&#35272;
+        </div>
     </div>
     <textarea
         class="font-preview-sample"
         style={'font-family: "' + fontFamily + '";'}
         bind:value={previewText}
         spellcheck="false"
-        wrap="off"
-    ></textarea>
+        wrap="off"></textarea>
     <div class="font-stats">
         {#if statsLoading}
             <div class="font-stats-line">&#20998;&#26512;&#20013;...</div>
         {:else if statsError}
             <div class="font-stats-line font-stats-error">{statsError}</div>
         {:else}
-            <div class="font-stats-line">&#24050;&#20351;&#29992;&#23383;&#31526;&#25968;&#65306;{usedCharCount}</div>
+            <div class="font-stats-line">
+                &#24050;&#20351;&#29992;&#23383;&#31526;&#25968;&#65306;{usedCharCount}
+            </div>
             <div class="font-stats-line">
                 &#32570;&#22833;&#23383;&#24418;&#25968;&#65306;{missingGlyphCharCount}
             </div>
@@ -181,7 +184,11 @@
     /* NOTE: 页面原为 .image-preview-container, .font-preview-container 共享
        渐变背景一条规则；此处拆出 .font-preview-container 份，页面保留图片份。 */
     .font-preview-container {
-        background: linear-gradient(180deg, rgba(247, 250, 253, 0.94), rgba(238, 244, 248, 0.94));
+        background: linear-gradient(
+            180deg,
+            rgba(247, 250, 253, 0.94),
+            rgba(238, 244, 248, 0.94)
+        );
     }
 
     .font-preview-container {
@@ -208,7 +215,9 @@
         border-color: var(--color-border);
         border-radius: var(--radius-md);
         color: var(--color-text);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), var(--shadow-xs);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.72),
+            var(--shadow-xs);
     }
 
     .font-preview-sample:focus {

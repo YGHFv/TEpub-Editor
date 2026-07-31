@@ -26,7 +26,10 @@ function browserReady() {
 export function isTauriRuntime() {
   if (!browserReady()) return false;
   const global = window as any;
-  return Boolean(global.__TAURI__ || global.__TAURI_INTERNALS__) || window.location.protocol === "tauri:";
+  return (
+    Boolean(global.__TAURI__ || global.__TAURI_INTERNALS__) ||
+    window.location.protocol === "tauri:"
+  );
 }
 
 export function usesWebScopedSettings() {
@@ -45,7 +48,7 @@ function accountSettingsKey(username: string) {
 function readJson<T>(store: Storage, key: string, fallback: T): T {
   try {
     const raw = store.getItem(key);
-    return raw ? JSON.parse(raw) as T : fallback;
+    return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
   }
@@ -68,7 +71,8 @@ function setWebAccountSession(session: WebAccountSession | null) {
 
 export function readScopedSettingsRaw(): Record<string, any> {
   if (!browserReady()) return {};
-  if (!usesWebScopedSettings()) return readJson(localStorage, LEGACY_SETTINGS_KEY, {});
+  if (!usesWebScopedSettings())
+    return readJson(localStorage, LEGACY_SETTINGS_KEY, {});
 
   const session = getWebAccountSession();
   if (session?.username) {
@@ -88,7 +92,9 @@ export function writeScopedSettingsRaw(settings: Record<string, any>) {
   if (session?.username) {
     writeJson(localStorage, accountSettingsKey(session.username), settings);
     if (!session.localOnly) {
-      void saveRemoteSettings(settings).catch((error) => console.warn("同步 Web 设置失败:", error));
+      void saveRemoteSettings(settings).catch((error) =>
+        console.warn("同步 Web 设置失败:", error),
+      );
     }
   } else {
     writeJson(sessionStorage, GUEST_SETTINGS_KEY, settings);
@@ -100,7 +106,10 @@ export function notifySettingsChanged() {
   window.dispatchEvent(new CustomEvent("tepub-settings-updated"));
 }
 
-async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
   const response = await fetch(`${webApiBaseUrl()}${path}`, {
     ...init,
     headers: {
@@ -120,18 +129,25 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
     error.status = response.status;
     throw error;
   }
-  return text ? JSON.parse(text) as T : undefined as T;
+  return text ? (JSON.parse(text) as T) : (undefined as T);
 }
 
 function localUsers() {
-  return readJson<Record<string, { password: string; settings: Record<string, any> }>>(localStorage, LOCAL_USERS_KEY, {});
+  return readJson<
+    Record<string, { password: string; settings: Record<string, any> }>
+  >(localStorage, LOCAL_USERS_KEY, {});
 }
 
-function saveLocalUsers(users: Record<string, { password: string; settings: Record<string, any> }>) {
+function saveLocalUsers(
+  users: Record<string, { password: string; settings: Record<string, any> }>,
+) {
   writeJson(localStorage, LOCAL_USERS_KEY, users);
 }
 
-async function localRegister(username: string, password: string): Promise<AuthResponse> {
+async function localRegister(
+  username: string,
+  password: string,
+): Promise<AuthResponse> {
   const key = username.toLowerCase();
   const users = localUsers();
   if (users[key]) throw new Error("账号已存在。");
@@ -140,11 +156,19 @@ async function localRegister(username: string, password: string): Promise<AuthRe
   return { username, token: `local-${key}`, settings: {} };
 }
 
-async function localLogin(username: string, password: string): Promise<AuthResponse> {
+async function localLogin(
+  username: string,
+  password: string,
+): Promise<AuthResponse> {
   const key = username.toLowerCase();
   const users = localUsers();
-  if (!users[key] || users[key].password !== password) throw new Error("账号或密码不正确。");
-  return { username, token: `local-${key}`, settings: users[key].settings || {} };
+  if (!users[key] || users[key].password !== password)
+    throw new Error("账号或密码不正确。");
+  return {
+    username,
+    token: `local-${key}`,
+    settings: users[key].settings || {},
+  };
 }
 
 export async function registerWebAccount(username: string, password: string) {
@@ -180,8 +204,16 @@ export async function loginWebAccount(username: string, password: string) {
 }
 
 function applyAuthResult(result: AuthResponse, localOnly: boolean) {
-  setWebAccountSession({ username: result.username, token: result.token, localOnly });
-  writeJson(localStorage, accountSettingsKey(result.username), result.settings || {});
+  setWebAccountSession({
+    username: result.username,
+    token: result.token,
+    localOnly,
+  });
+  writeJson(
+    localStorage,
+    accountSettingsKey(result.username),
+    result.settings || {},
+  );
   notifySettingsChanged();
 }
 
@@ -202,10 +234,17 @@ export function logoutWebAccount() {
 export async function syncRemoteSettings() {
   const session = getWebAccountSession();
   if (!session || session.localOnly) return null;
-  const result = await requestJson<{ settings: Record<string, any> }>("/settings", {
-    headers: { authorization: `Bearer ${session.token}` },
-  });
-  writeJson(localStorage, accountSettingsKey(session.username), result.settings || {});
+  const result = await requestJson<{ settings: Record<string, any> }>(
+    "/settings",
+    {
+      headers: { authorization: `Bearer ${session.token}` },
+    },
+  );
+  writeJson(
+    localStorage,
+    accountSettingsKey(session.username),
+    result.settings || {},
+  );
   notifySettingsChanged();
   return result.settings || {};
 }

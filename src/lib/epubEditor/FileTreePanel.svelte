@@ -49,13 +49,16 @@
         const fileName = file.name.toLowerCase();
         if (fileName === "container.xml") return "容器配置";
         if (fileName === "content.opf") return "元数据";
-        if (fileName.includes("toc") || fileName.includes("ncx")) return "目录结构";
+        if (fileName.includes("toc") || fileName.includes("ncx"))
+            return "目录结构";
         if (file.file_type === "css") return "样式表";
         if (file.file_type === "font") {
             return "字体 " + ((file.size || 0) / 1024).toFixed(1) + "KB";
         }
         if (file.file_type === "image") {
-            const sizeStr = file.size ? Math.round(file.size / 1024) + "KB" : "";
+            const sizeStr = file.size
+                ? Math.round(file.size / 1024) + "KB"
+                : "";
             if (file.resolution) {
                 return file.resolution + (sizeStr ? " " + sizeStr : "");
             }
@@ -248,6 +251,10 @@
 
     .tree-content {
         padding: 10px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(246, 249, 252, 0.64));
+        background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.44),
+            rgba(246, 249, 252, 0.64)
+        );
     }
 </style>

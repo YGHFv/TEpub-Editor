@@ -27,8 +27,20 @@ type ParsedFont = {
 const MAP_PATH = "META-INF/tepub-font-obfuscation.json";
 const FONT_EXTENSIONS = new Set(["ttf", "otf", "woff", "woff2"]);
 const HTML_EXTENSIONS = new Set(["xhtml", "html", "htm"]);
-const TEXT_EXTENSIONS = new Set(["xhtml", "html", "htm", "xml", "opf", "ncx", "css", "svg"]);
-const WOFF2_WASM_URL = new URL("../../node_modules/fonteditor-core/woff2/woff2.wasm", import.meta.url).href;
+const TEXT_EXTENSIONS = new Set([
+  "xhtml",
+  "html",
+  "htm",
+  "xml",
+  "opf",
+  "ncx",
+  "css",
+  "svg",
+]);
+const WOFF2_WASM_URL = new URL(
+  "../../node_modules/fonteditor-core/woff2/woff2.wasm",
+  import.meta.url,
+).href;
 let woff2Ready: Promise<unknown> | null = null;
 let fontRuntime: Promise<typeof import("fonteditor-core")> | null = null;
 
@@ -57,32 +69,47 @@ function normalizePath(path: string) {
 }
 
 function joinPath(base: string, relative: string) {
-  return relative.startsWith("/") ? normalizePath(relative.slice(1)) : normalizePath(`${base}/${relative}`);
+  return relative.startsWith("/")
+    ? normalizePath(relative.slice(1))
+    : normalizePath(`${base}/${relative}`);
 }
 
 function percentDecode(value: string) {
-  try { return decodeURIComponent(value); } catch { return value; }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function elementsByLocalName(root: ParentNode, name: string) {
-  return Array.from(root.querySelectorAll("*")).filter((element) => element.localName === name) as Element[];
+  return Array.from(root.querySelectorAll("*")).filter(
+    (element) => element.localName === name,
+  ) as Element[];
 }
 
 function parseXml(source: string, label: string) {
   const document = new DOMParser().parseFromString(source, "application/xml");
-  if (document.querySelector("parsererror")) throw new Error(`${label} XML 格式无效`);
+  if (document.querySelector("parsererror"))
+    throw new Error(`${label} XML 格式无效`);
   return document;
 }
 
 function isPrivateCodePoint(code: number) {
-  return (code >= 0xe000 && code <= 0xf8ff) || (code >= 0xf0000 && code <= 0xffffd) || (code >= 0x100000 && code <= 0x10fffd);
+  return (
+    (code >= 0xe000 && code <= 0xf8ff) ||
+    (code >= 0xf0000 && code <= 0xffffd) ||
+    (code >= 0x100000 && code <= 0x10fffd)
+  );
 }
 
 function isCjkCodePoint(code: number) {
-  return (code >= 0x3400 && code <= 0x4dbf)
-    || (code >= 0x4e00 && code <= 0x9fff)
-    || (code >= 0xf900 && code <= 0xfaff)
-    || (code >= 0x20000 && code <= 0x3ffff);
+  return (
+    (code >= 0x3400 && code <= 0x4dbf) ||
+    (code >= 0x4e00 && code <= 0x9fff) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0x20000 && code <= 0x3ffff)
+  );
 }
 
 function shouldMapCharacter(character: string) {
@@ -101,7 +128,10 @@ function transformHtmlText(source: string, mapping: Map<string, string>) {
   for (let index = 0; index < source.length;) {
     if (source[index] === "<") {
       const end = source.indexOf(">", index + 1);
-      if (end < 0) { output += source.slice(index); break; }
+      if (end < 0) {
+        output += source.slice(index);
+        break;
+      }
       const tag = source.slice(index, end + 1);
       output += tag;
       const match = tag.match(/^<\s*(\/?)\s*([\w:-]+)/);
@@ -113,7 +143,11 @@ function transformHtmlText(source: string, mapping: Map<string, string>) {
     }
     if (!rawTag && source[index] === "&") {
       const end = source.indexOf(";", index + 1);
-      if (end > index && end - index < 16) { output += source.slice(index, end + 1); index = end + 1; continue; }
+      if (end > index && end - index < 16) {
+        output += source.slice(index, end + 1);
+        index = end + 1;
+        continue;
+      }
     }
     const code = source.codePointAt(index) || 0;
     const character = String.fromCodePoint(code);
@@ -140,7 +174,10 @@ function collectHtmlCharacters(source: string) {
     }
     if (!rawTag && source[index] === "&") {
       const end = source.indexOf(";", index + 1);
-      if (end > index && end - index < 16) { index = end + 1; continue; }
+      if (end > index && end - index < 16) {
+        index = end + 1;
+        continue;
+      }
     }
     const code = source.codePointAt(index) || 0;
     const character = String.fromCodePoint(code);
@@ -151,7 +188,9 @@ function collectHtmlCharacters(source: string) {
 }
 
 function sourceNameWithSuffix(sourceName: string, suffix: string) {
-  const stem = sourceName.toLowerCase().endsWith(".epub") ? sourceName.slice(0, -5) : sourceName;
+  const stem = sourceName.toLowerCase().endsWith(".epub")
+    ? sourceName.slice(0, -5)
+    : sourceName;
   return `${stem}${suffix}.epub`;
 }
 
@@ -161,16 +200,30 @@ async function ensureWoff2() {
   await woff2Ready;
 }
 
-async function parseFont(path: string, bytes: ArrayBuffer, subset?: number[]): Promise<ParsedFont> {
+async function parseFont(
+  path: string,
+  bytes: ArrayBuffer,
+  subset?: number[],
+): Promise<ParsedFont> {
   const ext = extension(path);
   if (!FONT_EXTENSIONS.has(ext)) throw new Error(`不支持的字体格式：${path}`);
   if (ext === "woff2") await ensureWoff2();
-  const options: any = { type: ext, hinting: true, kerning: true, compound2simple: false };
+  const options: any = {
+    type: ext,
+    hinting: true,
+    kerning: true,
+    compound2simple: false,
+  };
   if (subset?.length) options.subset = subset;
   if (ext === "woff") options.inflate = inflate;
   const { createFont } = await loadFontRuntime();
   const font = createFont(bytes, options);
-  return { path, type: ext as ParsedFont["type"], font, glyphs: font.get().glyf || [] };
+  return {
+    path,
+    type: ext as ParsedFont["type"],
+    font,
+    glyphs: font.get().glyf || [],
+  };
 }
 
 function writeFont(parsed: ParsedFont) {
@@ -183,7 +236,11 @@ function writeFont(parsed: ParsedFont) {
 function normalizeFontCompatibility(parsed: ParsedFont) {
   const data = parsed.font.get();
   let changed = false;
-  const stem = parsed.path.split("/").pop()?.replace(/\.[^.]+$/, "") || "EmbeddedFont";
+  const stem =
+    parsed.path
+      .split("/")
+      .pop()
+      ?.replace(/\.[^.]+$/, "") || "EmbeddedFont";
   const safeStem = stem.replace(/[^A-Za-z0-9]+/g, "") || "EmbeddedFont";
   data.name ||= {};
   const defaults: Record<string, string> = {
@@ -203,13 +260,32 @@ function normalizeFontCompatibility(parsed: ParsedFont) {
   const unitsPerEm = Number(data.head?.unitsPerEm) || 1000;
   const glyphs = data.glyf || [];
   const bounds = {
-    xMin: Math.min(0, ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.xMin) || 0)),
-    yMin: Math.min(0, ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.yMin) || 0)),
-    xMax: Math.max(0, ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.xMax) || 0)),
-    yMax: Math.max(0, ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.yMax) || 0)),
+    xMin: Math.min(
+      0,
+      ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.xMin) || 0),
+    ),
+    yMin: Math.min(
+      0,
+      ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.yMin) || 0),
+    ),
+    xMax: Math.max(
+      0,
+      ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.xMax) || 0),
+    ),
+    yMax: Math.max(
+      0,
+      ...glyphs.map((glyph: TTF.Glyph) => Number(glyph.yMax) || 0),
+    ),
   };
   const head = data.head || {};
-  if (["xMin", "yMin", "xMax", "yMax"].some((key) => Math.abs(Number(head[key]) - bounds[key as keyof typeof bounds]) > unitsPerEm * 4)) changed = true;
+  if (
+    ["xMin", "yMin", "xMax", "yMax"].some(
+      (key) =>
+        Math.abs(Number(head[key]) - bounds[key as keyof typeof bounds]) >
+        unitsPerEm * 4,
+    )
+  )
+    changed = true;
   return changed;
 }
 
@@ -230,7 +306,8 @@ function collectFontPlainCodePoints(fonts: ParsedFont[]) {
   const supported = new Set<number>();
   for (const parsed of fonts) {
     for (const glyph of parsed.glyphs) {
-      for (const code of glyph.unicode || []) if (isCjkCodePoint(code)) supported.add(code);
+      for (const code of glyph.unicode || [])
+        if (isCjkCodePoint(code)) supported.add(code);
     }
   }
   return supported;
@@ -240,7 +317,8 @@ function collectFontPrivateCodePoints(fonts: ParsedFont[]) {
   const occupied = new Set<number>();
   for (const parsed of fonts) {
     for (const glyph of parsed.glyphs) {
-      for (const code of glyph.unicode || []) if (isPrivateCodePoint(code)) occupied.add(code);
+      for (const code of glyph.unicode || [])
+        if (isPrivateCodePoint(code)) occupied.add(code);
     }
   }
   return occupied;
@@ -254,7 +332,7 @@ function splitFontFamilies(value: string) {
     if (quote) {
       current += character;
       if (character === quote) quote = "";
-    } else if (character === "\"" || character === "'") {
+    } else if (character === '"' || character === "'") {
       quote = character;
       current += character;
     } else if (character === ",") {
@@ -282,13 +360,37 @@ function cssFontFamily(value: string) {
 
 function appendFontFallbacks(value: string, fallbackFamilies: string[]) {
   const important = value.match(/\s*!important\s*$/i)?.[0] || "";
-  const families = splitFontFamilies(important ? value.slice(0, -important.length) : value);
+  const families = splitFontFamilies(
+    important ? value.slice(0, -important.length) : value,
+  );
   const existing = new Set(families.map(normalizedFontFamily));
-  const additions = fallbackFamilies.filter((family) => !existing.has(family.toLowerCase())).map(cssFontFamily);
+  const additions = fallbackFamilies
+    .filter((family) => !existing.has(family.toLowerCase()))
+    .map(cssFontFamily);
   if (!additions.length) return value;
-  const genericFamilies = new Set(["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded", "emoji", "math", "fangsong"]);
-  const genericIndex = families.findIndex((family) => genericFamilies.has(normalizedFontFamily(family)));
-  families.splice(genericIndex < 0 ? families.length : genericIndex, 0, ...additions);
+  const genericFamilies = new Set([
+    "serif",
+    "sans-serif",
+    "monospace",
+    "cursive",
+    "fantasy",
+    "system-ui",
+    "ui-serif",
+    "ui-sans-serif",
+    "ui-monospace",
+    "ui-rounded",
+    "emoji",
+    "math",
+    "fangsong",
+  ]);
+  const genericIndex = families.findIndex((family) =>
+    genericFamilies.has(normalizedFontFamily(family)),
+  );
+  families.splice(
+    genericIndex < 0 ? families.length : genericIndex,
+    0,
+    ...additions,
+  );
   return `${families.join(", ")}${important}`;
 }
 
@@ -300,37 +402,58 @@ function rewriteCssFontFallbacks(source: string, fallbackFamilies: string[]) {
     fontFaces.push(block);
     return marker;
   });
-  const rewritten = masked.replace(/(font-family\s*:\s*)([^;}{]+)/gi, (_match, prefix: string, value: string) => (
-    `${prefix}${appendFontFallbacks(value, fallbackFamilies)}`
-  ));
-  return rewritten.replace(/__TEPUB_FONT_FACE_(\d+)__/g, (_match, index: string) => fontFaces[Number(index)] || "");
+  const rewritten = masked.replace(
+    /(font-family\s*:\s*)([^;}{]+)/gi,
+    (_match, prefix: string, value: string) =>
+      `${prefix}${appendFontFallbacks(value, fallbackFamilies)}`,
+  );
+  return rewritten.replace(
+    /__TEPUB_FONT_FACE_(\d+)__/g,
+    (_match, index: string) => fontFaces[Number(index)] || "",
+  );
 }
 
-function rewriteInlineFontFallbacks(source: string, fallbackFamilies: string[]) {
+function rewriteInlineFontFallbacks(
+  source: string,
+  fallbackFamilies: string[],
+) {
   if (!fallbackFamilies.length) return source;
-  return source.replace(/(style\s*=\s*)(['"])(.*?)\2/gi, (_match, prefix: string, quote: string, style: string) => {
-    const rewritten = style.replace(/(font-family\s*:\s*)([^;]+)/gi, (_declaration, declarationPrefix: string, value: string) => (
-      `${declarationPrefix}${appendFontFallbacks(value, fallbackFamilies)}`
-    ));
-    return `${prefix}${quote}${rewritten}${quote}`;
-  });
+  return source.replace(
+    /(style\s*=\s*)(['"])(.*?)\2/gi,
+    (_match, prefix: string, quote: string, style: string) => {
+      const rewritten = style.replace(
+        /(font-family\s*:\s*)([^;]+)/gi,
+        (_declaration, declarationPrefix: string, value: string) =>
+          `${declarationPrefix}${appendFontFallbacks(value, fallbackFamilies)}`,
+      );
+      return `${prefix}${quote}${rewritten}${quote}`;
+    },
+  );
 }
 
-function injectObfuscatedTextCompatibility(source: string, fallbackFamilies: string[]) {
+function injectObfuscatedTextCompatibility(
+  source: string,
+  fallbackFamilies: string[],
+) {
   if (/data-tepub-font-obfuscation\s*=/.test(source)) return source;
   const defaultFamily = fallbackFamilies.length
     ? `html { font-family: ${fallbackFamilies.map(cssFontFamily).join(", ")}, serif; }\n`
     : "";
   const style = `<style type="text/css" data-tepub-font-obfuscation="1">${defaultFamily}html, body { overflow-wrap: anywhere; word-break: break-all; }</style>`;
-  if (/<\/head\s*>/i.test(source)) return source.replace(/<\/head\s*>/i, `${style}</head>`);
+  if (/<\/head\s*>/i.test(source))
+    return source.replace(/<\/head\s*>/i, `${style}</head>`);
   return `${style}${source}`;
 }
 
 async function collectEmbeddedFontFamilies(zip: JSZip, fonts: ParsedFont[]) {
-  const fontByPath = new Map(fonts.map((font) => [normalizePath(font.path).toLowerCase(), font]));
+  const fontByPath = new Map(
+    fonts.map((font) => [normalizePath(font.path).toLowerCase(), font]),
+  );
   const families: Array<{ family: string; score: number; order: number }> = [];
   const seen = new Set<string>();
-  for (const path of Object.keys(zip.files).filter((name) => !zip.files[name].dir && extension(name) === "css")) {
+  for (const path of Object.keys(zip.files).filter(
+    (name) => !zip.files[name].dir && extension(name) === "css",
+  )) {
     const source = await zip.files[path].async("text");
     for (const match of source.matchAll(/@font-face\s*\{([^{}]*)\}/gi)) {
       const body = match[1];
@@ -338,26 +461,43 @@ async function collectEmbeddedFontFamilies(zip: JSZip, fonts: ParsedFont[]) {
       if (!familyMatch) continue;
       const family = unquotedFontFamily(familyMatch[1]);
       if (!family || seen.has(family.toLowerCase())) continue;
-      const referencedFonts = [...body.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)].map((urlMatch) => {
-        const relative = percentDecode(urlMatch[2].split(/[?#]/, 1)[0]);
-        return fontByPath.get(joinPath(parentPath(path), relative).toLowerCase());
-      }).filter((font): font is ParsedFont => Boolean(font));
+      const referencedFonts = [
+        ...body.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi),
+      ]
+        .map((urlMatch) => {
+          const relative = percentDecode(urlMatch[2].split(/[?#]/, 1)[0]);
+          return fontByPath.get(
+            joinPath(parentPath(path), relative).toLowerCase(),
+          );
+        })
+        .filter((font): font is ParsedFont => Boolean(font));
       if (referencedFonts.length) {
         seen.add(family.toLowerCase());
-        const score = Math.max(...referencedFonts.map((font) => font.glyphs.reduce(
-          (count: number, glyph: TTF.Glyph) => count + Number((glyph.unicode || []).some(isCjkCodePoint)),
-          0,
-        )));
+        const score = Math.max(
+          ...referencedFonts.map((font) =>
+            font.glyphs.reduce(
+              (count: number, glyph: TTF.Glyph) =>
+                count + Number((glyph.unicode || []).some(isCjkCodePoint)),
+              0,
+            ),
+          ),
+        );
         families.push({ family, score, order: families.length });
       }
     }
   }
-  return families.sort((left, right) => right.score - left.score || left.order - right.order).map(({ family }) => family);
+  return families
+    .sort((left, right) => right.score - left.score || left.order - right.order)
+    .map(({ family }) => family);
 }
 
 function privateCharacters(count: number, excluded: Set<number>) {
   const values: number[] = [];
-  for (const [start, end] of [[0xe000, 0xf8ff], [0xf0000, 0xffffd], [0x100000, 0x10fffd]]) {
+  for (const [start, end] of [
+    [0xe000, 0xf8ff],
+    [0xf0000, 0xffffd],
+    [0x100000, 0x10fffd],
+  ]) {
     for (let code = start; code <= end && values.length < count; code += 1) {
       if (!excluded.has(code)) values.push(code);
     }
@@ -386,17 +526,31 @@ function tagClass(tag: string) {
 function updateTagClass(tag: string, add: boolean) {
   const classMatch = tag.match(/\bclass\s*=\s*(['"])(.*?)\1/i);
   if (classMatch) {
-    const classes = classMatch[2].split(/\s+/).filter(Boolean)
-      .filter((name) => name !== BODY_ENCRYPTION_CLASS && !name.startsWith(`${BODY_ENCRYPTION_CLASS}-`));
+    const classes = classMatch[2]
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter(
+        (name) =>
+          name !== BODY_ENCRYPTION_CLASS &&
+          !name.startsWith(`${BODY_ENCRYPTION_CLASS}-`),
+      );
     if (add) classes.push(BODY_ENCRYPTION_CLASS);
-    if (!classes.length) return tag.replace(classMatch[0], "").replace(/\s+([/>])/g, "$1");
-    return tag.replace(classMatch[0], `class=${classMatch[1]}${classes.join(" ")}${classMatch[1]}`);
+    if (!classes.length)
+      return tag.replace(classMatch[0], "").replace(/\s+([/>])/g, "$1");
+    return tag.replace(
+      classMatch[0],
+      `class=${classMatch[1]}${classes.join(" ")}${classMatch[1]}`,
+    );
   }
   if (!add) return tag;
   return tag.replace(/\s*(\/?)>$/, ` class="${BODY_ENCRYPTION_CLASS}"$1>`);
 }
 
-function transformBodyText(source: string, mapping: Map<string, string>, mode: "encrypt" | "decrypt") {
+function transformBodyText(
+  source: string,
+  mapping: Map<string, string>,
+  mode: "encrypt" | "decrypt",
+) {
   let output = "";
   let paragraphDepth = 0;
   const markedStack: string[] = [];
@@ -404,14 +558,22 @@ function transformBodyText(source: string, mapping: Map<string, string>, mode: "
   for (let index = 0; index < source.length;) {
     if (source[index] === "<") {
       const end = source.indexOf(">", index + 1);
-      if (end < 0) { output += source.slice(index); break; }
+      if (end < 0) {
+        output += source.slice(index);
+        break;
+      }
       let tag = source.slice(index, end + 1);
       const match = tag.match(/^<\s*(\/?)\s*([\w:-]+)/);
       const closing = match?.[1] === "/";
       const name = match?.[2]?.toLowerCase() || "";
       const selfClosing = /\/\s*>$/.test(tag);
-      const marked = tagClass(tag).split(/\s+/)
-        .some((className) => className === BODY_ENCRYPTION_CLASS || className.startsWith(`${BODY_ENCRYPTION_CLASS}-`));
+      const marked = tagClass(tag)
+        .split(/\s+/)
+        .some(
+          (className) =>
+            className === BODY_ENCRYPTION_CLASS ||
+            className.startsWith(`${BODY_ENCRYPTION_CLASS}-`),
+        );
       if (closing) {
         const matchIndex = markedStack.lastIndexOf(name);
         while (matchIndex >= 0 && markedStack.length > matchIndex) {
@@ -435,11 +597,18 @@ function transformBodyText(source: string, mapping: Map<string, string>, mode: "
     }
     if (!rawTag && source[index] === "&") {
       const end = source.indexOf(";", index + 1);
-      if (end > index && end - index < 16) { output += source.slice(index, end + 1); index = end + 1; continue; }
+      if (end > index && end - index < 16) {
+        output += source.slice(index, end + 1);
+        index = end + 1;
+        continue;
+      }
     }
     const code = source.codePointAt(index) || 0;
     const character = String.fromCodePoint(code);
-    output += !rawTag && paragraphDepth > 0 ? mapping.get(character) || character : character;
+    output +=
+      !rawTag && paragraphDepth > 0
+        ? mapping.get(character) || character
+        : character;
     index += character.length;
   }
   return output;
@@ -465,11 +634,15 @@ function collectBodyCharacters(source: string) {
     }
     if (!rawTag && source[index] === "&") {
       const end = source.indexOf(";", index + 1);
-      if (end > index && end - index < 16) { index = end + 1; continue; }
+      if (end > index && end - index < 16) {
+        index = end + 1;
+        continue;
+      }
     }
     const code = source.codePointAt(index) || 0;
     const character = String.fromCodePoint(code);
-    if (!rawTag && paragraphDepth > 0 && shouldMapCharacter(character)) characters.push(character);
+    if (!rawTag && paragraphDepth > 0 && shouldMapCharacter(character))
+      characters.push(character);
     index += character.length;
   }
   return characters;
@@ -492,7 +665,11 @@ function randomDerangement(characters: string[]) {
 function relativeZipPath(fromFile: string, target: string) {
   const from = parentPath(normalizePath(fromFile)).split("/").filter(Boolean);
   const to = normalizePath(target).split("/").filter(Boolean);
-  while (from.length && to.length && from[0].toLowerCase() === to[0].toLowerCase()) {
+  while (
+    from.length &&
+    to.length &&
+    from[0].toLowerCase() === to[0].toLowerCase()
+  ) {
     from.shift();
     to.shift();
   }
@@ -500,15 +677,26 @@ function relativeZipPath(fromFile: string, target: string) {
 }
 
 function encodedZipUrl(path: string) {
-  return path.split("/").map((part) => encodeURIComponent(part)).join("/");
+  return path
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
 }
 
 function encryptedFontCss(fonts: Array<{ path: string }>, cssPath: string) {
-  const rules = fonts.map((font, index) => {
-    const family = `${BODY_ENCRYPTION_FAMILY}${index + 1}`;
-    const fontUrl = encodedZipUrl(relativeZipPath(cssPath, font.path));
-    const format = extension(font.path) === "otf" ? "opentype" : extension(font.path) === "woff2" ? "woff2" : extension(font.path) === "woff" ? "woff" : "truetype";
-    return `@font-face {
+  const rules = fonts
+    .map((font, index) => {
+      const family = `${BODY_ENCRYPTION_FAMILY}${index + 1}`;
+      const fontUrl = encodedZipUrl(relativeZipPath(cssPath, font.path));
+      const format =
+        extension(font.path) === "otf"
+          ? "opentype"
+          : extension(font.path) === "woff2"
+            ? "woff2"
+            : extension(font.path) === "woff"
+              ? "woff"
+              : "truetype";
+      return `@font-face {
   font-family: ${cssFontFamily(family)};
   src: url("${fontUrl}") format("${format}");
   font-style: normal;
@@ -521,7 +709,8 @@ function encryptedFontCss(fonts: Array<{ path: string }>, cssPath: string) {
   font-family: ${cssFontFamily(family)} !important;
   font-style: normal;
 }`;
-  }).join("\n\n");
+    })
+    .join("\n\n");
   return `/* TEpub external font encryption compatibility */\n\n${rules}\n`;
 }
 
@@ -533,20 +722,30 @@ function insertHeadChild(source: string, markup: string) {
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const closingIndent = match[1];
   const headSource = source.slice(0, match.index);
-  const existingChildIndent = headSource.match(/<head\b[^>]*>\s*\r?\n([ \t]+)\S/i)?.[1];
+  const existingChildIndent = headSource.match(
+    /<head\b[^>]*>\s*\r?\n([ \t]+)\S/i,
+  )?.[1];
   const childIndent = existingChildIndent || `${closingIndent}  `;
   const separator = headSource.endsWith("\n") ? "" : newline;
   return `${headSource}${separator}${childIndent}${markup}${newline}${closingIndent}${match[2]}${source.slice(match.index + match[0].length)}`;
 }
 
-function injectEncryptionStylesheetLink(source: string, htmlPath: string, cssPath: string) {
-  const stylePattern = /<style[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*>.*?<\/style>/gis;
-  const linkPattern = /<link\b[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*\/?\s*>/gi;
+function injectEncryptionStylesheetLink(
+  source: string,
+  htmlPath: string,
+  cssPath: string,
+) {
+  const stylePattern =
+    /<style[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*>.*?<\/style>/gis;
+  const linkPattern =
+    /<link\b[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*\/?\s*>/gi;
   const cleaned = source
     .replace(stylePattern, "")
     .replace(linkPattern, "")
     .replace(/^[ \t]*\r?\n(?=[ \t]*<\/head\s*>)/im, "");
-  const href = encodedZipUrl(relativeZipPath(htmlPath, cssPath)).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const href = encodedZipUrl(relativeZipPath(htmlPath, cssPath))
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;");
   const link = `<link rel="stylesheet" type="text/css" href="${href}" data-tepub-body-font-encryption="1" />`;
   return insertHeadChild(cleaned, link);
 }
@@ -559,25 +758,47 @@ async function installExternalEncryptionStylesheet(
   const pkg = await packageInfo(zip);
   let cssPath = joinPath(pkg.opfDir, `Styles/${BODY_ENCRYPTION_CSS_BASENAME}`);
   let suffix = 2;
-  while (zip.file(cssPath) && !(await zip.file(cssPath)!.async("text")).includes("TEpub external font encryption compatibility")) {
-    cssPath = joinPath(pkg.opfDir, `Styles/tepub-font-encryption-${suffix++}.css`);
+  while (
+    zip.file(cssPath) &&
+    !(await zip.file(cssPath)!.async("text")).includes(
+      "TEpub external font encryption compatibility",
+    )
+  ) {
+    cssPath = joinPath(
+      pkg.opfDir,
+      `Styles/tepub-font-encryption-${suffix++}.css`,
+    );
   }
   zip.file(cssPath, encryptedFontCss(fonts, cssPath));
   for (const htmlPath of htmlPaths) {
     const source = await zip.files[htmlPath].async("text");
-    zip.file(htmlPath, injectEncryptionStylesheetLink(source, htmlPath, cssPath));
+    zip.file(
+      htmlPath,
+      injectEncryptionStylesheetLink(source, htmlPath, cssPath),
+    );
   }
   const manifest = elementsByLocalName(pkg.opf, "manifest")[0];
   if (manifest) {
-    const existing = elementsByLocalName(pkg.opf, "item").find((item) => (
-      joinPath(pkg.opfDir, percentDecode(item.getAttribute("href") || "")).toLowerCase() === cssPath.toLowerCase()
-    ));
+    const existing = elementsByLocalName(pkg.opf, "item").find(
+      (item) =>
+        joinPath(
+          pkg.opfDir,
+          percentDecode(item.getAttribute("href") || ""),
+        ).toLowerCase() === cssPath.toLowerCase(),
+    );
     if (!existing) {
-      const usedIds = new Set(elementsByLocalName(pkg.opf, "item").map((item) => item.getAttribute("id") || ""));
+      const usedIds = new Set(
+        elementsByLocalName(pkg.opf, "item").map(
+          (item) => item.getAttribute("id") || "",
+        ),
+      );
       let id = "tepub-font-encryption-css";
       let idSuffix = 2;
       while (usedIds.has(id)) id = `tepub-font-encryption-css-${idSuffix++}`;
-      const item = pkg.opf.createElementNS(pkg.opf.documentElement.namespaceURI, "item");
+      const item = pkg.opf.createElementNS(
+        pkg.opf.documentElement.namespaceURI,
+        "item",
+      );
       item.setAttribute("id", id);
       item.setAttribute("href", relativeZipPath(pkg.opfPath, cssPath));
       item.setAttribute("media-type", "text/css");
@@ -591,32 +812,53 @@ async function removeExternalEncryptionStylesheets(zip: JSZip) {
   const pkg = await packageInfo(zip);
   let changed = false;
   for (const item of elementsByLocalName(pkg.opf, "item")) {
-    const href = percentDecode(item.getAttribute("href")?.split(/[?#]/, 1)[0] || "");
+    const href = percentDecode(
+      item.getAttribute("href")?.split(/[?#]/, 1)[0] || "",
+    );
     const path = joinPath(pkg.opfDir, href);
-    if (!/^tepub-font-encryption(?:-\d+)?\.css$/i.test(path.split("/").pop() || "")) continue;
+    if (
+      !/^tepub-font-encryption(?:-\d+)?\.css$/i.test(
+        path.split("/").pop() || "",
+      )
+    )
+      continue;
     zip.remove(path);
     item.parentNode?.removeChild(item);
     changed = true;
   }
-  if (changed) zip.file(pkg.opfPath, new XMLSerializer().serializeToString(pkg.opf));
+  if (changed)
+    zip.file(pkg.opfPath, new XMLSerializer().serializeToString(pkg.opf));
 }
 
-function injectBodyFontStyle(source: string, htmlPath: string, fontPath: string, remove = false) {
-  const pattern = /<style[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*>.*?<\/style>/gis;
-  const linkPattern = /<link\b[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*\/?\s*>/gi;
+function injectBodyFontStyle(
+  source: string,
+  htmlPath: string,
+  fontPath: string,
+  remove = false,
+) {
+  const pattern =
+    /<style[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*>.*?<\/style>/gis;
+  const linkPattern =
+    /<link\b[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*\/?\s*>/gi;
   const cleaned = source.replace(pattern, "").replace(linkPattern, "");
   if (remove) return cleaned;
   const fontUrl = encodedZipUrl(relativeZipPath(htmlPath, fontPath));
   const style = `<style type="text/css" data-tepub-body-font-encryption="1">@font-face { font-family: ${cssFontFamily(BODY_ENCRYPTION_FAMILY)}; src: url("${fontUrl}") format("truetype"); font-style: normal; font-weight: normal; } .${BODY_ENCRYPTION_CLASS} { font-family: ${cssFontFamily(BODY_ENCRYPTION_FAMILY)} !important; }</style>`;
-  if (/<\/head\s*>/i.test(cleaned)) return cleaned.replace(/<\/head\s*>/i, `${style}</head>`);
+  if (/<\/head\s*>/i.test(cleaned))
+    return cleaned.replace(/<\/head\s*>/i, `${style}</head>`);
   return `${style}${cleaned}`;
 }
 
 async function packageInfo(zip: JSZip) {
   const containerEntry = zip.file("META-INF/container.xml");
   if (!containerEntry) throw new Error("EPUB 缺少 META-INF/container.xml");
-  const container = parseXml(await containerEntry.async("text"), "container.xml");
-  const opfPath = elementsByLocalName(container, "rootfile")[0]?.getAttribute("full-path") || "";
+  const container = parseXml(
+    await containerEntry.async("text"),
+    "container.xml",
+  );
+  const opfPath =
+    elementsByLocalName(container, "rootfile")[0]?.getAttribute("full-path") ||
+    "";
   if (!opfPath || !zip.file(opfPath)) throw new Error("EPUB 的 OPF 路径无效");
   const opfSource = await zip.file(opfPath)!.async("text");
   const opf = parseXml(opfSource, "OPF");
@@ -624,7 +866,9 @@ async function packageInfo(zip: JSZip) {
   const manifestById = new Map<string, string>();
   for (const item of elementsByLocalName(opf, "item")) {
     const id = item.getAttribute("id") || "";
-    const href = percentDecode(item.getAttribute("href")?.split(/[?#]/, 1)[0] || "");
+    const href = percentDecode(
+      item.getAttribute("href")?.split(/[?#]/, 1)[0] || "",
+    );
     if (id && href) manifestById.set(id, joinPath(opfDir, href));
   }
   const spinePaths = elementsByLocalName(opf, "itemref")
@@ -634,20 +878,38 @@ async function packageInfo(zip: JSZip) {
 }
 
 async function generateEpub(zip: JSZip) {
-  zip.file("mimetype", "application/epub+zip", { compression: "STORE", createFolders: false });
-  return zip.generateAsync({ type: "blob", mimeType: "application/epub+zip", compression: "DEFLATE", compressionOptions: { level: 6 } });
+  zip.file("mimetype", "application/epub+zip", {
+    compression: "STORE",
+    createFolders: false,
+  });
+  return zip.generateAsync({
+    type: "blob",
+    mimeType: "application/epub+zip",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
+  });
 }
 
 async function loadFonts(zip: JSZip) {
-  const paths = Object.keys(zip.files).filter((path) => !zip.files[path].dir && FONT_EXTENSIONS.has(extension(path)));
+  const paths = Object.keys(zip.files).filter(
+    (path) => !zip.files[path].dir && FONT_EXTENSIONS.has(extension(path)),
+  );
   const parsed: ParsedFont[] = [];
   const failures: string[] = [];
   for (const path of paths) {
-    try { parsed.push(await parseFont(path, await zip.files[path].async("arraybuffer"))); }
-    catch (error) { failures.push(`${path}: ${error instanceof Error ? error.message : String(error)}`); }
+    try {
+      parsed.push(
+        await parseFont(path, await zip.files[path].async("arraybuffer")),
+      );
+    } catch (error) {
+      failures.push(
+        `${path}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
   if (!parsed.length) {
-    if (failures.length) throw new Error(`内嵌字体解析失败：${failures.join("；")}`);
+    if (failures.length)
+      throw new Error(`内嵌字体解析失败：${failures.join("；")}`);
     throw new Error("EPUB 内未找到 TTF、OTF、WOFF 或 WOFF2 字体");
   }
   return parsed;
@@ -667,11 +929,17 @@ async function subsetAllFontsForEncryption(zip: JSZip) {
       const parsed = await parseFont(path, source, [...codePoints]);
       const compatibilityRepaired = normalizeFontCompatibility(parsed);
       const written = writeFont(parsed);
-      if (!compatibilityRepaired && written.bytes.byteLength >= source.byteLength && parsed.type !== "otf") continue;
+      if (
+        !compatibilityRepaired &&
+        written.bytes.byteLength >= source.byteLength &&
+        parsed.type !== "otf"
+      )
+        continue;
       let outputPath = path;
       if (parsed.type === "otf") {
         outputPath = path.replace(/\.otf$/i, ".ttf");
-        if (zip.file(outputPath) && outputPath !== path) outputPath = path.replace(/\.otf$/i, "-subset.ttf");
+        if (zip.file(outputPath) && outputPath !== path)
+          outputPath = path.replace(/\.otf$/i, "-subset.ttf");
         pathMap.set(path, outputPath);
         zip.remove(path);
       }
@@ -682,14 +950,19 @@ async function subsetAllFontsForEncryption(zip: JSZip) {
     }
   }
   if ([...pathMap].some(([from, to]) => from !== to)) {
-    for (const path of Object.keys(zip.files).filter((name) => TEXT_EXTENSIONS.has(extension(name)))) {
+    for (const path of Object.keys(zip.files).filter((name) =>
+      TEXT_EXTENSIONS.has(extension(name)),
+    )) {
       const source = await zip.files[path].async("text");
       zip.file(path, rewriteWebEpubTextLinks(source, path, path, pathMap));
     }
     const pkg = await packageInfo(zip);
     for (const item of elementsByLocalName(pkg.opf, "item")) {
-      const href = percentDecode(item.getAttribute("href")?.split(/[?#]/, 1)[0] || "");
-      if (joinPath(pkg.opfDir, href).toLowerCase().endsWith(".ttf")) item.setAttribute("media-type", "font/ttf");
+      const href = percentDecode(
+        item.getAttribute("href")?.split(/[?#]/, 1)[0] || "",
+      );
+      if (joinPath(pkg.opfDir, href).toLowerCase().endsWith(".ttf"))
+        item.setAttribute("media-type", "font/ttf");
     }
     zip.file(pkg.opfPath, new XMLSerializer().serializeToString(pkg.opf));
   }
@@ -697,29 +970,42 @@ async function subsetAllFontsForEncryption(zip: JSZip) {
 }
 
 async function selectBodyFonts(zip: JSZip, fonts: ParsedFont[]) {
-  const fontByPath = new Map(fonts.map((font) => [normalizePath(font.path).toLowerCase(), font]));
+  const fontByPath = new Map(
+    fonts.map((font) => [normalizePath(font.path).toLowerCase(), font]),
+  );
   const familyPaths = new Map<string, string[]>();
   const bodyFamilies: string[] = [];
-  for (const path of Object.keys(zip.files).filter((name) => !zip.files[name].dir && extension(name) === "css")) {
+  for (const path of Object.keys(zip.files).filter(
+    (name) => !zip.files[name].dir && extension(name) === "css",
+  )) {
     const source = await zip.files[path].async("text");
     for (const match of source.matchAll(/@font-face\s*\{([^{}]*)\}/gi)) {
       const body = match[1];
       const familyMatch = body.match(/font-family\s*:\s*([^;}{]+)/i);
       if (!familyMatch) continue;
       const family = normalizedFontFamily(familyMatch[1]);
-      const paths = [...body.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)].map((urlMatch) => {
-        const relative = percentDecode(urlMatch[2].split(/[?#]/, 1)[0]);
-        return joinPath(parentPath(path), relative);
-      }).filter((fontPath) => fontByPath.has(fontPath.toLowerCase()));
+      const paths = [...body.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)]
+        .map((urlMatch) => {
+          const relative = percentDecode(urlMatch[2].split(/[?#]/, 1)[0]);
+          return joinPath(parentPath(path), relative);
+        })
+        .filter((fontPath) => fontByPath.has(fontPath.toLowerCase()));
       if (paths.length) familyPaths.set(family, paths);
     }
     const withoutFaces = cleanCssForFontRules(source);
     for (const rule of withoutFaces.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       const selectors = rule[1].split(",");
-      if (!selectors.some((selector) => /(^|[\s>+~])(?:body|p)(?=[:.#\[\s>+~]|$)/i.test(selector.trim()))) continue;
+      if (
+        !selectors.some((selector) =>
+          /(^|[\s>+~])(?:body|p)(?=[:.#\[\s>+~]|$)/i.test(selector.trim()),
+        )
+      )
+        continue;
       const familyMatch = rule[2].match(/font-family\s*:\s*([^;}{]+)/i);
       if (!familyMatch) continue;
-      for (const family of splitFontFamilies(familyMatch[1]).map(normalizedFontFamily)) {
+      for (const family of splitFontFamilies(familyMatch[1]).map(
+        normalizedFontFamily,
+      )) {
         if (!bodyFamilies.includes(family)) bodyFamilies.push(family);
       }
     }
@@ -732,32 +1018,57 @@ async function selectBodyFonts(zip: JSZip, fonts: ParsedFont[]) {
     }
   }
   if (selected.length) return selected;
-  return [...fonts].sort((left, right) => collectFontPlainCodePoints([right]).size - collectFontPlainCodePoints([left]).size).slice(0, 1);
+  return [...fonts]
+    .sort(
+      (left, right) =>
+        collectFontPlainCodePoints([right]).size -
+        collectFontPlainCodePoints([left]).size,
+    )
+    .slice(0, 1);
 }
 
-function injectBodyFontStackStyle(source: string, htmlPath: string, fonts: ParsedFont[]) {
-  const pattern = /<style[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*>.*?<\/style>/gis;
+function injectBodyFontStackStyle(
+  source: string,
+  htmlPath: string,
+  fonts: ParsedFont[],
+) {
+  const pattern =
+    /<style[^>]*data-tepub-body-font-encryption\s*=\s*(['"])1\1[^>]*>.*?<\/style>/gis;
   const cleaned = source.replace(pattern, "");
   const faces = fonts.map((font, index) => {
     const family = `${BODY_ENCRYPTION_FAMILY}${index + 1}`;
     const fontUrl = relativeZipPath(htmlPath, font.path).replace(/"/g, "%22");
     return `@font-face { font-family: ${cssFontFamily(family)}; src: url("${fontUrl}"); }`;
   });
-  const stack = fonts.map((_font, index) => cssFontFamily(`${BODY_ENCRYPTION_FAMILY}${index + 1}`)).join(", ");
+  const stack = fonts
+    .map((_font, index) =>
+      cssFontFamily(`${BODY_ENCRYPTION_FAMILY}${index + 1}`),
+    )
+    .join(", ");
   const style = `<style type="text/css" data-tepub-body-font-encryption="1">${faces.join(" ")} .${BODY_ENCRYPTION_CLASS} { font-family: ${stack} !important; }</style>`;
-  if (/<\/head\s*>/i.test(cleaned)) return cleaned.replace(/<\/head\s*>/i, `${style}</head>`);
+  if (/<\/head\s*>/i.test(cleaned))
+    return cleaned.replace(/<\/head\s*>/i, `${style}</head>`);
   return `${style}${cleaned}`;
 }
 
-type CssFontRule = { selectors: string[]; families: string[]; important: boolean; order: number };
+type CssFontRule = {
+  selectors: string[];
+  families: string[];
+  important: boolean;
+  order: number;
+};
 
 function fontFamilyDeclaration(source: string) {
-  const declarations = [...source.matchAll(/(?:^|;)\s*font-family\s*:\s*([^;}{]+)/gi)];
+  const declarations = [
+    ...source.matchAll(/(?:^|;)\s*font-family\s*:\s*([^;}{]+)/gi),
+  ];
   const value = declarations.at(-1)?.[1]?.trim();
   if (!value) return null;
   const important = /\s*!important\s*$/i.test(value);
   return {
-    families: splitFontFamilies(value.replace(/\s*!important\s*$/i, "")).map(normalizedFontFamily),
+    families: splitFontFamilies(value.replace(/\s*!important\s*$/i, "")).map(
+      normalizedFontFamily,
+    ),
     important,
   };
 }
@@ -765,10 +1076,22 @@ function fontFamilyDeclaration(source: string) {
 function isTitleLikeElement(element: Element | null) {
   for (let current = element; current; current = current.parentElement) {
     const tag = current.localName?.toLowerCase() || "";
-    if (/^h[1-6]$/.test(tag) || tag === "title" || tag === "header" || tag === "nav") return true;
-    const marker = `${current.getAttribute("class") || ""} ${current.getAttribute("id") || ""}`.toLowerCase();
-    if (/(^|[\s_-])(title|subtitle|heading|headline)([\s_-]|$)/.test(marker)
-      || /(^|[\s_-])(chapter|volume|part|section)[\s_-]*(title|subtitle|number|name)([\s_-]|$)/.test(marker)) return true;
+    if (
+      /^h[1-6]$/.test(tag) ||
+      tag === "title" ||
+      tag === "header" ||
+      tag === "nav"
+    )
+      return true;
+    const marker =
+      `${current.getAttribute("class") || ""} ${current.getAttribute("id") || ""}`.toLowerCase();
+    if (
+      /(^|[\s_-])(title|subtitle|heading|headline)([\s_-]|$)/.test(marker) ||
+      /(^|[\s_-])(chapter|volume|part|section)[\s_-]*(title|subtitle|number|name)([\s_-]|$)/.test(
+        marker,
+      )
+    )
+      return true;
   }
   return false;
 }
@@ -783,10 +1106,19 @@ const BODY_BLOCK_TAGS = new Set(BODY_BLOCK_SELECTOR.split(", "));
 function isEncryptableTextBlock(element: Element) {
   const tag = element.localName?.toLowerCase() || "";
   if (!BODY_BLOCK_TAGS.has(tag) || isTitleLikeElement(element)) return false;
-  if (Array.from(element.querySelectorAll("*")).some((child) => isTitleLikeElement(child))) return false;
+  if (
+    Array.from(element.querySelectorAll("*")).some((child) =>
+      isTitleLikeElement(child),
+    )
+  )
+    return false;
   if (![...(element.textContent || "")].some(shouldMapCharacter)) return false;
-  return !Array.from(element.querySelectorAll(BODY_BLOCK_SELECTOR))
-    .some((child) => child !== element && !isTitleLikeElement(child) && [...(child.textContent || "")].some(shouldMapCharacter));
+  return !Array.from(element.querySelectorAll(BODY_BLOCK_SELECTOR)).some(
+    (child) =>
+      child !== element &&
+      !isTitleLikeElement(child) &&
+      [...(child.textContent || "")].some(shouldMapCharacter),
+  );
 }
 
 function bodyBlockElements(document: Document) {
@@ -803,23 +1135,39 @@ function cleanCssForFontRules(source: string) {
 function selectorSpecificity(selector: string) {
   const withoutPseudoElements = selector.replace(/::[\w-]+(?:\([^)]*\))?/g, "");
   const ids = (withoutPseudoElements.match(/#[\w-]+/g) || []).length;
-  const classes = (withoutPseudoElements.match(/\.[\w-]+|\[[^\]]+\]|:(?!:)[\w-]+(?:\([^)]*\))?/g) || []).length;
-  const tags = (withoutPseudoElements.match(/(^|[\s>+~])(?:[a-z][\w-]*|\*)/gi) || [])
-    .filter((match) => !match.trim().endsWith("*")).length;
+  const classes = (
+    withoutPseudoElements.match(
+      /\.[\w-]+|\[[^\]]+\]|:(?!:)[\w-]+(?:\([^)]*\))?/g,
+    ) || []
+  ).length;
+  const tags = (
+    withoutPseudoElements.match(/(^|[\s>+~])(?:[a-z][\w-]*|\*)/gi) || []
+  ).filter((match) => !match.trim().endsWith("*")).length;
   return ids * 100 + classes * 10 + tags;
 }
 
-async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outsideParagraphsOnly = false) {
-  const fontByPath = new Map(fonts.map((font) => [normalizePath(font.path).toLowerCase(), font]));
+async function collectUsedCodePointsByFont(
+  zip: JSZip,
+  fonts: ParsedFont[],
+  outsideParagraphsOnly = false,
+) {
+  const fontByPath = new Map(
+    fonts.map((font) => [normalizePath(font.path).toLowerCase(), font]),
+  );
   const fontByFamily = new Map<string, ParsedFont>();
   const rules: CssFontRule[] = [];
-  const supportedByFont = new Map(fonts.map((font) => {
-    const supported = new Set<number>();
-    for (const glyph of font.glyphs) for (const code of glyph.unicode || []) supported.add(code);
-    return [font, supported] as const;
-  }));
+  const supportedByFont = new Map(
+    fonts.map((font) => {
+      const supported = new Set<number>();
+      for (const glyph of font.glyphs)
+        for (const code of glyph.unicode || []) supported.add(code);
+      return [font, supported] as const;
+    }),
+  );
   let order = 0;
-  for (const path of Object.keys(zip.files).filter((name) => !zip.files[name].dir && extension(name) === "css")) {
+  for (const path of Object.keys(zip.files).filter(
+    (name) => !zip.files[name].dir && extension(name) === "css",
+  )) {
     const source = await zip.files[path].async("text");
     for (const match of source.matchAll(/@font-face\s*\{([^{}]*)\}/gi)) {
       const body = match[1];
@@ -828,8 +1176,13 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
       const family = normalizedFontFamily(familyMatch[1]);
       for (const urlMatch of body.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
         const relative = percentDecode(urlMatch[2].split(/[?#]/, 1)[0]);
-        const font = fontByPath.get(joinPath(parentPath(path), relative).toLowerCase());
-        if (font) { fontByFamily.set(family, font); break; }
+        const font = fontByPath.get(
+          joinPath(parentPath(path), relative).toLowerCase(),
+        );
+        if (font) {
+          fontByFamily.set(family, font);
+          break;
+        }
       }
     }
     const withoutFaces = cleanCssForFontRules(source);
@@ -837,7 +1190,10 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
       const declaration = fontFamilyDeclaration(match[2]);
       if (!declaration) continue;
       rules.push({
-        selectors: match[1].split(",").map((selector) => selector.trim()).filter(Boolean),
+        selectors: match[1]
+          .split(",")
+          .map((selector) => selector.trim())
+          .filter(Boolean),
         families: declaration.families,
         important: declaration.important,
         order: order++,
@@ -854,39 +1210,60 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
       for (const selector of rule.selectors) {
         try {
           const clean = selector.replace(/::[\w-]+(?:\([^)]*\))?/g, "");
-          if (element.matches(clean)) matchedSpecificity = Math.max(matchedSpecificity, selectorSpecificity(clean));
-        } catch { /* Ignore selectors unsupported by the XML DOM matcher. */ }
+          if (element.matches(clean))
+            matchedSpecificity = Math.max(
+              matchedSpecificity,
+              selectorSpecificity(clean),
+            );
+        } catch {
+          /* Ignore selectors unsupported by the XML DOM matcher. */
+        }
       }
-      const beatsWinner = matchedSpecificity >= 0 && (
-        !winner
-        || (rule.important && !winner.important)
-        || (rule.important === winner.important && (matchedSpecificity > winnerSpecificity
-          || (matchedSpecificity === winnerSpecificity && rule.order >= winner.order)))
-      );
+      const beatsWinner =
+        matchedSpecificity >= 0 &&
+        (!winner ||
+          (rule.important && !winner.important) ||
+          (rule.important === winner.important &&
+            (matchedSpecificity > winnerSpecificity ||
+              (matchedSpecificity === winnerSpecificity &&
+                rule.order >= winner.order))));
       if (beatsWinner) {
         winner = rule;
         winnerSpecificity = matchedSpecificity;
       }
     }
-    if (inline && (!winner?.important || inline.important)) return inline.families;
+    if (inline && (!winner?.important || inline.important))
+      return inline.families;
     return winner?.families || inline?.families || [];
   }
 
   const usage = new Map<ParsedFont, Set<number>>();
-  const htmlPaths = Object.keys(zip.files).filter((path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)));
+  const htmlPaths = Object.keys(zip.files).filter(
+    (path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)),
+  );
   for (const path of htmlPaths) {
     const source = await zip.files[path].async("text");
-    const document = new DOMParser().parseFromString(source.replace(/<link\b[^>]*>/gi, ""), "application/xml");
+    const document = new DOMParser().parseFromString(
+      source.replace(/<link\b[^>]*>/gi, ""),
+      "application/xml",
+    );
     for (const style of Array.from(document.querySelectorAll("style"))) {
       const styleSource = style.textContent || "";
       for (const match of styleSource.matchAll(/@font-face\s*\{([^{}]*)\}/gi)) {
         const familyMatch = match[1].match(/font-family\s*:\s*([^;}{]+)/i);
         if (!familyMatch) continue;
         const family = normalizedFontFamily(familyMatch[1]);
-        for (const urlMatch of match[1].matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
+        for (const urlMatch of match[1].matchAll(
+          /url\(\s*(['"]?)(.*?)\1\s*\)/gi,
+        )) {
           const relative = percentDecode(urlMatch[2].split(/[?#]/, 1)[0]);
-          const font = fontByPath.get(joinPath(parentPath(path), relative).toLowerCase());
-          if (font) { fontByFamily.set(family, font); break; }
+          const font = fontByPath.get(
+            joinPath(parentPath(path), relative).toLowerCase(),
+          );
+          if (font) {
+            fontByFamily.set(family, font);
+            break;
+          }
         }
       }
       const withoutFaces = cleanCssForFontRules(styleSource);
@@ -894,14 +1271,18 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
         const declaration = fontFamilyDeclaration(match[2]);
         if (!declaration) continue;
         rules.push({
-          selectors: match[1].split(",").map((selector) => selector.trim()).filter(Boolean),
+          selectors: match[1]
+            .split(",")
+            .map((selector) => selector.trim())
+            .filter(Boolean),
           families: declaration.families,
           important: declaration.important,
           order: order++,
         });
       }
     }
-    const root = elementsByLocalName(document, "body")[0] || document.documentElement;
+    const root =
+      elementsByLocalName(document, "body")[0] || document.documentElement;
     const visit = (node: Node) => {
       if (node.nodeType === 3) {
         const text = node.nodeValue || "";
@@ -909,7 +1290,11 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
         let element = node.parentElement;
         if (outsideParagraphsOnly) {
           let ancestor = element;
-          while (ancestor && !BODY_BLOCK_TAGS.has(ancestor.localName?.toLowerCase() || "")) ancestor = ancestor.parentElement;
+          while (
+            ancestor &&
+            !BODY_BLOCK_TAGS.has(ancestor.localName?.toLowerCase() || "")
+          )
+            ancestor = ancestor.parentElement;
           if (ancestor && isEncryptableTextBlock(ancestor)) return;
         }
         let families: string[] = [];
@@ -920,8 +1305,12 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
         for (const character of text) {
           const code = character.codePointAt(0) || 0;
           if (code < 32) continue;
-          const font = families.map((family) => fontByFamily.get(family))
-            .find((candidate) => candidate && supportedByFont.get(candidate)?.has(code));
+          const font = families
+            .map((family) => fontByFamily.get(family))
+            .find(
+              (candidate) =>
+                candidate && supportedByFont.get(candidate)?.has(code),
+            );
           if (!font) continue;
           const codePoints = usage.get(font) || new Set<number>();
           codePoints.add(code);
@@ -936,16 +1325,25 @@ async function collectUsedCodePointsByFont(zip: JSZip, fonts: ParsedFont[], outs
     };
     if (root) visit(root);
   }
-  for (const codePoints of usage.values()) for (let code = 32; code <= 126; code += 1) codePoints.add(code);
+  for (const codePoints of usage.values())
+    for (let code = 32; code <= 126; code += 1) codePoints.add(code);
   return usage;
 }
 
-async function resolveParagraphFonts(zip: JSZip, fonts: ParsedFont[], htmlSources: Map<string, string>) {
-  const fontByPath = new Map(fonts.map((font) => [normalizePath(font.path).toLowerCase(), font]));
+async function resolveParagraphFonts(
+  zip: JSZip,
+  fonts: ParsedFont[],
+  htmlSources: Map<string, string>,
+) {
+  const fontByPath = new Map(
+    fonts.map((font) => [normalizePath(font.path).toLowerCase(), font]),
+  );
   const fontByFamily = new Map<string, ParsedFont>();
   const rules: CssFontRule[] = [];
   let order = 0;
-  for (const path of Object.keys(zip.files).filter((name) => !zip.files[name].dir && extension(name) === "css")) {
+  for (const path of Object.keys(zip.files).filter(
+    (name) => !zip.files[name].dir && extension(name) === "css",
+  )) {
     const source = await zip.files[path].async("text");
     for (const match of source.matchAll(/@font-face\s*\{([^{}]*)\}/gi)) {
       const body = match[1];
@@ -954,8 +1352,13 @@ async function resolveParagraphFonts(zip: JSZip, fonts: ParsedFont[], htmlSource
       const family = normalizedFontFamily(familyMatch[1]);
       for (const urlMatch of body.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
         const relative = percentDecode(urlMatch[2].split(/[?#]/, 1)[0]);
-        const font = fontByPath.get(joinPath(parentPath(path), relative).toLowerCase());
-        if (font) { fontByFamily.set(family, font); break; }
+        const font = fontByPath.get(
+          joinPath(parentPath(path), relative).toLowerCase(),
+        );
+        if (font) {
+          fontByFamily.set(family, font);
+          break;
+        }
       }
     }
     const withoutFaces = source.replace(/@font-face\s*\{[^{}]*\}/gi, "");
@@ -963,7 +1366,10 @@ async function resolveParagraphFonts(zip: JSZip, fonts: ParsedFont[], htmlSource
       const declaration = fontFamilyDeclaration(match[2]);
       if (!declaration) continue;
       rules.push({
-        selectors: match[1].split(",").map((selector) => selector.trim()).filter(Boolean),
+        selectors: match[1]
+          .split(",")
+          .map((selector) => selector.trim())
+          .filter(Boolean),
         families: declaration.families,
         important: declaration.important,
         order: order++,
@@ -971,12 +1377,20 @@ async function resolveParagraphFonts(zip: JSZip, fonts: ParsedFont[], htmlSource
     }
   }
 
-  const supportedByFont = new Map(fonts.map((font) => {
-    const supported = new Set<number>();
-    for (const glyph of font.glyphs) for (const code of glyph.unicode || []) if (isCjkCodePoint(code)) supported.add(code);
-    return [font, supported] as const;
-  }));
-  const fallbackFont = [...fonts].sort((left, right) => (supportedByFont.get(right)?.size || 0) - (supportedByFont.get(left)?.size || 0))[0];
+  const supportedByFont = new Map(
+    fonts.map((font) => {
+      const supported = new Set<number>();
+      for (const glyph of font.glyphs)
+        for (const code of glyph.unicode || [])
+          if (isCjkCodePoint(code)) supported.add(code);
+      return [font, supported] as const;
+    }),
+  );
+  const fallbackFont = [...fonts].sort(
+    (left, right) =>
+      (supportedByFont.get(right)?.size || 0) -
+      (supportedByFont.get(left)?.size || 0),
+  )[0];
   const assignments = new Map<string, Array<ParsedFont | null>>();
 
   function matchingFamilies(element: Element) {
@@ -988,36 +1402,55 @@ async function resolveParagraphFonts(zip: JSZip, fonts: ParsedFont[], htmlSource
       for (const selector of rule.selectors) {
         try {
           const clean = selector.replace(/::[\w-]+(?:\([^)]*\))?/g, "");
-          if (element.matches(clean)) matchedSpecificity = Math.max(matchedSpecificity, selectorSpecificity(clean));
-        } catch { /* Ignore unsupported selectors. */ }
+          if (element.matches(clean))
+            matchedSpecificity = Math.max(
+              matchedSpecificity,
+              selectorSpecificity(clean),
+            );
+        } catch {
+          /* Ignore unsupported selectors. */
+        }
       }
-      const beatsWinner = matchedSpecificity >= 0 && (
-        !winner
-        || (rule.important && !winner.important)
-        || (rule.important === winner.important && (matchedSpecificity > winnerSpecificity
-          || (matchedSpecificity === winnerSpecificity && rule.order >= winner.order)))
-      );
+      const beatsWinner =
+        matchedSpecificity >= 0 &&
+        (!winner ||
+          (rule.important && !winner.important) ||
+          (rule.important === winner.important &&
+            (matchedSpecificity > winnerSpecificity ||
+              (matchedSpecificity === winnerSpecificity &&
+                rule.order >= winner.order))));
       if (beatsWinner) {
         winner = rule;
         winnerSpecificity = matchedSpecificity;
       }
     }
-    if (inline && (!winner?.important || inline.important)) return inline.families;
+    if (inline && (!winner?.important || inline.important))
+      return inline.families;
     return winner?.families || inline?.families || [];
   }
 
   for (const [path, source] of htmlSources) {
-    const document = new DOMParser().parseFromString(source.replace(/<link\b[^>]*>/gi, ""), "application/xml");
+    const document = new DOMParser().parseFromString(
+      source.replace(/<link\b[^>]*>/gi, ""),
+      "application/xml",
+    );
     for (const style of Array.from(document.querySelectorAll("style"))) {
       const styleSource = style.textContent || "";
       for (const match of styleSource.matchAll(/@font-face\s*\{([^{}]*)\}/gi)) {
         const familyMatch = match[1].match(/font-family\s*:\s*([^;}{]+)/i);
         if (!familyMatch) continue;
         const family = normalizedFontFamily(familyMatch[1]);
-        for (const urlMatch of match[1].matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
+        for (const urlMatch of match[1].matchAll(
+          /url\(\s*(['"]?)(.*?)\1\s*\)/gi,
+        )) {
           const relative = percentDecode(urlMatch[2].split(/[?#]/, 1)[0]);
-          const font = fontByPath.get(joinPath(parentPath(path), relative).toLowerCase());
-          if (font) { fontByFamily.set(family, font); break; }
+          const font = fontByPath.get(
+            joinPath(parentPath(path), relative).toLowerCase(),
+          );
+          if (font) {
+            fontByFamily.set(family, font);
+            break;
+          }
         }
       }
       const withoutFaces = cleanCssForFontRules(styleSource);
@@ -1025,7 +1458,10 @@ async function resolveParagraphFonts(zip: JSZip, fonts: ParsedFont[], htmlSource
         const declaration = fontFamilyDeclaration(match[2]);
         if (!declaration) continue;
         rules.push({
-          selectors: match[1].split(",").map((selector) => selector.trim()).filter(Boolean),
+          selectors: match[1]
+            .split(",")
+            .map((selector) => selector.trim())
+            .filter(Boolean),
           families: declaration.families,
           important: declaration.important,
           order: order++,
@@ -1044,11 +1480,15 @@ async function resolveParagraphFonts(zip: JSZip, fonts: ParsedFont[], htmlSource
         families = matchingFamilies(current);
         current = current.parentElement;
       }
-      let font = families.map((family) => fontByFamily.get(family)).find(Boolean) || null;
+      let font =
+        families.map((family) => fontByFamily.get(family)).find(Boolean) ||
+        null;
       if (!font && !families.length) font = fallbackFont || null;
       if (font) {
         const supported = supportedByFont.get(font) || new Set<number>();
-        const hasSupportedText = [...(paragraph.textContent || "")].some((character) => supported.has(character.codePointAt(0) || 0));
+        const hasSupportedText = [...(paragraph.textContent || "")].some(
+          (character) => supported.has(character.codePointAt(0) || 0),
+        );
         if (!hasSupportedText) font = null;
       }
       paragraphFonts.push(font);
@@ -1067,12 +1507,18 @@ function transformParagraphsByFont(
   let output = "";
   let paragraphIndex = 0;
   let activeMapping: Map<string, string> | null = null;
-  const blockStack: Array<{ name: string; previous: Map<string, string> | null }> = [];
+  const blockStack: Array<{
+    name: string;
+    previous: Map<string, string> | null;
+  }> = [];
   let rawTag: "script" | "style" | null = null;
   for (let index = 0; index < source.length;) {
     if (source[index] === "<") {
       const end = source.indexOf(">", index + 1);
-      if (end < 0) { output += source.slice(index); break; }
+      if (end < 0) {
+        output += source.slice(index);
+        break;
+      }
       let tag = source.slice(index, end + 1);
       const match = tag.match(/^<\s*(\/?)\s*([\w:-]+)/);
       const closing = match?.[1] === "/";
@@ -1086,7 +1532,10 @@ function transformParagraphsByFont(
           const className = `${BODY_ENCRYPTION_CLASS}-${(fontIndexes.get(font) || 0) + 1}`;
           const classMatch = tag.match(/\bclass\s*=\s*(['"])(.*?)\1/i);
           tag = classMatch
-            ? tag.replace(classMatch[0], `class=${classMatch[1]}${classMatch[2]} ${className}${classMatch[1]}`)
+            ? tag.replace(
+                classMatch[0],
+                `class=${classMatch[1]}${classMatch[2]} ${className}${classMatch[1]}`,
+              )
             : tag.replace(/\s*(\/?)>$/, ` class="${className}"$1>`);
         }
       } else if (closing && BODY_BLOCK_TAGS.has(name)) {
@@ -1103,22 +1552,34 @@ function transformParagraphsByFont(
     }
     if (!rawTag && source[index] === "&") {
       const end = source.indexOf(";", index + 1);
-      if (end > index && end - index < 16) { output += source.slice(index, end + 1); index = end + 1; continue; }
+      if (end > index && end - index < 16) {
+        output += source.slice(index, end + 1);
+        index = end + 1;
+        continue;
+      }
     }
     const code = source.codePointAt(index) || 0;
     const character = String.fromCodePoint(code);
-    output += !rawTag && activeMapping ? activeMapping.get(character) || character : character;
+    output +=
+      !rawTag && activeMapping
+        ? activeMapping.get(character) || character
+        : character;
     index += character.length;
   }
   return output;
 }
 
-async function encryptFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessResult> {
+async function encryptFonts(
+  file: File,
+  zip: JSZip,
+): Promise<WebEpubFontProcessResult> {
   const fonts = await loadFonts(zip);
   const fallbackFamilies = await collectEmbeddedFontFamilies(zip, fonts);
   const supported = collectFontPlainCodePoints(fonts);
   if (!supported.size) throw new Error("内嵌字体未发现可加密汉字");
-  const htmlPaths = Object.keys(zip.files).filter((path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)));
+  const htmlPaths = Object.keys(zip.files).filter(
+    (path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)),
+  );
   if (!htmlPaths.length) throw new Error("EPUB 内未找到 HTML/XHTML 文件");
 
   const seen = new Set<string>();
@@ -1134,26 +1595,42 @@ async function encryptFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessR
     }
     for (const character of collectHtmlCharacters(source)) {
       const code = character.codePointAt(0) || 0;
-      if (supported.has(code) && !seen.has(character)) { seen.add(character); characters.push(character); }
+      if (supported.has(code) && !seen.has(character)) {
+        seen.add(character);
+        characters.push(character);
+      }
     }
   }
   if (!characters.length) throw new Error("未找到可加密的正文汉字");
   const shadows = privateCharacters(characters.length, existingPrivate);
-  const mapping = new Map(characters.map((character, index) => [character, shadows[index]]));
+  const mapping = new Map(
+    characters.map((character, index) => [character, shadows[index]]),
+  );
 
   let changedFiles = 0;
   for (const [path, source] of htmlSources) {
     const transformed = injectObfuscatedTextCompatibility(
-      rewriteInlineFontFallbacks(transformHtmlText(source, mapping), fallbackFamilies),
+      rewriteInlineFontFallbacks(
+        transformHtmlText(source, mapping),
+        fallbackFamilies,
+      ),
       fallbackFamilies,
     );
-    if (transformed !== source) { zip.file(path, transformed); changedFiles += 1; }
+    if (transformed !== source) {
+      zip.file(path, transformed);
+      changedFiles += 1;
+    }
   }
 
-  for (const path of Object.keys(zip.files).filter((name) => !zip.files[name].dir && extension(name) === "css")) {
+  for (const path of Object.keys(zip.files).filter(
+    (name) => !zip.files[name].dir && extension(name) === "css",
+  )) {
     const source = await zip.files[path].async("text");
     const transformed = rewriteCssFontFallbacks(source, fallbackFamilies);
-    if (transformed !== source) { zip.file(path, transformed); changedFiles += 1; }
+    if (transformed !== source) {
+      zip.file(path, transformed);
+      changedFiles += 1;
+    }
   }
 
   const pathMap = new Map(Object.keys(zip.files).map((path) => [path, path]));
@@ -1168,7 +1645,10 @@ async function encryptFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessR
         if (shadow) additions.push(shadow.codePointAt(0) || 0);
       }
       for (const code of additions) {
-        if (!unicodes.includes(code)) { unicodes.push(code); added += 1; }
+        if (!unicodes.includes(code)) {
+          unicodes.push(code);
+          added += 1;
+        }
       }
       glyph.unicode = unicodes;
     }
@@ -1177,29 +1657,39 @@ async function encryptFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessR
     let outputPath = parsed.path;
     if (parsed.type === "otf") {
       outputPath = parsed.path.replace(/\.otf$/i, ".ttf");
-      if (zip.file(outputPath) && outputPath !== parsed.path) outputPath = parsed.path.replace(/\.otf$/i, "-converted.ttf");
+      if (zip.file(outputPath) && outputPath !== parsed.path)
+        outputPath = parsed.path.replace(/\.otf$/i, "-converted.ttf");
       pathMap.set(parsed.path, outputPath);
       zip.remove(parsed.path);
     }
     zip.file(outputPath, written.bytes);
     changedFonts += 1;
   }
-  if (!changedFonts) throw new Error("字体 cmap 未能写入私用区映射，无法完成字体加密");
+  if (!changedFonts)
+    throw new Error("字体 cmap 未能写入私用区映射，无法完成字体加密");
 
   if ([...pathMap].some(([from, to]) => from !== to)) {
-    for (const path of Object.keys(zip.files).filter((name) => TEXT_EXTENSIONS.has(extension(name)))) {
+    for (const path of Object.keys(zip.files).filter((name) =>
+      TEXT_EXTENSIONS.has(extension(name)),
+    )) {
       const source = await zip.files[path].async("text");
       zip.file(path, rewriteWebEpubTextLinks(source, path, path, pathMap));
     }
     const pkg = await packageInfo(zip);
     for (const item of elementsByLocalName(pkg.opf, "item")) {
-      const href = percentDecode(item.getAttribute("href")?.split(/[?#]/, 1)[0] || "");
-      if (joinPath(pkg.opfDir, href).toLowerCase().endsWith(".ttf")) item.setAttribute("media-type", "font/ttf");
+      const href = percentDecode(
+        item.getAttribute("href")?.split(/[?#]/, 1)[0] || "",
+      );
+      if (joinPath(pkg.opfDir, href).toLowerCase().endsWith(".ttf"))
+        item.setAttribute("media-type", "font/ttf");
     }
     zip.file(pkg.opfPath, new XMLSerializer().serializeToString(pkg.opf));
   }
 
-  zip.file(MAP_PATH, JSON.stringify({ version: 1, map: [...mapping.entries()] }));
+  zip.file(
+    MAP_PATH,
+    JSON.stringify({ version: 1, map: [...mapping.entries()] }),
+  );
   const blob = await generateEpub(zip);
   return {
     sourceName: file.name,
@@ -1214,12 +1704,19 @@ async function encryptFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessR
   };
 }
 
-async function encryptBodyFontPermutation(file: File, zip: JSZip): Promise<WebEpubFontProcessResult> {
+async function encryptBodyFontPermutation(
+  file: File,
+  zip: JSZip,
+): Promise<WebEpubFontProcessResult> {
   const fonts = await loadFonts(zip);
   const pkg = await packageInfo(zip);
   const htmlPaths = pkg.spinePaths.length
-    ? pkg.spinePaths.filter((path) => zip.file(path) && HTML_EXTENSIONS.has(extension(path)))
-    : Object.keys(zip.files).filter((path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)));
+    ? pkg.spinePaths.filter(
+        (path) => zip.file(path) && HTML_EXTENSIONS.has(extension(path)),
+      )
+    : Object.keys(zip.files).filter(
+        (path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)),
+      );
   if (!htmlPaths.length) throw new Error("EPUB 内未找到正文 HTML/XHTML 文件");
 
   const htmlSources = new Map<string, string>();
@@ -1227,28 +1724,40 @@ async function encryptBodyFontPermutation(file: File, zip: JSZip): Promise<WebEp
   for (const path of htmlPaths) {
     const source = await zip.files[path].async("text");
     htmlSources.set(path, source);
-    for (const character of collectBodyCharacters(source)) bodyCharacters.add(character);
+    for (const character of collectBodyCharacters(source))
+      bodyCharacters.add(character);
   }
   if (bodyCharacters.size < 2) throw new Error("未找到可加密的正文段落汉字");
 
-  const candidates = fonts.map((font) => {
-    const supported = new Set<number>();
-    for (const glyph of font.glyphs) {
-      for (const code of glyph.unicode || []) if (isCjkCodePoint(code)) supported.add(code);
-    }
-    const characters = [...bodyCharacters].filter((character) => supported.has(character.codePointAt(0) || 0));
-    return { font, characters };
-  }).sort((left, right) => right.characters.length - left.characters.length);
+  const candidates = fonts
+    .map((font) => {
+      const supported = new Set<number>();
+      for (const glyph of font.glyphs) {
+        for (const code of glyph.unicode || [])
+          if (isCjkCodePoint(code)) supported.add(code);
+      }
+      const characters = [...bodyCharacters].filter((character) =>
+        supported.has(character.codePointAt(0) || 0),
+      );
+      return { font, characters };
+    })
+    .sort((left, right) => right.characters.length - left.characters.length);
   const selected = candidates[0];
-  if (!selected || selected.characters.length < 2) throw new Error("正文字体中未找到足够的可加密汉字");
+  if (!selected || selected.characters.length < 2)
+    throw new Error("正文字体中未找到足够的可加密汉字");
 
   const shuffled = randomDerangement(selected.characters);
-  const mapping = new Map(selected.characters.map((character, index) => [character, shuffled[index]]));
+  const mapping = new Map(
+    selected.characters.map((character, index) => [character, shuffled[index]]),
+  );
 
   let changedFiles = 0;
   for (const [path, source] of htmlSources) {
     const encrypted = transformBodyText(source, mapping, "encrypt");
-    const transformed = encrypted !== source ? injectBodyFontStyle(encrypted, path, selected.font.path) : source;
+    const transformed =
+      encrypted !== source
+        ? injectBodyFontStyle(encrypted, path, selected.font.path)
+        : source;
     if (transformed !== source) {
       zip.file(path, transformed);
       changedFiles += 1;
@@ -1257,10 +1766,14 @@ async function encryptBodyFontPermutation(file: File, zip: JSZip): Promise<WebEp
   if (!changedFiles) throw new Error("未发现可加密的正文段落");
 
   for (const glyph of selected.font.glyphs) {
-    glyph.unicode = [...new Set((glyph.unicode || []).map((code) => {
-      const cipher = mapping.get(String.fromCodePoint(code));
-      return cipher ? cipher.codePointAt(0) || code : code;
-    }))];
+    glyph.unicode = [
+      ...new Set(
+        (glyph.unicode || []).map((code) => {
+          const cipher = mapping.get(String.fromCodePoint(code));
+          return cipher ? cipher.codePointAt(0) || code : code;
+        }),
+      ),
+    ];
   }
 
   const pathMap = new Map(Object.keys(zip.files).map((path) => [path, path]));
@@ -1268,23 +1781,32 @@ async function encryptBodyFontPermutation(file: File, zip: JSZip): Promise<WebEp
   let outputPath = selected.font.path;
   if (selected.font.type === "otf") {
     outputPath = selected.font.path.replace(/\.otf$/i, ".ttf");
-    if (zip.file(outputPath) && outputPath !== selected.font.path) outputPath = selected.font.path.replace(/\.otf$/i, "-converted.ttf");
+    if (zip.file(outputPath) && outputPath !== selected.font.path)
+      outputPath = selected.font.path.replace(/\.otf$/i, "-converted.ttf");
     pathMap.set(selected.font.path, outputPath);
     zip.remove(selected.font.path);
   }
   zip.file(outputPath, written.bytes);
 
   if ([...pathMap].some(([from, to]) => from !== to)) {
-    for (const path of Object.keys(zip.files).filter((name) => TEXT_EXTENSIONS.has(extension(name)))) {
+    for (const path of Object.keys(zip.files).filter((name) =>
+      TEXT_EXTENSIONS.has(extension(name)),
+    )) {
       const source = await zip.files[path].async("text");
       zip.file(path, rewriteWebEpubTextLinks(source, path, path, pathMap));
     }
     const updatedPkg = await packageInfo(zip);
     for (const item of elementsByLocalName(updatedPkg.opf, "item")) {
-      const href = percentDecode(item.getAttribute("href")?.split(/[?#]/, 1)[0] || "");
-      if (joinPath(updatedPkg.opfDir, href).toLowerCase().endsWith(".ttf")) item.setAttribute("media-type", "font/ttf");
+      const href = percentDecode(
+        item.getAttribute("href")?.split(/[?#]/, 1)[0] || "",
+      );
+      if (joinPath(updatedPkg.opfDir, href).toLowerCase().endsWith(".ttf"))
+        item.setAttribute("media-type", "font/ttf");
     }
-    zip.file(updatedPkg.opfPath, new XMLSerializer().serializeToString(updatedPkg.opf));
+    zip.file(
+      updatedPkg.opfPath,
+      new XMLSerializer().serializeToString(updatedPkg.opf),
+    );
   }
 
   zip.remove(MAP_PATH);
@@ -1302,33 +1824,51 @@ async function encryptBodyFontPermutation(file: File, zip: JSZip): Promise<WebEp
   };
 }
 
-async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<WebEpubFontProcessResult> {
+async function encryptBodyFontsIndependently(
+  file: File,
+  zip: JSZip,
+): Promise<WebEpubFontProcessResult> {
   const subsettedFonts = await subsetAllFontsForEncryption(zip);
   const fonts = await loadFonts(zip);
   const pkg = await packageInfo(zip);
   const htmlPaths = pkg.spinePaths.length
-    ? pkg.spinePaths.filter((path) => zip.file(path) && HTML_EXTENSIONS.has(extension(path)))
-    : Object.keys(zip.files).filter((path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)));
+    ? pkg.spinePaths.filter(
+        (path) => zip.file(path) && HTML_EXTENSIONS.has(extension(path)),
+      )
+    : Object.keys(zip.files).filter(
+        (path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)),
+      );
   if (!htmlPaths.length) throw new Error("EPUB 内未找到正文 HTML/XHTML 文件");
   const htmlSources = new Map<string, string>();
-  for (const path of htmlPaths) htmlSources.set(path, await zip.files[path].async("text"));
+  for (const path of htmlPaths)
+    htmlSources.set(path, await zip.files[path].async("text"));
 
-  const { assignments, supportedByFont } = await resolveParagraphFonts(zip, fonts, htmlSources);
+  const { assignments, supportedByFont } = await resolveParagraphFonts(
+    zip,
+    fonts,
+    htmlSources,
+  );
   const protectedByFont = await collectUsedCodePointsByFont(zip, fonts, true);
   const charactersByFont = new Map<ParsedFont, Set<string>>();
   let bodyCharacterCount = 0;
   let encryptableCharacterCount = 0;
   for (const [path, source] of htmlSources) {
-    const document = new DOMParser().parseFromString(source.replace(/<link\b[^>]*>/gi, ""), "application/xml");
+    const document = new DOMParser().parseFromString(
+      source.replace(/<link\b[^>]*>/gi, ""),
+      "application/xml",
+    );
     const paragraphFonts = assignments.get(path) || [];
     bodyBlockElements(document).forEach((paragraph, index) => {
       if (!isEncryptableTextBlock(paragraph)) return;
       const font = paragraphFonts[index];
-      const bodyCharacters = [...(paragraph.textContent || "")].filter(shouldMapCharacter);
+      const bodyCharacters = [...(paragraph.textContent || "")].filter(
+        shouldMapCharacter,
+      );
       bodyCharacterCount += bodyCharacters.length;
       if (!font) return;
       const supported = supportedByFont.get(font) || new Set<number>();
-      const protectedCodePoints = protectedByFont.get(font) || new Set<number>();
+      const protectedCodePoints =
+        protectedByFont.get(font) || new Set<number>();
       const characters = charactersByFont.get(font) || new Set<string>();
       for (const character of bodyCharacters) {
         const code = character.codePointAt(0) || 0;
@@ -1341,8 +1881,13 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
     });
   }
 
-  if (bodyCharacterCount >= 100 && encryptableCharacterCount / bodyCharacterCount < 0.25) {
-    throw new Error(`正文共 ${bodyCharacterCount} 个汉字，但内嵌字体仅覆盖 ${encryptableCharacterCount} 个；该 EPUB 的正文主要使用未嵌入的系统字体，无法安全完成整书字体加密。请先嵌入完整正文字体后重试。`);
+  if (
+    bodyCharacterCount >= 100 &&
+    encryptableCharacterCount / bodyCharacterCount < 0.25
+  ) {
+    throw new Error(
+      `正文共 ${bodyCharacterCount} 个汉字，但内嵌字体仅覆盖 ${encryptableCharacterCount} 个；该 EPUB 的正文主要使用未嵌入的系统字体，无法安全完成整书字体加密。请先嵌入完整正文字体后重试。`,
+    );
   }
 
   const mappings = new Map<ParsedFont, Map<string, string>>();
@@ -1350,16 +1895,27 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
     const values = [...characters];
     if (values.length < 2) continue;
     const shuffled = randomDerangement(values);
-    mappings.set(font, new Map(values.map((character, index) => [character, shuffled[index]])));
+    mappings.set(
+      font,
+      new Map(values.map((character, index) => [character, shuffled[index]])),
+    );
   }
   const encryptedFonts = [...mappings.keys()];
-  if (!encryptedFonts.length) throw new Error("正文字体中未找到足够的可加密汉字");
-  const fontIndexes = new Map(encryptedFonts.map((font, index) => [font, index]));
+  if (!encryptedFonts.length)
+    throw new Error("正文字体中未找到足够的可加密汉字");
+  const fontIndexes = new Map(
+    encryptedFonts.map((font, index) => [font, index]),
+  );
 
   let changedFiles = 0;
   const changedHtmlPaths: string[] = [];
   for (const [path, source] of htmlSources) {
-    const encrypted = transformParagraphsByFont(source, assignments.get(path) || [], mappings, fontIndexes);
+    const encrypted = transformParagraphsByFont(
+      source,
+      assignments.get(path) || [],
+      mappings,
+      fontIndexes,
+    );
     if (encrypted !== source) {
       zip.file(path, encrypted);
       changedFiles += 1;
@@ -1371,10 +1927,14 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
   const pathMap = new Map(Object.keys(zip.files).map((path) => [path, path]));
   for (const [fontIndex, [font, mapping]] of [...mappings].entries()) {
     for (const glyph of font.glyphs) {
-      glyph.unicode = [...new Set((glyph.unicode || []).map((code) => {
-        const cipher = mapping.get(String.fromCodePoint(code));
-        return cipher ? cipher.codePointAt(0) || code : code;
-      }))];
+      glyph.unicode = [
+        ...new Set(
+          (glyph.unicode || []).map((code) => {
+            const cipher = mapping.get(String.fromCodePoint(code));
+            return cipher ? cipher.codePointAt(0) || code : code;
+          }),
+        ),
+      ];
     }
     normalizeFontCompatibility(font);
     setEncryptedFontIdentity(font, fontIndex);
@@ -1382,7 +1942,8 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
     let outputPath = font.path;
     if (font.type === "otf") {
       outputPath = font.path.replace(/\.otf$/i, ".ttf");
-      if (zip.file(outputPath) && outputPath !== font.path) outputPath = font.path.replace(/\.otf$/i, "-converted.ttf");
+      if (zip.file(outputPath) && outputPath !== font.path)
+        outputPath = font.path.replace(/\.otf$/i, "-converted.ttf");
       pathMap.set(font.path, outputPath);
       zip.remove(font.path);
     }
@@ -1390,24 +1951,39 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
   }
 
   if ([...pathMap].some(([from, to]) => from !== to)) {
-    for (const path of Object.keys(zip.files).filter((name) => TEXT_EXTENSIONS.has(extension(name)))) {
+    for (const path of Object.keys(zip.files).filter((name) =>
+      TEXT_EXTENSIONS.has(extension(name)),
+    )) {
       const source = await zip.files[path].async("text");
       zip.file(path, rewriteWebEpubTextLinks(source, path, path, pathMap));
     }
     const updatedPkg = await packageInfo(zip);
     for (const item of elementsByLocalName(updatedPkg.opf, "item")) {
-      const href = percentDecode(item.getAttribute("href")?.split(/[?#]/, 1)[0] || "");
-      if (joinPath(updatedPkg.opfDir, href).toLowerCase().endsWith(".ttf")) item.setAttribute("media-type", "font/ttf");
+      const href = percentDecode(
+        item.getAttribute("href")?.split(/[?#]/, 1)[0] || "",
+      );
+      if (joinPath(updatedPkg.opfDir, href).toLowerCase().endsWith(".ttf"))
+        item.setAttribute("media-type", "font/ttf");
     }
-    zip.file(updatedPkg.opfPath, new XMLSerializer().serializeToString(updatedPkg.opf));
+    zip.file(
+      updatedPkg.opfPath,
+      new XMLSerializer().serializeToString(updatedPkg.opf),
+    );
   }
 
-  await installExternalEncryptionStylesheet(zip, changedHtmlPaths, encryptedFonts.map((font) => ({
-    path: pathMap.get(font.path) || font.path,
-  })));
+  await installExternalEncryptionStylesheet(
+    zip,
+    changedHtmlPaths,
+    encryptedFonts.map((font) => ({
+      path: pathMap.get(font.path) || font.path,
+    })),
+  );
 
   zip.remove(MAP_PATH);
-  const mappedCharacters = [...mappings.values()].reduce((sum, mapping) => sum + mapping.size, 0);
+  const mappedCharacters = [...mappings.values()].reduce(
+    (sum, mapping) => sum + mapping.size,
+    0,
+  );
   const blob = await generateEpub(zip);
   return {
     sourceName: file.name,
@@ -1425,7 +2001,10 @@ async function encryptBodyFontsIndependently(file: File, zip: JSZip): Promise<We
 function savedMapping(source: string) {
   const payload = JSON.parse(source);
   const pairs: unknown[][] = Array.isArray(payload?.map) ? payload.map : [];
-  const entries: Array<[string, string]> = pairs.map((pair) => [String(pair?.[1] || ""), String(pair?.[0] || "")]);
+  const entries: Array<[string, string]> = pairs.map((pair) => [
+    String(pair?.[1] || ""),
+    String(pair?.[0] || ""),
+  ]);
   return new Map(entries.filter(([cipher, plain]) => Boolean(cipher && plain)));
 }
 
@@ -1460,32 +2039,44 @@ function normalizeCandidates(source: string) {
 
 function mappingFromPlainText(cipherText: string, plainText: string) {
   const cipher = normalizeCandidates(cipherText);
-  const plain = normalizeCandidates(plainText).filter((character) => isCjkCodePoint(character.codePointAt(0) || 0));
-  if (cipher.length < 50 || plain.length < 50) throw new Error("EPUB 或 TXT 文本过短，无法可靠对齐");
+  const plain = normalizeCandidates(plainText).filter((character) =>
+    isCjkCodePoint(character.codePointAt(0) || 0),
+  );
+  if (cipher.length < 50 || plain.length < 50)
+    throw new Error("EPUB 或 TXT 文本过短，无法可靠对齐");
 
   const offsets = new Map<number, number>();
   const positions = new Map<string, number[]>();
   plain.slice(0, 8000).forEach((character, index) => {
     if (!positions.has(character)) positions.set(character, []);
-    if ((positions.get(character)?.length || 0) < 10) positions.get(character)!.push(index);
+    if ((positions.get(character)?.length || 0) < 10)
+      positions.get(character)!.push(index);
   });
   cipher.slice(0, 8000).forEach((character, index) => {
     if (!isCjkCodePoint(character.codePointAt(0) || 0)) return;
     for (const plainIndex of positions.get(character) || []) {
       const offset = plainIndex - index;
-      if (Math.abs(offset) <= 2400) offsets.set(offset, (offsets.get(offset) || 0) + 1);
+      if (Math.abs(offset) <= 2400)
+        offsets.set(offset, (offsets.get(offset) || 0) + 1);
     }
   });
-  const bestOffset = cipher.length === plain.length
-    ? 0
-    : [...offsets].sort((a, b) => b[1] - a[1] || Math.abs(a[0]) - Math.abs(b[0]))[0]?.[0] || 0;
+  const bestOffset =
+    cipher.length === plain.length
+      ? 0
+      : [...offsets].sort(
+          (a, b) => b[1] - a[1] || Math.abs(a[0]) - Math.abs(b[0]),
+        )[0]?.[0] || 0;
   const counts = new Map<string, Map<string, number>>();
   for (let cipherIndex = 0; cipherIndex < cipher.length; cipherIndex += 1) {
     const plainIndex = cipherIndex + bestOffset;
     if (plainIndex < 0 || plainIndex >= plain.length) continue;
     const cipherCharacter = cipher[cipherIndex];
     const plainCharacter = plain[plainIndex];
-    if (!isMappingCandidate(cipherCharacter) || !shouldMapCharacter(plainCharacter)) continue;
+    if (
+      !isMappingCandidate(cipherCharacter) ||
+      !shouldMapCharacter(plainCharacter)
+    )
+      continue;
     const votes = counts.get(cipherCharacter) || new Map<string, number>();
     votes.set(plainCharacter, (votes.get(plainCharacter) || 0) + 1);
     counts.set(cipherCharacter, votes);
@@ -1494,35 +2085,51 @@ function mappingFromPlainText(cipherText: string, plainText: string) {
   for (const [cipherCharacter, votes] of counts) {
     const sorted = [...votes].sort((a, b) => b[1] - a[1]);
     const total = sorted.reduce((sum, [, count]) => sum + count, 0);
-    if (sorted[0] && sorted[0][1] / total >= 0.72) mapping.set(cipherCharacter, sorted[0][0]);
+    if (sorted[0] && sorted[0][1] / total >= 0.72)
+      mapping.set(cipherCharacter, sorted[0][0]);
   }
-  if (mapping.size < 30) throw new Error("TXT 与 EPUB 对齐失败，请确认两者是同一版本");
+  if (mapping.size < 30)
+    throw new Error("TXT 与 EPUB 对齐失败，请确认两者是同一版本");
   return mapping;
 }
 
 async function orderedCipherText(zip: JSZip) {
   const pkg = await packageInfo(zip);
   const paths = pkg.spinePaths.length
-    ? pkg.spinePaths.filter((path) => zip.file(path) && HTML_EXTENSIONS.has(extension(path)))
-    : Object.keys(zip.files).filter((path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)));
+    ? pkg.spinePaths.filter(
+        (path) => zip.file(path) && HTML_EXTENSIONS.has(extension(path)),
+      )
+    : Object.keys(zip.files).filter(
+        (path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)),
+      );
   const chunks: string[] = [];
   for (const path of paths) {
     const source = await zip.files[path].async("text");
-    const bodySource = source.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] || source;
+    const bodySource =
+      source.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] || source;
     const visibleSource = bodySource
       .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
       .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "");
-    const document = new DOMParser().parseFromString(`<body>${visibleSource}</body>`, "text/html");
+    const document = new DOMParser().parseFromString(
+      `<body>${visibleSource}</body>`,
+      "text/html",
+    );
     chunks.push(document.body?.textContent || "");
   }
   return chunks.join("\n");
 }
 
 function neutralizeFontCss(source: string) {
-  return source.replace(/@font-face\s*\{.*?\}/gis, "").replace(/font-family\s*:\s*[^;}{]+;?/gis, "font-family: serif;");
+  return source
+    .replace(/@font-face\s*\{.*?\}/gis, "")
+    .replace(/font-family\s*:\s*[^;}{]+;?/gis, "font-family: serif;");
 }
 
-async function decryptFonts(file: File, zip: JSZip, plainText?: string): Promise<WebEpubFontProcessResult> {
+async function decryptFonts(
+  file: File,
+  zip: JSZip,
+  plainText?: string,
+): Promise<WebEpubFontProcessResult> {
   let mapping = new Map<string, string>();
   let mode = "";
   const mapEntry = zip.file(MAP_PATH);
@@ -1540,7 +2147,8 @@ async function decryptFonts(file: File, zip: JSZip, plainText?: string): Promise
     mapping = mappingFromPlainText(await orderedCipherText(zip), plainText);
     mode = "txt-alignment";
   }
-  if (!mapping.size) throw new Error("未发现可用字体映射；请选择与 EPUB 对应的明文 TXT 后重试");
+  if (!mapping.size)
+    throw new Error("未发现可用字体映射；请选择与 EPUB 对应的明文 TXT 后重试");
 
   let changedFiles = 0;
   for (const path of Object.keys(zip.files)) {
@@ -1548,11 +2156,23 @@ async function decryptFonts(file: File, zip: JSZip, plainText?: string): Promise
     const ext = extension(path);
     if (HTML_EXTENSIONS.has(ext)) {
       const source = await zip.files[path].async("text");
-      const bodyPermutation = source.includes(BODY_ENCRYPTION_CLASS) || source.includes("data-tepub-body-font-encryption");
-      let transformed = bodyPermutation ? transformBodyText(source, mapping, "decrypt") : transformHtmlText(source, mapping);
-      if (bodyPermutation) transformed = injectBodyFontStyle(transformed, path, "", true);
-      if (mode === "txt-alignment") transformed = transformed.replace(/font-family\s*:\s*[^;"'}]+;?/gis, "font-family: serif;");
-      if (transformed !== source) { zip.file(path, transformed); changedFiles += 1; }
+      const bodyPermutation =
+        source.includes(BODY_ENCRYPTION_CLASS) ||
+        source.includes("data-tepub-body-font-encryption");
+      let transformed = bodyPermutation
+        ? transformBodyText(source, mapping, "decrypt")
+        : transformHtmlText(source, mapping);
+      if (bodyPermutation)
+        transformed = injectBodyFontStyle(transformed, path, "", true);
+      if (mode === "txt-alignment")
+        transformed = transformed.replace(
+          /font-family\s*:\s*[^;"'}]+;?/gis,
+          "font-family: serif;",
+        );
+      if (transformed !== source) {
+        zip.file(path, transformed);
+        changedFiles += 1;
+      }
     } else if (mode === "txt-alignment" && ext === "css") {
       const source = await zip.files[path].async("text");
       const transformed = neutralizeFontCss(source);
@@ -1596,8 +2216,16 @@ function collectSubsetCodePoints(source: string, output: Set<number>) {
         const entity = source.slice(index, end + 1);
         const numeric = entity.match(/^&#(?:x([0-9a-f]+)|(\d+));$/i);
         if (numeric) {
-          const code = Number.parseInt(numeric[1] || numeric[2], numeric[1] ? 16 : 10);
-          if (code >= 32 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)) output.add(code);
+          const code = Number.parseInt(
+            numeric[1] || numeric[2],
+            numeric[1] ? 16 : 10,
+          );
+          if (
+            code >= 32 &&
+            code <= 0x10ffff &&
+            !(code >= 0xd800 && code <= 0xdfff)
+          )
+            output.add(code);
         }
         index = end + 1;
         continue;
@@ -1610,11 +2238,18 @@ function collectSubsetCodePoints(source: string, output: Set<number>) {
   }
 }
 
-async function subsetFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessResult> {
+async function subsetFonts(
+  file: File,
+  zip: JSZip,
+): Promise<WebEpubFontProcessResult> {
   const fonts = await loadFonts(zip);
   const usage = await collectUsedCodePointsByFont(zip, fonts);
-  const retainedCodePoints = [...usage.values()].reduce((sum, codePoints) => sum + codePoints.size, 0);
-  if (!retainedCodePoints) throw new Error("未能根据 EPUB 样式确定内嵌字体实际使用的文字");
+  const retainedCodePoints = [...usage.values()].reduce(
+    (sum, codePoints) => sum + codePoints.size,
+    0,
+  );
+  if (!retainedCodePoints)
+    throw new Error("未能根据 EPUB 样式确定内嵌字体实际使用的文字");
   const pathMap = new Map(Object.keys(zip.files).map((path) => [path, path]));
   let changedFonts = 0;
   let savedBytes = 0;
@@ -1627,11 +2262,17 @@ async function subsetFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessRe
       const parsed = await parseFont(path, source, [...codePoints]);
       const compatibilityRepaired = normalizeFontCompatibility(parsed);
       const written = writeFont(parsed);
-      if (!compatibilityRepaired && written.bytes.byteLength >= source.byteLength && parsed.type !== "otf") continue;
+      if (
+        !compatibilityRepaired &&
+        written.bytes.byteLength >= source.byteLength &&
+        parsed.type !== "otf"
+      )
+        continue;
       let outputPath = path;
       if (parsed.type === "otf") {
         outputPath = path.replace(/\.otf$/i, ".ttf");
-        if (zip.file(outputPath) && outputPath !== path) outputPath = path.replace(/\.otf$/i, "-subset.ttf");
+        if (zip.file(outputPath) && outputPath !== path)
+          outputPath = path.replace(/\.otf$/i, "-subset.ttf");
         pathMap.set(path, outputPath);
         zip.remove(path);
       }
@@ -1642,17 +2283,23 @@ async function subsetFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessRe
       // Keep unsupported fonts unchanged and continue with the remaining embedded fonts.
     }
   }
-  if (!changedFonts) throw new Error("内嵌字体无需裁剪或当前字体格式无法子集化");
+  if (!changedFonts)
+    throw new Error("内嵌字体无需裁剪或当前字体格式无法子集化");
 
   if ([...pathMap].some(([from, to]) => from !== to)) {
-    for (const path of Object.keys(zip.files).filter((name) => TEXT_EXTENSIONS.has(extension(name)))) {
+    for (const path of Object.keys(zip.files).filter((name) =>
+      TEXT_EXTENSIONS.has(extension(name)),
+    )) {
       const source = await zip.files[path].async("text");
       zip.file(path, rewriteWebEpubTextLinks(source, path, path, pathMap));
     }
     const pkg = await packageInfo(zip);
     for (const item of elementsByLocalName(pkg.opf, "item")) {
-      const href = percentDecode(item.getAttribute("href")?.split(/[?#]/, 1)[0] || "");
-      if (joinPath(pkg.opfDir, href).toLowerCase().endsWith(".ttf")) item.setAttribute("media-type", "font/ttf");
+      const href = percentDecode(
+        item.getAttribute("href")?.split(/[?#]/, 1)[0] || "",
+      );
+      if (joinPath(pkg.opfDir, href).toLowerCase().endsWith(".ttf"))
+        item.setAttribute("media-type", "font/ttf");
     }
     zip.file(pkg.opfPath, new XMLSerializer().serializeToString(pkg.opf));
   }
@@ -1670,11 +2317,19 @@ async function subsetFonts(file: File, zip: JSZip): Promise<WebEpubFontProcessRe
   };
 }
 
-export async function processWebEpubFont(file: File, action: WebEpubFontAction, plainText?: string) {
+export async function processWebEpubFont(
+  file: File,
+  action: WebEpubFontAction,
+  plainText?: string,
+) {
   let zip: JSZip;
-  try { zip = await JSZip.loadAsync(await file.arrayBuffer()); }
-  catch (error) { throw new Error(`无法读取 EPUB：${String(error)}`); }
-  if (action === "font-encrypt") return encryptBodyFontsIndependently(file, zip);
+  try {
+    zip = await JSZip.loadAsync(await file.arrayBuffer());
+  } catch (error) {
+    throw new Error(`无法读取 EPUB：${String(error)}`);
+  }
+  if (action === "font-encrypt")
+    return encryptBodyFontsIndependently(file, zip);
   if (action === "font-decrypt") return decryptFonts(file, zip, plainText);
   return subsetFonts(file, zip);
 }

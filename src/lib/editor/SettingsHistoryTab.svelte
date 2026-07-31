@@ -20,7 +20,9 @@
 <div class="history-settings-card">
     {#each history as h}
         <button class="hist-item" onclick={() => onRestore(h)}>
-            <span class="hist-time">{new Date(h.timestamp * 1000).toLocaleString()}</span>
+            <span class="hist-time"
+                >{new Date(h.timestamp * 1000).toLocaleString()}</span
+            >
             <span class="hist-size">{(h.size / 1024).toFixed(1)}KB</span>
         </button>
     {:else}

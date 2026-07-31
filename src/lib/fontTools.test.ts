@@ -76,22 +76,27 @@ describe("path helpers", () => {
     expect(resolveRelativePath("OEBPS/Styles/main.css", "../Fonts/a.ttf")).toBe(
       "OEBPS/Fonts/a.ttf",
     );
-    expect(resolveRelativePath("OEBPS/Text/ch1.xhtml", "./../Styles/a.css")).toBe(
-      "OEBPS/Styles/a.css",
-    );
+    expect(
+      resolveRelativePath("OEBPS/Text/ch1.xhtml", "./../Styles/a.css"),
+    ).toBe("OEBPS/Styles/a.css");
     expect(resolveRelativePath("root.opf", "a.css")).toBe("a.css");
   });
 
   it("resolveCssHrefToZipPath combines resolution, query stripping and normalization", () => {
-    expect(resolveCssHrefToZipPath("OEBPS/Text/ch1.xhtml", "../Styles/a.css?v=2#top")).toBe(
-      "OEBPS/Styles/a.css",
-    );
+    expect(
+      resolveCssHrefToZipPath(
+        "OEBPS/Text/ch1.xhtml",
+        "../Styles/a.css?v=2#top",
+      ),
+    ).toBe("OEBPS/Styles/a.css");
   });
 });
 
 describe("normalizeFontFamilyName / parseFontFamilyList", () => {
   it("strips quotes, trims and lowercases", () => {
-    expect(normalizeFontFamilyName('"Source Han Serif"')).toBe("source han serif");
+    expect(normalizeFontFamilyName('"Source Han Serif"')).toBe(
+      "source han serif",
+    );
     expect(normalizeFontFamilyName("'MyFont'")).toBe("myfont");
     expect(normalizeFontFamilyName("  Arial  ")).toBe("arial");
     // 与原实现一致：先去首尾引号再 trim，引号外有空白时引号保留
@@ -99,7 +104,7 @@ describe("normalizeFontFamilyName / parseFontFamilyList", () => {
   });
 
   it("splits comma lists while keeping commas inside quotes", () => {
-    expect(parseFontFamilyList('"Foo, Bar",\'Baz\',serif')).toEqual([
+    expect(parseFontFamilyList("\"Foo, Bar\",'Baz',serif")).toEqual([
       "foo, bar",
       "baz",
       "serif",
@@ -116,7 +121,8 @@ describe("collectSelectorsUsingFont", () => {
   const aliases = new Set(["myfont"]);
 
   it("collects selectors whose rules declare the target family", () => {
-    const css = 'h1, .title { color: red; font-family: "MyFont", serif; }\np { font-family: serif; }';
+    const css =
+      'h1, .title { color: red; font-family: "MyFont", serif; }\np { font-family: serif; }';
     expect(collectSelectorsUsingFont(css, aliases)).toEqual(["h1", ".title"]);
   });
 
@@ -127,7 +133,9 @@ describe("collectSelectorsUsingFont", () => {
   });
 
   it("matches font-family property case-insensitively", () => {
-    expect(collectSelectorsUsingFont("div { FONT-FAMILY: MyFont; }", aliases)).toEqual(["div"]);
+    expect(
+      collectSelectorsUsingFont("div { FONT-FAMILY: MyFont; }", aliases),
+    ).toEqual(["div"]);
   });
 });
 
@@ -139,20 +147,26 @@ describe("collectFontFaceFamiliesByFontPath", () => {
     const css =
       '@font-face { font-family: "Alias One"; src: url("../Fonts/a.ttf"); }\n' +
       "@font-face { font-family: Other; src: url(../Fonts/b.ttf); }";
-    expect(collectFontFaceFamiliesByFontPath(cssPath, css, fontPath)).toEqual(["alias one"]);
+    expect(collectFontFaceFamiliesByFontPath(cssPath, css, fontPath)).toEqual([
+      "alias one",
+    ]);
   });
 
   it("ignores data: and http(s) urls but matches a later local url", () => {
     const css =
       "@font-face { font-family: Remote; src: url(https://x/a.ttf); }\n" +
       "@font-face { font-family: Mixed; src: url(data:,AAA), url('../Fonts/a.ttf?v=3'); }";
-    expect(collectFontFaceFamiliesByFontPath(cssPath, css, fontPath)).toEqual(["mixed"]);
+    expect(collectFontFaceFamiliesByFontPath(cssPath, css, fontPath)).toEqual([
+      "mixed",
+    ]);
   });
 
   it("skips blocks missing src or font-family", () => {
     const css =
       "@font-face { src: url(../Fonts/a.ttf); }\n@font-face { font-family: NoSrc; }";
-    expect(collectFontFaceFamiliesByFontPath(cssPath, css, fontPath)).toEqual([]);
+    expect(collectFontFaceFamiliesByFontPath(cssPath, css, fontPath)).toEqual(
+      [],
+    );
   });
 });
 
@@ -163,7 +177,9 @@ describe("buildFontFamilyAliases", () => {
       fontFileName: "SourceHan.ttf",
       extraAliases: ["Internal Name"],
     });
-    expect(aliases).toEqual(new Set(["preview family", "sourcehan", "internal name"]));
+    expect(aliases).toEqual(
+      new Set(["preview family", "sourcehan", "internal name"]),
+    );
   });
 
   it("adds families linked through @font-face declarations in css contents", () => {
@@ -186,7 +202,12 @@ describe("styleAttributeUsesFont", () => {
   const aliases = new Set(["myfont"]);
 
   it("detects the target family in inline styles", () => {
-    expect(styleAttributeUsesFont('color: red; font-family: "MyFont", serif', aliases)).toBe(true);
+    expect(
+      styleAttributeUsesFont(
+        'color: red; font-family: "MyFont", serif',
+        aliases,
+      ),
+    ).toBe(true);
     expect(styleAttributeUsesFont("font-family: serif", aliases)).toBe(false);
   });
 

@@ -33,7 +33,9 @@
     <div class="font-settings-head">
         <div>
             <div class="font-settings-title">外部字体</div>
-            <div class="font-settings-note">导入后自动复制到当前书库目录下的“字体”文件夹，并可直接在块编辑里选择使用。</div>
+            <div class="font-settings-note">
+                导入后自动复制到当前书库目录下的“字体”文件夹，并可直接在块编辑里选择使用。
+            </div>
         </div>
         <button class="grid-btn blue" disabled={isImporting} onclick={onImport}>
             {isImporting ? "导入中..." : "导入字体"}
@@ -54,15 +56,23 @@
                         <button
                             class="mini-action"
                             type="button"
-                            disabled={renamingFileName === font.file_name || deletingFileName === font.file_name}
+                            disabled={renamingFileName === font.file_name ||
+                                deletingFileName === font.file_name}
                             onclick={() => onRename(font)}
-                        >{renamingFileName === font.file_name ? "重命名中..." : "重命名"}</button>
+                            >{renamingFileName === font.file_name
+                                ? "重命名中..."
+                                : "重命名"}</button
+                        >
                         <button
                             class="mini-action"
                             type="button"
-                            disabled={deletingFileName === font.file_name || renamingFileName === font.file_name}
+                            disabled={deletingFileName === font.file_name ||
+                                renamingFileName === font.file_name}
                             onclick={() => onDelete(font)}
-                        >{deletingFileName === font.file_name ? "删除中..." : "删除"}</button>
+                            >{deletingFileName === font.file_name
+                                ? "删除中..."
+                                : "删除"}</button
+                        >
                     </div>
                 </div>
                 <code>{font.css_value}</code>

@@ -11,7 +11,9 @@ export type WebClientViewOverride = "desktop" | "mobile" | "";
 
 function queryViewOverride() {
   if (typeof window === "undefined") return "";
-  return new URLSearchParams(window.location.search).get("view")?.toLowerCase() ?? "";
+  return (
+    new URLSearchParams(window.location.search).get("view")?.toLowerCase() ?? ""
+  );
 }
 
 export function getWebClientViewOverride(): WebClientViewOverride {
@@ -25,7 +27,9 @@ export function setWebClientViewOverride(view: WebClientViewOverride) {
   if (view) localStorage.setItem(WEB_VIEW_OVERRIDE_KEY, view);
   else localStorage.removeItem(WEB_VIEW_OVERRIDE_KEY);
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(CLIENT_PROFILE_EVENT, { detail: view }));
+    window.dispatchEvent(
+      new CustomEvent(CLIENT_PROFILE_EVENT, { detail: view }),
+    );
   }
 }
 
@@ -38,7 +42,8 @@ function resolvedViewOverride() {
 export function isMobileUserAgent() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent || "";
-  const iPadLikeMac = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  const iPadLikeMac =
+    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
   return MOBILE_UA_PATTERN.test(ua) || iPadLikeMac;
 }
 
@@ -48,19 +53,28 @@ export function isWebMobileClient() {
   if (view === "desktop") return false;
   if (view === "mobile") return true;
 
-  const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
-  const narrowViewport = window.matchMedia?.("(max-width: 760px)")?.matches ?? false;
+  const coarsePointer =
+    window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
+  const narrowViewport =
+    window.matchMedia?.("(max-width: 760px)")?.matches ?? false;
   return isMobileUserAgent() || narrowViewport || coarsePointer;
 }
 
 export function applyClientProfile() {
   if (typeof document === "undefined") return () => {};
   const root = document.documentElement;
-  const viewportMeta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
-  const originalViewport = viewportMeta?.getAttribute("content") || DEFAULT_VIEWPORT_CONTENT;
+  const viewportMeta = document.querySelector<HTMLMetaElement>(
+    'meta[name="viewport"]',
+  );
+  const originalViewport =
+    viewportMeta?.getAttribute("content") || DEFAULT_VIEWPORT_CONTENT;
 
   const apply = () => {
-    const client = platform.isWeb ? (isWebMobileClient() ? "web-mobile" : "web-desktop") : "tauri";
+    const client = platform.isWeb
+      ? isWebMobileClient()
+        ? "web-mobile"
+        : "web-desktop"
+      : "tauri";
     root.dataset.tepubClient = client;
     if (viewportMeta) {
       viewportMeta.setAttribute(

@@ -1,4 +1,8 @@
-import { PlatformUnsupportedError, type PlatformAdapter, type PlatformWindowHandle } from "./types";
+import {
+  PlatformUnsupportedError,
+  type PlatformAdapter,
+  type PlatformWindowHandle,
+} from "./types";
 import { getWebAccountSession } from "$lib/webAccount";
 
 function getWebApiBaseUrl(): string {
@@ -8,10 +12,15 @@ function getWebApiBaseUrl(): string {
 
 function webAuthHeaders(): Record<string, string> {
   const session = getWebAccountSession();
-  return session?.token && !session.localOnly ? { authorization: `Bearer ${session.token}` } : {};
+  return session?.token && !session.localOnly
+    ? { authorization: `Bearer ${session.token}` }
+    : {};
 }
 
-async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
   const response = await fetch(`${getWebApiBaseUrl()}${path}`, {
     ...init,
     headers: {
@@ -36,7 +45,9 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   return (await response.json()) as T;
 }
 
-function createBrowserWindowHandle(target: Window | null = null): PlatformWindowHandle {
+function createBrowserWindowHandle(
+  target: Window | null = null,
+): PlatformWindowHandle {
   return {
     label: null,
     async show() {
@@ -71,7 +82,10 @@ export function createWebPlatform(): PlatformAdapter {
     isWeb: true,
     apiBaseUrl: getWebApiBaseUrl(),
 
-    async invoke<T = unknown>(command: string, args: Record<string, unknown> = {}) {
+    async invoke<T = unknown>(
+      command: string,
+      args: Record<string, unknown> = {},
+    ) {
       return requestJson<T>(`/commands/${encodeURIComponent(command)}`, {
         method: "POST",
         headers: webAuthHeaders(),
@@ -128,14 +142,16 @@ export function createWebPlatform(): PlatformAdapter {
     async readFile(path) {
       if (/^https?:\/\//i.test(path) || path.startsWith("/")) {
         const response = await fetch(path);
-        if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+        if (!response.ok)
+          throw new Error(`Request failed with ${response.status}`);
         return new Uint8Array(await response.arrayBuffer());
       }
       throw new PlatformUnsupportedError("Direct filesystem read", "web");
     },
 
     async writeFile(path, data) {
-      if (typeof window === "undefined" || typeof document === "undefined") return;
+      if (typeof window === "undefined" || typeof document === "undefined")
+        return;
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
       const blob = new Blob([bytes], { type: "application/octet-stream" });
       const url = URL.createObjectURL(blob);
@@ -149,11 +165,15 @@ export function createWebPlatform(): PlatformAdapter {
     },
 
     async revealPath() {
-      throw new PlatformUnsupportedError("Reveal in system file manager", "web");
+      throw new PlatformUnsupportedError(
+        "Reveal in system file manager",
+        "web",
+      );
     },
 
     async openExternal(url) {
-      if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
+      if (typeof window !== "undefined")
+        window.open(url, "_blank", "noopener,noreferrer");
     },
 
     async getCurrentWindowLabel() {
@@ -165,7 +185,9 @@ export function createWebPlatform(): PlatformAdapter {
     },
 
     getCurrentWindow() {
-      return createBrowserWindowHandle(typeof window === "undefined" ? null : window);
+      return createBrowserWindowHandle(
+        typeof window === "undefined" ? null : window,
+      );
     },
 
     async onCurrentWindowCloseRequested() {
@@ -208,7 +230,10 @@ export function createWebPlatform(): PlatformAdapter {
     },
 
     async createWebviewWindow(_label, url) {
-      const target = typeof window === "undefined" ? null : window.open(url, "_blank", "noopener,noreferrer");
+      const target =
+        typeof window === "undefined"
+          ? null
+          : window.open(url, "_blank", "noopener,noreferrer");
       return createBrowserWindowHandle(target);
     },
   };

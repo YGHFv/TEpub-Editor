@@ -49,15 +49,12 @@
         // NOTE: Do NOT emit restore-main-window here. It should only be emitted
         // after the user confirms closing (or if there are no unsaved changes).
         // The actual restoration is handled by the confirmation dialog logic.
-        win.listen(
-            "tauri://close-requested",
-            async (event) => {
-                // Prevent default close, show confirmation if needed
-                // The 'beforeunload' or custom logic should handle this
-                console.log("EPUB window close requested");
-                // Do NOT emit restore-main-window here as it's too early
-            },
-        ).then((unlisten) => {
+        win.listen("tauri://close-requested", async (event) => {
+            // Prevent default close, show confirmation if needed
+            // The 'beforeunload' or custom logic should handle this
+            console.log("EPUB window close requested");
+            // Do NOT emit restore-main-window here as it's too early
+        }).then((unlisten) => {
             if (isUnmounted) {
                 unlisten();
             } else {
@@ -160,18 +157,23 @@
     }
 
     // 后台按需补全文件 title / resolution，不阻塞文件树首屏渲染
-    async function loadFileMetaInBackground(epubPath: string, nodes: EpubFileNode[]) {
+    async function loadFileMetaInBackground(
+        epubPath: string,
+        nodes: EpubFileNode[],
+    ) {
         const flat = flattenFiles(nodes);
         const needMeta = flat.filter(
-            (n) =>
-                n.file_type === "html" || n.file_type === "image",
+            (n) => n.file_type === "html" || n.file_type === "image",
         );
         if (needMeta.length === 0) return;
         try {
-            const metas = await platform.invoke<EpubFileMeta[]>("load_epub_file_meta", {
-                epubPath,
-                filePaths: needMeta.map((n) => n.path),
-            });
+            const metas = await platform.invoke<EpubFileMeta[]>(
+                "load_epub_file_meta",
+                {
+                    epubPath,
+                    filePaths: needMeta.map((n) => n.path),
+                },
+            );
             const metaMap = new Map<string, EpubFileMeta>();
             for (const m of metas) metaMap.set(m.path, m);
             // 把补全到的 title/resolution 回写到 fileTree（浅拷贝触发响应式更新）
@@ -181,7 +183,10 @@
         }
     }
 
-    function applyMeta(node: EpubFileNode, metaMap: Map<string, EpubFileMeta>): EpubFileNode {
+    function applyMeta(
+        node: EpubFileNode,
+        metaMap: Map<string, EpubFileMeta>,
+    ): EpubFileNode {
         const meta = metaMap.get(node.path);
         const updated = { ...node };
         if (meta) {
@@ -618,7 +623,9 @@
                 const matchedElements = new Set<Element>();
                 const selectors: string[] = [];
 
-                for (const styleEl of Array.from(doc.querySelectorAll("style"))) {
+                for (const styleEl of Array.from(
+                    doc.querySelectorAll("style"),
+                )) {
                     selectors.push(
                         ...collectSelectorsUsingFont(
                             styleEl.textContent || "",
@@ -732,7 +739,9 @@
         const routePath = $page.url.searchParams.get("file") || "";
         const isNewRoutePath =
             routePath && routePath !== sourceEpubPath && routePath !== epubPath;
-        const requestedPath = isNewRoutePath ? routePath : epubPath || routePath;
+        const requestedPath = isNewRoutePath
+            ? routePath
+            : epubPath || routePath;
 
         isLoading = true;
         loadingMessage = "正在加载 EPUB...";
@@ -855,10 +864,13 @@
             content = fileContentCache.get(filePath)!;
         } else {
             try {
-                content = await platform.invoke<string>("read_epub_file_content", {
-                    epubPath: epubPath,
-                    filePath: filePath,
-                });
+                content = await platform.invoke<string>(
+                    "read_epub_file_content",
+                    {
+                        epubPath: epubPath,
+                        filePath: filePath,
+                    },
+                );
                 fileContentCache.set(filePath, content);
             } catch (e) {
                 console.warn("Failed to process preview asset " + filePath, e);
@@ -868,7 +880,6 @@
 
         if (!previewCache.has(filePath)) {
             try {
-
                 const processed = await processHtmlForPreview(
                     content,
                     filePath,
@@ -997,7 +1008,11 @@
         }
 
         console.log(
-            "Pre-cached " + Object.keys(cssContents).length + " CSS files and " + Object.keys(binaryData).length + " binary assets",
+            "Pre-cached " +
+                Object.keys(cssContents).length +
+                " CSS files and " +
+                Object.keys(binaryData).length +
+                " binary assets",
         );
     }
 
@@ -1041,24 +1056,34 @@
         setupCloseHandler();
 
         // Calling loadEpub (now top-level)
-        platform.listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
-            if (!isLoading) return;
-            const routePath = $page.url.searchParams.get("file") || "";
-            const activePath = sourceEpubPath || epubPath || routePath;
-            if (event.payload.epubPath && activePath && event.payload.epubPath !== activePath) return;
-            loadingMessage = event.payload.message;
-        }).then((fn) => {
-            unlistenPrepareStage = fn;
-        }).finally(() => {
-            loadEpub();
-        });
+        platform
+            .listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
+                if (!isLoading) return;
+                const routePath = $page.url.searchParams.get("file") || "";
+                const activePath = sourceEpubPath || epubPath || routePath;
+                if (
+                    event.payload.epubPath &&
+                    activePath &&
+                    event.payload.epubPath !== activePath
+                )
+                    return;
+                loadingMessage = event.payload.message;
+            })
+            .then((fn) => {
+                unlistenPrepareStage = fn;
+            })
+            .finally(() => {
+                loadEpub();
+            });
 
         const blockGlobalSearch = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
                 e.preventDefault();
                 showFindReplace = true;
                 setTimeout(() => {
-                    const input = document.getElementById("epub-search-input-fr");
+                    const input = document.getElementById(
+                        "epub-search-input-fr",
+                    );
                     if (input) input.focus();
                 }, 50);
             }
@@ -1094,13 +1119,12 @@
                     }
                 } else if (action === "save-as") {
                     try {
-                        const res = await platform.invoke<Record<string, string>>(
-                            "read_epub_files_batch",
-                            {
-                                epubPath,
-                                filePaths: [context.path],
-                            },
-                        );
+                        const res = await platform.invoke<
+                            Record<string, string>
+                        >("read_epub_files_batch", {
+                            epubPath,
+                            filePaths: [context.path],
+                        });
                         const content = res[context.path];
                         if (!content) throw new Error("读取导出内容失败。");
                         const savedPath = await platform.saveDialog({
@@ -1125,13 +1149,12 @@
                 } else if (action === "duplicate") {
                     try {
                         const oldPath = context.path;
-                        const res = await platform.invoke<Record<string, string>>(
-                            "read_epub_files_batch",
-                            {
-                                epubPath,
-                                filePaths: [oldPath],
-                            },
-                        );
+                        const res = await platform.invoke<
+                            Record<string, string>
+                        >("read_epub_files_batch", {
+                            epubPath,
+                            filePaths: [oldPath],
+                        });
                         const content = res[oldPath];
                         if (!content) throw new Error("读取文件内容失败");
                         // Simple duplicate naming: foo.xhtml -> foo_copy.xhtml
@@ -1150,7 +1173,7 @@
                         await loadEpub();
                         isProjectDirty = true;
                     } catch (e) {
-            toastError("复制文件失败：" + e);
+                        toastError("复制文件失败：" + e);
                     }
                 } else if (action === "import-sibling") {
                     try {
@@ -1188,7 +1211,7 @@
                             isProjectDirty = true;
                         }
                     } catch (e) {
-            toastError("重命名文件失败：" + e);
+                        toastError("重命名文件失败：" + e);
                     }
                 } else if (action === "new-sibling-html") {
                     const res = await showPromptDialog(
@@ -1217,7 +1240,7 @@
                             await loadEpub();
                             isProjectDirty = true;
                         } catch (e) {
-            toastError("删除文件失败：" + e);
+                            toastError("删除文件失败：" + e);
                         } finally {
                             isPromptBusy = false;
                             showPrompt = false;
@@ -1330,7 +1353,9 @@
                                     }
                                 }
                                 console.log(
-                                    "[DEBUG] Refactor completed, updated " + updatedCount + " files.",
+                                    "[DEBUG] Refactor completed, updated " +
+                                        updatedCount +
+                                        " files.",
                                 );
                             }
 
@@ -1349,7 +1374,7 @@
                             }
                         } catch (e) {
                             console.error("Rename/Refactor failed", e);
-            toastError("重命名/重构失败：" + e);
+                            toastError("重命名/重构失败：" + e);
                         } finally {
                             isPromptBusy = false;
                             showPrompt = false;
@@ -1478,7 +1503,7 @@
                                 "[DEBUG] new-file: add_epub_file failed:",
                                 e,
                             );
-            toastError("保存文件失败：" + e);
+                            toastError("保存文件失败：" + e);
                         } finally {
                             isPromptBusy = false;
                             showPrompt = false;
@@ -1554,7 +1579,6 @@
                         });
                     }
                 } else if (action === "select-children") {
-
                     if (context.src) {
                         const targetSrc = context.src;
 
@@ -1623,7 +1647,9 @@
                                 filesToSelect.forEach((p) =>
                                     multiSelectedFiles.add(p),
                                 );
-                                multiSelectedFiles = new Set(multiSelectedFiles); // trigger
+                                multiSelectedFiles = new Set(
+                                    multiSelectedFiles,
+                                ); // trigger
 
                                 // Auto expand folders for first item
                                 const firstPath = filesToSelect
@@ -1700,12 +1726,11 @@
                                 const targetPath =
                                     context.path + "/" + fileName;
 
-                                const fileData = await platform.invoke<number[]>(
-                                    "read_binary_file",
-                                    {
-                                        path: filePath,
-                                    },
-                                );
+                                const fileData = await platform.invoke<
+                                    number[]
+                                >("read_binary_file", {
+                                    path: filePath,
+                                });
 
                                 await platform.invoke("add_epub_file_binary", {
                                     epubPath,
@@ -1715,12 +1740,17 @@
 
                                 importedCount++;
                             } catch (e) {
-                                console.error("Failed to import file " + filePath, e);
+                                console.error(
+                                    "Failed to import file " + filePath,
+                                    e,
+                                );
                             }
                         }
 
                         if (importedCount > 0) {
-                            toastSuccess("已导入 " + importedCount + " 个文件。");
+                            toastSuccess(
+                                "已导入 " + importedCount + " 个文件。",
+                            );
                             await loadEpub();
                             if (context.path) {
                                 expandedFolders.add(context.path);
@@ -1731,7 +1761,7 @@
                 }
             } catch (err) {
                 console.error("Action error:", err);
-            toastError("操作失败：" + err);
+                toastError("操作失败：" + err);
             }
         };
 
@@ -1802,7 +1832,6 @@
         return stack.join("/");
     }
 
-
     async function processHtmlForPreview(
         html: string,
         filePath: string,
@@ -1841,7 +1870,7 @@
                     },
                 );
             } catch (e) {
-            console.error("Failed to load editor selection state", e);
+                console.error("Failed to load editor selection state", e);
             }
         }
 
@@ -1935,7 +1964,7 @@
                     },
                 );
             } catch (e) {
-            console.error("Failed to sync editor preview", e);
+                console.error("Failed to sync editor preview", e);
             }
         }
 
@@ -1971,7 +2000,7 @@
                     if (blobUrl) {
                         processedCss = processedCss
                             .split(asset.original)
-                            .join("url(\"" + blobUrl + "\")");
+                            .join('url("' + blobUrl + '")');
                     }
                 }
             }
@@ -2019,7 +2048,7 @@
             "::-webkit-scrollbar {",
             "    display: none !important;",
             "}",
-            "aside[epub\:type=\"footnote\"] {",
+            'aside[epub\:type="footnote"] {',
             "    display: none;",
             "}",
             ".footnote-popup {",
@@ -2124,7 +2153,9 @@ document.addEventListener("click", function (event) {
 
                 if (
                     fullTag.endsWith("/>") ||
-                    ["br", "hr", "img", "input", "meta", "link"].includes(tagName)
+                    ["br", "hr", "img", "input", "meta", "link"].includes(
+                        tagName,
+                    )
                 ) {
                     continue;
                 }
@@ -2143,7 +2174,12 @@ document.addEventListener("click", function (event) {
                         for (let k = 1; k < popped.length; k++) {
                             errors.push({
                                 type: "tag",
-                                message: "Line " + popped[k].line + ": unclosed tag <" + popped[k].tag + ">",
+                                message:
+                                    "Line " +
+                                    popped[k].line +
+                                    ": unclosed tag <" +
+                                    popped[k].tag +
+                                    ">",
                                 line: popped[k].line,
                             });
                             newErrorLines.push(popped[k].line);
@@ -2151,7 +2187,12 @@ document.addEventListener("click", function (event) {
                     } else {
                         errors.push({
                             type: "tag",
-                            message: "Line " + lineNum + ": extra closing tag </" + tagName + ">",
+                            message:
+                                "Line " +
+                                lineNum +
+                                ": extra closing tag </" +
+                                tagName +
+                                ">",
                             line: lineNum,
                         });
                         newErrorLines.push(lineNum);
@@ -2165,7 +2206,12 @@ document.addEventListener("click", function (event) {
         for (const unclosed of tagStack) {
             errors.push({
                 type: "tag",
-                message: "Line " + unclosed.line + ": unclosed tag <" + unclosed.tag + ">",
+                message:
+                    "Line " +
+                    unclosed.line +
+                    ": unclosed tag <" +
+                    unclosed.tag +
+                    ">",
                 line: unclosed.line,
             });
             newErrorLines.push(unclosed.line);
@@ -2227,10 +2273,13 @@ document.addEventListener("click", function (event) {
 
                     const previewHtml =
                         fileContentCache.get(previewSourcePath) ??
-                        (await platform.invoke<string>("read_epub_file_content", {
-                            epubPath,
-                            filePath: previewSourcePath,
-                        }));
+                        (await platform.invoke<string>(
+                            "read_epub_file_content",
+                            {
+                                epubPath,
+                                filePath: previewSourcePath,
+                            },
+                        ));
 
                     fileContentCache.set(previewSourcePath, previewHtml);
 
@@ -2372,7 +2421,9 @@ document.addEventListener("click", function (event) {
         expandedFolders = new Set(expandedFolders);
         await tick();
         const escapedPath = file.path.replace(/"/g, '\"');
-        const fileNode = document.querySelector('.tree-node[data-path="' + escapedPath + '"]');
+        const fileNode = document.querySelector(
+            '.tree-node[data-path="' + escapedPath + '"]',
+        );
         if (fileNode) {
             fileNode.scrollIntoView({ block: "center", behavior: "smooth" });
         }
@@ -2466,13 +2517,12 @@ document.addEventListener("click", function (event) {
 
                 let fontBinary = fontBinaryCache.get(file.path);
                 if (!fontBinary) {
-                    const binaryData = await platform.invoke<Record<string, number[]>>(
-                        "read_epub_binary_batch",
-                        {
-                            epubPath,
-                            filePaths: [file.path],
-                        },
-                    );
+                    const binaryData = await platform.invoke<
+                        Record<string, number[]>
+                    >("read_epub_binary_batch", {
+                        epubPath,
+                        filePaths: [file.path],
+                    });
                     const data = binaryData[file.path];
                     if (!data) {
                         throw new Error("font binary data missing");
@@ -2494,20 +2544,24 @@ document.addEventListener("click", function (event) {
 
                 let internalNames: string[] = [];
                 try {
-                    const inspect = await platform.invoke<FontGlyphAnalyzeResult>(
-                        "analyze_epub_font_glyphs",
-                        {
-                            epubPath,
-                            filePath: file.path,
-                            chars: [],
-                        },
-                    );
+                    const inspect =
+                        await platform.invoke<FontGlyphAnalyzeResult>(
+                            "analyze_epub_font_glyphs",
+                            {
+                                epubPath,
+                                filePath: file.path,
+                                chars: [],
+                            },
+                        );
                     internalNames = inspect.internal_names || [];
                     if (internalNames.length > 0) {
                         currentFontInternalName = internalNames[0];
                     }
                 } catch (inspectErr) {
-                    console.warn("Failed to read font internal names", inspectErr);
+                    console.warn(
+                        "Failed to read font internal names",
+                        inspectErr,
+                    );
                 }
 
                 const renderFamily = createFontPreviewFamily();
@@ -2521,8 +2575,7 @@ document.addEventListener("click", function (event) {
                 currentFontFace = fontFace;
                 currentFontFamily = renderFamily;
 
-                const statFamily =
-                    internalNames[0] || fontFileStem(file.name);
+                const statFamily = internalNames[0] || fontFileStem(file.name);
                 await computeFontUsageStats(file, statFamily, internalNames);
 
                 fileContent = "";
@@ -2536,10 +2589,13 @@ document.addEventListener("click", function (event) {
             if (fileContentCache.has(file.path)) {
                 content = fileContentCache.get(file.path)!;
             } else {
-                content = await platform.invoke<string>("read_epub_file_content", {
-                    epubPath: epubPath,
-                    filePath: file.path,
-                });
+                content = await platform.invoke<string>(
+                    "read_epub_file_content",
+                    {
+                        epubPath: epubPath,
+                        filePath: file.path,
+                    },
+                );
 
                 fileContentCache.set(file.path, content);
             }
@@ -2984,7 +3040,7 @@ document.addEventListener("click", function (event) {
         e.preventDefault();
         e.stopPropagation();
         if (!epubPath) {
-        toastError("向 EPUB 添加资源失败。");
+            toastError("向 EPUB 添加资源失败。");
             return;
         }
 
@@ -3052,7 +3108,7 @@ document.addEventListener("click", function (event) {
                 });
             } catch (err) {
                 console.error("Batch file write failed", err);
-        toastError("批量写入文件失败：" + err);
+                toastError("批量写入文件失败：" + err);
                 return;
             }
 
@@ -3089,7 +3145,11 @@ document.addEventListener("click", function (event) {
                         // Add Assets
                         for (const path of newAssetItems) {
                             const href = getRelPath(path);
-                            if (manifest.querySelector('item[href="' + href + '"]'))
+                            if (
+                                manifest.querySelector(
+                                    'item[href="' + href + '"]',
+                                )
+                            )
                                 continue;
 
                             const newItem = doc.createElement("item");
@@ -3131,7 +3191,9 @@ document.addEventListener("click", function (event) {
                             const href = getRelPath(path);
                             // Manifest entry first
                             if (
-                                !manifest.querySelector('item[href="' + href + '"]')
+                                !manifest.querySelector(
+                                    'item[href="' + href + '"]',
+                                )
                             ) {
                                 const newItem = doc.createElement("item");
                                 const safeName =
@@ -3315,10 +3377,13 @@ document.addEventListener("click", function (event) {
         }
 
         try {
-            const ncxContent = await platform.invoke<string>("read_epub_file_content", {
-                epubPath: epubPath,
-                filePath: ncxNode.path,
-            });
+            const ncxContent = await platform.invoke<string>(
+                "read_epub_file_content",
+                {
+                    epubPath: epubPath,
+                    filePath: ncxNode.path,
+                },
+            );
 
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(ncxContent, "text/xml");
@@ -3417,28 +3482,28 @@ document.addEventListener("click", function (event) {
         result = result.replace(/(&lt;!--[\s\S]*?--&gt;)/g, (match) => {
             const placeholder = "___PH" + placeholderIndex + "___";
             placeholders[placeholderIndex++] =
-                "<span class=\"comment\">" + match + "</span>";
+                '<span class="comment">' + match + "</span>";
             return placeholder;
         });
 
         result = result.replace(/(&lt;\/?)(\w+)/g, (match, p1, p2) => {
             const placeholder = "___PH" + placeholderIndex + "___";
             placeholders[placeholderIndex++] =
-                p1 + "<span class=\"tag\">" + p2 + "</span>";
+                p1 + '<span class="tag">' + p2 + "</span>";
             return placeholder;
         });
 
         result = result.replace(/(\s)([\w-]+)(=)/g, (match, p1, p2, p3) => {
             const placeholder = "___PH" + placeholderIndex + "___";
             placeholders[placeholderIndex++] =
-                p1 + "<span class=\"attr\">" + p2 + "</span>" + p3;
+                p1 + '<span class="attr">' + p2 + "</span>" + p3;
             return placeholder;
         });
 
         result = result.replace(/="([^"]*)"/g, (match, p1) => {
             const placeholder = "___PH" + placeholderIndex + "___";
             placeholders[placeholderIndex++] =
-                "=\"<span class=\\\"string\\\">" + p1 + "</span>\\\"";
+                '="<span class=\\"string\\">' + p1 + '</span>\\"';
             return placeholder;
         });
 
@@ -3461,14 +3526,14 @@ document.addEventListener("click", function (event) {
         result = result.replace(/(\/\*[\s\S]*?\*\/)/g, (match) => {
             const placeholder = "___PH" + placeholderIndex + "___";
             placeholders[placeholderIndex++] =
-                "<span class=\"comment\">" + match + "</span>";
+                '<span class="comment">' + match + "</span>";
             return placeholder;
         });
 
         result = result.replace(/([\w-]+)(\s*)(:)/g, (match, p1, p2, p3) => {
             const placeholder = "___PH" + placeholderIndex + "___";
             placeholders[placeholderIndex++] =
-                "<span class=\"property\">" + p1 + "</span>" + p2 + p3;
+                '<span class="property">' + p1 + "</span>" + p2 + p3;
             return placeholder;
         });
 
@@ -3493,11 +3558,16 @@ document.addEventListener("click", function (event) {
         return lines
             .map((line, i) => {
                 const lineNum = i + 1;
-                return "<div class=\"line-with-number\"><span class=\"line-number\">" + lineNum + "</span><span class=\"line-content\">" + (line || " " ) + "</span></div>";
+                return (
+                    '<div class="line-with-number"><span class="line-number">' +
+                    lineNum +
+                    '</span><span class="line-content">' +
+                    (line || " ") +
+                    "</span></div>"
+                );
             })
             .join("");
     }
-
 
     function getFilesInScope(): EpubFileNode[] {
         switch (searchScope) {
@@ -3820,10 +3890,13 @@ document.addEventListener("click", function (event) {
             let content = fileContentCache.get(file.path) || "";
             if (!content) {
                 try {
-                    content = await platform.invoke<string>("read_epub_file_content", {
-                        epubPath: epubPath,
-                        filePath: file.path,
-                    });
+                    content = await platform.invoke<string>(
+                        "read_epub_file_content",
+                        {
+                            epubPath: epubPath,
+                            filePath: file.path,
+                        },
+                    );
                 } catch (e) {
                     continue;
                 }
@@ -3962,7 +4035,10 @@ document.addEventListener("click", function (event) {
     // 保存查找历史到 localStorage
 
     function saveSearchHistory() {
-        localStorage.setItem(EPUB_FIND_HISTORY_KEY, JSON.stringify(findHistory));
+        localStorage.setItem(
+            EPUB_FIND_HISTORY_KEY,
+            JSON.stringify(findHistory),
+        );
         localStorage.setItem(
             EPUB_REPLACE_HISTORY_KEY,
             JSON.stringify(replaceHistory),
@@ -4051,116 +4127,121 @@ document.addEventListener("click", function (event) {
 
 <Toast />
 
-    {#if showPrompt}
+{#if showPrompt}
+    <div
+        class="prompt-overlay"
+        role="button"
+        tabindex="-1"
+        on:click={handlePromptOverlayClick}
+        on:keydown={handlePromptOverlayKeydown}
+    >
         <div
-            class="prompt-overlay"
-            role="button"
+            class="prompt-dialog"
+            role="dialog"
+            aria-modal="true"
             tabindex="-1"
-            on:click={handlePromptOverlayClick}
-            on:keydown={handlePromptOverlayKeydown}
         >
-            <div
-                class="prompt-dialog"
-                role="dialog"
-                aria-modal="true"
-                tabindex="-1"
-            >
-                <div class="prompt-title">{promptTitle}</div>
-                <input
-                    type="text"
-                    bind:this={promptInput}
-                    bind:value={promptValue}
-                    class="prompt-input"
-                    on:keydown={handlePromptInputKeydown}
-                    disabled={isPromptBusy}
-                />
-                {#if promptOptions}
-                    <div class="prompt-check">
-                        <label>
-                            <input
-                                type="checkbox"
-                                bind:checked={promptCheckValue}
-                                disabled={isPromptBusy}
-                            />
-                            &#33258;&#21160;&#26356;&#26032;&#20854;&#20182;&#25991;&#20214;&#20013;&#30340;&#38142;&#25509;&#24341;&#29992;
-                        </label>
-                    </div>
-                {/if}
-
-                <div class="prompt-buttons">
-                    <button
-                        class="prompt-btn cancel"
-                        on:click={handlePromptCancel}
-                        disabled={isPromptBusy}
-                    >
-                        &#21462;&#28040;
-                    </button>
-                    <button
-                        class="prompt-btn confirm"
-                        on:click={handlePromptConfirm}
-                        disabled={isPromptBusy}
-                    >
-                        {isPromptBusy ? "\u6B63\u5728\u66F4\u65B0\u94FE\u63A5..." : "\u786E\u5B9A"}
-                    </button>
-                </div>
-            </div>
-        </div>
-    {/if}
-
-    <!-- 闂備胶鍘ч〃搴㈢濠婂牊鍋╅柣鎰靛墰閳绘洖顭跨捄鍝勵槵闁逞屽墯椤洭骞忕€ｎ喖围闁告粈绀佸▓鎼佹煟閻樺弶澶勭紒璇插暣閵?-->
-    {#if showConfirm}
-        <div
-            class="prompt-overlay"
-            role="button"
-            tabindex="-1"
-            on:click={handleConfirmOverlayClick}
-            on:keydown={handleConfirmOverlayKeydown}
-        >
-            <div
-                class="prompt-dialog"
-                role="dialog"
-                aria-modal="true"
-                tabindex="-1"
-            >
-                <div class="prompt-title">{confirmTitle}</div>
-                <div
-                    class="prompt-message"
-                    style="margin-bottom: 20px; color: #ccc;"
-                >
-                    {confirmMessage}
-                </div>
-                <div class="prompt-buttons">
-                    <button class="prompt-btn cancel" on:click={handleConfirmCancel}>
-                        &#21462;&#28040;
-                    </button>
-                    <button
-                        class="prompt-btn confirm delete"
-                        on:click={handleConfirmConfirm}
-                    >
-                        &#21024;&#38500;
-                    </button>
-                </div>
-            </div>
-        </div>
-    {/if}
-    {#if isLoading}
-        <div class="loading page-loading">{loadingMessage}</div>
-    {:else if error}
-        <div class="error page-error">{error}</div>
-    {:else}
-        <div class="epub-editor">
-            <FileTreePanel
-                {fileTree}
-                {expandedFolders}
-                {selectedFile}
-                {multiSelectedFiles}
-                {isSaving}
-                isDirty={isProjectDirty || modifiedFiles.size > 0}
-                onToggleFolder={toggleFolder}
-                onSelectFile={selectFile}
-                onSaveAll={saveAllChanges}
-                onRefresh={loadEpub}
+            <div class="prompt-title">{promptTitle}</div>
+            <input
+                type="text"
+                bind:this={promptInput}
+                bind:value={promptValue}
+                class="prompt-input"
+                on:keydown={handlePromptInputKeydown}
+                disabled={isPromptBusy}
             />
+            {#if promptOptions}
+                <div class="prompt-check">
+                    <label>
+                        <input
+                            type="checkbox"
+                            bind:checked={promptCheckValue}
+                            disabled={isPromptBusy}
+                        />
+                        &#33258;&#21160;&#26356;&#26032;&#20854;&#20182;&#25991;&#20214;&#20013;&#30340;&#38142;&#25509;&#24341;&#29992;
+                    </label>
+                </div>
+            {/if}
+
+            <div class="prompt-buttons">
+                <button
+                    class="prompt-btn cancel"
+                    on:click={handlePromptCancel}
+                    disabled={isPromptBusy}
+                >
+                    &#21462;&#28040;
+                </button>
+                <button
+                    class="prompt-btn confirm"
+                    on:click={handlePromptConfirm}
+                    disabled={isPromptBusy}
+                >
+                    {isPromptBusy
+                        ? "\u6B63\u5728\u66F4\u65B0\u94FE\u63A5..."
+                        : "\u786E\u5B9A"}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- 闂備胶鍘ч〃搴㈢濠婂牊鍋╅柣鎰靛墰閳绘洖顭跨捄鍝勵槵闁逞屽墯椤洭骞忕€ｎ喖围闁告粈绀佸▓鎼佹煟閻樺弶澶勭紒璇插暣閵?-->
+{#if showConfirm}
+    <div
+        class="prompt-overlay"
+        role="button"
+        tabindex="-1"
+        on:click={handleConfirmOverlayClick}
+        on:keydown={handleConfirmOverlayKeydown}
+    >
+        <div
+            class="prompt-dialog"
+            role="dialog"
+            aria-modal="true"
+            tabindex="-1"
+        >
+            <div class="prompt-title">{confirmTitle}</div>
+            <div
+                class="prompt-message"
+                style="margin-bottom: 20px; color: #ccc;"
+            >
+                {confirmMessage}
+            </div>
+            <div class="prompt-buttons">
+                <button
+                    class="prompt-btn cancel"
+                    on:click={handleConfirmCancel}
+                >
+                    &#21462;&#28040;
+                </button>
+                <button
+                    class="prompt-btn confirm delete"
+                    on:click={handleConfirmConfirm}
+                >
+                    &#21024;&#38500;
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+{#if isLoading}
+    <div class="loading page-loading">{loadingMessage}</div>
+{:else if error}
+    <div class="error page-error">{error}</div>
+{:else}
+    <div class="epub-editor">
+        <FileTreePanel
+            {fileTree}
+            {expandedFolders}
+            {selectedFile}
+            {multiSelectedFiles}
+            {isSaving}
+            isDirty={isProjectDirty || modifiedFiles.size > 0}
+            onToggleFolder={toggleFolder}
+            onSelectFile={selectFile}
+            onSaveAll={saveAllChanges}
+            onRefresh={loadEpub}
+        />
 
         <main class="editor-pane">
             <TabsBar
@@ -4176,9 +4257,14 @@ document.addEventListener("click", function (event) {
                 {#if isImageFile(selectedFile.name)}
                     <div class="image-preview-container">
                         {#if currentImageSrc}
-                            <img src={currentImageSrc} alt={selectedFile.name} />
+                            <img
+                                src={currentImageSrc}
+                                alt={selectedFile.name}
+                            />
                         {:else}
-                            <div class="loading loading-inline">&#21152;&#36733;&#22270;&#29255;&#20013;...</div>
+                            <div class="loading loading-inline">
+                                &#21152;&#36733;&#22270;&#29255;&#20013;...
+                            </div>
                         {/if}
                     </div>
                 {:else if isFontFile(selectedFile.name)}
@@ -4199,7 +4285,9 @@ document.addEventListener("click", function (event) {
                             <EpubCodeEditor
                                 bind:this={epubCodeEditorComponent}
                                 doc={fileContent}
-                                language={getFileLanguage(selectedFile.file_type)}
+                                language={getFileLanguage(
+                                    selectedFile.file_type,
+                                )}
                                 onChange={handleFileContentChange}
                                 onSave={saveCurrentFile}
                                 onClick={handleEditorClick}
@@ -4207,24 +4295,36 @@ document.addEventListener("click", function (event) {
                                 onOpenSearch={() => {
                                     showFindReplace = true;
                                     setTimeout(() => {
-                                        const input = document.getElementById("epub-search-input-fr");
+                                        const input = document.getElementById(
+                                            "epub-search-input-fr",
+                                        );
                                         if (input) input.focus();
                                         else {
-                                            const inputs = document.querySelectorAll(".fr-input");
-                                            if (inputs.length > 0) (inputs[0] as HTMLElement).focus();
+                                            const inputs =
+                                                document.querySelectorAll(
+                                                    ".fr-input",
+                                                );
+                                            if (inputs.length > 0)
+                                                (
+                                                    inputs[0] as HTMLElement
+                                                ).focus();
                                         }
                                     }, 50);
                                 }}
                             />
                         {:else}
                             <pre class="code-block">{@html addLineNumbers(
-                                fileContent.replace(/</g, "&lt;").replace(/>/g, "&gt;"),
-                            )}</pre>
+                                    fileContent
+                                        .replace(/</g, "&lt;")
+                                        .replace(/>/g, "&gt;"),
+                                )}</pre>
                         {/if}
                     </div>
                 {/if}
             {:else}
-                <div class="placeholder">&#35831;&#20174;&#24038;&#20391;&#36873;&#25321;&#19968;&#20010;&#25991;&#20214;</div>
+                <div class="placeholder">
+                    &#35831;&#20174;&#24038;&#20391;&#36873;&#25321;&#19968;&#20010;&#25991;&#20214;
+                </div>
             {/if}
 
             {#if showFindReplace && selectedFile && isEditable(selectedFile.file_type)}
@@ -4281,21 +4381,30 @@ document.addEventListener("click", function (event) {
             {:else}
                 <div class="toc-container">
                     {#if isTocLoading}
-                        <div class="loading toc-loading">&#23569;&#22899;&#31048;&#31095;&#20013;&#183;&#183;&#183;&#183;&#183;&#183;</div>
+                        <div class="loading toc-loading">
+                            &#23569;&#22899;&#31048;&#31095;&#20013;&#183;&#183;&#183;&#183;&#183;&#183;
+                        </div>
                     {:else if tocList.length === 0}
-                        <div class="empty">&#26242;&#26080;&#30446;&#24405;&#25110;&#26410;&#25214;&#21040; toc.ncx</div>
+                        <div class="empty">
+                            &#26242;&#26080;&#30446;&#24405;&#25110;&#26410;&#25214;&#21040;
+                            toc.ncx
+                        </div>
                     {:else}
                         <div class="toc-list">
                             {#each tocList as item}
-                                <TocNode bind:this={tocNodeRefs[item.id]} {item} onSelect={handleTocClick} />
+                                <TocNode
+                                    bind:this={tocNodeRefs[item.id]}
+                                    {item}
+                                    onSelect={handleTocClick}
+                                />
                             {/each}
                         </div>
                     {/if}
                 </div>
             {/if}
         </aside>
-        </div>
-    {/if}
+    </div>
+{/if}
 
 <!-- Context Menu -->
 <ContextMenu />
@@ -4303,10 +4412,13 @@ document.addEventListener("click", function (event) {
 {#if showCloseDialog}
     <div class="dialog-overlay">
         <div class="dialog">
-            <div class="dialog-header">&#26410;&#20445;&#23384;&#30340;&#26356;&#25913;</div>
+            <div class="dialog-header">
+                &#26410;&#20445;&#23384;&#30340;&#26356;&#25913;
+            </div>
             <div class="dialog-content">
                 {#if closeContext === "tab"}
-                    &#25991;&#20214; "{pendingCloseFile?.name}" &#26377;&#26410;&#20445;&#23384;&#30340;&#26356;&#25913;&#65292;&#26159;&#21542;&#20445;&#23384;&#65311;
+                    &#25991;&#20214; "{pendingCloseFile?.name}"
+                    &#26377;&#26410;&#20445;&#23384;&#30340;&#26356;&#25913;&#65292;&#26159;&#21542;&#20445;&#23384;&#65311;
                 {:else}
                     &#24744;&#26377; {modifiedFiles.size} &#20010;&#25991;&#20214;&#21253;&#21547;&#26410;&#20445;&#23384;&#30340;&#26356;&#25913;&#65292;&#26159;&#21542;&#20445;&#23384;&#25152;&#26377;&#24182;&#36864;&#20986;&#65311;
                 {/if}
@@ -4440,8 +4552,9 @@ document.addEventListener("click", function (event) {
         margin: 0;
         padding: 0;
         overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-            Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+        font-family:
+            -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+            Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
     }
 
     .editor-pane {
@@ -4652,7 +4765,8 @@ document.addEventListener("click", function (event) {
         max-height: 100%;
         box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         background-color: #fff;
-        background-image: linear-gradient(45deg, #eee 25%, transparent 25%),
+        background-image:
+            linear-gradient(45deg, #eee 25%, transparent 25%),
             linear-gradient(-45deg, #eee 25%, transparent 25%),
             linear-gradient(45deg, transparent 75%, #eee 75%),
             linear-gradient(-45deg, transparent 75%, #eee 75%);
@@ -4840,7 +4954,11 @@ document.addEventListener("click", function (event) {
     /* NOTE: 原为 .image-preview-container, .font-preview-container 共享一条
        渐变背景规则；字体份已随 FontPreviewPanel 组件下沉，此处保留图片份。 */
     .image-preview-container {
-        background: linear-gradient(180deg, rgba(247, 250, 253, 0.94), rgba(238, 244, 248, 0.94));
+        background: linear-gradient(
+            180deg,
+            rgba(247, 250, 253, 0.94),
+            rgba(238, 244, 248, 0.94)
+        );
     }
 
     .image-preview-container img {

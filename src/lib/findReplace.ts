@@ -62,7 +62,8 @@ export function expandExtendedEscapes(text: string): string {
  * 调用方沿用既有的 try/catch → “正则表达式错误” 提示路径。
  */
 export function buildFindRegex(query: FindQuery): RegExp {
-  let source = query.mode === "regex" ? query.pattern : escapeRegExpLiteral(query.pattern);
+  let source =
+    query.mode === "regex" ? query.pattern : escapeRegExpLiteral(query.pattern);
   if (query.wholeWord) {
     source = query.mode === "regex" ? `\\b(?:${source})\\b` : `\\b${source}\\b`;
   }
@@ -75,11 +76,16 @@ export function buildFindRegex(query: FindQuery): RegExp {
  * 保持既有实现的字面量搜索语义（尤其 up 方向的边界行为，见 findNextMatch）。
  */
 function isPlainTextQuery(query: FindQuery): boolean {
-  return query.mode === "text" && query.caseSensitive !== false && !query.wholeWord;
+  return (
+    query.mode === "text" && query.caseSensitive !== false && !query.wholeWord
+  );
 }
 
 /** 列出全部（非重叠）匹配；零宽匹配自动前进一位避免死循环。 */
-export function findAllMatches(content: string, query: FindQuery): MatchRange[] {
+export function findAllMatches(
+  content: string,
+  query: FindQuery,
+): MatchRange[] {
   if (!query.pattern) return [];
   const ranges: MatchRange[] = [];
   if (isPlainTextQuery(query)) {
@@ -102,7 +108,10 @@ export function findAllMatches(content: string, query: FindQuery): MatchRange[] 
 }
 
 /** 单文件匹配计数。 */
-export function countMatchesInContent(content: string, query: FindQuery): number {
+export function countMatchesInContent(
+  content: string,
+  query: FindQuery,
+): number {
   return findAllMatches(content, query).length;
 }
 
@@ -129,7 +138,9 @@ export function findNextMatch(
       direction === "up"
         ? content.lastIndexOf(query.pattern, Math.max(0, start))
         : content.indexOf(query.pattern, Math.max(0, start));
-    return index >= 0 ? { from: index, to: index + query.pattern.length } : null;
+    return index >= 0
+      ? { from: index, to: index + query.pattern.length }
+      : null;
   }
   const matches = findAllMatches(content, query);
   if (direction === "up") {
@@ -187,7 +198,9 @@ export function findNextMatchWrapped(
   const matches = findAllMatches(content, query);
   if (matches.length === 0) return null;
   if (direction === "down") {
-    return matches.find((item) => item.from >= start) ?? (wrap ? matches[0] : null);
+    return (
+      matches.find((item) => item.from >= start) ?? (wrap ? matches[0] : null)
+    );
   }
   for (let i = matches.length - 1; i >= 0; i--) {
     if (matches[i].to <= start) return matches[i];
@@ -239,16 +252,23 @@ export interface ScopeFileSource<T> {
 }
 
 /** 计算给定搜索范围内应参与查找/替换的文件列表。 */
-export function filterFilesInScope<T>(scope: SearchScope, source: ScopeFileSource<T>): T[] {
+export function filterFilesInScope<T>(
+  scope: SearchScope,
+  source: ScopeFileSource<T>,
+): T[] {
   const current = source.currentFile === null ? [] : [source.currentFile];
   switch (scope) {
     case "current":
     case "open":
       return current;
     case "html":
-      return source.allFiles.filter((file) => source.isHtml(file) && source.isEditable(file));
+      return source.allFiles.filter(
+        (file) => source.isHtml(file) && source.isEditable(file),
+      );
     case "selected": {
-      const selected = (source.selectedFiles ?? []).filter((file) => source.isEditable(file));
+      const selected = (source.selectedFiles ?? []).filter((file) =>
+        source.isEditable(file),
+      );
       return selected.length > 0 ? selected : current;
     }
     case "all":
