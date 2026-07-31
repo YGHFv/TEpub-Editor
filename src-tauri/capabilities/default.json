@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "主窗口能力。fs 插件不再静态放行 ** 全盘：前端直接的 fs 调用只覆盖 $APPDATA（书库默认根、mobile 导入缓存）；用户经保存/打开对话框选中的路径由 dialog 插件在运行时自动授权；后端导出到公共下载目录的文件由 mobile_export_epub 运行时补授权。其余文件访问一律走后端 invoke（不受插件 scope 限制）。",
   "windows": [
     "main",
     "editor-*",
@@ -38,14 +38,6 @@
     "fs:allow-exists",
     "core:resources:default",
     "core:path:default",
-    "core:webview:default",
-    {
-      "identifier": "fs:scope",
-      "allow": [
-        {
-          "path": "**"
-        }
-      ]
-    }
+    "core:webview:default"
   ]
 }

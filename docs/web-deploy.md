@@ -46,6 +46,18 @@ Browser builds cannot directly use local paths, native save/open dialogs, file a
 
 The recommended backend migration is to expose the existing Rust command behavior as HTTP endpoints, then route web `platform.invoke` calls to those endpoints.
 
+## 桌面端文件访问范围（Tauri scope）
+
+桌面端前端的文件访问范围已从早期的全盘 `**` 收敛，`src-tauri/capabilities/default.json` 与 `tauri.conf.json` 现在只静态放行 `$APPDATA`：
+
+- **plugin-fs 静态 scope**：仅 `$APPDATA`（递归读写）。前端直接的 plugin-fs 调用只有三处——`platform.readFile/writeFile`、mobile 导入缓存写入、批处理日志导出，目标都在 `$APPDATA` 内或来自对话框返回值。
+- **对话框选中路径自动授权**：`plugin-dialog` 的 `open`/`save` 在用户确认后会调用 `allow_file`/`allow_directory` 把该路径加入运行时 scope。因此「另存为任意位置」照常可用，且授权精确到用户刚选的那个文件。
+- **运行时补授权（两处）**：`extract_epub` 把 EPUB 解压目录授权给 asset 协议——书库根可被用户指向任意目录、便携版指向 exe 同级 `data/`、失败时还会回退系统临时目录，静态 scope 无法覆盖；`mobile_export_epub` 把导出到公共下载目录（Android `/storage/emulated/0/Download` 等）的文件授权给 fs scope，供前端读回交给系统分享面板。
+- **assetProtocol.scope**：静态 `$APPDATA/**` 加上述运行时授权。reader 通过 `asset://` 直接 fetch 解压后的章节/CSS/字体/图片（比 IPC 快一个数量级），这条链路依赖运行时授权。
+- **其余文件操作走后端 invoke**：83 个 Tauri 命令中绝大多数文件读写在 Rust 侧完成，不受插件 scope 限制——这也是收敛能做得这么彻底的前提。
+
+新增前端直接 fs 调用前，请先确认目标路径落在 `$APPDATA` 内或来自对话框返回值；否则应改为后端命令或在命令内运行时授权，而不是放宽静态 scope。
+
 ## 安全注意事项
 
 自托管公网部署前，请了解当前服务端（`server/web-server.mjs`）的安全边界：

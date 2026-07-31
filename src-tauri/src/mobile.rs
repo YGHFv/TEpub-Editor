@@ -454,6 +454,16 @@ pub async fn mobile_export_epub(
             return Err("待导出的 EPUB 文件不存在".to_string());
         }
 
+        // 导出目标可能落在公共下载目录（Android /storage/emulated/0/Download 等），
+        // 位于 fs 插件静态 scope（$APPDATA/**）之外。前端 offerSystemExport 会用
+        // plugin-fs 读回该文件交给系统分享面板，因此导出成功后按实际路径补授权。
+        let allow_read_back = |path: &Path| {
+            use tauri_plugin_fs::FsExt;
+            if let Some(scope) = app.try_fs_scope() {
+                let _ = scope.allow_file(path);
+            }
+        };
+
         let mut safe_name = sanitize_filename_part(&file_name);
         if safe_name.is_empty() {
             safe_name = src
@@ -481,6 +491,7 @@ pub async fn mobile_export_epub(
                     let target = build_processed_epub_path(&out_dir.join(&safe_name), "");
                     match fs::copy(&src, &target) {
                         Ok(_) => {
+                            allow_read_back(&target);
                             let output_path = target.to_string_lossy().to_string();
                             return Ok(MobileExportResult {
                                 output_path: output_path.clone(),
@@ -509,6 +520,7 @@ pub async fn mobile_export_epub(
                             let target = build_processed_epub_path(&out_dir.join(&safe_name), "");
                             match fs::copy(&src, &target) {
                                 Ok(_) => {
+                                    allow_read_back(&target);
                                     let output_path = target.to_string_lossy().to_string();
                                     return Ok(MobileExportResult {
                                         output_path: output_path.clone(),
@@ -536,6 +548,7 @@ pub async fn mobile_export_epub(
         ensure_dir(&out_dir)?;
         let target = build_processed_epub_path(&out_dir.join(&safe_name), "");
         fs::copy(&src, &target).map_err(|e| format!("导出 EPUB 失败: {}", e))?;
+        allow_read_back(&target);
         let output_path = target.to_string_lossy().to_string();
         Ok(MobileExportResult {
             output_path: output_path.clone(),

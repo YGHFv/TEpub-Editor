@@ -1694,6 +1694,18 @@ fn extract_epub_impl(
         _temp_dir_keep = Some(temp_dir);
     }
 
+    // 2.5 把解压目录授权给 asset 协议。
+    // tauri.conf.json 的 assetProtocol.scope 只静态放行 $APPDATA/**，而解压目录
+    // 落在书库 _data/extract/ 下（书库根可被用户指向任意目录，便携版还会指向
+    // exe 同级 data/），也可能回退到系统临时目录。reader 通过 asset:// 直接
+    // fetch 这些文件（比 IPC 快一个数量级），因此必须在运行时按实际路径补授权。
+    {
+        use tauri::Manager;
+        let _ = app
+            .asset_protocol_scope()
+            .allow_directory(&temp_path_buf, true);
+    }
+
     // 3. 遍历目录构建文件列表
     let mut all_files = Vec::new();
 

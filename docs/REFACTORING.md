@@ -73,5 +73,5 @@ src-tauri/src/
 ## 不做 / 需要决策
 
 - **LICENSE**：README 声明保留所有权利，但公开推 Docker 镜像并教用户自部署，默认授权矛盾。需要作者决定：补一个写明允许范围的自定义 LICENSE，或换 MIT/Apache-2.0。
-- **Tauri `fs:scope "**"` 收敛**：需要先梳理哪些前端直接 fs 调用是必要的（多数走后端 invoke），收敛范围要配合第 3 期做，单独收会破坏现有功能。
+- **Tauri `fs:scope "**"` 收敛** ✅ 已完成（2026-07-31）：`fs:scope` 的 `**` 条目已删除，`assetProtocol.scope` 收为 `$APPDATA/**`。前端直接 fs 调用只剩三处且都在 `$APPDATA` 或对话框返回路径内；对话框选中路径由 plugin-dialog 自动授权；`extract_epub`（解压目录 → asset 协议）与 `mobile_export_epub`（公共下载目录导出文件 → fs scope）在运行时按实际路径补授权。细节见 `docs/web-deploy.md` 的「桌面端文件访问范围」章节。
 - **全量 cargo fmt / prettier --write**：工具链已配好（`.prettierrc`、`eslint.config.js`、`rustfmt.toml`），全量格式化会产生巨大 diff，应在某个功能间歇期单独提交，不与功能改动混合。
