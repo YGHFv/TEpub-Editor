@@ -1,6 +1,6 @@
 [package]
 name = "tepub-editor"
-version = "1.0.2"
+version = "1.1.0"
 description = "TEpub Editor - a TXT/EPUB workbench for library management, editing, reading and toolbox utilities"
 authors = ["YGHFv"]
 edition = "2021"

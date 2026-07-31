@@ -1,7 +1,7 @@
 # TEpub Editor
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-blue)
-![Version](https://img.shields.io/badge/Version-1.0.2-orange)
+![Version](https://img.shields.io/badge/Version-1.1.0-orange)
 ![Stack](https://img.shields.io/badge/Stack-Tauri%202%20%2B%20Svelte%205%20%2B%20Rust-00a7d0)
 
 TEpub Editor 是一个围绕 TXT 与 EPUB 的工作台，把书库管理、长文本编辑、EPUB 制作、EPUB 内部编辑、阅读和一批 EPUB 处理工具放在同一个应用里，同时提供桌面客户端和浏览器 Web 版。

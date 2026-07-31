@@ -1,6 +1,6 @@
 {
   "name": "tepub-editor",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "",
   "type": "module",
   "packageManager": "pnpm@10.28.0",
