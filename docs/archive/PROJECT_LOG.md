@@ -3805,3 +3805,11 @@ Caveats:
 - 将系统托盘、桌面窗口恢复、背景色设置及关闭时隐藏逻辑限定为 Tauri 桌面目标，避免 Android 编译不存在的 `menu`、`tray` 和桌面窗口 API。
 - 验证 `cargo check`、Android `aarch64-linux-android` 交叉检查、`pnpm check` 和 51 项前端测试通过。
 - 本地 Android release Rust 动态库编译成功；APK 封装仅受本机 JDK 证书库无法下载 Gradle 影响，代码编译阶段已完整通过。
+
+### 2026-10-16 v1.1.1 单实例多 EPUB 窗口与查找替换布局
+
+- 桌面端改用单实例进程；再次启动时将 TXT / EPUB 文件参数转交给主实例，并为每个文件创建独立编辑或阅读窗口。
+- EPUB 后端解压及读写缓存改为按文件路径隔离，多个 EPUB 可并行编辑并分别保存。
+- 修复 EPUB 编辑器底部查找替换面板缺少按钮空间、窗口较矮时可能被编辑内容挤出的布局问题。
+- 验证：`pnpm check`、118 项前端测试、17 项 Rust 测试与 `pnpm build` 通过；Windows 实测重复启动复用单实例并能连续打开多个 EPUB 与 TXT 窗口。
+- 发布版本升至 `1.1.1`，推送 `v1.1.1` 标签触发 GitHub Actions 多平台构建。
