@@ -6,7 +6,7 @@ use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     utils::config::Color,
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 mod ai;
 mod app;
@@ -45,7 +45,18 @@ fn restore_primary_window(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default().manage(app::LaunchRequests::default());
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        if app.state::<app::LaunchRequests>().enqueue(&args, &cwd) {
+            // Only the main layout dispatches file requests; child windows must not replay them.
+            let _ = app.emit_to("main", "tepub-launch-requested", ());
+        } else {
+            restore_primary_window(app);
+        }
+    }));
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -155,6 +166,7 @@ pub fn run() {
             epub::rename_epub_file,
             app::get_launch_args, // Register new command
             app::get_launch_info,
+            app::take_launch_requests,
             app::set_file_assoc,
             app::reveal_in_explorer,
             library::rename_book_file,

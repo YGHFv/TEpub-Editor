@@ -236,6 +236,8 @@
         padding: 6px 10px;
         font-size: 13px;
         flex-shrink: 0;
+        box-sizing: border-box;
+        width: 100%;
         overflow: visible;
     }
 
@@ -322,7 +324,8 @@
     }
 
     .fr-find-actions {
-        width: 102px;
+        width: auto;
+        justify-content: flex-start;
     }
 
     .fr-options :global(.fr-custom-select) {

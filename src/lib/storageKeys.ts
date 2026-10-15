@@ -93,12 +93,6 @@ export const SHELF_SETTINGS_KEY = "shelf-settings";
 // ===================== 启动参数 / 批处理（跨窗口共享） =====================
 
 /**
- * 本次会话已处理的启动文件列表（sessionStorage，防止重复打开）。
- * **共享**：library 页 + toolbox 页。
- */
-export const LAUNCH_SESSION_KEY = "tepub-editor-launch-files";
-
-/**
  * 批处理任务配置前缀，后接任务 id。
  * **共享**：toolbox 页写入，batch-progress 窗口读取并回写。
  */

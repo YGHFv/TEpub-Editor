@@ -15,7 +15,7 @@
         saveAppSettings,
         type GlobalAppSettings,
     } from "$lib/appSettings";
-    import { LAUNCH_SESSION_KEY, SHELF_SETTINGS_KEY } from "$lib/storageKeys";
+    import { SHELF_SETTINGS_KEY } from "$lib/storageKeys";
 
     const TOOLBOX_WINDOW_WIDTH = 1200;
     const TOOLBOX_WINDOW_HEIGHT = 740;
@@ -66,12 +66,6 @@
         aiProviders?: AiProviderConfig[];
         txtAiProofing?: TxtAiProofingConfig;
         libraryAiMatch?: LibraryAiMatchConfig;
-    }
-
-    interface LaunchInfo {
-        filePath?: string | null;
-        filePaths?: string[];
-        action?: string | null;
     }
 
     const NAMING_MODE_OPTIONS = [
@@ -1105,87 +1099,6 @@
         return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     }
 
-    function collectLaunchPaths(launchInfo: LaunchInfo | null | undefined) {
-        const candidates = [
-            ...(launchInfo?.filePaths ?? []),
-            launchInfo?.filePath ?? "",
-        ];
-        const seen = new Set<string>();
-        return candidates
-            .filter(
-                (path): path is string =>
-                    typeof path === "string" && path.trim().length > 0,
-            )
-            .filter((path) => {
-                const key = path.toLowerCase();
-                if (seen.has(key)) return false;
-                seen.add(key);
-                return true;
-            });
-    }
-
-    function launchSessionKey(paths: string[], action: string) {
-        return JSON.stringify({ action, paths });
-    }
-
-    function supportedLaunchPath(path: string) {
-        const ext = path.split(".").pop()?.toLowerCase();
-        return ext === "epub" || ext === "txt";
-    }
-
-    async function openLaunchFilePath(
-        filePath: string,
-        action: string,
-        opts: { hideMain: boolean },
-    ) {
-        appSettings = loadAppSettings();
-        const ext = filePath.split(".").pop()?.toLowerCase();
-        if (ext === "txt") {
-            await openFilePathInEditor(filePath, opts);
-            return;
-        }
-        if (ext !== "epub") return;
-
-        if (action !== "reader") {
-            await openFilePathInEditor(filePath, opts);
-            return;
-        }
-
-        const encoded = encodeURIComponent(filePath);
-        try {
-            const appWindow = platform.getCurrentWindow();
-            const win = await platform.createWebviewWindow(
-                windowLabel("reader"),
-                `/reader?file=${encoded}`,
-                {
-                    title: "TEpub-Editor-Reader",
-                    width: TOOLBOX_WINDOW_WIDTH,
-                    height: TOOLBOX_WINDOW_HEIGHT,
-                    minWidth: TOOLBOX_WINDOW_WIDTH,
-                    minHeight: TOOLBOX_WINDOW_HEIGHT,
-                    dragDropEnabled: false,
-                    center: true,
-                },
-            );
-
-            const shouldHideMain =
-                opts.hideMain && appSettings.closeLibraryOnEpubOpen !== false;
-            if (shouldHideMain) {
-                await appWindow.hide();
-                win.once("tauri://destroyed", async () => {
-                    await appWindow.show();
-                    await appWindow.setFocus();
-                });
-            }
-        } catch (e: any) {
-            console.error("打开阅读器失败:", e);
-            await platform.message(`打开失败：${e}`, {
-                title: "错误",
-                kind: "error",
-            });
-        }
-    }
-
     async function openFilePathInEditor(
         filePath: string,
         opts: { hideMain: boolean },
@@ -2030,25 +1943,6 @@
                 window.location.href = "/";
             }
         });
-
-        try {
-            const launchInfo =
-                await platform.invoke<LaunchInfo>("get_launch_info");
-            const action = launchInfo?.action ?? "";
-            const launchPaths =
-                collectLaunchPaths(launchInfo).filter(supportedLaunchPath);
-            if (launchPaths.length > 0) {
-                const key = launchSessionKey(launchPaths, action);
-                if (sessionStorage.getItem(LAUNCH_SESSION_KEY) !== key) {
-                    sessionStorage.setItem(LAUNCH_SESSION_KEY, key);
-                    for (const filePath of launchPaths) {
-                        await openLaunchFilePath(filePath, action, {
-                            hideMain: launchPaths.length === 1,
-                        });
-                    }
-                }
-            }
-        } catch {}
 
         // 系统级文件拖放（桌面端；web 端不触发，由 svelte:window 的 HTML5 drop 兜底）
         platform.onCurrentWindowFileDrop((paths) => {

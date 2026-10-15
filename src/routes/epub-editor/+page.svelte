@@ -4530,6 +4530,7 @@ document.addEventListener("click", function (event) {
         border-left: 1px solid #ddd;
         border-right: 1px solid #ddd;
         min-width: 0;
+        min-height: 0;
         position: relative;
     }
 
@@ -4559,6 +4560,7 @@ document.addEventListener("click", function (event) {
 
     .editor-content {
         flex: 1;
+        min-height: 0;
         overflow-y: hidden; /* Let CodeMirror handle scroll */
         position: relative;
         padding: 0; /* Remove padding to fix black border */

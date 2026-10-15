@@ -645,11 +645,9 @@ fn font_has_glyph(font_data: &[u8], codepoint: u32) -> Result<bool, String> {
 fn read_epub_binary_cached(epub_path: &str, file_path: &str) -> Result<Vec<u8>, String> {
     {
         let cache_guard = lock_epub_cache()?;
-        if let Some(cache) = cache_guard.as_ref() {
-            if cache.epub_path == epub_path {
-                if let Some(data) = cache.binary_cache.get(file_path) {
-                    return Ok(data.clone());
-                }
+        if let Some(cache) = cache_guard.get(epub_path) {
+            if let Some(data) = cache.binary_cache.get(file_path) {
+                return Ok(data.clone());
             }
         }
     }
@@ -667,12 +665,10 @@ fn read_epub_binary_cached(epub_path: &str, file_path: &str) -> Result<Vec<u8>, 
 
     {
         let mut cache_guard = lock_epub_cache()?;
-        if let Some(cache) = cache_guard.as_mut() {
-            if cache.epub_path == epub_path {
-                cache
-                    .binary_cache
-                    .insert(file_path.to_string(), buffer.clone());
-            }
+        if let Some(cache) = cache_guard.get_mut(epub_path) {
+            cache
+                .binary_cache
+                .insert(file_path.to_string(), buffer.clone());
         }
     }
 

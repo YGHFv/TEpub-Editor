@@ -11,16 +11,14 @@ use zip::write::SimpleFileOptions;
 
 // --- EPUB 全局缓存 ---
 pub(crate) struct EpubCache {
-    pub(crate) epub_path: String,
     pub(crate) text_cache: HashMap<String, String>,
     pub(crate) binary_cache: HashMap<String, Vec<u8>>,
     pub(crate) temp_dir: Option<TempDir>,
 }
 
 impl EpubCache {
-    pub(crate) fn new(path: String) -> Self {
+    pub(crate) fn new() -> Self {
         EpubCache {
-            epub_path: path,
             text_cache: HashMap::new(),
             binary_cache: HashMap::new(),
             temp_dir: None,
@@ -28,7 +26,8 @@ impl EpubCache {
     }
 }
 
-static EPUB_CACHE: Lazy<Mutex<Option<EpubCache>>> = Lazy::new(|| Mutex::new(None));
+static EPUB_CACHE: Lazy<Mutex<HashMap<String, EpubCache>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 static QUOTED_PATH_REF_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"(?is)(['"])(.*?)\1"#).expect("valid quoted path regex"));
@@ -38,8 +37,8 @@ static CSS_URL_PATH_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 /// 安全获取 EPUB_CACHE 锁，避免 Mutex 中毒后连锁 panic。
-pub(crate) fn lock_epub_cache() -> Result<std::sync::MutexGuard<'static, Option<EpubCache>>, String>
-{
+pub(crate) fn lock_epub_cache(
+) -> Result<std::sync::MutexGuard<'static, HashMap<String, EpubCache>>, String> {
     EPUB_CACHE
         .lock()
         .map_err(|_| "EPUB 缓存已被中毒，无法访问".to_string())

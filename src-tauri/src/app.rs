@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process;
+use std::sync::Mutex;
 
 use crate::fs_utils::{app_data_root, is_portable};
 use crate::library::library_pointer_path;
@@ -125,24 +126,139 @@ pub(crate) struct LaunchInfo {
     action: Option<String>,
 }
 
+impl LaunchInfo {
+    fn from_args(args: &[String], cwd: &std::path::Path) -> Self {
+        let mut files = Vec::new();
+        let mut action = None;
+        for arg in args.iter().skip(1) {
+            if let Some(value) = arg.strip_prefix("--action=") {
+                action = Some(value.to_string());
+            } else if !arg.starts_with("--") && !arg.is_empty() {
+                let path = PathBuf::from(arg);
+                let path = if path.is_absolute() {
+                    path
+                } else {
+                    cwd.join(path)
+                };
+                if matches!(
+                    path.extension()
+                        .and_then(|ext| ext.to_str())
+                        .map(str::to_ascii_lowercase)
+                        .as_deref(),
+                    Some("epub" | "txt")
+                ) {
+                    files.push(path.to_string_lossy().into_owned());
+                }
+            }
+        }
+        Self {
+            file_path: files.first().cloned(),
+            file_paths: files,
+            action,
+        }
+    }
+}
+
+// Keep requests until the main webview has installed its listener, including cold starts.
+pub(crate) struct LaunchRequests(Mutex<Vec<LaunchInfo>>);
+
+impl Default for LaunchRequests {
+    fn default() -> Self {
+        let launch = get_launch_info();
+        Self(Mutex::new(if launch.file_paths.is_empty() {
+            Vec::new()
+        } else {
+            vec![launch]
+        }))
+    }
+}
+
+impl LaunchRequests {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    pub(crate) fn enqueue(&self, args: &[String], cwd: &str) -> bool {
+        let launch = LaunchInfo::from_args(args, std::path::Path::new(cwd));
+        if launch.file_paths.is_empty() {
+            return false;
+        }
+        self.0.lock().unwrap().push(launch);
+        true
+    }
+
+    fn take(&self) -> Vec<LaunchInfo> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
+
+#[tauri::command]
+pub(crate) fn take_launch_requests(requests: tauri::State<'_, LaunchRequests>) -> Vec<LaunchInfo> {
+    requests.take()
+}
+
 #[tauri::command]
 pub fn get_launch_info() -> LaunchInfo {
     let args: Vec<String> = std::env::args().collect();
-    let mut files: Vec<String> = Vec::new();
-    let mut action: Option<String> = None;
-    for a in args.iter().skip(1) {
-        if let Some(stripped) = a.strip_prefix("--action=") {
-            action = Some(stripped.to_string());
-        } else if a.starts_with("--") {
-            // ignore unknown flags
-        } else {
-            files.push(a.clone());
-        }
+    LaunchInfo::from_args(&args, &std::env::current_dir().unwrap_or_default())
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
     }
-    LaunchInfo {
-        file_path: files.first().cloned(),
-        file_paths: files,
-        action,
+
+    #[test]
+    fn launch_paths_use_the_senders_working_directory() {
+        let cwd = tempfile::tempdir().unwrap();
+        let launch = LaunchInfo::from_args(
+            &args(&[
+                "app",
+                "--action=reader",
+                "first book.EPUB",
+                "notes.txt",
+                "--unknown",
+                "image.png",
+            ]),
+            cwd.path(),
+        );
+        assert_eq!(launch.action.as_deref(), Some("reader"));
+        assert_eq!(
+            launch.file_paths,
+            vec![
+                cwd.path()
+                    .join("first book.EPUB")
+                    .to_string_lossy()
+                    .into_owned(),
+                cwd.path().join("notes.txt").to_string_lossy().into_owned(),
+            ]
+        );
+        assert_eq!(launch.file_path.as_ref(), launch.file_paths.first());
+    }
+
+    #[test]
+    fn absolute_launch_paths_are_not_rebased() {
+        let cwd = tempfile::tempdir().unwrap();
+        let path = cwd.path().join("book.epub").to_string_lossy().into_owned();
+        let launch = LaunchInfo::from_args(&args(&["app", &path]), std::path::Path::new("other"));
+        assert_eq!(launch.file_paths, vec![path]);
+    }
+
+    #[test]
+    fn queued_launches_are_drained_once_and_repeated_requests_are_preserved() {
+        let requests = LaunchRequests(Mutex::new(Vec::new()));
+        let cwd = tempfile::tempdir().unwrap();
+        let cwd = cwd.path().to_string_lossy().into_owned();
+        let argv = args(&["app", "one.epub", "two.epub"]);
+        assert!(requests.enqueue(&argv, &cwd));
+        assert!(requests.enqueue(&argv, &cwd));
+        let launches = requests.take();
+        assert_eq!(launches.len(), 2);
+        assert_eq!(launches[0].file_paths.len(), 2);
+        assert_eq!(launches[0].file_paths, launches[1].file_paths);
+        assert!(requests.take().is_empty());
+        assert!(!requests.enqueue(&args(&["app"]), &cwd));
+        assert!(!requests.enqueue(&args(&["app", "unsupported.png"]), &cwd));
     }
 }
 

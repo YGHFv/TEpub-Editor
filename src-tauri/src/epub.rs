@@ -1661,13 +1661,9 @@ fn extract_epub_impl(
     // 1. 检查是否已经有缓存且临时内容未关闭
     let existing_temp_path = {
         let cache_guard = lock_epub_cache()?;
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
-                } else {
-                    None
-                }
+        if let Some(cache) = cache_guard.get(&epub_path) {
+            if let Some(ref temp) = cache.temp_dir {
+                Some(temp.path().to_path_buf())
             } else {
                 None
             }
@@ -1902,9 +1898,10 @@ fn extract_epub_impl(
     // 初始化全局缓存 (仅在新建时)
     if _temp_dir_keep.is_some() {
         let mut cache_guard = lock_epub_cache()?;
-        let mut cache = EpubCache::new(epub_path);
+        let mut cache = EpubCache::new();
         cache.temp_dir = _temp_dir_keep;
-        *cache_guard = Some(cache);
+        // Concurrent windows opening the same file must not drop an existing extraction.
+        cache_guard.entry(epub_path).or_insert(cache);
     }
 
     Ok(build_tree(&all_files))
@@ -1926,13 +1923,9 @@ pub async fn load_epub_file_meta(
     tauri::async_runtime::spawn_blocking(move || {
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -1981,11 +1974,9 @@ pub async fn load_epub_file_meta(
 #[tauri::command]
 pub async fn get_epub_temp_dir_path(epub_path: String) -> Result<String, String> {
     let cache_guard = lock_epub_cache()?;
-    if let Some(ref cache) = *cache_guard {
-        if cache.epub_path == epub_path {
-            if let Some(ref temp) = cache.temp_dir {
-                return Ok(temp.path().to_string_lossy().to_string());
-            }
+    if let Some(cache) = cache_guard.get(&epub_path) {
+        if let Some(ref temp) = cache.temp_dir {
+            return Ok(temp.path().to_string_lossy().to_string());
         }
     }
     Err("EPUB 未加载或缓存失效".to_string())
@@ -2000,13 +1991,9 @@ pub async fn read_epub_file_content(
         // 1. 获取临时目录路径
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -2033,13 +2020,9 @@ pub async fn read_epub_file_binary(
         // 1. 获取临时目录路径
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -2074,17 +2057,13 @@ pub async fn read_epub_files_batch(
         // 1. 检查缓存，收集需要读取的文件
         {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    for path in &file_paths {
-                        if let Some(content) = cache.text_cache.get(path) {
-                            results.insert(path.clone(), content.clone());
-                        } else {
-                            to_read.push(path.clone());
-                        }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                for path in &file_paths {
+                    if let Some(content) = cache.text_cache.get(path) {
+                        results.insert(path.clone(), content.clone());
+                    } else {
+                        to_read.push(path.clone());
                     }
-                } else {
-                    to_read = file_paths.clone();
                 }
             } else {
                 to_read = file_paths.clone();
@@ -2112,11 +2091,9 @@ pub async fn read_epub_files_batch(
             // 3. 存入缓存
             {
                 let mut cache_guard = lock_epub_cache()?;
-                if let Some(ref mut cache) = *cache_guard {
-                    if cache.epub_path == epub_path {
-                        for (path, content) in new_contents {
-                            cache.text_cache.insert(path, content);
-                        }
+                if let Some(cache) = cache_guard.get_mut(&epub_path) {
+                    for (path, content) in new_contents {
+                        cache.text_cache.insert(path, content);
                     }
                 }
             }
@@ -2143,17 +2120,13 @@ pub async fn read_epub_binary_batch(
         // 1. 检查缓存
         {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    for path in &file_paths {
-                        if let Some(data) = cache.binary_cache.get(path) {
-                            results.insert(path.clone(), data.clone());
-                        } else {
-                            to_read.push(path.clone());
-                        }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                for path in &file_paths {
+                    if let Some(data) = cache.binary_cache.get(path) {
+                        results.insert(path.clone(), data.clone());
+                    } else {
+                        to_read.push(path.clone());
                     }
-                } else {
-                    to_read = file_paths.clone();
                 }
             } else {
                 to_read = file_paths.clone();
@@ -2181,11 +2154,9 @@ pub async fn read_epub_binary_batch(
             // 3. 存入缓存
             {
                 let mut cache_guard = lock_epub_cache()?;
-                if let Some(ref mut cache) = *cache_guard {
-                    if cache.epub_path == epub_path {
-                        for (path, data) in new_data {
-                            cache.binary_cache.insert(path, data);
-                        }
+                if let Some(cache) = cache_guard.get_mut(&epub_path) {
+                    for (path, data) in new_data {
+                        cache.binary_cache.insert(path, data);
                     }
                 }
             }
@@ -2209,13 +2180,9 @@ pub async fn save_epub_file_content(
         // 1. 获取临时目录路径
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -2232,10 +2199,8 @@ pub async fn save_epub_file_content(
         // 3. 更新缓存 (Text Cache)
         {
             let mut cache_guard = lock_epub_cache()?;
-            if let Some(ref mut cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    cache.text_cache.insert(file_path, content);
-                }
+            if let Some(cache) = cache_guard.get_mut(&epub_path) {
+                cache.text_cache.insert(file_path, content);
             }
         }
 
@@ -2255,13 +2220,9 @@ pub async fn save_epub_file_binary(
         // 1. 获取临时目录路径
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -2281,10 +2242,8 @@ pub async fn save_epub_file_binary(
         // 3. 更新二进制缓存 (Binary Cache)
         {
             let mut cache_guard = lock_epub_cache()?;
-            if let Some(ref mut cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    cache.binary_cache.insert(file_path, Default::default());
-                }
+            if let Some(cache) = cache_guard.get_mut(&epub_path) {
+                cache.binary_cache.insert(file_path, Default::default());
             }
         }
 
@@ -2303,13 +2262,9 @@ pub async fn save_epub_files_batch(
         // 1. Get Temp Path
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -2334,14 +2289,12 @@ pub async fn save_epub_files_batch(
             // For simplicity and speed in batch mode, let's just invalidate the specific cache entries if they exist.
             {
                 let mut cache_guard = lock_epub_cache()?;
-                if let Some(ref mut cache) = *cache_guard {
-                    if cache.epub_path == epub_path {
-                        // If it was text, update with valid utf8?
-                        // Risk of decoding binary as text.
-                        // Safer to remove from text_cache and let it re-read from disk on next access.
-                        cache.text_cache.remove(&file_path);
-                        cache.binary_cache.remove(&file_path);
-                    }
+                if let Some(cache) = cache_guard.get_mut(&epub_path) {
+                    // If it was text, update with valid utf8?
+                    // Risk of decoding binary as text.
+                    // Safer to remove from text_cache and let it re-read from disk on next access.
+                    cache.text_cache.remove(&file_path);
+                    cache.binary_cache.remove(&file_path);
                 }
             }
         }
@@ -2359,13 +2312,9 @@ pub async fn save_epub_to_disk(epub_path: String) -> Result<(), String> {
 
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -2466,13 +2415,9 @@ pub async fn add_epub_file_binary(
         // 1. 获取临时目录
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }
@@ -2501,13 +2446,9 @@ pub async fn delete_epub_file(epub_path: String, file_path: String) -> Result<()
     // 1. 获取临时目录
     let temp_path: PathBuf = {
         let cache_guard = lock_epub_cache()?;
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
-                } else {
-                    None
-                }
+        if let Some(cache) = cache_guard.get(&epub_path) {
+            if let Some(ref temp) = cache.temp_dir {
+                Some(temp.path().to_path_buf())
             } else {
                 None
             }
@@ -2539,13 +2480,9 @@ pub async fn rename_epub_file(
     // 1. 获取临时目录
     let temp_path: PathBuf = {
         let cache_guard = lock_epub_cache()?;
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path {
-                if let Some(ref temp) = cache.temp_dir {
-                    Some(temp.path().to_path_buf())
-                } else {
-                    None
-                }
+        if let Some(cache) = cache_guard.get(&epub_path) {
+            if let Some(ref temp) = cache.temp_dir {
+                Some(temp.path().to_path_buf())
             } else {
                 None
             }
@@ -2567,6 +2504,83 @@ pub async fn rename_epub_file(
     std::fs::rename(old_target, new_target).map_err(|e| format!("重命名失败: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod multi_book_tests {
+    use super::*;
+
+    #[test]
+    fn different_books_keep_independent_extractions_and_can_both_be_saved() {
+        let root = tempfile::tempdir().unwrap();
+        let chapter = "OEBPS/chapter.xhtml".to_string();
+        let mut books = Vec::new();
+        for (name, text) in [
+            ("first.epub", "first original"),
+            ("second.epub", "second original"),
+        ] {
+            let path = root.path().join(name).to_string_lossy().into_owned();
+            let temp = tempfile::tempdir().unwrap();
+            fs::create_dir_all(temp.path().join("OEBPS")).unwrap();
+            fs::write(temp.path().join("mimetype"), "application/epub+zip").unwrap();
+            fs::write(temp.path().join(&chapter), text).unwrap();
+            let mut cache = EpubCache::new();
+            cache.temp_dir = Some(temp);
+            lock_epub_cache().unwrap().insert(path.clone(), cache);
+            books.push(path);
+        }
+
+        tauri::async_runtime::block_on(async {
+            assert_ne!(
+                get_epub_temp_dir_path(books[0].clone()).await.unwrap(),
+                get_epub_temp_dir_path(books[1].clone()).await.unwrap(),
+            );
+            assert_eq!(
+                read_epub_file_content(books[0].clone(), chapter.clone())
+                    .await
+                    .unwrap(),
+                "first original",
+            );
+            assert_eq!(
+                read_epub_file_content(books[1].clone(), chapter.clone())
+                    .await
+                    .unwrap(),
+                "second original",
+            );
+            for (path, text) in books.iter().zip(["first edited", "second edited"]) {
+                save_epub_file_content(path.clone(), chapter.clone(), text.to_string())
+                    .await
+                    .unwrap();
+            }
+            for (path, text) in books.iter().zip(["first edited", "second edited"]) {
+                assert_eq!(
+                    read_epub_file_content(path.clone(), chapter.clone())
+                        .await
+                        .unwrap(),
+                    text,
+                );
+                assert_eq!(
+                    read_epub_files_batch(path.clone(), vec![chapter.clone()])
+                        .await
+                        .unwrap()[&chapter],
+                    text,
+                );
+                save_epub_to_disk(path.clone()).await.unwrap();
+                let mut archive = zip::ZipArchive::new(fs::File::open(path).unwrap()).unwrap();
+                let mut saved = String::new();
+                archive
+                    .by_name(&chapter)
+                    .unwrap()
+                    .read_to_string(&mut saved)
+                    .unwrap();
+                assert_eq!(saved, text);
+            }
+        });
+        let mut caches = lock_epub_cache().unwrap();
+        for path in books {
+            caches.remove(&path);
+        }
+    }
 }
 
 pub(crate) struct EpubParsedMeta {
@@ -3000,15 +3014,11 @@ fn parse_epub_metadata_from_parts(
 pub(crate) fn parse_epub_metadata_live(epub_path: &Path) -> Result<EpubParsedMeta, String> {
     let temp_path = {
         let cache_guard = lock_epub_cache()?;
-        if let Some(ref cache) = *cache_guard {
-            if cache.epub_path == epub_path.to_string_lossy() {
-                cache
-                    .temp_dir
-                    .as_ref()
-                    .map(|temp| temp.path().to_path_buf())
-            } else {
-                None
-            }
+        if let Some(cache) = cache_guard.get(epub_path.to_string_lossy().as_ref()) {
+            cache
+                .temp_dir
+                .as_ref()
+                .map(|temp| temp.path().to_path_buf())
         } else {
             None
         }

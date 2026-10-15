@@ -35,7 +35,7 @@
         usesWebScopedSettings,
         type WebAccountSession,
     } from "$lib/webAccount";
-    import { LAUNCH_SESSION_KEY, batchTaskKey } from "$lib/storageKeys";
+    import { batchTaskKey } from "$lib/storageKeys";
 
     type ToolId =
         | "library"
@@ -104,12 +104,6 @@
         errorCount: number;
         warningCount: number;
         issues: ToolboxDiagnosticIssue[];
-    };
-
-    type LaunchInfo = {
-        filePath?: string | null;
-        filePaths?: string[];
-        action?: string | null;
     };
 
     type LegacyLibraryData = {
@@ -420,108 +414,6 @@
     ) {
         const { url, ...windowOptions } = options;
         return platform.createWebviewWindow(label, url, windowOptions);
-    }
-
-    function collectLaunchPaths(launchInfo: LaunchInfo | null | undefined) {
-        const candidates = [
-            ...(launchInfo?.filePaths ?? []),
-            launchInfo?.filePath ?? "",
-        ];
-        const seen = new Set<string>();
-        return candidates
-            .filter(
-                (path): path is string =>
-                    typeof path === "string" && path.trim().length > 0,
-            )
-            .filter((path) => {
-                const key = path.toLowerCase();
-                if (seen.has(key)) return false;
-                seen.add(key);
-                return true;
-            });
-    }
-
-    function launchSessionKey(paths: string[], action: string) {
-        return JSON.stringify({ action, paths });
-    }
-
-    function supportedLaunchPath(path: string) {
-        const ext = path.split(".").pop()?.toLowerCase();
-        return ext === "epub" || ext === "txt";
-    }
-
-    async function openLaunchPath(filePath: string, action: string) {
-        const ext = filePath.split(".").pop()?.toLowerCase();
-        const encoded = encodeURIComponent(filePath);
-
-        if (ext === "txt") {
-            await createToolWindow(windowLabel("editor"), {
-                url: appPath(`/editor?file=${encoded}&fromLibrary=1`),
-                title: "TEpub-Editor-TXT",
-                width: TOOLBOX_WINDOW_WIDTH,
-                height: TOOLBOX_WINDOW_HEIGHT,
-                minWidth: TOOLBOX_WINDOW_WIDTH,
-                minHeight: TOOLBOX_WINDOW_HEIGHT,
-                dragDropEnabled: true,
-                center: true,
-            });
-            return;
-        }
-
-        if (ext !== "epub") return;
-
-        if (action === "reader") {
-            await createToolWindow(windowLabel("reader"), {
-                url: appPath(`/reader?file=${encoded}`),
-                title: "TEpub-Editor-Reader",
-                width: TOOLBOX_WINDOW_WIDTH,
-                height: TOOLBOX_WINDOW_HEIGHT,
-                minWidth: TOOLBOX_WINDOW_WIDTH,
-                minHeight: TOOLBOX_WINDOW_HEIGHT,
-                dragDropEnabled: false,
-                center: true,
-            });
-            return;
-        }
-
-        await createToolWindow(windowLabel("epub-editor"), {
-            url: appPath(`/epub-editor?file=${encoded}`),
-            title: "TEpub-Editor-EPUB",
-            width: TOOLBOX_WINDOW_WIDTH,
-            height: TOOLBOX_WINDOW_HEIGHT,
-            minWidth: TOOLBOX_WINDOW_WIDTH,
-            minHeight: TOOLBOX_WINDOW_HEIGHT,
-            dragDropEnabled: true,
-            center: true,
-        });
-    }
-
-    async function openLaunchFiles() {
-        if (!isRootToolbox()) return;
-        if (platform.isWeb) return;
-
-        try {
-            const launchInfo =
-                await platform.invoke<LaunchInfo>("get_launch_info");
-            const action = launchInfo?.action ?? "";
-            const paths =
-                collectLaunchPaths(launchInfo).filter(supportedLaunchPath);
-            if (paths.length === 0) return;
-
-            const key = launchSessionKey(paths, action);
-            if (sessionStorage.getItem(LAUNCH_SESSION_KEY) === key) return;
-            sessionStorage.setItem(LAUNCH_SESSION_KEY, key);
-
-            for (const path of paths) {
-                await openLaunchPath(path, action);
-            }
-            statusText =
-                paths.length > 1
-                    ? `已打开 ${paths.length} 个文件`
-                    : "文件已打开";
-        } catch (e) {
-            console.warn("处理启动文件失败:", e);
-        }
     }
 
     async function pickFile(tool: Tool) {
@@ -1259,7 +1151,6 @@
         updateMobileClient();
         loadGlobalSettingsWithLegacy();
         refreshWebClientViewState();
-        openLaunchFiles();
         const onSettingsUpdated = () => {
             accountSession = getWebAccountSession();
             appSettings = loadAppSettings();

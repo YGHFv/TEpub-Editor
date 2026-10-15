@@ -91,13 +91,9 @@ pub async fn search_in_files(
         // 1. 获取临时目录
         let temp_path: PathBuf = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    if let Some(ref temp) = cache.temp_dir {
-                        Some(temp.path().to_path_buf())
-                    } else {
-                        None
-                    }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                if let Some(ref temp) = cache.temp_dir {
+                    Some(temp.path().to_path_buf())
                 } else {
                     None
                 }

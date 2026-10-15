@@ -347,15 +347,11 @@ pub async fn mobile_update_epub_metadata(
 
         let temp_root = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    cache
-                        .temp_dir
-                        .as_ref()
-                        .map(|temp| temp.path().to_path_buf())
-                } else {
-                    None
-                }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                cache
+                    .temp_dir
+                    .as_ref()
+                    .map(|temp| temp.path().to_path_buf())
             } else {
                 None
             }
@@ -403,15 +399,11 @@ pub async fn mobile_update_epub_cover(
 
         let temp_root = {
             let cache_guard = lock_epub_cache()?;
-            if let Some(ref cache) = *cache_guard {
-                if cache.epub_path == epub_path {
-                    cache
-                        .temp_dir
-                        .as_ref()
-                        .map(|temp| temp.path().to_path_buf())
-                } else {
-                    None
-                }
+            if let Some(cache) = cache_guard.get(&epub_path) {
+                cache
+                    .temp_dir
+                    .as_ref()
+                    .map(|temp| temp.path().to_path_buf())
             } else {
                 None
             }
