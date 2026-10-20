@@ -1,0 +1,41 @@
+/**
+ * 自绘标题行的三种形态。
+ *
+ * - none：浏览器里没有可自绘的窗口边框，页面不画窗口按钮
+ * - custom：Windows / Linux，decorations: false，最小化/最大化/关闭全部自己画
+ * - mac-overlay：macOS 用 titleBarStyle: "Overlay"，红黄绿按钮仍由系统绘制并
+ *   浮在页面左上角，所以只要留出左侧安全区，不能自己再画一套按钮
+ */
+export type WindowChromeMode = "none" | "custom" | "mac-overlay";
+
+function isTauriRuntime() {
+  if (typeof window === "undefined") return false;
+  const global = window as any;
+  return Boolean(global.__TAURI__ || global.__TAURI_INTERNALS__);
+}
+
+export function isMacOS() {
+  // 用 userAgent 而不是 navigator.platform：新版 Chrome 已冻结 platform，
+  // 且 electron/wry 里 userAgent 更可靠
+  const nav = typeof navigator === "undefined" ? null : navigator;
+  if (!nav) return false;
+  return /Macintosh|Mac OS X/i.test(nav.userAgent || "");
+}
+
+function isLinux() {
+  const nav = typeof navigator === "undefined" ? null : navigator;
+  if (!nav) return false;
+  return /Linux/i.test(nav.userAgent || "") && !/Android/i.test(nav.userAgent);
+}
+
+export function detectWindowChrome(): WindowChromeMode {
+  // 不依赖 $app/environment：这个函数在 +layout 顶层和 onMount 里都会调用，
+  // 服务端渲染时 window 不存在，直接判 typeof 更省事
+  if (typeof window === "undefined" || !isTauriRuntime()) return "none";
+  if (isMacOS()) return "mac-overlay";
+  // Linux：tao 在无边框窗口上没法拖动边缘缩放（Windows 靠 WM_NCHITTEST 才行），
+  // 关掉系统边框会让窗口既不能改大小也没法最大化。所以 Linux 保留系统标题栏，
+  // 页面这边只画一条标签栏（见 tauri.linux.conf.json）
+  if (isLinux()) return "none";
+  return "custom";
+}

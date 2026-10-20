@@ -36,6 +36,16 @@ static CSS_URL_PATH_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?is)url\(\s*([^'"\)\s][^)]*?)\s*\)"#).expect("valid css url regex")
 });
 
+// 下面两条原本在 collect_opf_id_hints / parse_xmlish_attrs 里按次编译。
+// fancy_regex 带反向引用（\2）的编译开销极大，一本 800 条目的书里
+// 每条 manifest 项都编一次，光编译就吃掉十几秒 —— 打开图书卡顿的元凶。
+// 正则本身与输入无关，提成 static 只编一次。
+static OPF_ITEM_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"(?is)<item\b([^>]*)>"#).expect("valid opf item regex"));
+
+static XMLISH_ATTR_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"([:\w.-]+)\s*=\s*(['"])(.*?)\2"#).expect("valid attr regex"));
+
 /// 安全获取 EPUB_CACHE 锁，避免 Mutex 中毒后连锁 panic。
 pub(crate) fn lock_epub_cache(
 ) -> Result<std::sync::MutexGuard<'static, HashMap<String, EpubCache>>, String> {
@@ -421,12 +431,8 @@ pub(crate) fn collect_opf_id_hints(bytes: &[u8]) -> HashMap<String, String> {
             continue;
         }
         let opf_text = String::from_utf8_lossy(&opf_data).to_string();
-        let item_re = match Regex::new(r#"(?is)<item\b([^>]*)>"#) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
         let opf_dir = zip_parent(&opf_path);
-        for caps in item_re.captures_iter(&opf_text).flatten() {
+        for caps in OPF_ITEM_RE.captures_iter(&opf_text).flatten() {
             let attrs_text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let attrs = parse_xmlish_attrs(attrs_text);
             let item_id = attrs.get("id").map(|s| s.trim()).unwrap_or("");
@@ -851,10 +857,9 @@ where
 
 pub(crate) fn parse_xmlish_attrs(text: &str) -> HashMap<String, String> {
     let mut attrs = HashMap::new();
-    let Ok(attr_re) = Regex::new(r#"([:\w.-]+)\s*=\s*(['"])(.*?)\2"#) else {
-        return attrs;
-    };
-    for caps in attr_re.captures_iter(text).flatten() {
+    // 用提升到 static 的 OPF_ITEM/ATTR 正则：每次调用重新编译 fancy_regex
+    // 属于纯浪费（见上方 OPF_ITEM_RE 的注释）
+    for caps in XMLISH_ATTR_RE.captures_iter(text).flatten() {
         let key = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         let value = caps.get(3).map(|m| m.as_str()).unwrap_or("").to_string();
         if !key.is_empty() {

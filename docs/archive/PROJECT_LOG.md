@@ -3834,3 +3834,55 @@ Caveats:
   headless Web 与 `tauri dev` 桌面端实测滚动条切换、点击定位（定位误差 0~1px）
   及页签往返 6 次无残留元素。
 - 发布版本升至 `1.2.0`，推送 `v1.2.0` 标签触发 GitHub Actions 多平台构建。
+
+### 2026-10-20 v1.2.1 深色界面收口、顶部标签栏与打开图书卡顿
+
+- 深色主题：窗口标题栏、样式库预览底色、EPUB 编辑/阅读纸面统一到 `#191e26`。
+  此前深色下预览 iframe 仍是 `#1e2430`——`app.css` 的 `.mobile-frame` 深色规则
+  带 `!important`，PreviewPane 的同名规则没带，被压掉了。
+- 修复二级页面「先闪白再变深」：`app.html` 的首帧脚本用 `location.protocol === "http:"`
+  判断「网页版」，但 Tauri 在 Windows 上是 `http://tauri.localhost`、开发时是
+  `http://localhost:1420`，两者都是 http。于是首帧去读网页访客设置（空的），
+  先画浅色，等 Svelte 挂载后再转深色。改为检测 `__TAURI__` / `__TAURI_INTERNALS__`
+  与 `tauri:` 协议，并把 `data-theme`、`color-scheme`、`theme-color` 和内联底色
+  都提到样式表之前设置。`applyTheme` 接管后清掉那层内联底色，避免切回浅色时残留。
+- 阅读器深色不生效：`themePresetExplicit` 旧判断 `!== false` 把「从未设置过」
+  当成「用户选了纸色」。改为 `=== true`，没选过就跟随应用深浅色。
+- 桌面端改为自绘标题栏（`decorations: false`），应用名、二级页面标签、窗口按钮
+  合并到同一行，标签紧随软件名。macOS 走 `titleBarStyle: "Overlay"` +
+  `hiddenTitle`（红黄绿按钮仍由系统绘制，左侧留 82px 安全区），通过
+  `tauri.macos.conf.json` 覆盖窗口配置。补 `start-dragging`、`internal-toggle-maximize`
+  等窗口权限。
+- 标签栏在工具箱首页也常驻，`工具箱` 固定为第一个标签且不可关闭；
+  标签只显示页面名，书名移到悬停提示（长书名会把标题行挤满并互相截断）。
+- 新增「设置 → 通用 → 使用多窗口打开二级页面」，默认关闭。关闭时二级页面在主窗口
+  内跳转并由标签栏承载；开启后仍按窗口打开。切换页面用的是 `goto`（SPA 导航），
+  不是整页刷新。
+- 修复 TXT 编辑器「新增正则」行点了没反应：空模式的行在规范化时被过滤掉，
+  扫描时空正则又会匹配所有行。改为保留草稿行，确认后才落地。
+- 打开图书卡顿（dev 明显、编译版正常）：
+  - `collect_opf_id_hints` / `parse_xmlish_attrs` 对每个 OPF manifest 条目
+    （824 条）重新 `fancy_regex::Regex::new()`，单本书 12.3 秒。正则提到
+    `once_cell::sync::Lazy` 静态后降到 362 毫秒。
+  - `prepare_epub_for_open` 是同步命令，会占住 Tauri 主线程导致整个界面冻住。
+    改为 `async` + `spawn_blocking`。
+  - 新增 `PREPARE_CACHE`（路径 + 修改时间 + 大小）：切标签回来不再重扫整本书，
+    实测冷启 411 毫秒、命中 5 毫秒。
+  - `[profile.dev]` 开 `opt-level = 1`（依赖 3）。debug 完全不优化时解压、Zip 扫描、
+    正则与文本处理比 release 慢一个数量级——这正是「dev 特别卡、编译版反而好」的来源。
+- 切回阅读器标签不再重读整本书：新增 `$lib/readerCache`，按「源路径 + 修改时间
+  + 大小 + 解压目录」缓存每个章节/样式表的文本（`prepare_epub_for_open` 的结果
+  里补了 `sourceModifiedMs` / `sourceSize` 供前端拼缓存键）。实测回到阅读器标签
+  的 asset 请求从 823 次降到 4 次，章节文本就绪时间 8.8 秒 → 约 3 秒，剩下的
+  是 DOMParser 与列布局，属于必要开销。
+- 关闭二级页面（阅读器/编辑器）时改用 `goto` 而不是 `location.href`：
+  后者会整页重载，标签栏跟着闪一下，且 `remaining.href` 本就带 base 前缀，
+  再拼一次 base 会把子路径部署下的地址拼坏。
+- macOS / Linux 的窗口形态与 Windows 分开：Windows 自绘标题行（`decorations: false`），
+  macOS 用 `titleBarStyle: "Overlay"` 保留红黄绿按钮，Linux 直接保留系统标题栏
+  —— tao 在 Linux 的无边框窗口上无法拖动边缘缩放，去掉边框会让窗口既不能改大小
+  也没法最大化。配置分别落在 `tauri.macos.conf.json` / `tauri.linux.conf.json`。
+- 验证：`svelte-check` 0 错误 0 警告、147 项前端测试、17 项 Rust 测试与 `pnpm build`
+  通过；`tauri dev` 桌面端实测标签切换 2~17 毫秒、单次导航 1 条 history entry、
+  首帧无浅色闪帧、`prepare_epub_for_open` 冷/热分别为 411 / 5 毫秒。
+- 发布版本升至 `1.2.1`。

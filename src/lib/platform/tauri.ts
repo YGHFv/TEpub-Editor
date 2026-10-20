@@ -1,4 +1,6 @@
 import type { PlatformAdapter, PlatformWindowHandle } from "./types";
+import { THEME_CANVAS_COLORS, loadAppSettings } from "$lib/appSettings";
+import { detectWindowChrome } from "$lib/windowChrome";
 
 function wrapTauriWindow(win: any): PlatformWindowHandle {
   return {
@@ -201,11 +203,49 @@ export function createTauriPlatform(): PlatformAdapter {
       await getCurrentWindow().close();
     },
 
+    async minimizeCurrentWindow() {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().minimize();
+    },
+
+    async toggleMaximizeCurrentWindow() {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().toggleMaximize();
+    },
+
+    async isCurrentWindowMaximized() {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return await getCurrentWindow().isMaximized();
+    },
+
+    async onCurrentWindowResized(handler) {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return await getCurrentWindow().onResized(() => handler());
+    },
+
     async createWebviewWindow(label, url, options = {}) {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      return wrapTauriWindow(
-        new WebviewWindow(label, { url, ...(options as any) }),
-      );
+      // 新窗口的底色/原生标题栏按当前主题建：不传 theme 的话 WebView2 会先画
+      // 一帧白底再等前端切主题，二级页面打开时整屏闪白
+      const theme = loadAppSettings().uiTheme;
+      // 与主窗口一致：Windows 去掉系统标题栏，由页面画一条能放标签的标题行。
+      // macOS 用 Overlay 保留红黄绿按钮（页面给它们留了左侧安全区）；
+      // Linux 保留系统标题栏，否则窗口既不能缩放也没法最大化（详见 windowChrome.ts）
+      const chrome = detectWindowChrome();
+      const chromeOptions =
+        chrome === "custom"
+          ? { decorations: false, shadow: true }
+          : chrome === "mac-overlay"
+            ? { decorations: true, titleBarStyle: "Overlay", hiddenTitle: true }
+            : {};
+      const win = new WebviewWindow(label, {
+        url,
+        theme,
+        backgroundColor: THEME_CANVAS_COLORS[theme],
+        ...chromeOptions,
+        ...(options as any),
+      });
+      return wrapTauriWindow(win);
     },
   };
 }

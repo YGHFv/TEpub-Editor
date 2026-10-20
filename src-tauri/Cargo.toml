@@ -1,6 +1,6 @@
 [package]
 name = "tepub-editor"
-version = "1.2.0"
+version = "1.2.1"
 description = "TEpub Editor - a TXT/EPUB workbench for library management, editing, reading and toolbox utilities"
 authors = ["YGHFv"]
 edition = "2021"
@@ -48,3 +48,13 @@ image = "0.25"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
+
+# 开发构建默认完全不优化。解压 EPUB、Zip 扫描、正则与文本处理全是 CPU 密集的，
+# debug 下比 release 慢一个数量级，同一本书 dev 里打开要几秒、编译版却很快 ——
+# 用户看到的就是"dev 特别卡"。开 1 级优化（依赖用 3 级）后 dev 运行速度接近
+# release，只多花一点编译时间；调试符号仍保留，断点照常可用。
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

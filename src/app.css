@@ -137,6 +137,76 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* =========================================================
+   标题行（自绘窗口标题栏）+ 二级页面标签
+   标题行在正常流里、页面在它下面的一格；各页面根容器原本按
+   100vh / position:fixed inset:0 满屏写死，会把标题行盖住并把
+   底部几十像素顶出视口，所以这里统一压成"填满剩余区域"。
+   ========================================================= */
+.app-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+}
+
+.app-frame-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  /* 页面普遍自己管内部滚动；工具箱这类靠页面滚动的也收进这一格，
+     标题行因此不会跟着滚走 */
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* 满屏根容器：高度改成填满 app-frame-body。
+   限定直接子元素：.page / .editor-page 这类通用名在页面深处也可能出现，
+   全局匹配会把内层块也拉成整屏高 */
+.app-frame-body
+  > :where(
+    .app-container,
+    .epub-editor,
+    .library-app,
+    .metadata-container,
+    .search-window,
+    .batch-app,
+    .toolbox-app,
+    .style-library-page,
+    .text-editor-page,
+    .image-tool-app,
+    .diagnose-page,
+    .process-page,
+    .advanced-page,
+    .font-page,
+    .mobile-shell,
+    .editor-page,
+    .mobile-page,
+    .desktop-page,
+    .page,
+    /* 加载/错误占位屏本身是满屏根节点（min-height:100vh），不压下来会
+       在标签栏下面多撑出 39px，出现一条多余的滚动条 */
+    .page-loading,
+    .page-error
+  ) {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+/* 原本用 position:fixed;inset:0 铺满视口的页面：改成锚在 app-frame-body
+   里，否则它们会盖到标签栏上面（fixed 不受祖先 overflow 裁剪影响） */
+.app-frame-body :where(.web-epub-page, .rd-app) {
+  position: absolute !important;
+  inset: 0 !important;
+  height: auto !important;
+}
+
+/* 靠页面自身滚动的工具页（工具箱/书库以外这些）在 flex 盒里允许撑高 */
+.app-frame-body :where(.toolbox-app, .style-library-page) {
+  overflow: visible;
+}
+
 body {
   overscroll-behavior: none;
 }
@@ -938,35 +1008,41 @@ textarea:disabled {
 /* —— 自动挂载（零特异度，页面可自行覆盖）—— */
 /* 壳进场：仅淡入，不位移，避免给 fixed 弹窗建 containing block */
 :where(
-    .library-app,
-    .toolbox-app,
-    .app-container,
-    .epub-editor,
-    .metadata-container,
-    .search-window,
-    .batch-app,
-    .process-page,
-    .advanced-page,
-    .font-page,
-    .diagnose-page,
-    .text-editor-page,
-    .web-epub-page,
-    .image-tool-app
-  ) {
+  .library-app,
+  .toolbox-app,
+  .app-container,
+  .epub-editor,
+  .metadata-container,
+  .search-window,
+  .batch-app,
+  .process-page,
+  .advanced-page,
+  .font-page,
+  .diagnose-page,
+  .text-editor-page,
+  .web-epub-page,
+  .image-tool-app
+) {
   animation: tepub-fade-in var(--motion-fast) var(--ease-out) backwards;
 }
 
 /* 弹窗遮罩与容器：自动淡入/缩放（与 .overlay-enter/.dialog-enter 等价） */
 :where(
-    .settings-overlay,
-    .dialog-overlay,
-    .modal-overlay,
-    .context-overlay,
-    .saving-overlay
-  ) {
+  .settings-overlay,
+  .dialog-overlay,
+  .modal-overlay,
+  .context-overlay,
+  .saving-overlay
+) {
   animation: tepub-fade-in var(--motion-fast) var(--ease-default) backwards;
 }
-:where(.settings-shell, .settings-panel, .dialog, .modal-content, .prompt-dialog) {
+:where(
+  .settings-shell,
+  .settings-panel,
+  .dialog,
+  .modal-content,
+  .prompt-dialog
+) {
   animation: tepub-scale-in var(--motion-fast) var(--ease-out) backwards;
 }
 
@@ -1031,8 +1107,11 @@ textarea:disabled {
     "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", "Monaco",
     "Courier New", monospace;
 
-  --color-canvas: #14181d;
-  --color-canvas-glow: #1a1f27;
+  /* 画布不要用接近纯黑的 #14181d：工具箱主页是大片纯画布、样式库是大片
+     surface 面板，两者摆在一起会像两个不同的应用。把画布抬到与表面同一
+     色相（墨蓝）上，页与页之间才连得上 */
+  --color-canvas: #191e26;
+  --color-canvas-glow: #212a36;
   --color-surface: #1e2430;
   --color-surface-soft: #242b38;
   --color-surface-raised: rgba(30, 36, 48, 0.95);
@@ -1086,11 +1165,7 @@ textarea:disabled {
 }
 
 :root[data-theme="dark"] ::-webkit-scrollbar-track {
-  background: color-mix(
-    in srgb,
-    var(--color-surface-soft) 72%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--color-surface-soft) 72%, transparent);
 }
 
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb {
@@ -1099,11 +1174,7 @@ textarea:disabled {
     var(--color-border-strong),
     var(--color-border)
   );
-  border-color: color-mix(
-    in srgb,
-    var(--color-surface-soft) 72%,
-    transparent
-  );
+  border-color: color-mix(in srgb, var(--color-surface-soft) 72%, transparent);
 }
 
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
@@ -1286,11 +1357,7 @@ textarea:disabled {
 :root[data-theme="dark"] :where(.epub-textarea),
 :root[data-theme="dark"] :where(.rule-input),
 :root[data-theme="dark"] :where(.prompt-input) {
-  background: color-mix(
-    in srgb,
-    var(--color-canvas) 88%,
-    var(--color-surface)
-  );
+  background: color-mix(in srgb, var(--color-canvas) 88%, var(--color-surface));
   border-color: var(--color-border);
   color: var(--color-text);
 }

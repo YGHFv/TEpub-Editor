@@ -1,5 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import { goto } from "$app/navigation";
+    import { base } from "$app/paths";
     import { platform } from "$lib/platform";
     import LibraryGrid from "$lib/LibraryGrid.svelte";
     import LibraryListSimple from "$lib/LibraryListSimple.svelte";
@@ -1045,6 +1047,11 @@
 
     async function openToolbox() {
         appSettings = loadAppSettings();
+        // 默认（同窗口）直接跳过去，由顶部标签栏切回，不开新窗口
+        if (!appSettings.secondaryWindows) {
+            await goto(`${base}/`);
+            return;
+        }
         try {
             let toolboxWin = await platform.getWindowByLabel("toolbox");
             if (toolboxWin) {
@@ -1112,6 +1119,12 @@
             : `/editor?file=${encoded}&fromLibrary=1`;
         const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
 
+        // 默认同窗口：书库留在标签栏里，编辑器作为新标签打开
+        if (!appSettings.secondaryWindows) {
+            await goto(`${base}${url}`);
+            return;
+        }
+
         try {
             const appWindow = platform.getCurrentWindow();
             const win = await platform.createWebviewWindow(
@@ -1174,6 +1187,12 @@
             : `/editor?file=${encoded}&fromLibrary=1`;
         const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
 
+        // 默认同窗口：书库留在标签栏里，编辑器作为新标签打开
+        if (!appSettings.secondaryWindows) {
+            await goto(`${base}${url}`);
+            return;
+        }
+
         try {
             const appWindow = platform.getCurrentWindow();
             const win = await platform.createWebviewWindow(
@@ -1222,6 +1241,12 @@
         const encoded = encodeURIComponent(book.filePath);
         const url = `/reader?file=${encoded}`;
         const title = `${book.title || "阅读"} · 阅读`;
+
+        // 默认同窗口：书库留在标签栏里，阅读器作为新标签打开
+        if (!appSettings.secondaryWindows) {
+            await goto(`${base}${url}`);
+            return;
+        }
 
         try {
             const appWindow = platform.getCurrentWindow();

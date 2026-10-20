@@ -1,5 +1,8 @@
 ﻿<script lang="ts">
     import { onMount, tick } from "svelte";
+    import { base } from "$app/paths";
+    import { goto } from "$app/navigation";
+    import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
     import { platform } from "$lib/platform";
     // 文本读写不走 fs 插件，统一使用自定义后端命令（platform.invoke 的
     // read_text_file / save_text_file）。
@@ -585,22 +588,52 @@
         ];
     }
 
+    /** 正则 tab 显示的行 = 已保存规则 + 未落盘的空行 */
+    $: tocRegexRows = [...appSettings.customRegexRules, ...draftTocRegexRules];
+
     function updateTocRegexRule(
         index: number,
         patch: Partial<CustomRegexRule>,
     ) {
-        appSettings.customRegexRules = appSettings.customRegexRules.map(
-            (rule, idx) => (idx === index ? { ...rule, ...patch } : rule),
+        const persisted = appSettings.customRegexRules.length;
+        if (index < persisted) {
+            appSettings.customRegexRules = appSettings.customRegexRules.map(
+                (rule, idx) => (idx === index ? { ...rule, ...patch } : rule),
+            );
+            return;
+        }
+        // 编辑的是草稿行：填上内容才并入正式列表，否则保存时会丢掉空行
+        const draftIndex = index - persisted;
+        const next = draftTocRegexRules.map((rule, idx) =>
+            idx === draftIndex ? { ...rule, ...patch } : rule,
         );
+        const draft = next[draftIndex];
+        if (draft && draft.pattern.trim()) {
+            appSettings.customRegexRules = [
+                ...appSettings.customRegexRules,
+                draft,
+            ];
+            draftTocRegexRules = next.filter((_, idx) => idx !== draftIndex);
+            return;
+        }
+        draftTocRegexRules = next;
     }
 
     function removeTocRegexRule(index: number) {
+        const persisted = appSettings.customRegexRules.length;
+        if (index >= persisted) {
+            draftTocRegexRules = draftTocRegexRules.filter(
+                (_, idx) => idx !== index - persisted,
+            );
+            return;
+        }
         appSettings.customRegexRules = appSettings.customRegexRules.filter(
             (_, idx) => idx !== index,
         );
     }
 
     function resetTocRegexRules() {
+        draftTocRegexRules = [];
         appSettings.customRegexRules = [
             { level: 1, pattern: DEFAULT_META_VOLUME_REGEX },
             { level: 1, pattern: DEFAULT_SETTINGS.volRegex },
@@ -609,11 +642,17 @@
         ];
     }
 
+    /**
+     * 刚点「新增正则」还没填内容的空行。
+     *
+     * 不能直接塞进 customRegexRules：空正则能匹配每一行，扫目录时会把全书
+     * 切成章；保存时它也会被写进设置。空行只留在内存里，等用户敲进第一个
+     * 字符再并入正式列表（与工具箱 → 目录正则的处理保持一致）。
+     */
+    let draftTocRegexRules: CustomRegexRule[] = [];
+
     function addTocRegexRule() {
-        appSettings.customRegexRules = [
-            ...appSettings.customRegexRules,
-            { level: 3, pattern: "" },
-        ];
+        draftTocRegexRules = [...draftTocRegexRules, { level: 3, pattern: "" }];
     }
 
     function isLikelyTocTitle(title: string, level: number) {
@@ -3851,11 +3890,20 @@
             await platform.invoke("exit_app");
             return;
         }
+        if (!usesMultiWindow()) {
+            // 同窗口模式下没有独立编辑器窗口可销毁：把自己的标签一并摘掉，
+            // 再回到上一个标签（没有就回工具箱）
+            const remaining = closeCurrentTab();
+            // goto 走 SPA 导航：location.href 会整页重载，标签栏跟着闪一下，
+            // 且 remaining.href 已含 base 前缀，再拼一次会把路径拼坏
+            await goto(remaining?.href || `${base}/`);
+            return;
+        }
         if (openedFromLibrary) {
             await platform.getCurrentWindow().destroy();
             return;
         }
-        window.location.href = "/";
+        window.location.href = `${base}/`;
     }
 
     function handleDialogSave() {
@@ -5794,11 +5842,13 @@
         document.documentElement.setAttribute("data-theme", t);
         const meta = document.querySelector('meta[name="theme-color"]');
         if (meta) {
+            // 与 $lib/appSettings 的 THEME_CANVAS_COLORS 保持一致：
+            // 深色画布统一是 #191e26，不是更早的纯黑 #14181d
             const colors: Record<string, string> = {
-                light: "var(--color-canvas)",
-                dark: "#14181d",
+                light: "#eef4f8",
+                dark: "#191e26",
             };
-            meta.setAttribute("content", colors[t] || "var(--color-canvas)");
+            meta.setAttribute("content", colors[t] || "#eef4f8");
         }
     }
 
@@ -5846,7 +5896,9 @@
 </script>
 
 <svelte:head>
-    <meta name="theme-color" content="var(--color-surface-soft)" />
+    <!-- theme-color 由 applyTheme() 按深浅色写入具体色值；
+         这里原来写的是 var(--color-surface-soft)，meta 不支持 CSS 变量，
+         浏览器会直接忽略，等于给页面塞了一个无效的重复标签 -->
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
@@ -6857,7 +6909,7 @@
                         />
                     {:else if settingsActiveTab === "toc"}
                         <SettingsTocTab
-                            rules={appSettings.customRegexRules}
+                            rules={tocRegexRows}
                             presetPatterns={TOC_PRESET_PATTERNS}
                             bind:prefixLevel={tocPrefixLevel}
                             bind:prefixText={tocPrefixText}
@@ -7204,7 +7256,9 @@
                 >
                     确认回退到历史版本？
                 </div>
-                <div style="color: var(--color-muted); margin-bottom: 30px; line-height:1.6;">
+                <div
+                    style="color: var(--color-muted); margin-bottom: 30px; line-height:1.6;"
+                >
                     当前版本将自动保存为新的历史记录。<br />
                     此操作可以再次回退。
                 </div>
@@ -8552,7 +8606,12 @@
         min-width: 0;
         box-sizing: border-box;
         background: var(--color-danger-soft);
-        border: 1px solid color-mix(in srgb, var(--color-danger-soft) 92%, var(--color-danger));
+        border: 1px solid
+            color-mix(
+                in srgb,
+                var(--color-danger-soft) 92%,
+                var(--color-danger)
+            );
         border-radius: var(--radius-xs);
         padding: 6px 10px;
         font-size: 12px;
@@ -8647,7 +8706,11 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
+        background: linear-gradient(
+            180deg,
+            var(--color-surface),
+            var(--color-surface-soft)
+        );
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;
@@ -8962,7 +9025,11 @@
     }
 
     .scroll-p::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, var(--color-border-strong), var(--color-border));
+        background: linear-gradient(
+            180deg,
+            var(--color-border-strong),
+            var(--color-border)
+        );
         border-radius: 999px;
     }
 

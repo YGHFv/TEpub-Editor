@@ -1,6 +1,8 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onDestroy, onMount } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import { loadAppSettings } from "$lib/appSettings";
+    import { PAPER_DARK_BG, PAPER_DARK_TEXT } from "$lib/epubPaperTheme";
     import {
         EPUB_HEADER_STYLES,
         EPUB_HEADER_PREVIEW_TITLE_CSS,
@@ -71,6 +73,10 @@
     let selectedStyleId = EPUB_HEADER_STYLES[0]?.id || "";
     let savedStyles: EpubStyleModule[] = [];
     let copyMessage = "";
+    /** 每次主题变更自增，用来驱动 isDarkTheme 重新求值 */
+    let themeRevision = 0;
+    let isDarkTheme = false;
+    let disposeThemeListeners: (() => void) | null = null;
 
     let headerInput: HTMLInputElement | null = null;
     let headerName = "";
@@ -122,6 +128,10 @@
     let draftStyle: EpubStyleModule | null = null;
     let draftPreviewDoc = "";
 
+    $: {
+        void themeRevision;
+        isDarkTheme = resolveDarkTheme();
+    }
     $: headerStyles = [
         ...EPUB_HEADER_STYLES,
         ...savedStyles.filter((style) => style.kind === "header"),
@@ -169,6 +179,7 @@
     $: {
         void titleStyles;
         void savedStyles;
+        void isDarkTheme;
         selectedPreviewDoc = selectedStyle
             ? buildPreviewDoc(selectedStyle)
             : "";
@@ -194,6 +205,7 @@
     }
     $: {
         void titleStyles;
+        void isDarkTheme;
         draftPreviewDoc = draftStyle ? buildPreviewDoc(draftStyle) : "";
     }
     $: interfaceRows = Object.entries(EPUB_STYLE_INTERFACE).map(
@@ -209,7 +221,34 @@
 
     onMount(() => {
         savedStyles = loadSavedStyles();
+        // 主题只看 app 设置（不跟系统 prefers-color-scheme 走）。
+        // 同窗口改动发自定义事件，跨窗口改 localStorage 只有 storage 事件会到
+        const syncTheme = () => {
+            themeRevision += 1;
+        };
+        window.addEventListener("tepub-settings-updated", syncTheme);
+        window.addEventListener("storage", syncTheme);
+        disposeThemeListeners = () => {
+            window.removeEventListener("tepub-settings-updated", syncTheme);
+            window.removeEventListener("storage", syncTheme);
+        };
     });
+
+    onDestroy(() => {
+        disposeThemeListeners?.();
+        disposeThemeListeners = null;
+    });
+
+    /**
+     * 只认 app 设置里的 uiTheme；dataset.theme 是 applyTheme 用同一份设置写下的，
+     * 作为兜底一起看。故意不读 prefers-color-scheme：系统深色不该改动书页配色。
+     * SSR 首帧按浅色。
+     */
+    function resolveDarkTheme() {
+        if (typeof document === "undefined") return false;
+        if (loadAppSettings().uiTheme === "dark") return true;
+        return document.documentElement.dataset.theme === "dark";
+    }
 
     function setMode(mode: ViewMode) {
         viewMode = mode;
@@ -394,6 +433,12 @@
     }
 
     function buildPreviewDoc(style: EpubStyleModule) {
+        const dark = isDarkTheme;
+        // 深色直接写进 srcdoc，避免 iframe 首帧闪白；浅色保持原样
+        const shellBackground = dark ? PAPER_DARK_BG : "#eef2f7";
+        const paperBackgroundColor = dark ? PAPER_DARK_BG : "#fffdf8";
+        const defaultTextColor = dark ? PAPER_DARK_TEXT : "#172033";
+        const paragraphTextColor = dark ? PAPER_DARK_TEXT : "#263244";
         const boundTitleStyle =
             style.kind === "header" ? resolveHeaderTitleStyle(style) : null;
         const hasHeaderPreview = style.kind === "header";
@@ -437,8 +482,8 @@
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background: #eef2f7;
-        color: #172033;
+        background: ${shellBackground};
+        color: ${defaultTextColor};
         font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
       }
 
@@ -452,7 +497,7 @@
         box-sizing: border-box;
         padding: ${hasHeaderPreview ? "0 24px 42px" : "46px 24px 42px"};
         overflow: ${style.kind === "illustration" ? "auto" : "hidden"};
-        background: #fffdf8;
+        background: ${paperBackgroundColor};
       }
 
       .te-preview-header-page {
@@ -461,7 +506,7 @@
 
       p.te-paragraph {
         margin: 0 0 0.85em;
-        color: #263244;
+        color: ${paragraphTextColor};
         font-family: "DK-SONGTI", "SimSun", serif;
         font-size: 16px;
         line-height: 1.75;
@@ -1669,7 +1714,11 @@
     }
 
     button.danger {
-        border-color: color-mix(in srgb, var(--color-danger-soft) 92%, var(--color-danger));
+        border-color: color-mix(
+            in srgb,
+            var(--color-danger-soft) 92%,
+            var(--color-danger)
+        );
         color: var(--color-danger);
     }
 

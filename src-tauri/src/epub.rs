@@ -827,12 +827,37 @@ mod tests {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub(crate) struct EpubPrepareResult {
     source_path: String,
     processed_path: String,
     changed: bool,
     action: String,
+    /// 源文件的修改时间（unix 毫秒）与大小，随结果一起返回。
+    /// 前端拿它给「整本书解析结果」做缓存键：同窗口切标签会让阅读页重新
+    /// 挂载，没有这两个值就只能每次重新 fetch 并解析全书（几百章、几秒）。
+    source_modified_ms: u64,
+    source_size: u64,
+}
+
+/// 构造结果时顺便带上源文件的 mtime / 大小（见上面两个字段的用途）
+fn epub_prepare_result(
+    source: &Path,
+    processed: String,
+    changed: bool,
+    action: impl Into<String>,
+) -> EpubPrepareResult {
+    let (source_modified_ms, source_size) = prepare_cache_key(source)
+        .map(|(_, stamp, len)| (stamp, len))
+        .unwrap_or((0, 0));
+    EpubPrepareResult {
+        source_path: source.to_string_lossy().to_string(),
+        processed_path: processed,
+        changed,
+        action: action.into(),
+        source_modified_ms,
+        source_size,
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -840,6 +865,27 @@ pub(crate) struct EpubPrepareResult {
 pub(crate) struct EpubPrepareStageEvent {
     epub_path: String,
     message: String,
+}
+
+/// 预处理结果缓存：(路径, 修改时间, 大小) → 上次算出的结论。
+///
+/// prepare 要读整个 EPUB（十几 MB 到上百 MB）并扫一遍 ZIP 目录，耗时几百
+/// 毫秒起。同窗口模式切标签会让页面重新挂载、重新调一次 prepare，
+/// 每次都重算等于每切一次标签就卡一下。文件没被改过时直接返回上次结论。
+/// 修改时间和大小都参与比对：只比时间的话，同一秒内改写的文件会被误判。
+type PrepareCacheKey = (String, u64, u64);
+static PREPARE_CACHE: once_cell::sync::Lazy<
+    std::sync::Mutex<HashMap<PrepareCacheKey, EpubPrepareResult>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+fn prepare_cache_key(source: &Path) -> Option<PrepareCacheKey> {
+    let meta = fs::metadata(source).ok()?;
+    let modified = meta.modified().ok()?;
+    let stamp = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as u64;
+    Some((source.to_string_lossy().to_string(), stamp, meta.len()))
 }
 
 fn emit_epub_prepare_stage(app: &tauri::AppHandle, epub_path: &Path, message: impl Into<String>) {
@@ -853,7 +899,18 @@ fn emit_epub_prepare_stage(app: &tauri::AppHandle, epub_path: &Path, message: im
 }
 
 #[tauri::command]
-pub fn prepare_epub_for_open(
+pub async fn prepare_epub_for_open(
+    app: tauri::AppHandle,
+    epub_path: String,
+) -> Result<EpubPrepareResult, String> {
+    // 这个命令会读整个 EPUB（几十 MB）并扫全部 ZIP 条目，同步命令会占住
+    // 主线程，界面在打开图书时直接冻住。丢到阻塞线程池里跑。
+    tauri::async_runtime::spawn_blocking(move || prepare_epub_for_open_impl(app, epub_path))
+        .await
+        .map_err(|e| format!("准备 EPUB 任务失败: {}", e))?
+}
+
+fn prepare_epub_for_open_impl(
     app: tauri::AppHandle,
     epub_path: String,
 ) -> Result<EpubPrepareResult, String> {
@@ -862,21 +919,44 @@ pub fn prepare_epub_for_open(
         return Err(format!("文件不存在: {}", epub_path));
     }
 
-    emit_epub_prepare_stage(&app, &source, "准备 EPUB 文件");
+    // 文件没变过就直接复用上次结论（见 PREPARE_CACHE 注释）
+    let cache_key = prepare_cache_key(&source);
+    if let Some(key) = cache_key.clone() {
+        if let Ok(cache) = PREPARE_CACHE.lock() {
+            if let Some(hit) = cache.get(&key) {
+                return Ok(hit.clone());
+            }
+        }
+    }
+
+    let result = prepare_epub_for_open_uncached(&app, &source)?;
+    if let Some(key) = cache_key {
+        if let Ok(mut cache) = PREPARE_CACHE.lock() {
+            cache.insert(key, result.clone());
+        }
+    }
+    Ok(result)
+}
+
+fn prepare_epub_for_open_uncached(
+    app: &tauri::AppHandle,
+    source: &Path,
+) -> Result<EpubPrepareResult, String> {
+    emit_epub_prepare_stage(app, source, "准备 EPUB 文件");
 
     // Case 1: valid ZIP/EPUB, only repair pseudo-encryption bit if needed.
-    if is_zip_archive_path(&source) {
-        emit_epub_prepare_stage(&app, &source, "读取 EPUB 文件");
-        let mut bytes = read_epub_bytes(&source)?;
-        emit_epub_prepare_stage(&app, &source, "检查伪加密标记");
+    if is_zip_archive_path(source) {
+        emit_epub_prepare_stage(app, source, "读取 EPUB 文件");
+        let mut bytes = read_epub_bytes(source)?;
+        emit_epub_prepare_stage(app, source, "检查伪加密标记");
         let fixed_encryption_flag = clear_zip_encryption_flags(&mut bytes);
 
         let rebuilt = {
             let mut progress = |message: &str| {
-                emit_epub_prepare_stage(&app, &source, message);
+                emit_epub_prepare_stage(app, source, message);
             };
             rebuild_epub_with_sanitized_names_from_bytes_with_progress(
-                &source,
+                source,
                 &bytes,
                 "_deobf",
                 &mut progress,
@@ -884,41 +964,42 @@ pub fn prepare_epub_for_open(
         };
 
         if let Some(out_path) = rebuilt {
-            return Ok(EpubPrepareResult {
-                source_path: source.to_string_lossy().to_string(),
-                processed_path: out_path.to_string_lossy().to_string(),
-                changed: true,
-                action: if fixed_encryption_flag {
-                    "已自动解除伪加密并修复文件名混淆".to_string()
-                } else {
-                    "已自动修复文件名混淆".to_string()
-                },
-            });
+            let action = if fixed_encryption_flag {
+                "已自动解除伪加密并修复文件名混淆"
+            } else {
+                "已自动修复文件名混淆"
+            };
+            return Ok(epub_prepare_result(
+                source,
+                out_path.to_string_lossy().to_string(),
+                true,
+                action,
+            ));
         }
 
         if fixed_encryption_flag {
-            emit_epub_prepare_stage(&app, &source, "写出伪加密修复文件");
-            let out_path = build_processed_epub_path(&source, "_decrypted");
+            emit_epub_prepare_stage(app, source, "写出伪加密修复文件");
+            let out_path = build_processed_epub_path(source, "_decrypted");
             fs::write(&out_path, &bytes).map_err(|e| format!("写入修复文件失败: {}", e))?;
-            return Ok(EpubPrepareResult {
-                source_path: source.to_string_lossy().to_string(),
-                processed_path: out_path.to_string_lossy().to_string(),
-                changed: true,
-                action: "已自动解除伪加密".to_string(),
-            });
+            return Ok(epub_prepare_result(
+                source,
+                out_path.to_string_lossy().to_string(),
+                true,
+                "已自动解除伪加密".to_string(),
+            ));
         }
-        emit_epub_prepare_stage(&app, &source, "EPUB 无需预处理");
-        return Ok(EpubPrepareResult {
-            source_path: source.to_string_lossy().to_string(),
-            processed_path: source.to_string_lossy().to_string(),
-            changed: false,
-            action: "无需处理".to_string(),
-        });
+        emit_epub_prepare_stage(app, source, "EPUB 无需预处理");
+        return Ok(epub_prepare_result(
+            source,
+            source.to_string_lossy().to_string(),
+            false,
+            "无需处理".to_string(),
+        ));
     }
 
     // Case 2: try simple XOR obfuscation recovery.
-    emit_epub_prepare_stage(&app, &source, "检测非标准混淆格式");
-    let bytes = read_epub_bytes(&source)?;
+    emit_epub_prepare_stage(app, source, "检测非标准混淆格式");
+    let bytes = read_epub_bytes(source)?;
     let mut candidate_keys: Vec<u8> = vec![0xFF, 0xA5, 0x5A];
     if bytes.len() >= 4 {
         let k0 = bytes[0] ^ 0x50;
@@ -930,9 +1011,9 @@ pub fn prepare_epub_for_open(
     }
 
     for key in candidate_keys {
-        emit_epub_prepare_stage(&app, &source, "尝试 XOR 解混淆");
+        emit_epub_prepare_stage(app, source, "尝试 XOR 解混淆");
         let mut decoded = xor_bytes(&bytes, key);
-        emit_epub_prepare_stage(&app, &source, "检查解混淆后的 ZIP 标记");
+        emit_epub_prepare_stage(app, source, "检查解混淆后的 ZIP 标记");
         let fixed_encryption_flag = clear_zip_encryption_flags(&mut decoded);
         if is_zip_archive_bytes(&decoded) {
             let suffix = if fixed_encryption_flag {
@@ -943,10 +1024,10 @@ pub fn prepare_epub_for_open(
 
             let rebuilt = {
                 let mut progress = |message: &str| {
-                    emit_epub_prepare_stage(&app, &source, message);
+                    emit_epub_prepare_stage(app, source, message);
                 };
                 rebuild_epub_with_sanitized_names_from_bytes_with_progress(
-                    &source,
+                    source,
                     &decoded,
                     suffix,
                     &mut progress,
@@ -954,23 +1035,23 @@ pub fn prepare_epub_for_open(
             };
 
             if let Some(out_path) = rebuilt {
-                return Ok(EpubPrepareResult {
-                    source_path: source.to_string_lossy().to_string(),
-                    processed_path: out_path.to_string_lossy().to_string(),
-                    changed: true,
-                    action: "已自动解混淆并修复可读格式".to_string(),
-                });
+                return Ok(epub_prepare_result(
+                    source,
+                    out_path.to_string_lossy().to_string(),
+                    true,
+                    "已自动解混淆并修复可读格式".to_string(),
+                ));
             }
 
-            emit_epub_prepare_stage(&app, &source, "写出解混淆后的 EPUB");
+            emit_epub_prepare_stage(app, source, "写出解混淆后的 EPUB");
             let out_path = build_processed_epub_path(&source, suffix);
             fs::write(&out_path, &decoded).map_err(|e| format!("写入解混淆文件失败: {}", e))?;
-            return Ok(EpubPrepareResult {
-                source_path: source.to_string_lossy().to_string(),
-                processed_path: out_path.to_string_lossy().to_string(),
-                changed: true,
-                action: "已自动解混淆并修复可读格式".to_string(),
-            });
+            return Ok(epub_prepare_result(
+                source,
+                out_path.to_string_lossy().to_string(),
+                true,
+                "已自动解混淆并修复可读格式".to_string(),
+            ));
         }
     }
 

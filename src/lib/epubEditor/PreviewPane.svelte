@@ -13,6 +13,7 @@
         type PreviewClickPayload,
         type RevealMode,
     } from "./previewSync";
+    import { applyPaperTheme } from "$lib/epubPaperTheme";
 
     let {
         content,
@@ -20,6 +21,7 @@
         hasSelectedFile,
         onPreviewClick,
         showScrollbar = false,
+        darkPaper = false,
     }: {
         content: string;
         errors: ValidationError[];
@@ -31,6 +33,11 @@
          * 默认隐藏：滚动条会占掉右侧 8px 的槽位，书页就不在预览列正中
          */
         showScrollbar?: boolean;
+        /**
+         * 书页是否按深色主题渲染。由页面按 uiTheme 传入，
+         * 组件自己不读设置 —— 这样切主题时父级重算一次就够了。
+         */
+        darkPaper?: boolean;
     } = $props();
 
     let previewIframe: HTMLIFrameElement | null = $state(null);
@@ -241,9 +248,17 @@
         const iframeDoc = previewIframe?.contentDocument;
         if (!iframeDoc) return;
         installPreviewChrome(iframeDoc);
+        applyPaperTheme(iframeDoc, darkPaper);
         bindFootnotePopups(iframeDoc);
         bindPreviewClickHandler();
     }
+
+    // 主题在预览已经渲染完之后才切换时，重新给这篇文档上色
+    $effect(() => {
+        const dark = darkPaper;
+        const iframeDoc = previewIframe?.contentDocument;
+        if (iframeDoc) applyPaperTheme(iframeDoc, dark);
+    });
 
     $effect(() => {
         if (previewIframe && content) {
@@ -275,6 +290,7 @@
 <div
     class="preview-container"
     class:hide-scrollbar={!showScrollbar}
+    class:dark-paper={darkPaper}
     bind:this={previewContainer}
     use:trackContainerWidth
 >
@@ -417,6 +433,7 @@
         max-height: none;
         background: var(--color-surface);
         border: 1px solid var(--color-border);
+        /* 深色书页时外框同色（见 .dark-paper 规则），这里只留兜底 */
         box-sizing: border-box; /* Prevent border from adding width */
         box-shadow: var(--shadow-sm); /* Shadow for depth */
         overflow: hidden; /* Hide overflow outside the "phone screen" */
@@ -441,6 +458,17 @@
         padding: 0;
         display: block;
         flex-shrink: 0;
+    }
+
+    /* 深色书页：外框和 iframe 垫底都换成纸色，否则书页四周会露一圈白。
+       !important 是必需的：app.css 里有一条全局
+       `:root[data-theme="dark"] ... .mobile-frame { background: surface !important }`
+       （给其它预览用），不带 !important 压不住它，手机框会刷回 surface，
+       书页外圈就多出一圈深灰，看着像没对齐 */
+    :root[data-theme="dark"] .preview-container.dark-paper,
+    :root[data-theme="dark"] .preview-container.dark-paper .mobile-frame,
+    :root[data-theme="dark"] .preview-container.dark-paper iframe {
+        background: var(--color-canvas, #191e26) !important;
     }
 
     .placeholder {
@@ -474,11 +502,13 @@
     }
 
     /* Modern UI overrides */
+    /* 预览槽的底色走 token：写死浅色时深色主题下会在书页两侧
+       露出一圈发白的板，看起来像没切主题 */
     .preview-container {
         background: linear-gradient(
             180deg,
-            rgba(231, 240, 247, 0.88),
-            rgba(239, 245, 249, 0.94)
+            var(--color-surface-soft),
+            var(--color-hover)
         );
         padding: 12px;
         box-sizing: border-box;
@@ -518,7 +548,7 @@
     }
 
     ::-webkit-scrollbar-track {
-        background: rgba(226, 235, 244, 0.72);
+        background: var(--color-surface-soft);
     }
 
     ::-webkit-scrollbar-thumb {

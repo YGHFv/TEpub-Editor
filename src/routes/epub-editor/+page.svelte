@@ -1,7 +1,10 @@
 <script lang="ts">
     import { onMount, tick } from "svelte";
     import { platform, type PlatformUnlisten } from "$lib/platform";
+    import { base } from "$app/paths";
+    import { goto } from "$app/navigation";
     import { page } from "$app/stores";
+    import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
     import TocNode from "$lib/TocNode.svelte";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
@@ -182,9 +185,23 @@
         // getCurrentWindow().label 判断等价）。web 端 label 为 null，标签页
         // window.close() 对非脚本打开的页面是 no-op，回首页是最接近
         // "关闭编辑器"的真实降级。
+        // 同窗口模式（默认）下没有独立窗口可销毁：标签栏里还留着书库就回书库，
+        // 否则回工具箱。
         const label = await platform.getCurrentWindowLabel();
+        if (!usesMultiWindow()) {
+            // 关掉编辑器时把自己的标签一并摘掉，否则回到上一页后标签栏
+            // 里还挂着这本已经关掉的书；优先回书库，其它情况回最近一个标签
+            const remaining = closeCurrentTab();
+            const hasLibrary = remaining?.id.startsWith("/library");
+            // goto 走 SPA 导航：location.href 会整页重载，标签栏跟着闪一下，
+            // 且 remaining.href 已含 base 前缀，再拼一次会把路径拼坏
+            await goto(
+                hasLibrary ? `${base}/library` : remaining?.href || `${base}/`,
+            );
+            return;
+        }
         if (label === "main" || label === null) {
-            window.location.href = "/";
+            window.location.href = `${base}/`;
             return;
         }
         await platform.getCurrentWindow().destroy();
@@ -4322,6 +4339,7 @@ document.addEventListener("click", function (event) {
                         hasSelectedFile={!!selectedFile}
                         onPreviewClick={handlePreviewClick}
                         showScrollbar={appSettings.previewScrollbar}
+                        darkPaper={appSettings.uiTheme === "dark"}
                     />
                 </div>
                 <div class="preview-slot" class:is-hidden={activeTab !== "toc"}>

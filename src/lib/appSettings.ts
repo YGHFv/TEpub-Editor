@@ -52,6 +52,9 @@ export interface GlobalAppSettings {
   /** EPUB 编辑/阅读预览是否显示滚动条。默认隐藏：滚动条会占掉右侧 8px，
       书页就不在预览列正中，观感很别扭 */
   previewScrollbar: boolean;
+  /** 二级页面（书库/编辑器/工具）是否各自开新窗口。默认关闭：
+      关闭时在主窗口内跳转，顶部用标签栏切换；打开才回到多窗口行为 */
+  secondaryWindows: boolean;
   txtEditorCloseAction: "exit" | "library";
   aiProofing: AiProofingConfig;
   aiProviders: AiProviderConfig[];
@@ -106,6 +109,7 @@ export const DEFAULT_APP_SETTINGS: GlobalAppSettings = {
   closeLibraryOnToolboxOpen: true,
   closeToolboxOnToolOpen: true,
   previewScrollbar: false,
+  secondaryWindows: false,
   txtEditorCloseAction: "library",
   aiProofing: { ...DEFAULT_AI_PROOFING },
   aiProviders: [],
@@ -276,6 +280,8 @@ export function normalizeAppSettings(
         : true,
     previewScrollbar:
       typeof raw.previewScrollbar === "boolean" ? raw.previewScrollbar : false,
+    secondaryWindows:
+      typeof raw.secondaryWindows === "boolean" ? raw.secondaryWindows : false,
     txtEditorCloseAction: isCloseAction(raw.txtEditorCloseAction)
       ? raw.txtEditorCloseAction
       : "library",
@@ -372,14 +378,49 @@ export function isPreviewScrollbarEnabled(): boolean {
   return loadAppSettings().previewScrollbar === true;
 }
 
+/** 「使用多窗口打开二级页面」，默认关闭（同窗口 + 顶部标签栏） */
+export function usesMultiWindow() {
+  return loadAppSettings().secondaryWindows === true;
+}
+
+/** 各主题下的窗口/画布底色，供 <meta theme-color> 与原生标题栏同步使用 */
+export const THEME_CANVAS_COLORS: Record<UiTheme, string> = {
+  light: "#eef4f8",
+  dark: "#191e26",
+};
+
 export function applyTheme(theme: UiTheme) {
   if (typeof document === "undefined") return;
   const normalized = migrateUiTheme(theme) ?? "light";
   document.documentElement.setAttribute("data-theme", normalized);
+  // color-scheme 让原生控件（滚动条、下拉、表单）一起跟着切，
+  // 否则深色皮肤下 WebView 仍按浅色画默认控件
+  document.documentElement.style.colorScheme = normalized;
   const meta = document.querySelector('meta[name="theme-color"]');
-  const colors: Record<UiTheme, string> = {
-    light: "#eef4f8",
-    dark: "#151b23",
-  };
-  if (meta) meta.setAttribute("content", colors[normalized]);
+  if (meta) meta.setAttribute("content", THEME_CANVAS_COLORS[normalized]);
+  // app.html 的内联脚本在首帧前就设过内联底色；这里接管后要撤掉，
+  // 否则以后切回浅色时那层内联深色还压在上面（内联样式优先级高于 app.css）
+  document.documentElement.style.removeProperty("background");
+  void syncNativeWindowTheme(normalized);
+}
+
+/**
+ * Tauri 窗口的标题栏由系统绘制，跟 CSS 主题无关。
+ * 切到深色时要显式告诉 WebView2/AppKit，否则顶部标题行永远是浅色
+ * （截图里深色界面顶着一整条白条就是这个原因）。
+ */
+async function syncNativeWindowTheme(theme: UiTheme) {
+  try {
+    // 动态 import：web 构建里不该把 tauri 模块带进来
+    const { isTauriRuntime } = await import("$lib/webAccount");
+    if (!isTauriRuntime()) return;
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    await win.setTheme(theme);
+    // 原生标题栏重绘有一帧延迟，同帧再刷一次背景色兜底
+    await win.setBackgroundColor?.(THEME_CANVAS_COLORS[theme]);
+  } catch (error) {
+    // 权限未授予或不是 Tauri 运行时：只影响标题栏配色，不阻断主题切换
+    console.warn("同步原生窗口主题失败:", error);
+  }
 }

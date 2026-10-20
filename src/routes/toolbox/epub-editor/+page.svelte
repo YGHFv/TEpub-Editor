@@ -20,6 +20,7 @@
         revealTextInPreview,
     } from "$lib/epubEditor/previewSync";
     import { hasUnsavedEpubChanges } from "$lib/unsavedChanges";
+    import { paperBackground, paperTextColor } from "$lib/epubPaperTheme";
     import { loadAppSettings, type GlobalAppSettings } from "$lib/appSettings";
     import {
         EPUB_FIND_HISTORY_KEY,
@@ -734,7 +735,14 @@
         // 编辑器常驻在独立窗口/标签页里，改完设置回来要立刻生效。
         // 自定义事件只在本窗口冒泡，跨窗口改 localStorage 只有 storage 事件会送达
         const syncSettings = () => {
-            appSettings = loadAppSettings();
+            const next = loadAppSettings();
+            const themeChanged = next.uiTheme !== appSettings.uiTheme;
+            appSettings = next;
+            // 预览文档的纸色是在生成 srcdoc 时写死的，主题一变必须重算，
+            // 否则深色界面里会留着一整页浅色书页
+            if (themeChanged && previewHtml && selectedFile?.kind === "xhtml") {
+                void refreshPreviewFromEditor();
+            }
         };
         window.addEventListener("tepub-settings-updated", syncSettings);
         window.addEventListener("storage", syncSettings);
@@ -1437,8 +1445,13 @@
         const bodyFontSize = readerMode
             ? `${readerPreviewFontSize}px`
             : "inherit";
+        // 底色在生成 srcdoc 时按当前主题写死：交给运行时的 applyPaperTheme
+        // 去改已经晚了，iframe 会先按浅色画一帧（切页面时整屏闪白）
+        const dark = appSettings.uiTheme === "dark";
+        const paperBg = paperBackground(dark);
+        const paperText = paperTextColor(dark);
         style.textContent = `
-      html, body { margin: 0; padding: 0; background: #fffdf9; color: #172033; }
+      html, body { margin: 0; padding: 0; background: ${paperBg}; color: ${paperText}; }
       html { overflow-x: hidden; }
       body { box-sizing: border-box; max-width: ${bodyMaxWidth}; margin: 0 auto; padding: ${bodyPadding}; font-size: ${bodyFontSize}; line-height: 1.8; overflow-x: hidden; }
       img, svg, video { max-width: 100%; height: auto; }
@@ -1448,7 +1461,7 @@
       html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; }
       ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
       .tepub-footnote-backdrop { position: fixed; inset: 0; z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background: rgba(15, 23, 42, .72); }
-      .tepub-footnote-dialog { position: relative; width: min(90vw, 720px); max-height: 88vh; overflow: auto; padding: 16px; box-sizing: border-box; border-radius: 8px; background: #fff; box-shadow: 0 16px 48px rgba(0, 0, 0, .32); }
+      .tepub-footnote-dialog { position: relative; width: min(90vw, 720px); max-height: 88vh; overflow: auto; padding: 16px; box-sizing: border-box; border-radius: 8px; background: ${dark ? paperBg : "#fff"}; color: ${paperText}; box-shadow: 0 16px 48px rgba(0, 0, 0, .32); }
       .tepub-footnote-dialog img { display: block; max-width: 100%; max-height: calc(88vh - 40px); width: auto; height: auto; margin: 0 auto; }
       .tepub-footnote-dialog figure { margin: 0; }
     `;
@@ -2490,6 +2503,7 @@
                     <div class="preview-stack">
                         <div
                             class="preview-body"
+                            class:dark-paper={appSettings.uiTheme === "dark"}
                             class:hide-scrollbar={!appSettings.previewScrollbar}
                             class:is-hidden={!readerMode &&
                                 rightTab !== "preview"}
@@ -3455,6 +3469,13 @@
         background: var(--color-surface);
         box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
         overflow: hidden;
+    }
+
+    /* 书页外框跟着纸色走：iframe 底色已经是深色了，
+       外框还留浅色会在书页四周镶一圈白边 */
+    .preview-body.dark-paper .mobile-frame,
+    .preview-body.dark-paper .chapter-preview {
+        background: var(--color-canvas, #191e26);
     }
 
     .reader-frame {

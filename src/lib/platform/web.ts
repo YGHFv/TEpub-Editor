@@ -229,6 +229,17 @@ export function createWebPlatform(): PlatformAdapter {
       if (typeof window !== "undefined") window.close();
     },
 
+    // 浏览器没有原生窗口边框：这些调用没有对应语义，返回 no-op 让调用方
+    // 不必到处判断运行时（自绘标题行在 web 端不画窗口按钮）
+    async minimizeCurrentWindow() {},
+    async toggleMaximizeCurrentWindow() {},
+    async isCurrentWindowMaximized() {
+      return false;
+    },
+    async onCurrentWindowResized() {
+      return () => {};
+    },
+
     async createWebviewWindow(_label, url) {
       const target =
         typeof window === "undefined"

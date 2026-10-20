@@ -407,11 +407,22 @@
         return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     }
 
+    /**
+     * 打开工具页。
+     *
+     * 设置「使用多窗口打开二级页面」关闭（默认）时直接在当前窗口跳转，
+     * 顶部标签栏负责切回；打开时才建独立窗口。返回 null 表示走了跳转，
+     * 调用方不要再对窗口做 show/hide。
+     */
     async function createToolWindow(
         label: string,
         options: Record<string, any> & { url: string },
     ) {
         const { url, ...windowOptions } = options;
+        if (!appSettings.secondaryWindows) {
+            await goto(url);
+            return null;
+        }
         return platform.createWebviewWindow(label, url, windowOptions);
     }
 
@@ -581,7 +592,11 @@
         await goto(appPath("/library"));
     }
 
-    async function hideToolboxHomeWhileOpen(childWindow: PlatformWindowHandle) {
+    async function hideToolboxHomeWhileOpen(
+        childWindow: PlatformWindowHandle | null,
+    ) {
+        // 同窗口跳转（默认）没有子窗口可等，页面已经切走，不需要隐藏主页
+        if (!childWindow) return;
         if (appSettings.closeToolboxOnToolOpen === false) return;
         const toolboxWindow = platform.getCurrentWindow();
         try {
@@ -921,22 +936,62 @@
         saveGlobalSettings();
     }
 
+    /**
+     * 刚点「添加」还没填内容的新规则。
+     *
+     * 不能直接塞进 customRegexRules 再保存：normalizeTocRegexRules 会丢掉
+     * pattern 为空的行（空正则会匹配每一行，扫描目录时会把全书切成章），
+     * 结果就是点一下行立刻消失。所以空行只留在内存里，等用户敲进第一个
+     * 字符再并入正式列表并落盘。
+     */
+    let draftRegexRules: TocRegexRule[] = [];
+    $: displayRegexRules = [
+        ...appSettings.customRegexRules,
+        ...draftRegexRules,
+    ];
+
     function updateTocRegexRule(index: number, patch: Partial<TocRegexRule>) {
-        appSettings.customRegexRules = appSettings.customRegexRules.map(
-            (rule, i) => (i === index ? { ...rule, ...patch } : rule),
+        const persistedCount = appSettings.customRegexRules.length;
+        if (index < persistedCount) {
+            appSettings.customRegexRules = appSettings.customRegexRules.map(
+                (rule, i) => (i === index ? { ...rule, ...patch } : rule),
+            );
+            saveGlobalSettings();
+            return;
+        }
+        const draftIndex = index - persistedCount;
+        const next = draftRegexRules.map((rule, i) =>
+            i === draftIndex ? { ...rule, ...patch } : rule,
         );
-        saveGlobalSettings();
+        const draft = next[draftIndex];
+        if (draft && draft.pattern.trim()) {
+            // 有内容了：并入正式列表（保存时才真正生效）
+            appSettings.customRegexRules = [
+                ...appSettings.customRegexRules,
+                draft,
+            ];
+            draftRegexRules = next.filter((_, i) => i !== draftIndex);
+            saveGlobalSettings();
+            return;
+        }
+        draftRegexRules = next;
     }
 
     function addTocRegexRule(level: number) {
-        appSettings.customRegexRules = [
-            ...appSettings.customRegexRules,
+        draftRegexRules = [
+            ...draftRegexRules,
             { enabled: true, level: level <= 1 ? 1 : 3, pattern: "" },
         ];
-        saveGlobalSettings();
     }
 
     function removeTocRegexRule(index: number) {
+        const persistedCount = appSettings.customRegexRules.length;
+        if (index >= persistedCount) {
+            draftRegexRules = draftRegexRules.filter(
+                (_, i) => i !== index - persistedCount,
+            );
+            return;
+        }
         appSettings.customRegexRules = appSettings.customRegexRules.filter(
             (_, i) => i !== index,
         );
@@ -944,6 +999,7 @@
     }
 
     function resetTocRegexRules() {
+        draftRegexRules = [];
         appSettings.customRegexRules = DEFAULT_TOC_REGEX_RULES.map((rule) => ({
             ...rule,
         }));
@@ -1394,6 +1450,19 @@
                         />
                     </div>
                     <label class="set-row toggle-row">
+                        <span class="set-label"
+                            >使用多窗口打开二级页面
+                            <small
+                                >关闭时在当前窗口内切换，顶部用标签栏在页面间跳转</small
+                            ></span
+                        >
+                        <input
+                            type="checkbox"
+                            bind:checked={appSettings.secondaryWindows}
+                            on:change={saveGlobalSettings}
+                        />
+                    </label>
+                    <label class="set-row toggle-row">
                         <span class="set-label">打开工具时隐藏工具箱主页</span>
                         <input
                             type="checkbox"
@@ -1483,7 +1552,7 @@
                         >
                     </div>
                     <div class="toolbox-regex-list">
-                        {#each appSettings.customRegexRules as rule, index}
+                        {#each displayRegexRules as rule, index}
                             <div class="toolbox-regex-row">
                                 <label
                                     class="toolbox-regex-enabled"

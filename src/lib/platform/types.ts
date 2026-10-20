@@ -84,6 +84,14 @@ export interface PlatformAdapter {
     handler: (pos: { x: number; y: number }) => void,
   ): Promise<PlatformUnlisten>;
   closeCurrentWindow(): Promise<void>;
+  // ===== 自绘标题栏（decorations: false 的窗口）=====
+  // 窗口去掉系统边框后，拖动由 data-tauri-drag-region 处理，但最小化、
+  // 最大化、关闭这些按钮要自己接回来。web 端实现为 no-op。
+  minimizeCurrentWindow(): Promise<void>;
+  toggleMaximizeCurrentWindow(): Promise<void>;
+  isCurrentWindowMaximized(): Promise<boolean>;
+  /** 窗口尺寸/最大化状态变化（用于同步自绘按钮的图标） */
+  onCurrentWindowResized(handler: () => void): Promise<PlatformUnlisten>;
   createWebviewWindow(
     label: string,
     url: string,

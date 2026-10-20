@@ -392,7 +392,8 @@
         overflow-y: auto;
         padding: 12px;
         border-right: 1px solid var(--color-border);
-        background: rgba(248, 250, 252, 0.9);
+        /* 用 token 而不是固定的近白色，深色主题下才不会整条侧栏发白 */
+        background: var(--color-surface-soft);
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -417,9 +418,16 @@
     }
 
     .style-block-nav button.active {
-        border-color: rgba(22, 119, 184, 0.24);
+        /* 描边同样跟着块强调色走，但压到文字色里，避免深色主题下固定蓝边突兀 */
+        border-color: color-mix(
+            in srgb,
+            var(--block-accent) 34%,
+            var(--color-border)
+        );
         background: var(--color-surface);
-        color: var(--block-accent);
+        /* 强调色由各块自带（部分是很暗的棕/绿），和当前主题文字色混合后
+           浅色下足够深、深色下足够亮，两种主题都能读清 */
+        color: color-mix(in srgb, var(--block-accent) 78%, var(--color-text));
         box-shadow: var(--shadow-sm);
     }
 
@@ -453,7 +461,8 @@
         overflow: hidden;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: rgba(250, 251, 255, 0.9);
+        /* 原先写死的浅紫白，深色主题下会变成一块亮色卡片 */
+        background: var(--color-surface);
         box-shadow: var(--shadow-xs);
         min-height: max-content;
     }
@@ -470,7 +479,8 @@
 
     .style-block-head strong {
         display: block;
-        color: var(--block-accent);
+        /* 同 nav.active：块强调色混入主题文字色，保证深色主题下暗色 accent 不至于看不清 */
+        color: color-mix(in srgb, var(--block-accent) 78%, var(--color-text));
         font-family: Georgia, "Times New Roman", serif;
         font-size: 0.98rem;
         letter-spacing: 0;
@@ -488,8 +498,10 @@
     .style-block-head code {
         padding: 5px 8px;
         border-radius: var(--radius-md);
-        background: rgba(166, 120, 29, 0.1);
-        color: var(--block-accent);
+        /* 原值 #a6781d 正是第一个块的 accent，说明底色本意是「强调色的淡染」，
+           因此按 accent 混合透明色，而不是固定成某个 token 的色调 */
+        background: color-mix(in srgb, var(--block-accent) 12%, transparent);
+        color: color-mix(in srgb, var(--block-accent) 78%, var(--color-text));
         font-family: Consolas, monospace;
         font-size: 10px;
         display: grid;
@@ -517,7 +529,7 @@
         align-items: center;
         gap: 14px;
         min-height: 50px;
-        border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+        border-bottom: 1px solid var(--color-border);
     }
 
     .style-prop-row:last-child {
@@ -565,7 +577,8 @@
     .style-prop-row input:focus {
         outline: none;
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.16);
+        /* 固定 alpha 的蓝环在深色主题下偏亮，统一走主题 focus-ring */
+        box-shadow: var(--focus-ring);
         background: var(--color-surface);
     }
 
@@ -708,7 +721,11 @@
 
     .style-toolbar-btn-primary {
         border-color: var(--color-accent);
-        background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-teal) 100%);
+        background: linear-gradient(
+            135deg,
+            var(--color-accent) 0%,
+            var(--color-teal) 100%
+        );
         color: var(--color-surface);
         box-shadow: none;
     }
@@ -752,7 +769,7 @@
 
     .style-source-editor textarea:focus {
         border-color: var(--color-accent);
-        box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.16);
+        box-shadow: var(--focus-ring);
     }
 
     /* Modern UI overrides */
@@ -761,7 +778,11 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
+        background: linear-gradient(
+            180deg,
+            var(--color-surface),
+            var(--color-surface-soft)
+        );
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;

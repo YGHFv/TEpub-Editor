@@ -5,6 +5,7 @@ import {
   loadAppSettings,
   normalizeAppSettings,
   saveAppSettings,
+  usesMultiWindow,
 } from "./appSettings";
 
 describe("app settings persistence", () => {
@@ -59,6 +60,25 @@ describe("preview scrollbar setting", () => {
     expect(normalizeAppSettings({ previewScrollbar: 1 }).previewScrollbar).toBe(
       false,
     );
+  });
+});
+
+describe("multi-window secondary pages setting", () => {
+  afterEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("defaults to same-window tab mode", () => {
+    expect(DEFAULT_APP_SETTINGS.secondaryWindows).toBe(false);
+    expect(normalizeAppSettings({}).secondaryWindows).toBe(false);
+    expect(usesMultiWindow()).toBe(false);
+  });
+
+  it("keeps an explicit true after save and reload", () => {
+    saveAppSettings({ ...loadAppSettings(), secondaryWindows: true });
+    expect(loadAppSettings().secondaryWindows).toBe(true);
+    expect(usesMultiWindow()).toBe(true);
   });
 });
 // @vitest-environment happy-dom

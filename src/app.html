@@ -4,11 +4,55 @@
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- 浏览器/WebView 的界面条跟着主题走（web 端顶栏、移动端状态栏） -->
+    <meta name="theme-color" content="#eef4f8" />
     <script>
       (function () {
         try {
-          var isWeb =
-            location.protocol === "http:" || location.protocol === "https:";
+          // 判断运行时不能只看协议：Tauri 在 Windows 上是 http://tauri.localhost，
+          // 开发时是 http://localhost:1420，都满足 http:。看协议会把整个桌面端
+          // 误当成 web，进而去读 web 的账号/访客设置（那里通常为空），
+          // 首帧永远是浅色，等 Svelte 挂载后才转深色 —— 这就是「先闪白再变深」。
+          // 与 src/lib/webAccount.ts 的 isTauriRuntime() 保持一致。
+          var isTauri =
+            location.protocol === "tauri:" ||
+            !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
+          var isWeb = !isTauri;
+          // 主题必须在首帧之前落到 <html> 上：等 Svelte mount 之后再切，
+          // 深色用户每次打开二级页面都会先看到一整屏浅色底（闪白）。
+          // 下面这段读取规则与 src/lib/webAccount.ts 的 readScopedSettingsRaw
+          // 一一对应，内联脚本无法 import，改动必须两处同步。
+          var raw = null;
+          function parse(value) {
+            try {
+              return value ? JSON.parse(value) : null;
+            } catch (error) {
+              return null;
+            }
+          }
+          if (isWeb) {
+            var auth = parse(localStorage.getItem("tepub-web-auth"));
+            raw =
+              auth && auth.username
+                ? parse(
+                    localStorage.getItem(
+                      "tepub-web-account-settings:" +
+                        String(auth.username).toLowerCase(),
+                    ),
+                  )
+                : parse(sessionStorage.getItem("tepub-web-guest-settings"));
+          } else {
+            raw = parse(localStorage.getItem("app-settings"));
+          }
+          var theme = raw && raw.uiTheme;
+          if (theme === "dark") {
+            document.documentElement.dataset.theme = "dark";
+            document.documentElement.style.colorScheme = "dark";
+            // 内联背景色兜住样式表到达前的那一帧，颜色同 --color-canvas
+            document.documentElement.style.background = "#191e26";
+            var themeMeta = document.querySelector('meta[name="theme-color"]');
+            if (themeMeta) themeMeta.setAttribute("content", "#191e26");
+          }
           if (!isWeb) return;
           var queryView = new URLSearchParams(location.search).get("view");
           // 该 key 与 src/lib/storageKeys.ts 的 WEB_VIEW_OVERRIDE_KEY 同值：
@@ -35,11 +79,26 @@
         background: #eef4f8;
       }
 
+      /* 深色兜底：脚本已置 data-theme="dark" 时首帧就是深色底，
+         不用等 app.css 加载完。
+         只设 background-color：app.css 里深色还有一层很淡的渐变，
+         用 background 简写会把那层渐变一并盖掉 */
+      :root[data-theme="dark"] {
+        background-color: #191e26;
+        color-scheme: dark;
+      }
+
       html,
       body {
         margin: 0;
         min-height: 100%;
         background: #eef4f8;
+      }
+
+      /* body 在 html 里，:root[data-theme] 不能直接选到它，
+         要单独写一条，否则深色下首帧仍是 body 的浅色底 */
+      :root[data-theme="dark"] body {
+        background: #191e26;
       }
     </style>
     %sveltekit.head%

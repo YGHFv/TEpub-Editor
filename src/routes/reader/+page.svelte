@@ -1,6 +1,11 @@
 <script lang="ts">
     import { onMount, onDestroy, tick } from "svelte";
     import { platform, type PlatformUnlisten } from "$lib/platform";
+    import { loadAppSettings } from "$lib/appSettings";
+    import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
+    import { bookTextCache, readerCacheKey } from "$lib/readerCache";
+    import { base } from "$app/paths";
+    import { goto } from "$app/navigation";
     import { page } from "$app/stores";
     import ReaderTocNode from "$lib/ReaderTocNode.svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
@@ -83,6 +88,22 @@
     type ThemePreset = "paper" | "eye" | "dark" | "sepia" | "snow";
     let themePreset: ThemePreset = "paper";
     let customBgImage = ""; // 用户自定义背景图（dataURL）。优先级高于 themePreset。
+    /**
+     * 用户是否自己挑过阅读主题。
+     * 没挑过时跟随应用深/浅色（深色界面下默认就是暗夜），
+     * 挑过之后一律尊重用户选择，不再被应用主题覆盖。
+     */
+    let themePresetExplicit = false;
+
+    /** 应用主题是深色且用户没指定过阅读主题 → 用暗夜纸色 */
+    function applyAppThemeDefault() {
+        if (themePresetExplicit) return false;
+        const nextDark = loadAppSettings().uiTheme === "dark";
+        const nextPreset: ThemePreset = nextDark ? "dark" : "paper";
+        if (themePreset === nextPreset) return false;
+        themePreset = nextPreset;
+        return true;
+    }
     $: bodyTextColor = (() => {
         if (bodyTextTone === "theme") return "var(--rd-text)";
         if (bodyTextTone === "black")
@@ -346,6 +367,9 @@
         try {
             // 1) 准备文件（处理混淆 / 加密格式）
             loadingMsg = "正在解压 EPUB…";
+            // 源文件身份（修改时间 + 大小），与解压目录一起构成缓存键
+            let sourceModifiedMs = 0;
+            let sourceSize = 0;
             try {
                 const prepared: any = await platform.invoke(
                     "prepare_epub_for_open",
@@ -355,6 +379,11 @@
                 // snake_case 字段，否则伪加密与文件名混淆修复会被静默跳过。
                 const preparedPath =
                     prepared?.processedPath || prepared?.processed_path;
+                sourceModifiedMs =
+                    prepared?.sourceModifiedMs ??
+                    prepared?.source_modified_ms ??
+                    0;
+                sourceSize = prepared?.sourceSize ?? prepared?.source_size ?? 0;
                 if (preparedPath) {
                     migrateLegacyReaderKeys(preparedPath);
                     epubPath = preparedPath;
@@ -390,6 +419,14 @@
                     e,
                 );
             }
+            // 缓存键必须带上解压目录：章节 HTML 里的图片/CSS 已经是 asset URL，
+            // 换个解压目录（重启后 temp dir 会变）这些 URL 就全失效了
+            const bookKey = readerCacheKey(
+                bookSourcePath || epubPath,
+                sourceModifiedMs,
+                sourceSize,
+                tempDirPath,
+            );
             // 统一用正斜杠拼路径。Windows 上 convertFileSrc 也接受正斜杠，且这样
             // 生成的 asset URL 路径里仍保留 `/` 作为段分隔符 —— 浏览器在解析 EPUB
             // 自带 CSS 里的 `@import url("fonts.css")` / `@font-face src:url("../Fonts/x.ttf")`
@@ -415,23 +452,38 @@
                 return convertFileSrc(`${tempDirSlash}/${cleaned}`, "asset");
             }
 
-            // 文本读取统一接口：优先 fetch，失败回退 IPC（保证健壮性）
+            // 文本读取统一接口：优先内存缓存，其次 fetch，失败回退 IPC
+            //
+            // 同窗口模式切回阅读器标签时页面会重新挂载，整本书要重新读一遍。
+            // 800 章就是 800 多次 asset fetch（实测 2~3 秒），而这批文本在同一
+            // 本书、同一个解压目录里不会变 —— 用 bookKey 缓存起来，第二次进来
+            // 直接命中内存，只剩 DOMParser 与 CSS 处理的成本。
+            const textCache = bookTextCache(bookKey);
             async function fetchText(absInEpub: string): Promise<string> {
+                const cached = textCache.get(absInEpub);
+                if (cached !== undefined) return cached;
+                let text: string | null = null;
                 if (tempDirPath) {
                     try {
                         const resp = await fetch(toAssetUrl(absInEpub));
-                        if (resp.ok) return await resp.text();
-                        console.warn(
-                            `fetch ${absInEpub} 状态 ${resp.status}，回退 IPC`,
-                        );
+                        if (resp.ok) text = await resp.text();
+                        else
+                            console.warn(
+                                `fetch ${absInEpub} 状态 ${resp.status}，回退 IPC`,
+                            );
                     } catch (e) {
                         console.warn(`fetch ${absInEpub} 失败，回退 IPC:`, e);
                     }
                 }
-                return platform.invoke<string>("read_epub_file_content", {
-                    epubPath,
-                    filePath: absInEpub,
-                });
+                if (text === null) {
+                    text = await platform.invoke<string>(
+                        "read_epub_file_content",
+                        { epubPath, filePath: absInEpub },
+                    );
+                }
+                // 读失败时写空串会把后续重试路径也堵死，成功才缓存
+                if (text !== "") textCache.set(absInEpub, text);
+                return text;
             }
 
             // 3) 读取 container.xml -> OPF 路径（解析与 webEpub.ts 共用同一实现）
@@ -2361,6 +2413,7 @@
     // ===== 主题 =====
     function setTheme(p: ThemePreset) {
         themePreset = p;
+        themePresetExplicit = true;
         customBgImage = ""; // 切换到内置主题就清掉自定义图
         persistSettings();
     }
@@ -2409,6 +2462,7 @@
                     bodyTextTone,
                     bodyFontWeight,
                     themePreset,
+                    themePresetExplicit,
                     customBgImage,
                     fullScreenNext,
                     wheelTurnPage,
@@ -2446,7 +2500,19 @@
                 bodyTextTone = s.bodyTextTone;
             if (typeof s.bodyFontWeight === "number")
                 bodyFontWeight = Math.max(350, Math.min(700, s.bodyFontWeight));
-            if (typeof s.themePreset === "string") themePreset = s.themePreset;
+            if (
+                s.themePreset === "paper" ||
+                s.themePreset === "eye" ||
+                s.themePreset === "dark" ||
+                s.themePreset === "sepia" ||
+                s.themePreset === "snow"
+            ) {
+                themePreset = s.themePreset;
+                // 只有"确实点过 chip"才算用户选择。老版本没存这个字段，
+                // 里面的 themePreset 是默认值而不是选择，必须当作未选择，
+                // 否则升级后深色界面打开书仍是米黄纸，这次的跟随主题等于没做
+                themePresetExplicit = s.themePresetExplicit === true;
+            }
             if (typeof s.customBgImage === "string")
                 customBgImage = s.customBgImage;
             if (typeof s.fullScreenNext === "boolean")
@@ -2873,6 +2939,15 @@
     }
 
     async function back() {
+        // 同窗口模式（默认）：没有独立阅读器窗口可关。先摘掉自己的标签，
+        // 再跳到上一个标签 —— 用 history.back() 会把已关闭的页留在标签栏里
+        if (!usesMultiWindow()) {
+            const remaining = closeCurrentTab();
+            // 用 goto 而不是 location.href：后者会整页重载，标签栏闪一下白，
+            // 而且 href 已经带 base 前缀，再拼一次 base 会把路径拼坏
+            await goto(remaining?.href || `${base}/`);
+            return;
+        }
         // 桌面：关闭当前 Tauri 窗口（失败时回退浏览器后退）；Web：直接浏览器后退。
         if (platform.isTauri) {
             try {
@@ -2886,6 +2961,21 @@
     // ===== 生命周期 =====
     onMount(() => {
         loadSettings();
+        // 没存过（或没显式选过）阅读主题时，跟随应用深/浅色：
+        // 深色界面打开书不该直接怼一张米黄纸
+        applyAppThemeDefault();
+        const onAppThemeChanged = () => {
+            if (applyAppThemeDefault()) persistSettings();
+        };
+        window.addEventListener("tepub-settings-updated", onAppThemeChanged);
+        window.addEventListener("storage", onAppThemeChanged);
+        onDestroy(() => {
+            window.removeEventListener(
+                "tepub-settings-updated",
+                onAppThemeChanged,
+            );
+            window.removeEventListener("storage", onAppThemeChanged);
+        });
         epubPath = $page.url.searchParams.get("file") || "";
         if (!epubPath) {
             errorMsg = "未提供 EPUB 文件路径";
@@ -3594,14 +3684,16 @@
         --rd-border: rgba(37, 99, 235, 0.18);
         --rd-tools-bg: var(--color-surface);
     }
+    /* 暗夜主题的底色对齐应用深色画布（--color-canvas 深色值 #191e26）。
+       原先用 #1c1c1c，从墨蓝的界面跳进阅读器会像换了个应用 */
     .rd-app[data-theme="dark"] {
-        --rd-bg: #1c1c1c;
-        --rd-bg-soft: #2a2a2a;
-        --rd-text: #d4d4d4;
-        --rd-text-soft: #888888;
+        --rd-bg: #191e26;
+        --rd-bg-soft: #1e2430;
+        --rd-text: #e2e8f0;
+        --rd-text-soft: #93a1b0;
         --rd-accent: #c69658;
         --rd-border: rgba(198, 150, 88, 0.24);
-        --rd-tools-bg: rgba(28, 28, 28, 0.96);
+        --rd-tools-bg: rgba(20, 24, 29, 0.96);
     }
     .rd-app {
         position: fixed;
