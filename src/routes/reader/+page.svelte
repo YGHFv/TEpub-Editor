@@ -3,10 +3,29 @@
     import { platform, type PlatformUnlisten } from "$lib/platform";
     import { loadAppSettings } from "$lib/appSettings";
     import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
-    import { bookTextCache, readerCacheKey } from "$lib/readerCache";
+    import {
+        bookTextCache,
+        readerCacheKey,
+        readReaderCache,
+        writeReaderCache,
+    } from "$lib/readerCache";
     import { base } from "$app/paths";
     import { goto } from "$app/navigation";
-    import { page } from "$app/stores";
+    import {
+        currentKeepAliveView,
+        onlyWhenActive,
+        titleSetter,
+        viewUrl,
+    } from "$lib/keepAlive/viewState";
+
+    // 保活视图：切走时把整本书的 CSSStyleSheet 从 document 上摘下来，
+    // 切回来再挂上。EPUB 里的 `p { }`、`body { }` 是全局选择器，多个页面
+    // 同时挂载时会污染别人的排版（尤其是编辑器预览）。
+    const keepAliveView = currentKeepAliveView();
+    // getContext 只能在组件初始化时读：把本页地址先取出来，onMount 里直接用
+    const ownUrl = viewUrl();
+    // 保活下 <title> 会被别的页面覆盖，标题统一交给视图宿主登记
+    const setWindowTitle = titleSetter();
     import ReaderTocNode from "$lib/ReaderTocNode.svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import {
@@ -41,6 +60,10 @@
     let bookSourcePath = ""; // 用于进度 / 书签的稳定书源路径
     let bookTitle = "";
     let bookAuthor = "";
+    // 书名解析出来后同步窗口标题。保活下由视图宿主登记 —— 隐藏页面的
+    // <title> 会覆盖当前页的标题，所以不能只靠 svelte:head。
+    // 这个文件是传统 `$:` 语法，不能混用 runes。
+    $: setWindowTitle(bookTitle ? `${bookTitle} · 阅读` : "阅读");
     let spine: SpineEntry[] = [];
     let toc: TocNode[] = []; // 多级目录树（顶层节点列表）
     let chapterStartCols: number[] = []; // 每章首列索引
@@ -317,13 +340,37 @@
         }
     }
 
-    function clearAdoptedChapterStyles() {
-        if (adoptedChapterStyleSheets.size > 0) {
-            document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
-                (sheet) => !adoptedChapterStyleSheets.has(sheet),
-            );
-            adoptedChapterStyleSheets.clear();
+    /** 把已登记的样式表挂回 document（切回本视图时用） */
+    function attachAdoptedChapterStyles() {
+        if (adoptedChapterStyleSheets.size === 0) return;
+        try {
+            document.adoptedStyleSheets = [
+                ...document.adoptedStyleSheets,
+                ...adoptedChapterStyleSheets,
+            ];
+        } catch (error) {
+            console.warn("EPUB stylesheet re-registration failed:", error);
         }
+    }
+
+    /**
+     * 把样式表从 document 上摘下来，但**保留 sheet 对象**。
+     *
+     * 保活模式下本页切走时调用：EPUB 里的 `p { }`、`body { }` 是全局选择器，
+     * 不摘掉会污染同时挂载着的其它页面。保留对象是因为章节里的 style 节点
+     * 在首次登记时就已经从 DOM 移除了 —— 清掉这一份就再也拼不回来。
+     */
+    function detachAdoptedChapterStyles() {
+        if (adoptedChapterStyleSheets.size === 0) return;
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+            (sheet) => !adoptedChapterStyleSheets.has(sheet),
+        );
+    }
+
+    /** 页面真正销毁时才连对象一起丢掉 */
+    function clearAdoptedChapterStyles() {
+        detachAdoptedChapterStyles();
+        adoptedChapterStyleSheets.clear();
         adoptedChapterStyleCss.clear();
     }
 
@@ -486,342 +533,341 @@
                 return text;
             }
 
-            // 3) 读取 container.xml -> OPF 路径（解析与 webEpub.ts 共用同一实现）
-            loadingMsg = "解析目录…";
-            let containerXml = "";
-            try {
-                containerXml = await fetchText("META-INF/container.xml");
-            } catch (e) {
-                throw new Error("找不到 META-INF/container.xml: " + e);
-            }
-            const opfPath = parseContainerRootfilePath(containerXml);
-
-            // 4) 读取并解析 OPF
-            const opfXml = await fetchText(opfPath);
-            const pkg = parseOpfPackage(opfXml, opfPath);
-            bookTitle = (pkg.metadata.title || "").trim() || "未命名";
-            bookAuthor = (pkg.metadata.creator || "").trim();
-
-            const spinePaths: string[] = pkg.spine
-                .map((s) => s.manifest?.fullPath)
-                .filter((h): h is string => !!h);
-
-            // 5) 读取 NCX / Nav 用于章节标题 + 多级目录树
-            //
-            // 两个产物：
-            //   titleByPath: 每个 spine 文件的最佳章节标题，用于 spine[i].title
-            //   toc:         多级目录树，每个节点带一个 spineIdx（或 -1）
-            //                用于"目录"面板的 ReaderTocNode 递归渲染
-            const titleByPath = new Map<string, string>();
-
-            // 把 href 解析到 spine 索引。nav/ncx 里的 href 可能带 #fragment
-            // （章节内部锚点），但我们粒度只到 spine 文件 —— 丢掉 fragment 后再匹配。
-            function hrefToSpineIdx(absHref: string): number {
-                const clean = absHref.split("#")[0];
-                for (let i = 0; i < spinePaths.length; i++) {
-                    if (spinePaths[i] === clean) return i;
-                }
-                return -1;
-            }
-
-            // webEpub.ts 的层级 nav/ncx 解析结果 -> 本页 TocNode（附带填 titleByPath）
-            const mapNavItems = (items: WebEpubNavItem[]): TocNode[] =>
-                items.map((item) => {
-                    const abs = item.fullPath
-                        ? item.fullPath.split("#")[0]
-                        : "";
-                    if (abs && item.label && !titleByPath.has(abs)) {
-                        titleByPath.set(abs, item.label);
-                    }
-                    return {
-                        title: item.label || "(未命名)",
-                        spineIdx: item.fullPath
-                            ? hrefToSpineIdx(item.fullPath)
-                            : -1,
-                        children: item.children
-                            ? mapNavItems(item.children)
-                            : [],
-                    };
-                });
-
-            // EPUB3 nav
-            const navEntry = pkg.manifest.find((m) =>
-                m.properties.split(/\s+/).includes("nav"),
-            );
-            if (navEntry) {
+            // 2.6) 解析成品缓存：整本 parse + 序列化的结果与阅读进度无关，
+            //      切标签回来时直接复用 —— 否则 800 章要重跑 800 次 DOMParser
+            //      和一遍 CSS 处理，这就是「切回去像重新加载」的主要成本。
+            //      排版（列宽/字号/当前页）不走缓存，下面仍然重新测量与恢复。
+            const cachedSnapshot = readReaderCache(bookKey);
+            if (cachedSnapshot) {
+                bookTitle = cachedSnapshot.title;
+                bookAuthor = cachedSnapshot.author;
+                spine = cachedSnapshot.spine;
+                toc = cachedSnapshot.toc;
+                chapterFullHtml = cachedSnapshot.chapterFullHtml;
+                chapterBgStyle = cachedSnapshot.chapterBgStyle;
+                loadingMsg = "恢复上次的排版…";
+            } else {
+                // 3) 读取 container.xml -> OPF 路径（解析与 webEpub.ts 共用同一实现）
+                loadingMsg = "解析目录…";
+                let containerXml = "";
                 try {
-                    const navHtml = await fetchText(navEntry.fullPath);
-                    toc = mapNavItems(
-                        parseNavDocument(navHtml, navEntry.fullPath),
-                    );
-                } catch {}
-            }
+                    containerXml = await fetchText("META-INF/container.xml");
+                } catch (e) {
+                    throw new Error("找不到 META-INF/container.xml: " + e);
+                }
+                const opfPath = parseContainerRootfilePath(containerXml);
 
-            // EPUB2 NCX (media-type == application/x-dtbncx+xml 或扩展名 .ncx)
-            if (toc.length === 0) {
-                const ncxEntry = pkg.manifest.find(
-                    (m) =>
-                        m.mediaType === "application/x-dtbncx+xml" ||
-                        m.fullPath.endsWith(".ncx"),
+                // 4) 读取并解析 OPF
+                const opfXml = await fetchText(opfPath);
+                const pkg = parseOpfPackage(opfXml, opfPath);
+                bookTitle = (pkg.metadata.title || "").trim() || "未命名";
+                bookAuthor = (pkg.metadata.creator || "").trim();
+
+                const spinePaths: string[] = pkg.spine
+                    .map((s) => s.manifest?.fullPath)
+                    .filter((h): h is string => !!h);
+
+                // 5) 读取 NCX / Nav 用于章节标题 + 多级目录树
+                //
+                // 两个产物：
+                //   titleByPath: 每个 spine 文件的最佳章节标题，用于 spine[i].title
+                //   toc:         多级目录树，每个节点带一个 spineIdx（或 -1）
+                //                用于"目录"面板的 ReaderTocNode 递归渲染
+                const titleByPath = new Map<string, string>();
+
+                // 把 href 解析到 spine 索引。nav/ncx 里的 href 可能带 #fragment
+                // （章节内部锚点），但我们粒度只到 spine 文件 —— 丢掉 fragment 后再匹配。
+                function hrefToSpineIdx(absHref: string): number {
+                    const clean = absHref.split("#")[0];
+                    for (let i = 0; i < spinePaths.length; i++) {
+                        if (spinePaths[i] === clean) return i;
+                    }
+                    return -1;
+                }
+
+                // webEpub.ts 的层级 nav/ncx 解析结果 -> 本页 TocNode（附带填 titleByPath）
+                const mapNavItems = (items: WebEpubNavItem[]): TocNode[] =>
+                    items.map((item) => {
+                        const abs = item.fullPath
+                            ? item.fullPath.split("#")[0]
+                            : "";
+                        if (abs && item.label && !titleByPath.has(abs)) {
+                            titleByPath.set(abs, item.label);
+                        }
+                        return {
+                            title: item.label || "(未命名)",
+                            spineIdx: item.fullPath
+                                ? hrefToSpineIdx(item.fullPath)
+                                : -1,
+                            children: item.children
+                                ? mapNavItems(item.children)
+                                : [],
+                        };
+                    });
+
+                // EPUB3 nav
+                const navEntry = pkg.manifest.find((m) =>
+                    m.properties.split(/\s+/).includes("nav"),
                 );
-                if (ncxEntry) {
+                if (navEntry) {
                     try {
-                        const ncxXml = await fetchText(ncxEntry.fullPath);
+                        const navHtml = await fetchText(navEntry.fullPath);
                         toc = mapNavItems(
-                            parseNcxDocument(ncxXml, ncxEntry.fullPath),
+                            parseNavDocument(navHtml, navEntry.fullPath),
                         );
                     } catch {}
                 }
-            }
-            // 最终兜底：没有 nav 也没有 ncx —— 每个 spine 文件就是一个顶层目录项。
-            if (toc.length === 0) {
-                toc = spinePaths.map((p, i) => ({
-                    title: titleByPath.get(p) || `第 ${i + 1} 节`,
-                    spineIdx: i,
-                    children: [],
-                }));
-            }
 
-            // 6) 形成 spine
-            spine = spinePaths.map((p) => ({
-                path: p,
-                title: titleByPath.get(p) || "",
-            }));
-            if (spine.length === 0)
-                throw new Error("EPUB spine 为空，无法显示");
-
-            // 7) 并行 fetch 所有章节文本（不再用 batch IPC）
-            //
-            // 之前 read_epub_files_batch 一次返回整本书所有 spine 文本（几百 KB
-            // 到几十 MB JSON），单次 IPC 序列化 + JSON.parse 同步阻塞主线程几秒
-            // 到几分钟 —— 这才是用户看到 "读取样式表"（实际是上一步还没让出
-            // 主线程）卡几分钟的真正源头。
-            // 改为 fetch 之后：浏览器并行多路加载，每个返回小字符串立即让出主线程，
-            // loadingMsg 也能实时刷帧让用户看到进度。
-            let loadedCh = 0;
-            const totalCh = spine.length;
-            loadingMsg = `读取章节 0/${totalCh}…`;
-            const chapterTextEntries = await Promise.all(
-                spine.map(async (s) => {
-                    try {
-                        const text = await fetchText(s.path);
-                        return [s.path, text] as const;
-                    } catch (e) {
-                        console.warn(`读取章节失败 ${s.path}:`, e);
-                        return [s.path, ""] as const;
-                    } finally {
-                        loadedCh++;
-                        // 每完成一个章节都更新一次 loadingMsg，配合 await 让 UI 能刷帧
-                        loadingMsg = `读取章节 ${loadedCh}/${totalCh}…`;
-                    }
-                }),
-            );
-            const chapterTexts: Record<string, string> =
-                Object.fromEntries(chapterTextEntries);
-
-            // 8) 解析章节并收集所有图片 / 外部 CSS 引用（一次性，不发起 IPC）
-            loadingMsg = "解析章节…";
-            const parsedDocs: (Document | null)[] = new Array(
-                spine.length,
-            ).fill(null);
-            type ImgRef = {
-                el: Element;
-                abs: string;
-                isSvg: boolean;
-                useXlink: boolean;
-            };
-            const allImgRefs: ImgRef[] = [];
-            const imagePathSet = new Set<string>();
-            // EPUB 自带 CSS（如 @font-face 字体定义）的引用
-            type CssLinkRef = { el: Element; chapterIdx: number; abs: string };
-            const cssLinkRefs: CssLinkRef[] = [];
-            const cssPathSet = new Set<string>();
-
-            for (let i = 0; i < spine.length; i++) {
-                const raw = chapterTexts[spine[i].path];
-                if (!raw) continue;
-                let doc: Document;
-                try {
-                    doc = new DOMParser().parseFromString(
-                        raw,
-                        "application/xhtml+xml",
+                // EPUB2 NCX (media-type == application/x-dtbncx+xml 或扩展名 .ncx)
+                if (toc.length === 0) {
+                    const ncxEntry = pkg.manifest.find(
+                        (m) =>
+                            m.mediaType === "application/x-dtbncx+xml" ||
+                            m.fullPath.endsWith(".ncx"),
                     );
-                    if (doc.querySelector("parsererror"))
-                        throw new Error("xhtml parse error");
-                } catch {
-                    doc = new DOMParser().parseFromString(raw, "text/html");
-                }
-                // 移除 script（安全）；保留 style 标签和 inline style 让 EPUB 自带的
-                // 颜色 / 对齐 / 字体规则生效。link[rel=stylesheet] 不直接移除，下面会
-                // IPC 读其内容并替换为 style 标签，连带把 url() 字体文件转成 blob URL。
-                doc.querySelectorAll("script").forEach((n) => n.remove());
-                normalizeInlineStyles(doc);
-
-                Array.from(
-                    doc.querySelectorAll('link[rel="stylesheet"]'),
-                ).forEach((link) => {
-                    const href = link.getAttribute("href") || "";
-                    if (
-                        !href ||
-                        /^https?:/i.test(href) ||
-                        href.startsWith("data:")
-                    ) {
-                        link.remove();
-                        return;
-                    }
-                    const abs = resolveRelative(spine[i].path, href);
-                    cssLinkRefs.push({ el: link, chapterIdx: i, abs });
-                    cssPathSet.add(abs);
-                });
-
-                // 收集 <img>
-                Array.from(doc.querySelectorAll("img")).forEach((img) => {
-                    const src = img.getAttribute("src");
-                    img.removeAttribute("width");
-                    img.removeAttribute("height");
-                    if (
-                        !src ||
-                        src.startsWith("data:") ||
-                        /^https?:/i.test(src)
-                    )
-                        return;
-                    const abs = resolveRelative(spine[i].path, src);
-                    imagePathSet.add(abs);
-                    allImgRefs.push({
-                        el: img,
-                        abs,
-                        isSvg: false,
-                        useXlink: false,
-                    });
-                });
-                // 收集 SVG <image>
-                Array.from(doc.getElementsByTagName("image")).forEach((img) => {
-                    const xlink = img.getAttributeNS(
-                        "http://www.w3.org/1999/xlink",
-                        "href",
-                    );
-                    const href = img.getAttribute("href") || xlink || "";
-                    if (
-                        !href ||
-                        href.startsWith("data:") ||
-                        /^https?:/i.test(href)
-                    )
-                        return;
-                    const abs = resolveRelative(spine[i].path, href);
-                    imagePathSet.add(abs);
-                    allImgRefs.push({
-                        el: img,
-                        abs,
-                        isSvg: true,
-                        useXlink: xlink !== null,
-                    });
-                });
-                parsedDocs[i] = doc;
-            }
-
-            // ===== 9) CSS 文件读取与资源 URL 替换 =====
-            //
-            // tempDirPath / toAssetUrl / fetchText 已在第 2.5 步定义并被前面的
-            // container/OPF/Nav/NCX/spine 使用，这里直接复用。
-            const URL_RE = /url\s*\(\s*(['"]?)([^'")]+?)\1\s*\)/g;
-            // @import 两种语法：@import url("x.css") 或 @import "x.css"。带可选 media list。
-            const IMPORT_RE =
-                /@import\s+(?:url\s*\(\s*(['"]?)([^'")]+?)\1\s*\)|(['"])([^'"]+?)\3)\s*[^;]*;/g;
-
-            // —— CSS 文件并行 fetch（不再用 batch IPC，避免一次返回所有 CSS 字符串）
-            const cssPaths = Array.from(cssPathSet);
-            const cssContent = new Map<string, string>();
-            if (cssPaths.length > 0) {
-                let loadedCss = 0;
-                loadingMsg = `读取样式表 0/${cssPaths.length}…`;
-                const cssEntries = await Promise.all(
-                    cssPaths.map(async (p) => {
+                    if (ncxEntry) {
                         try {
-                            return [p, await fetchText(p)] as const;
+                            const ncxXml = await fetchText(ncxEntry.fullPath);
+                            toc = mapNavItems(
+                                parseNcxDocument(ncxXml, ncxEntry.fullPath),
+                            );
+                        } catch {}
+                    }
+                }
+                // 最终兜底：没有 nav 也没有 ncx —— 每个 spine 文件就是一个顶层目录项。
+                if (toc.length === 0) {
+                    toc = spinePaths.map((p, i) => ({
+                        title: titleByPath.get(p) || `第 ${i + 1} 节`,
+                        spineIdx: i,
+                        children: [],
+                    }));
+                }
+
+                // 6) 形成 spine
+                spine = spinePaths.map((p) => ({
+                    path: p,
+                    title: titleByPath.get(p) || "",
+                }));
+                if (spine.length === 0)
+                    throw new Error("EPUB spine 为空，无法显示");
+
+                // 7) 并行 fetch 所有章节文本（不再用 batch IPC）
+                //
+                // 之前 read_epub_files_batch 一次返回整本书所有 spine 文本（几百 KB
+                // 到几十 MB JSON），单次 IPC 序列化 + JSON.parse 同步阻塞主线程几秒
+                // 到几分钟 —— 这才是用户看到 "读取样式表"（实际是上一步还没让出
+                // 主线程）卡几分钟的真正源头。
+                // 改为 fetch 之后：浏览器并行多路加载，每个返回小字符串立即让出主线程，
+                // loadingMsg 也能实时刷帧让用户看到进度。
+                let loadedCh = 0;
+                const totalCh = spine.length;
+                loadingMsg = `读取章节 0/${totalCh}…`;
+                const chapterTextEntries = await Promise.all(
+                    spine.map(async (s) => {
+                        try {
+                            const text = await fetchText(s.path);
+                            return [s.path, text] as const;
                         } catch (e) {
-                            console.warn(`读取 CSS 失败 ${p}:`, e);
-                            return [p, ""] as const;
+                            console.warn(`读取章节失败 ${s.path}:`, e);
+                            return [s.path, ""] as const;
                         } finally {
-                            loadedCss++;
-                            loadingMsg = `读取样式表 ${loadedCss}/${cssPaths.length}…`;
+                            loadedCh++;
+                            // 每完成一个章节都更新一次 loadingMsg，配合 await 让 UI 能刷帧
+                            loadingMsg = `读取章节 ${loadedCh}/${totalCh}…`;
                         }
                     }),
                 );
-                for (const [p, content] of cssEntries)
-                    cssContent.set(p, content);
-            }
+                const chapterTexts: Record<string, string> =
+                    Object.fromEntries(chapterTextEntries);
 
-            // —— 递归拉平所有 CSS 的 @import：被 @import 引用的子样式表也提前 fetch 进来
-            // 进 cssContent。否则浏览器加载主 CSS 后会自己去 asset:// 拉子表，子表里
-            // url(../Fonts/x.ttf) 走浏览器 URL 相对解析。Tauri 在 Windows 上的 asset
-            // URL 是 `https://asset.localhost/{encodeURIComponent(path)}` —— 整条路径
-            // 被 %2F / %5C 编码成单 segment，浏览器相对解析时 `..` 会一退到 root，
-            // 实际请求变成 `asset.localhost/Fonts/x.ttf` → 500（找不到文件）。
-            // 解决：所有 @import 提前 fetch 入内存，processCss 时把 @import 整句替换
-            // 为对应已处理（含 url() 改写、body→.epub-body）的内容内联进来。
-            // 浏览器拿到的最终样式里没有 @import，绝对不会再触发相对解析问题。
-            async function ensureCssLoaded(absPath: string): Promise<void> {
-                if (cssContent.has(absPath)) return;
-                try {
-                    cssContent.set(absPath, await fetchText(absPath));
-                } catch (e) {
-                    console.warn(`@import 子样式表 fetch 失败 ${absPath}:`, e);
-                    cssContent.set(absPath, "");
-                }
-            }
-            // BFS：对每个已知 CSS 扫 @import，把新发现的 abs 路径加进 fetch 队列
-            {
-                const seen = new Set<string>(cssContent.keys());
-                // 起点除已加载的 link CSS 外，还要把章节内嵌 style 块里的 @import 算上 ——
-                // 它们指向的子表同样要预拉，否则 processCss 内联时拿不到内容。
-                // 用一个临时 Map 暂存内嵌 style 的"虚拟 base 路径 → 文本"以参与 BFS。
-                const inlineStyleSources: { base: string; txt: string }[] = [];
+                // 8) 解析章节并收集所有图片 / 外部 CSS 引用（一次性，不发起 IPC）
+                loadingMsg = "解析章节…";
+                const parsedDocs: (Document | null)[] = new Array(
+                    spine.length,
+                ).fill(null);
+                type ImgRef = {
+                    el: Element;
+                    abs: string;
+                    isSvg: boolean;
+                    useXlink: boolean;
+                };
+                const allImgRefs: ImgRef[] = [];
+                const imagePathSet = new Set<string>();
+                // EPUB 自带 CSS（如 @font-face 字体定义）的引用
+                type CssLinkRef = {
+                    el: Element;
+                    chapterIdx: number;
+                    abs: string;
+                };
+                const cssLinkRefs: CssLinkRef[] = [];
+                const cssPathSet = new Set<string>();
+
                 for (let i = 0; i < spine.length; i++) {
-                    const doc = parsedDocs[i];
-                    if (!doc) continue;
-                    Array.from(doc.querySelectorAll("style")).forEach((s) => {
-                        const t = s.textContent || "";
-                        if (t)
-                            inlineStyleSources.push({
-                                base: spine[i].path,
-                                txt: t,
-                            });
-                    });
-                }
-                // 把内嵌 style 的 @import 直接加到第一轮 frontier
-                const initialFromInline: string[] = [];
-                for (const src of inlineStyleSources) {
-                    IMPORT_RE.lastIndex = 0;
-                    let m: RegExpExecArray | null;
-                    while ((m = IMPORT_RE.exec(src.txt)) !== null) {
-                        const rel = (m[2] || m[4] || "").trim();
+                    const raw = chapterTexts[spine[i].path];
+                    if (!raw) continue;
+                    let doc: Document;
+                    try {
+                        doc = new DOMParser().parseFromString(
+                            raw,
+                            "application/xhtml+xml",
+                        );
+                        if (doc.querySelector("parsererror"))
+                            throw new Error("xhtml parse error");
+                    } catch {
+                        doc = new DOMParser().parseFromString(raw, "text/html");
+                    }
+                    // 移除 script（安全）；保留 style 标签和 inline style 让 EPUB 自带的
+                    // 颜色 / 对齐 / 字体规则生效。link[rel=stylesheet] 不直接移除，下面会
+                    // IPC 读其内容并替换为 style 标签，连带把 url() 字体文件转成 blob URL。
+                    doc.querySelectorAll("script").forEach((n) => n.remove());
+                    normalizeInlineStyles(doc);
+
+                    Array.from(
+                        doc.querySelectorAll('link[rel="stylesheet"]'),
+                    ).forEach((link) => {
+                        const href = link.getAttribute("href") || "";
                         if (
-                            !rel ||
-                            rel.startsWith("data:") ||
-                            /^https?:/i.test(rel)
-                        )
-                            continue;
-                        const abs = resolveRelative(src.base, rel);
-                        if (!seen.has(abs)) {
-                            seen.add(abs);
-                            initialFromInline.push(abs);
+                            !href ||
+                            /^https?:/i.test(href) ||
+                            href.startsWith("data:")
+                        ) {
+                            link.remove();
+                            return;
                         }
+                        const abs = resolveRelative(spine[i].path, href);
+                        cssLinkRefs.push({ el: link, chapterIdx: i, abs });
+                        cssPathSet.add(abs);
+                    });
+
+                    // 收集 <img>
+                    Array.from(doc.querySelectorAll("img")).forEach((img) => {
+                        const src = img.getAttribute("src");
+                        img.removeAttribute("width");
+                        img.removeAttribute("height");
+                        if (
+                            !src ||
+                            src.startsWith("data:") ||
+                            /^https?:/i.test(src)
+                        )
+                            return;
+                        const abs = resolveRelative(spine[i].path, src);
+                        imagePathSet.add(abs);
+                        allImgRefs.push({
+                            el: img,
+                            abs,
+                            isSvg: false,
+                            useXlink: false,
+                        });
+                    });
+                    // 收集 SVG <image>
+                    Array.from(doc.getElementsByTagName("image")).forEach(
+                        (img) => {
+                            const xlink = img.getAttributeNS(
+                                "http://www.w3.org/1999/xlink",
+                                "href",
+                            );
+                            const href =
+                                img.getAttribute("href") || xlink || "";
+                            if (
+                                !href ||
+                                href.startsWith("data:") ||
+                                /^https?:/i.test(href)
+                            )
+                                return;
+                            const abs = resolveRelative(spine[i].path, href);
+                            imagePathSet.add(abs);
+                            allImgRefs.push({
+                                el: img,
+                                abs,
+                                isSvg: true,
+                                useXlink: xlink !== null,
+                            });
+                        },
+                    );
+                    parsedDocs[i] = doc;
+                }
+
+                // ===== 9) CSS 文件读取与资源 URL 替换 =====
+                //
+                // tempDirPath / toAssetUrl / fetchText 已在第 2.5 步定义并被前面的
+                // container/OPF/Nav/NCX/spine 使用，这里直接复用。
+                const URL_RE = /url\s*\(\s*(['"]?)([^'")]+?)\1\s*\)/g;
+                // @import 两种语法：@import url("x.css") 或 @import "x.css"。带可选 media list。
+                const IMPORT_RE =
+                    /@import\s+(?:url\s*\(\s*(['"]?)([^'")]+?)\1\s*\)|(['"])([^'"]+?)\3)\s*[^;]*;/g;
+
+                // —— CSS 文件并行 fetch（不再用 batch IPC，避免一次返回所有 CSS 字符串）
+                const cssPaths = Array.from(cssPathSet);
+                const cssContent = new Map<string, string>();
+                if (cssPaths.length > 0) {
+                    let loadedCss = 0;
+                    loadingMsg = `读取样式表 0/${cssPaths.length}…`;
+                    const cssEntries = await Promise.all(
+                        cssPaths.map(async (p) => {
+                            try {
+                                return [p, await fetchText(p)] as const;
+                            } catch (e) {
+                                console.warn(`读取 CSS 失败 ${p}:`, e);
+                                return [p, ""] as const;
+                            } finally {
+                                loadedCss++;
+                                loadingMsg = `读取样式表 ${loadedCss}/${cssPaths.length}…`;
+                            }
+                        }),
+                    );
+                    for (const [p, content] of cssEntries)
+                        cssContent.set(p, content);
+                }
+
+                // —— 递归拉平所有 CSS 的 @import：被 @import 引用的子样式表也提前 fetch 进来
+                // 进 cssContent。否则浏览器加载主 CSS 后会自己去 asset:// 拉子表，子表里
+                // url(../Fonts/x.ttf) 走浏览器 URL 相对解析。Tauri 在 Windows 上的 asset
+                // URL 是 `https://asset.localhost/{encodeURIComponent(path)}` —— 整条路径
+                // 被 %2F / %5C 编码成单 segment，浏览器相对解析时 `..` 会一退到 root，
+                // 实际请求变成 `asset.localhost/Fonts/x.ttf` → 500（找不到文件）。
+                // 解决：所有 @import 提前 fetch 入内存，processCss 时把 @import 整句替换
+                // 为对应已处理（含 url() 改写、body→.epub-body）的内容内联进来。
+                // 浏览器拿到的最终样式里没有 @import，绝对不会再触发相对解析问题。
+                async function ensureCssLoaded(absPath: string): Promise<void> {
+                    if (cssContent.has(absPath)) return;
+                    try {
+                        cssContent.set(absPath, await fetchText(absPath));
+                    } catch (e) {
+                        console.warn(
+                            `@import 子样式表 fetch 失败 ${absPath}:`,
+                            e,
+                        );
+                        cssContent.set(absPath, "");
                     }
                 }
-                if (initialFromInline.length > 0) {
-                    await Promise.all(initialFromInline.map(ensureCssLoaded));
-                }
-                let frontier = [
-                    ...Array.from(cssContent.keys()),
-                    ...initialFromInline,
-                ];
-                while (frontier.length > 0) {
-                    const newAbs: string[] = [];
-                    for (const cur of frontier) {
-                        const txt = cssContent.get(cur) || "";
+                // BFS：对每个已知 CSS 扫 @import，把新发现的 abs 路径加进 fetch 队列
+                {
+                    const seen = new Set<string>(cssContent.keys());
+                    // 起点除已加载的 link CSS 外，还要把章节内嵌 style 块里的 @import 算上 ——
+                    // 它们指向的子表同样要预拉，否则 processCss 内联时拿不到内容。
+                    // 用一个临时 Map 暂存内嵌 style 的"虚拟 base 路径 → 文本"以参与 BFS。
+                    const inlineStyleSources: { base: string; txt: string }[] =
+                        [];
+                    for (let i = 0; i < spine.length; i++) {
+                        const doc = parsedDocs[i];
+                        if (!doc) continue;
+                        Array.from(doc.querySelectorAll("style")).forEach(
+                            (s) => {
+                                const t = s.textContent || "";
+                                if (t)
+                                    inlineStyleSources.push({
+                                        base: spine[i].path,
+                                        txt: t,
+                                    });
+                            },
+                        );
+                    }
+                    // 把内嵌 style 的 @import 直接加到第一轮 frontier
+                    const initialFromInline: string[] = [];
+                    for (const src of inlineStyleSources) {
                         IMPORT_RE.lastIndex = 0;
                         let m: RegExpExecArray | null;
-                        while ((m = IMPORT_RE.exec(txt)) !== null) {
+                        while ((m = IMPORT_RE.exec(src.txt)) !== null) {
                             const rel = (m[2] || m[4] || "").trim();
                             if (
                                 !rel ||
@@ -829,268 +875,318 @@
                                 /^https?:/i.test(rel)
                             )
                                 continue;
-                            const abs = resolveRelative(cur, rel);
+                            const abs = resolveRelative(src.base, rel);
                             if (!seen.has(abs)) {
                                 seen.add(abs);
-                                newAbs.push(abs);
+                                initialFromInline.push(abs);
                             }
                         }
                     }
-                    if (newAbs.length === 0) break;
-                    await Promise.all(newAbs.map(ensureCssLoaded));
-                    frontier = newAbs;
-                }
-            }
-
-            // —— 把 EPUB 章节里的图片 src 直接指向 asset URL
-            // 这一步完全本地，无 IPC，对 1000 张图也只是 setAttribute 调用，毫秒级。
-            for (const ref of allImgRefs) {
-                const url = toAssetUrl(ref.abs);
-                if (ref.isSvg) {
-                    if (ref.useXlink) {
-                        ref.el.setAttributeNS(
-                            "http://www.w3.org/1999/xlink",
-                            "href",
-                            url,
+                    if (initialFromInline.length > 0) {
+                        await Promise.all(
+                            initialFromInline.map(ensureCssLoaded),
                         );
                     }
-                    ref.el.setAttribute("href", url);
-                } else {
-                    ref.el.setAttribute("src", url);
-                }
-            }
-
-            // —— 第四步：处理 CSS 文本（url() 改写为 asset URL，body/html 改写为 .epub-body）
-            //
-            // 后断言除常见的 \s , { : . [ # 外，还要包括 ) —— 处理 :where(html, body)
-            // 这种 body 紧跟 ) 的写法。漏掉它会让整条规则 body 选择器没替换、规则失效。
-            // body / html 选择器同时映射到 .epub-body 与 .rd-chapter 两类元素：
-            // - .epub-body 是真正的内容容器（文字 / 图片 / inline style），承担"局部样式"
-            // - .rd-chapter 是 section 容器，被 CSS column-fragmented 时每页都画一份背景
-            // 用户 CSS 中 `body.full { background:url(); ... }` 经替换后写到这两个选择器
-            // 上 → .rd-chapter.full 拿到 background 即可在每列重复绘制实现"全屏背景"。
-            const BODY_RE = /(^|[\s,>+~(])(?:body|html)(?=[\s,{:.\[#)])/g;
-            const BODY_REPLACE = "$1.epub-body, $1.rd-chapter";
-            // processedCssCache 记忆每个 CSS 已经处理（含递归内联）的最终文本。
-            // 同一文件可能被多个 link / @import 引用，避免重复处理。
-            const processedCssCache = new Map<string, string>();
-            function processCss(
-                css: string,
-                cssPath: string,
-                visiting: Set<string>,
-            ): string {
-                // 1) 先把 @import 整句替换为已处理的子表内容（递归内联）
-                //    用 replace + 函数回调一次扫完，避免在循环里改字符串导致 lastIndex 错位
-                const inlined = css.replace(
-                    IMPORT_RE,
-                    (match, _q1, u1, _q2, u2) => {
-                        const rel = (u1 || u2 || "").trim();
-                        if (
-                            !rel ||
-                            rel.startsWith("data:") ||
-                            /^https?:/i.test(rel)
-                        )
-                            return match;
-                        const abs = resolveRelative(cssPath, rel);
-                        if (visiting.has(abs)) return ""; // 循环引用：丢掉本次 @import
-                        const sub = cssContent.get(abs);
-                        if (sub === undefined) return ""; // 没拉到内容也丢掉，避免浏览器再去 fetch
-                        if (processedCssCache.has(abs))
-                            return processedCssCache.get(abs)!;
-                        const next = new Set(visiting);
-                        next.add(abs);
-                        const out = processCss(sub, abs, next);
-                        processedCssCache.set(abs, out);
-                        return out;
-                    },
-                );
-                // 2) 在已无 @import 的文本上做 url() 与 body/html 改写
-                return inlined
-                    .replace(URL_RE, (match, _q, url) => {
-                        const trimmed = url.trim();
-                        if (
-                            !trimmed ||
-                            trimmed.startsWith("data:") ||
-                            /^https?:/i.test(trimmed) ||
-                            trimmed.startsWith("#")
-                        ) {
-                            return match;
+                    let frontier = [
+                        ...Array.from(cssContent.keys()),
+                        ...initialFromInline,
+                    ];
+                    while (frontier.length > 0) {
+                        const newAbs: string[] = [];
+                        for (const cur of frontier) {
+                            const txt = cssContent.get(cur) || "";
+                            IMPORT_RE.lastIndex = 0;
+                            let m: RegExpExecArray | null;
+                            while ((m = IMPORT_RE.exec(txt)) !== null) {
+                                const rel = (m[2] || m[4] || "").trim();
+                                if (
+                                    !rel ||
+                                    rel.startsWith("data:") ||
+                                    /^https?:/i.test(rel)
+                                )
+                                    continue;
+                                const abs = resolveRelative(cur, rel);
+                                if (!seen.has(abs)) {
+                                    seen.add(abs);
+                                    newAbs.push(abs);
+                                }
+                            }
                         }
-                        const abs = resolveRelative(cssPath, trimmed);
-                        return `url("${toAssetUrl(abs)}")`;
-                    })
-                    .replace(BODY_RE, BODY_REPLACE);
-            }
-            for (const ref of cssLinkRefs) {
-                let css = "";
-                if (cssContent.has(ref.abs)) {
-                    if (processedCssCache.has(ref.abs)) {
-                        css = processedCssCache.get(ref.abs)!;
-                    } else {
-                        css = processCss(
-                            cssContent.get(ref.abs)!,
-                            ref.abs,
-                            new Set([ref.abs]),
-                        );
-                        processedCssCache.set(ref.abs, css);
+                        if (newAbs.length === 0) break;
+                        await Promise.all(newAbs.map(ensureCssLoaded));
+                        frontier = newAbs;
                     }
                 }
-                const ownerDoc = ref.el.ownerDocument || document;
-                const styleEl = ownerDoc.createElement("style");
-                styleEl.textContent = css;
-                ref.el.parentNode?.replaceChild(styleEl, ref.el);
-            }
 
-            // 同样处理章节内嵌 style 块：走 processCss（含 @import 内联、url() 改写、
-            // body→.epub-body）。某些 EPUB 在章节里直接写 inline style 块带 @import "../Styles/x.css"，
-            // 必须把子表也内联进来，避免浏览器自己 fetch 时被 asset URL 单 segment
-            // 路径绊倒（详见上面 ensureCssLoaded 注释）。
-            for (let i = 0; i < spine.length; i++) {
-                const doc = parsedDocs[i];
-                if (!doc) continue;
-                const chapterPath = spine[i].path;
-                Array.from(doc.querySelectorAll("style")).forEach((styleEl) => {
-                    const txt = styleEl.textContent || "";
-                    if (!txt) return;
-                    styleEl.textContent = processCss(
-                        txt,
-                        chapterPath,
-                        new Set([chapterPath]),
+                // —— 把 EPUB 章节里的图片 src 直接指向 asset URL
+                // 这一步完全本地，无 IPC，对 1000 张图也只是 setAttribute 调用，毫秒级。
+                for (const ref of allImgRefs) {
+                    const url = toAssetUrl(ref.abs);
+                    if (ref.isSvg) {
+                        if (ref.useXlink) {
+                            ref.el.setAttributeNS(
+                                "http://www.w3.org/1999/xlink",
+                                "href",
+                                url,
+                            );
+                        }
+                        ref.el.setAttribute("href", url);
+                    } else {
+                        ref.el.setAttribute("src", url);
+                    }
+                }
+
+                // —— 第四步：处理 CSS 文本（url() 改写为 asset URL，body/html 改写为 .epub-body）
+                //
+                // 后断言除常见的 \s , { : . [ # 外，还要包括 ) —— 处理 :where(html, body)
+                // 这种 body 紧跟 ) 的写法。漏掉它会让整条规则 body 选择器没替换、规则失效。
+                // body / html 选择器同时映射到 .epub-body 与 .rd-chapter 两类元素：
+                // - .epub-body 是真正的内容容器（文字 / 图片 / inline style），承担"局部样式"
+                // - .rd-chapter 是 section 容器，被 CSS column-fragmented 时每页都画一份背景
+                // 用户 CSS 中 `body.full { background:url(); ... }` 经替换后写到这两个选择器
+                // 上 → .rd-chapter.full 拿到 background 即可在每列重复绘制实现"全屏背景"。
+                const BODY_RE = /(^|[\s,>+~(])(?:body|html)(?=[\s,{:.\[#)])/g;
+                const BODY_REPLACE = "$1.epub-body, $1.rd-chapter";
+                // processedCssCache 记忆每个 CSS 已经处理（含递归内联）的最终文本。
+                // 同一文件可能被多个 link / @import 引用，避免重复处理。
+                const processedCssCache = new Map<string, string>();
+                function processCss(
+                    css: string,
+                    cssPath: string,
+                    visiting: Set<string>,
+                ): string {
+                    // 1) 先把 @import 整句替换为已处理的子表内容（递归内联）
+                    //    用 replace + 函数回调一次扫完，避免在循环里改字符串导致 lastIndex 错位
+                    const inlined = css.replace(
+                        IMPORT_RE,
+                        (match, _q1, u1, _q2, u2) => {
+                            const rel = (u1 || u2 || "").trim();
+                            if (
+                                !rel ||
+                                rel.startsWith("data:") ||
+                                /^https?:/i.test(rel)
+                            )
+                                return match;
+                            const abs = resolveRelative(cssPath, rel);
+                            if (visiting.has(abs)) return ""; // 循环引用：丢掉本次 @import
+                            const sub = cssContent.get(abs);
+                            if (sub === undefined) return ""; // 没拉到内容也丢掉，避免浏览器再去 fetch
+                            if (processedCssCache.has(abs))
+                                return processedCssCache.get(abs)!;
+                            const next = new Set(visiting);
+                            next.add(abs);
+                            const out = processCss(sub, abs, next);
+                            processedCssCache.set(abs, out);
+                            return out;
+                        },
                     );
-                });
-            }
+                    // 2) 在已无 @import 的文本上做 url() 与 body/html 改写
+                    return inlined
+                        .replace(URL_RE, (match, _q, url) => {
+                            const trimmed = url.trim();
+                            if (
+                                !trimmed ||
+                                trimmed.startsWith("data:") ||
+                                /^https?:/i.test(trimmed) ||
+                                trimmed.startsWith("#")
+                            ) {
+                                return match;
+                            }
+                            const abs = resolveRelative(cssPath, trimmed);
+                            return `url("${toAssetUrl(abs)}")`;
+                        })
+                        .replace(BODY_RE, BODY_REPLACE);
+                }
+                for (const ref of cssLinkRefs) {
+                    let css = "";
+                    if (cssContent.has(ref.abs)) {
+                        if (processedCssCache.has(ref.abs)) {
+                            css = processedCssCache.get(ref.abs)!;
+                        } else {
+                            css = processCss(
+                                cssContent.get(ref.abs)!,
+                                ref.abs,
+                                new Set([ref.abs]),
+                            );
+                            processedCssCache.set(ref.abs, css);
+                        }
+                    }
+                    const ownerDoc = ref.el.ownerDocument || document;
+                    const styleEl = ownerDoc.createElement("style");
+                    styleEl.textContent = css;
+                    ref.el.parentNode?.replaceChild(styleEl, ref.el);
+                }
 
-            // 11) 序列化各章节为完整 HTML（仅生成数组，不立刻拼接）
-            // 关键修复：head 里的 style 标签（含 link 替换来的）必须显式提取注入到
-            // section 内 —— body.innerHTML 不会包含 head 的内容，否则 EPUB 自带的字体
-            // 定义、颜色、对齐等 CSS 全部失效（用户看到"样式直接全没了"）。
-            //
-            // 同样关键：body 自身的 class / style / id 也要复制到 .epub-body 包装 div，
-            // 否则 epub 通过 `body.fullpage` 这类 class，或 `<body style="background:url()">`
-            // 这种 inline 写法设的背景全部丢失（用户看到"自带背景无法显示"）。
-            // body inline style 里的 url() 也要走 url 替换（与 processCss 同样规则），
-            // 否则 asset 协议拿不到文件。
-            loadingMsg = "渲染…";
-            chapterFullHtml = new Array(spine.length);
-            // 转义 HTML 属性值用，避免 class/style 里的特殊字符破坏 outerHTML 注入
-            const escapeAttr = (s: string) =>
-                s
-                    .replace(/&/g, "&amp;")
-                    .replace(/"/g, "&quot;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;");
-            // 从 body inline style 中只提取 "background-image 相关" 属性（image / repeat /
-            // position / size / attachment / origin / clip）。
-            //
-            // 关键：不再提取 background-color 与 plain `background:` 的颜色部分。
-            // 旧实现把 `background: white` 也搬到 chapterBgStyle，再被 .rd-chapter-bg 全屏
-            // div 渲染成 inset:0 的白色块 —— 直接遮住 .rd-app 的主题色（用户看到的就是
-            // "主题没了"、"全屏背景白成一片"）。新实现只让 EPUB 自带的背景图通过全屏层
-            // 显示，bg-color 由阅读器主题接管。shorthand `background: white url(x.png)` 也
-            // 只取 url() 部分。
-            const extractBgStyle = (styleStr: string): string => {
-                if (!styleStr) return "";
-                const decls = styleStr
-                    .split(";")
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                const out: string[] = [];
-                const IMAGE_LONGHAND =
-                    /^background-(image|repeat|position|size|attachment|origin|clip)\s*:/i;
-                for (const d of decls) {
-                    if (IMAGE_LONGHAND.test(d)) {
-                        out.push(d);
+                // 同样处理章节内嵌 style 块：走 processCss（含 @import 内联、url() 改写、
+                // body→.epub-body）。某些 EPUB 在章节里直接写 inline style 块带 @import "../Styles/x.css"，
+                // 必须把子表也内联进来，避免浏览器自己 fetch 时被 asset URL 单 segment
+                // 路径绊倒（详见上面 ensureCssLoaded 注释）。
+                for (let i = 0; i < spine.length; i++) {
+                    const doc = parsedDocs[i];
+                    if (!doc) continue;
+                    const chapterPath = spine[i].path;
+                    Array.from(doc.querySelectorAll("style")).forEach(
+                        (styleEl) => {
+                            const txt = styleEl.textContent || "";
+                            if (!txt) return;
+                            styleEl.textContent = processCss(
+                                txt,
+                                chapterPath,
+                                new Set([chapterPath]),
+                            );
+                        },
+                    );
+                }
+
+                // 11) 序列化各章节为完整 HTML（仅生成数组，不立刻拼接）
+                // 关键修复：head 里的 style 标签（含 link 替换来的）必须显式提取注入到
+                // section 内 —— body.innerHTML 不会包含 head 的内容，否则 EPUB 自带的字体
+                // 定义、颜色、对齐等 CSS 全部失效（用户看到"样式直接全没了"）。
+                //
+                // 同样关键：body 自身的 class / style / id 也要复制到 .epub-body 包装 div，
+                // 否则 epub 通过 `body.fullpage` 这类 class，或 `<body style="background:url()">`
+                // 这种 inline 写法设的背景全部丢失（用户看到"自带背景无法显示"）。
+                // body inline style 里的 url() 也要走 url 替换（与 processCss 同样规则），
+                // 否则 asset 协议拿不到文件。
+                loadingMsg = "渲染…";
+                chapterFullHtml = new Array(spine.length);
+                // 转义 HTML 属性值用，避免 class/style 里的特殊字符破坏 outerHTML 注入
+                const escapeAttr = (s: string) =>
+                    s
+                        .replace(/&/g, "&amp;")
+                        .replace(/"/g, "&quot;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;");
+                // 从 body inline style 中只提取 "background-image 相关" 属性（image / repeat /
+                // position / size / attachment / origin / clip）。
+                //
+                // 关键：不再提取 background-color 与 plain `background:` 的颜色部分。
+                // 旧实现把 `background: white` 也搬到 chapterBgStyle，再被 .rd-chapter-bg 全屏
+                // div 渲染成 inset:0 的白色块 —— 直接遮住 .rd-app 的主题色（用户看到的就是
+                // "主题没了"、"全屏背景白成一片"）。新实现只让 EPUB 自带的背景图通过全屏层
+                // 显示，bg-color 由阅读器主题接管。shorthand `background: white url(x.png)` 也
+                // 只取 url() 部分。
+                const extractBgStyle = (styleStr: string): string => {
+                    if (!styleStr) return "";
+                    const decls = styleStr
+                        .split(";")
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                    const out: string[] = [];
+                    const IMAGE_LONGHAND =
+                        /^background-(image|repeat|position|size|attachment|origin|clip)\s*:/i;
+                    for (const d of decls) {
+                        if (IMAGE_LONGHAND.test(d)) {
+                            out.push(d);
+                            continue;
+                        }
+                        if (/^background\s*:/i.test(d)) {
+                            // 简写：只挑 url() 与 size/repeat/position 关键词，忽略颜色词
+                            const val = d.slice(d.indexOf(":") + 1);
+                            const urlM = val.match(/url\([^)]*\)/i);
+                            if (urlM) out.push(`background-image: ${urlM[0]}`);
+                            const repeatM = val.match(
+                                /\b(no-repeat|repeat-x|repeat-y|repeat|space|round)\b/i,
+                            );
+                            if (repeatM)
+                                out.push(`background-repeat: ${repeatM[1]}`);
+                            const sizeM = val.match(
+                                /\/\s*(cover|contain|auto|\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw)(?:\s+\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw))?)/i,
+                            );
+                            if (sizeM) out.push(`background-size: ${sizeM[1]}`);
+                        }
+                    }
+                    return out.join("; ");
+                };
+                // 重置 chapterBgStyle，与 chapterFullHtml 对齐
+                chapterBgStyle = new Array(spine.length).fill("");
+                for (let i = 0; i < spine.length; i++) {
+                    const doc = parsedDocs[i];
+                    if (!doc) {
+                        chapterFullHtml[i] =
+                            `<section class="rd-chapter" data-idx="${i}"><p style="color:#b66;">[章节加载失败：${spine[i].path}]</p></section>`;
                         continue;
                     }
-                    if (/^background\s*:/i.test(d)) {
-                        // 简写：只挑 url() 与 size/repeat/position 关键词，忽略颜色词
-                        const val = d.slice(d.indexOf(":") + 1);
-                        const urlM = val.match(/url\([^)]*\)/i);
-                        if (urlM) out.push(`background-image: ${urlM[0]}`);
-                        const repeatM = val.match(
-                            /\b(no-repeat|repeat-x|repeat-y|repeat|space|round)\b/i,
-                        );
-                        if (repeatM)
-                            out.push(`background-repeat: ${repeatM[1]}`);
-                        const sizeM = val.match(
-                            /\/\s*(cover|contain|auto|\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw)(?:\s+\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw))?)/i,
-                        );
-                        if (sizeM) out.push(`background-size: ${sizeM[1]}`);
+                    const head = doc.head;
+                    const headStyles = head
+                        ? Array.from(head.querySelectorAll("style"))
+                              .map((s) => s.outerHTML)
+                              .join("")
+                        : "";
+                    const body = doc.body || doc.querySelector("body");
+                    if (body instanceof HTMLElement)
+                        markOpeningHeaderImage(body);
+                    const html = body
+                        ? body.innerHTML
+                        : doc.documentElement.innerHTML;
+                    // 把 body 的 class / style / id 转移到 .epub-body div
+                    const chapterPath = spine[i].path;
+                    const bodyClass = body?.getAttribute("class") || "";
+                    let bodyStyle = body?.getAttribute("style") || "";
+                    if (body && bodyStyle) {
+                        // Ensure the CSS declaration block is live before serializing it.
+                        // XML-parsed inline styles otherwise survive as inert attributes,
+                        // so styles such as display:none and background URLs are lost.
+                        body.style.cssText = bodyStyle;
+                        bodyStyle = body.style.cssText;
                     }
-                }
-                return out.join("; ");
-            };
-            // 重置 chapterBgStyle，与 chapterFullHtml 对齐
-            chapterBgStyle = new Array(spine.length).fill("");
-            for (let i = 0; i < spine.length; i++) {
-                const doc = parsedDocs[i];
-                if (!doc) {
+                    if (bodyStyle) {
+                        bodyStyle = bodyStyle.replace(
+                            URL_RE,
+                            (match, _q, url) => {
+                                const trimmed = url.trim();
+                                if (
+                                    !trimmed ||
+                                    trimmed.startsWith("data:") ||
+                                    /^https?:/i.test(trimmed) ||
+                                    trimmed.startsWith("#")
+                                ) {
+                                    return match;
+                                }
+                                const abs = resolveRelative(
+                                    chapterPath,
+                                    trimmed,
+                                );
+                                return `url("${toAssetUrl(abs)}")`;
+                            },
+                        );
+                    }
+                    const bodyId = body?.getAttribute("id") || "";
+                    // EPUB body 自带的 background-* 属性单独提取出来，存到 chapterBgStyle，
+                    // 后面用全屏背景层 .rd-chapter-bg 渲染（覆盖整个 viewport，不只列宽）。
+                    // 不再把 background 写到 section.rd-chapter 的 style 上 —— 否则 column-
+                    // fragmented 会把背景在每列重复绘制，与全屏层冲突，且无法贴窗口边。
+                    const sectionClass = bodyClass
+                        ? `rd-chapter ${bodyClass}`
+                        : "rd-chapter";
+                    const sectionBgStyle = extractBgStyle(bodyStyle);
+                    const epubBodyClass = bodyClass
+                        ? `epub-body ${bodyClass}`
+                        : "epub-body";
+                    // .epub-body 也清掉 background-* 部分（避免在白色卡片背后重复绘制）。
+                    // 其他属性保留（color、margin、padding 等）。
+                    const bodyStyleNoBg = bodyStyle;
+                    const styleAttr = bodyStyleNoBg
+                        ? ` style="${escapeAttr(bodyStyleNoBg)}"`
+                        : "";
+                    const idAttr = bodyId ? ` id="${escapeAttr(bodyId)}"` : "";
+                    // 把 body 的 background 样式存到 chapterBgStyle，供全屏背景层使用：
+                    // 当前章节的背景图会被复制到 .rd-chapter-bg 全屏 div，覆盖整个 viewport，
+                    // 而不只是列宽内的 section.rd-chapter 区域。
+                    chapterBgStyle[i] = sectionBgStyle;
                     chapterFullHtml[i] =
-                        `<section class="rd-chapter" data-idx="${i}"><p style="color:#b66;">[章节加载失败：${spine[i].path}]</p></section>`;
-                    continue;
+                        `<section class="${escapeAttr(sectionClass)}" data-idx="${i}">${headStyles}<div class="${escapeAttr(epubBodyClass)}"${idAttr}${styleAttr}>${html}</div></section>`;
                 }
-                const head = doc.head;
-                const headStyles = head
-                    ? Array.from(head.querySelectorAll("style"))
-                          .map((s) => s.outerHTML)
-                          .join("")
-                    : "";
-                const body = doc.body || doc.querySelector("body");
-                if (body instanceof HTMLElement) markOpeningHeaderImage(body);
-                const html = body
-                    ? body.innerHTML
-                    : doc.documentElement.innerHTML;
-                // 把 body 的 class / style / id 转移到 .epub-body div
-                const chapterPath = spine[i].path;
-                const bodyClass = body?.getAttribute("class") || "";
-                let bodyStyle = body?.getAttribute("style") || "";
-                if (body && bodyStyle) {
-                    // Ensure the CSS declaration block is live before serializing it.
-                    // XML-parsed inline styles otherwise survive as inert attributes,
-                    // so styles such as display:none and background URLs are lost.
-                    body.style.cssText = bodyStyle;
-                    bodyStyle = body.style.cssText;
-                }
-                if (bodyStyle) {
-                    bodyStyle = bodyStyle.replace(URL_RE, (match, _q, url) => {
-                        const trimmed = url.trim();
-                        if (
-                            !trimmed ||
-                            trimmed.startsWith("data:") ||
-                            /^https?:/i.test(trimmed) ||
-                            trimmed.startsWith("#")
-                        ) {
-                            return match;
-                        }
-                        const abs = resolveRelative(chapterPath, trimmed);
-                        return `url("${toAssetUrl(abs)}")`;
-                    });
-                }
-                const bodyId = body?.getAttribute("id") || "";
-                // EPUB body 自带的 background-* 属性单独提取出来，存到 chapterBgStyle，
-                // 后面用全屏背景层 .rd-chapter-bg 渲染（覆盖整个 viewport，不只列宽）。
-                // 不再把 background 写到 section.rd-chapter 的 style 上 —— 否则 column-
-                // fragmented 会把背景在每列重复绘制，与全屏层冲突，且无法贴窗口边。
-                const sectionClass = bodyClass
-                    ? `rd-chapter ${bodyClass}`
-                    : "rd-chapter";
-                const sectionBgStyle = extractBgStyle(bodyStyle);
-                const epubBodyClass = bodyClass
-                    ? `epub-body ${bodyClass}`
-                    : "epub-body";
-                // .epub-body 也清掉 background-* 部分（避免在白色卡片背后重复绘制）。
-                // 其他属性保留（color、margin、padding 等）。
-                const bodyStyleNoBg = bodyStyle;
-                const styleAttr = bodyStyleNoBg
-                    ? ` style="${escapeAttr(bodyStyleNoBg)}"`
-                    : "";
-                const idAttr = bodyId ? ` id="${escapeAttr(bodyId)}"` : "";
-                // 把 body 的 background 样式存到 chapterBgStyle，供全屏背景层使用：
-                // 当前章节的背景图会被复制到 .rd-chapter-bg 全屏 div，覆盖整个 viewport，
-                // 而不只是列宽内的 section.rd-chapter 区域。
-                chapterBgStyle[i] = sectionBgStyle;
-                chapterFullHtml[i] =
-                    `<section class="${escapeAttr(sectionClass)}" data-idx="${i}">${headStyles}<div class="${escapeAttr(epubBodyClass)}"${idAttr}${styleAttr}>${html}</div></section>`;
+
+                // 解析产物存进缓存，下次切回这个标签直接命中
+                writeReaderCache(bookKey, {
+                    spine,
+                    toc,
+                    title: bookTitle,
+                    author: bookAuthor,
+                    chapterFullHtml,
+                    chapterBgStyle,
+                });
             }
 
             // 12) 进度恢复（兼容旧格式：纯 currentSpread 数字 / 新格式：{ch,sp}）
@@ -1610,6 +1706,13 @@
                 return;
             }
             if (renderedSet.size >= chapterFullHtml.length) {
+                hydrateScheduled = false;
+                return;
+            }
+            // 保活：切走的标签不再在后台抢主线程 —— 隐藏页面照样会执行
+            // idle 回调，继续 hydrate 就是在和用户当前看的页面抢帧。
+            // 切回来时 onActivationChange 会重新调度。
+            if (keepAliveView && !keepAliveView.isActive()) {
                 hydrateScheduled = false;
                 return;
             }
@@ -2768,7 +2871,12 @@
     })();
 
     // ===== 事件 =====
+    // 同窗口保活：别的标签的页面也一直挂着，它们的 window 监听器不会因为
+    // 隐藏而失效。不判当前视图的话，隐藏的阅读器会把可见编辑器的方向键
+    // 拿去翻页。
+    const activeOnly = onlyWhenActive();
     function onKeydown(e: KeyboardEvent) {
+        if (!activeOnly()) return;
         // 焦点在阅读区域时，按键由 onFrameKeydown 处理；两个监听器都执行
         // 会造成一次 ArrowRight 前进两页。
         if (e.defaultPrevented) return;
@@ -2818,6 +2926,7 @@
     let wheelAccum = 0;
     let wheelTimer: any = null;
     function onWheel(e: WheelEvent) {
+        if (!activeOnly()) return;
         if (pageMode !== "paginated") return; // 滚动模式：不拦截，浏览器自然滚动
         if (!wheelTurnPage) return;
         if (activePanel) return;
@@ -2929,8 +3038,17 @@
         }
     }
 
+    // 隐藏期间窗口尺寸变了：布局没重算，切回来必须补一次，否则列宽还是旧的
+    let layoutDirtyWhileHidden = false;
+
     function onResize() {
         if (loading) return;
+        // 保活：隐藏的页面也占着真实尺寸，改窗口大小同样会变宽高。但没必要
+        // 在后台重排整本书，记个脏标记，切回来时补算。
+        if (keepAliveView && !keepAliveView.isActive()) {
+            layoutDirtyWhileHidden = true;
+            return;
+        }
         const anchor = captureReadingAnchor();
         requestAnimationFrame(() => {
             recomputeLayout();
@@ -2969,14 +3087,37 @@
         };
         window.addEventListener("tepub-settings-updated", onAppThemeChanged);
         window.addEventListener("storage", onAppThemeChanged);
+        const stopActivation = keepAliveView?.onActivationChange((active) => {
+            if (active) {
+                // 隐藏期间样式表被摘掉了，切回来挂回去（sheet 对象一直留着）
+                attachAdoptedChapterStyles();
+                scheduleHydrate();
+                // 隐藏期间改过窗口尺寸：补算一次列宽，再按锚点回到原位置
+                if (layoutDirtyWhileHidden) {
+                    layoutDirtyWhileHidden = false;
+                    requestAnimationFrame(() => {
+                        if (destroyed || loading) return;
+                        const anchor = captureReadingAnchor();
+                        recomputeLayout();
+                        restoreReadingAnchor(anchor);
+                    });
+                }
+                return;
+            }
+            detachAdoptedChapterStyles();
+            // 隐藏前把阅读进度落盘：用户可能在切走后就关掉窗口
+            if (pageMode === "scroll" && !loading) saveProgress();
+        });
         onDestroy(() => {
+            stopActivation?.();
             window.removeEventListener(
                 "tepub-settings-updated",
                 onAppThemeChanged,
             );
             window.removeEventListener("storage", onAppThemeChanged);
         });
-        epubPath = $page.url.searchParams.get("file") || "";
+        // 保活模式下读本视图自己的地址：全局 page.url 会随别的标签跳转而变
+        epubPath = ownUrl.searchParams.get("file") || "";
         if (!epubPath) {
             errorMsg = "未提供 EPUB 文件路径";
             loading = false;
@@ -3100,6 +3241,7 @@
 </script>
 
 <svelte:head>
+    <!-- 保活时这条会被别的页面覆盖，真正的标题登记在视图宿主里（见脚本） -->
     <title>{bookTitle ? `${bookTitle} · 阅读` : "阅读"}</title>
 </svelte:head>
 

@@ -1,5 +1,9 @@
 <script lang="ts">
-    import { page } from "$app/stores";
+    import { viewUrl } from "$lib/keepAlive/viewState";
+
+    // 保活视图里页面常驻，全局 page.url 会随别的标签跳转而变；
+    // 视图按 路径+查询串 区分，所以本页地址在实例内是常量
+    const ownUrl = viewUrl();
     import { onDestroy } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import {
@@ -248,7 +252,7 @@
         footnoteMode: "standard-to-popup",
     };
 
-    $: rawAction = $page.url.searchParams.get(
+    const rawAction = ownUrl.searchParams.get(
         "tool",
     ) as WebEpubAdvancedAction | null;
     $: action = rawAction && ACTIONS.has(rawAction) ? rawAction : "epub-to-txt";

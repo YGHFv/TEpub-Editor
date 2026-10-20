@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { EpubFileNode } from "./FileTreePanel.svelte";
+    import Icon from "$lib/icons/Icon.svelte";
     import { getFileIcon } from "./fileIcons";
 
     let {
@@ -49,7 +50,9 @@
                 role="button"
                 tabindex="0"
             >
-                <span class="tab-icon">{getFileIcon(tab.file_type)}</span>
+                <span class="tab-icon"
+                    ><Icon name={getFileIcon(tab.file_type)} size={14} /></span
+                >
                 <span class="tab-name" title={tab.name}
                     >{tab.name}{#if modifiedFiles.has(tab.path)}
                         <span class="modified-indicator">*</span>
@@ -60,7 +63,7 @@
                     onclick={(e) => onCloseTab(e, index)}
                     aria-label={"关闭标签页"}
                 >
-                    &times;
+                    <Icon name="close" size={12} strokeWidth={2.1} />
                 </button>
             </div>
         {/each}

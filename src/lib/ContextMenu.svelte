@@ -1,5 +1,6 @@
 ﻿<script lang="ts">
     import { onMount, onDestroy } from "svelte";
+    import { isInHiddenView } from "./keepAlive/viewState";
 
     let showMenu = false;
     let pos = { x: 0, y: 0 };
@@ -80,6 +81,9 @@
     }
 
     function onContextMenu(e: MouseEvent) {
+        // 保活：隐藏页面里的 ContextMenu 也挂着 window 监听，不能替可见页面
+        // 弹菜单（它的 absolute 定位会对到错误的坐标）
+        if (isInHiddenView(e.target)) return;
         // 1. Check for Context Data Attribute (File Tree / TOC)
         const target = e.target as HTMLElement;
         if (target.closest("[data-native-context-menu='true']")) return;

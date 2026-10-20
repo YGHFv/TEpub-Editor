@@ -6,6 +6,10 @@
     import LibraryGrid from "$lib/LibraryGrid.svelte";
     import LibraryListSimple from "$lib/LibraryListSimple.svelte";
     import LibraryPreview from "$lib/LibraryPreview.svelte";
+    import Icon from "$lib/icons/Icon.svelte";
+    import type { IconName } from "$lib/icons/Icon.svelte";
+    import { isInHiddenView } from "$lib/keepAlive/viewState";
+    import { appRoutePath } from "$lib/secondaryTabs";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
     import Toast from "$lib/Toast.svelte";
@@ -652,10 +656,10 @@
         previewMode: "auto",
         dblClickAction: "edit",
     };
-    const VIEW_ICONS: Record<string, string> = {
-        grid: "▦",
-        "list-cover": "☷",
-        "list-simple": "☰",
+    const VIEW_ICONS: Record<string, IconName> = {
+        grid: "grid",
+        "list-cover": "list-cover",
+        "list-simple": "list",
     };
 
     // 预览区可见性：三态
@@ -1755,6 +1759,8 @@
 
     async function handleDragDrop(event: DragEvent) {
         event.preventDefault();
+        // 保活：隐藏的书库也会收到 window 级 drop，不能抢可见页面的拖放
+        if (isInHiddenView(event.target)) return;
         const files = event.dataTransfer?.files;
         if (!files) return;
         for (let i = 0; i < files.length; i++) {
@@ -1960,12 +1966,15 @@
             .getCurrentWindowLabel()
             .catch(() => null);
         platform.onCurrentWindowCloseRequested(async (event) => {
+            // 保活：书库可能只是后台挂着的一层，只有它确实在显示时
+            // 才把「关窗口」翻译成「回工具箱」
             if (
                 currentWindowLabel === "main" &&
-                window.location.pathname === "/library"
+                !isInHiddenView(document.querySelector(".library-app")) &&
+                appRoutePath(location.pathname) === "/library"
             ) {
                 event.preventDefault();
-                window.location.href = "/";
+                await goto(`${base}/`);
             }
         });
 
@@ -1986,8 +1995,9 @@
     });
 
     function backToLibrary() {
-        // 从编辑器/元数据页返回书库
-        window.location.href = "/library";
+        // 从编辑器/元数据页返回书库。用 goto 走 SPA：整页重载会把
+        // 其它标签的保活状态一起丢掉
+        void goto(`${base}/library`);
     }
 </script>
 
@@ -2002,10 +2012,11 @@
     <!-- 顶部工具栏 -->
     <div class="toolbar">
         <div class="toolbar-left">
-            <button class="tb-btn primary" on:click={addBook}>+ 添加图书</button
+            <button class="tb-btn primary" on:click={addBook}
+                ><Icon name="plus" size={15} /> 添加图书</button
             >
             <button class="tb-btn" on:click={openExternalFiles}
-                >📂 打开文件</button
+                ><Icon name="folder-open" size={15} /> 打开文件</button
             >
             <div class="search-box">
                 <input
@@ -2023,25 +2034,33 @@
                 </span>
             {/if}
             <span class="book-count">{books.length} 本书</span>
-            <button class="tb-btn" on:click={cycleViewMode} title="切换视图"
-                >{VIEW_ICONS[viewMode]}</button
+            <button
+                class="tb-btn icon-btn"
+                on:click={cycleViewMode}
+                title="切换视图"
+                aria-label="切换视图"
             >
+                <Icon name={VIEW_ICONS[viewMode]} size={17} />
+            </button>
             <button
                 class="tb-btn icon-btn"
                 on:click={openToolbox}
                 title="工具箱"
                 aria-label="工具箱"
             >
-                <span class="toolbox-entry-icon" aria-hidden="true"></span>
+                <Icon name="folder" size={17} />
             </button>
             <button
-                class="tb-btn"
+                class="tb-btn icon-btn"
                 on:click={() => {
                     appSettings = loadAppSettings();
                     showSettings = !showSettings;
                 }}
-                title="书库设置">⚙</button
+                title="书库设置"
+                aria-label="书库设置"
             >
+                <Icon name="settings" size={17} />
+            </button>
         </div>
     </div>
 
@@ -2057,7 +2076,9 @@
                     title="点击移除该筛选"
                 >
                     <span class="filter-chip-text">{tag}</span>
-                    <span class="filter-chip-remove">×</span>
+                    <span class="filter-chip-remove"
+                        ><Icon name="close" size={12} strokeWidth={2.2} /></span
+                    >
                 </button>
             {/each}
             <button
@@ -2081,7 +2102,9 @@
             {:else if filteredBooks.length === 0}
                 <div class="empty-state">
                     {#if books.length === 0}
-                        <div class="empty-icon">📚</div>
+                        <div class="empty-icon">
+                            <Icon name="books" size={56} strokeWidth={1.4} />
+                        </div>
                         <div class="empty-text">书库为空</div>
                         <div class="empty-hint">
                             点击「+ 添加图书」或拖放文件到此处
@@ -2511,7 +2534,9 @@
                     <button
                         class="settings-close"
                         on:click={cancelCollisionPrompt}
-                        title="取消">×</button
+                        title="取消"
+                        aria-label="取消"
+                        ><Icon name="close" size={16} /></button
                     >
                 </div>
                 <div class="settings-body">
@@ -2573,7 +2598,9 @@
                     <button
                         class="settings-close"
                         on:click={cancelRenameBook}
-                        title="取消">×</button
+                        title="取消"
+                        aria-label="取消"
+                        ><Icon name="close" size={16} /></button
                     >
                 </div>
                 <div class="settings-body">
@@ -2645,7 +2672,9 @@
                         class="settings-close"
                         on:click={() => (showMetaEditor = false)}
                         title="关闭"
-                        disabled={savingMetadata}>×</button
+                        aria-label="关闭"
+                        disabled={savingMetadata}
+                        ><Icon name="close" size={16} /></button
                     >
                 </div>
 
@@ -2678,10 +2707,15 @@
                                         <button
                                             class="meta-inline-btn"
                                             title="清除副标题"
+                                            aria-label="清除副标题"
                                             on:click={() => {
                                                 metaForm.subtitle = "";
                                                 subtitleShown = false;
-                                            }}>×</button
+                                            }}
+                                            ><Icon
+                                                name="close"
+                                                size={13}
+                                            /></button
                                         >
                                     </div>
                                 {:else}
@@ -2731,7 +2765,12 @@
                                                                 tag,
                                                             )}
                                                         title="移除标签"
-                                                        >×</button
+                                                        aria-label="移除标签"
+                                                        ><Icon
+                                                            name="close"
+                                                            size={11}
+                                                            strokeWidth={2.2}
+                                                        /></button
                                                     >
                                                 </span>
                                             {/each}
@@ -2957,9 +2996,11 @@
                                                 ? "复制 UUID"
                                                 : "无 UUID 可复制"}
                                         >
-                                            {copyFeedbackKey === "uuid"
-                                                ? "✓"
-                                                : "⎘"}
+                                            {#if copyFeedbackKey === "uuid"}
+                                                <Icon name="check" size={14} />
+                                            {:else}
+                                                <Icon name="copy" size={14} />
+                                            {/if}
                                         </button>
                                         <button
                                             class="meta-icon-btn"
@@ -2967,7 +3008,7 @@
                                             disabled={refreshing}
                                             title="从 EPUB 文件重新读取元数据"
                                         >
-                                            {refreshing ? "…" : "↻"}
+                                            <Icon name="refresh" size={14} />
                                         </button>
                                     </div>
                                 {/if}
@@ -2991,9 +3032,14 @@
                                             >已填写</span
                                         >
                                     {/if}
-                                    <span class="meta-collapse-arrow"
-                                        >{productionExpanded ? "▾" : "▸"}</span
-                                    >
+                                    <span class="meta-collapse-arrow">
+                                        <Icon
+                                            name={productionExpanded
+                                                ? "chevron-down"
+                                                : "chevron-right"}
+                                            size={12}
+                                        />
+                                    </span>
                                 </button>
                                 {#if productionExpanded}
                                     <div class="meta-section-body">
@@ -3131,6 +3177,9 @@
     }
 
     .tb-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         padding: 6px 12px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
@@ -3138,6 +3187,7 @@
         color: var(--color-text-soft);
         cursor: pointer;
         font-size: 13px;
+        line-height: 1;
         transition: background var(--transition-fast);
     }
 
@@ -3163,43 +3213,7 @@
         width: 32px;
         height: 32px;
         padding: 0;
-        display: inline-flex;
-        align-items: center;
         justify-content: center;
-        font-size: 16px;
-        line-height: 1;
-    }
-
-    .toolbox-entry-icon {
-        position: relative;
-        width: 16px;
-        height: 12px;
-        box-sizing: border-box;
-        border: 1.8px solid currentColor;
-        border-radius: var(--radius-xs);
-        opacity: 0.9;
-    }
-
-    .toolbox-entry-icon::before {
-        content: "";
-        position: absolute;
-        left: 4px;
-        top: -5px;
-        width: 6px;
-        height: 5px;
-        box-sizing: border-box;
-        border: 1.8px solid currentColor;
-        border-bottom: none;
-        border-radius: 3px 3px 0 0;
-    }
-
-    .toolbox-entry-icon::after {
-        content: "";
-        position: absolute;
-        left: -1.8px;
-        right: -1.8px;
-        top: 4px;
-        border-top: 1.8px solid currentColor;
     }
 
     .search-box input {
@@ -3485,13 +3499,15 @@
     }
 
     .settings-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         width: 26px;
         height: 26px;
         border: none;
         border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-muted);
-        font-size: 20px;
         line-height: 1;
         cursor: pointer;
         transition:
@@ -3611,8 +3627,10 @@
     /* 箭头被推到行尾 */
     .meta-collapse-arrow {
         margin-left: auto;
-        display: inline-block;
-        width: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
         color: var(--color-muted);
         flex-shrink: 0;
         text-align: right;
@@ -3666,12 +3684,14 @@
         flex-shrink: 0;
         width: 26px;
         height: 26px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         border: 1px solid var(--color-border);
         background: var(--color-surface);
         color: var(--color-muted);
         border-radius: var(--radius-xs);
         cursor: pointer;
-        font-size: 14px;
         line-height: 1;
         transition:
             background var(--transition-fast),
@@ -3710,12 +3730,14 @@
         flex-shrink: 0;
         width: 28px;
         height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         border: 1px solid var(--color-border);
         background: var(--color-surface);
         color: var(--color-muted);
         border-radius: var(--radius-xs);
         cursor: pointer;
-        font-size: 13px;
         line-height: 1;
         transition:
             background var(--transition-fast),
@@ -3809,11 +3831,13 @@
         flex-shrink: 0;
         width: 18px;
         height: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         border: none;
         background: transparent;
         color: inherit;
         border-radius: 50%;
-        font-size: 14px;
         line-height: 1;
         cursor: pointer;
         opacity: 0.6;

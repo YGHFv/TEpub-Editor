@@ -2,6 +2,7 @@
     import { onMount } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import ToolImportPage from "$lib/ToolImportPage.svelte";
+    import { isInHiddenView } from "$lib/keepAlive/viewState";
     import {
         EPUB_ILLUSTRATION_STYLES,
         type EpubStyleModule,
@@ -470,6 +471,7 @@
 
 <svelte:window
     on:keydown={(event) => {
+        if (isInHiddenView(event.target)) return;
         if (event.key === "Escape") showLogModal = false;
     }}
 />

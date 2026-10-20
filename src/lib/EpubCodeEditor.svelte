@@ -9,6 +9,7 @@
     import { css } from "@codemirror/lang-css";
     import { xml } from "@codemirror/lang-xml";
     import { EPUB_EDITOR_FONT_SIZE_KEY } from "./storageKeys";
+    import { onlyWhenActive } from "./keepAlive/viewState";
 
     export let doc = "";
     export let language: "html" | "css" | "xml" | "other" = "other";
@@ -168,9 +169,12 @@
     }
 
     let blockNativeSearch: (e: KeyboardEvent) => void;
+    // 保活：隐藏页面里的代码编辑器也会收到 window 级 keydown，不能抢 Ctrl+F
+    const activeOnly = onlyWhenActive();
 
     onMount(() => {
         blockNativeSearch = (e: KeyboardEvent) => {
+            if (!activeOnly()) return;
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
                 e.preventDefault();
                 e.stopPropagation();

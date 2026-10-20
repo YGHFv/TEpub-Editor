@@ -341,7 +341,9 @@
             Arial, sans-serif;
         background-color: var(--color-hover);
         color: var(--color-text);
-        overflow: hidden;
+        /* 不要把溢出裁掉：这个窗口高度是固定的，用户放大界面字号后内容
+           可能装不下，宁可出一条滚动条也不能把「全部替换」按钮切掉 */
+        overflow: auto;
         font-size: 13px;
         user-select: none;
     }
@@ -350,13 +352,20 @@
         display: flex;
         padding: 12px;
         gap: 16px;
-        height: 100vh;
+        /* 100vh 在这里是死代码：app-frame 里它已经被压成"填满剩余区域"。
+           写 100% 才能在系统标题栏 + 自绘标题行都存在时算对高度 */
+        height: 100%;
+        min-height: 0;
         box-sizing: border-box;
         align-items: stretch;
     }
 
     .left-panel {
         flex-grow: 1;
+        /* min-width/min-height:0 不可省：flex 子项默认 min-height:auto，
+           内容比容器高时不会收缩，会把底部状态栏顶出窗口 */
+        min-width: 0;
+        min-height: 0;
         display: flex;
         flex-direction: column;
         gap: 12px;
@@ -368,6 +377,7 @@
         gap: 8px;
         width: 100px;
         flex-shrink: 0;
+        min-height: 0;
     }
 
     .input-group {
@@ -525,6 +535,8 @@
         gap: 14px;
         /* 让 body 的渐变底透上来；写死浅色 rgba 会在深色下糊成一块发白的板 */
         background: transparent;
+        /* 窗口被拖到很矮时整块面板可以滚，别把按钮裁掉 */
+        overflow: auto;
     }
 
     .left-panel,
@@ -544,6 +556,9 @@
         width: 118px;
         padding: 10px;
         gap: 10px;
+        /* 四个按钮等高铺满，不再按内容高度算 —— 窗口变矮时按钮跟着缩，
+           而不是把最后一个挤出面板 */
+        justify-content: flex-start;
     }
 
     .row {
@@ -616,7 +631,11 @@
         min-height: var(--control-height);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
+        background: linear-gradient(
+            180deg,
+            var(--color-surface),
+            var(--color-surface-soft)
+        );
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         font-weight: 700;

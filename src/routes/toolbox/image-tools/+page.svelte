@@ -7,6 +7,7 @@
         type GlobalAppSettings,
     } from "$lib/appSettings";
     import { IMAGE_TOOLS_AI_CONFIG_KEY as CONFIG_KEY } from "$lib/storageKeys";
+    import { isInHiddenView } from "$lib/keepAlive/viewState";
 
     type AiTarget = "duokan" | "standard" | "banner";
     type ToolMode = "cover" | "header" | "ai";
@@ -1316,6 +1317,7 @@
     }
 
     function handleKeydown(event: KeyboardEvent) {
+        if (isInHiddenView(event.target)) return;
         if (event.key === "Escape") {
             if (customSelectOpen) {
                 customSelectOpen = null;

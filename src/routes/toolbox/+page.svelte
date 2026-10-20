@@ -8,6 +8,8 @@
         setWebClientViewOverride,
     } from "$lib/clientProfile";
     import { platform, type PlatformWindowHandle } from "$lib/platform";
+    import Icon from "$lib/icons/Icon.svelte";
+    import { isInHiddenView } from "$lib/keepAlive/viewState";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
     import {
@@ -877,6 +879,9 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
+        // 保活：隐藏的工具箱也挂着这条 window 监听，不判当前视图的话，
+        // 在别的标签里按 Esc 会把工具箱窗口关掉
+        if (isInHiddenView(e.target)) return;
         if (e.key === "Escape" && !isRootToolbox()) {
             closeWindow();
         }
@@ -1251,7 +1256,7 @@
                 {/each}
             </div>
             <label class="toolbox-search">
-                <span aria-hidden="true">⌕</span>
+                <Icon name="search" size={15} strokeWidth={2} />
                 <input
                     type="search"
                     bind:value={toolSearch}
@@ -1270,8 +1275,7 @@
                             ? "恢复自动页面"
                             : "切换电脑页面"}
                         aria-pressed={webDesktopViewEnabled}
-                        ><span class="desktop-view-icon" aria-hidden="true"
-                        ></span></button
+                        ><Icon name="monitor" size={17} /></button
                     >
                 {/if}
                 <button
@@ -1279,7 +1283,7 @@
                     type="button"
                     on:click={openSettings}
                     title="设置"
-                    aria-label="设置">⚙</button
+                    aria-label="设置"><Icon name="settings" size={17} /></button
                 >
             </div>
         </div>
@@ -1842,7 +1846,6 @@
         border-color: var(--color-border);
         border-radius: var(--radius-sm);
         background: var(--color-surface);
-        font-size: 17px;
         transition:
             color var(--transition-fast),
             border-color var(--transition-fast),
@@ -1854,26 +1857,6 @@
         border-color: var(--color-border);
         background: var(--color-hover);
         color: var(--color-accent-deep);
-    }
-
-    .desktop-view-icon {
-        position: relative;
-        width: 16px;
-        height: 11px;
-        box-sizing: border-box;
-        border: 1.7px solid currentColor;
-        border-radius: var(--radius-xs);
-    }
-
-    .desktop-view-icon::before {
-        content: "";
-        position: absolute;
-        left: 50%;
-        bottom: -4px;
-        width: 7px;
-        height: 3px;
-        border-bottom: 1.7px solid currentColor;
-        transform: translateX(-50%);
     }
 
     .toolbox-mini-btn {

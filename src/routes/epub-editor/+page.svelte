@@ -3,8 +3,17 @@
     import { platform, type PlatformUnlisten } from "$lib/platform";
     import { base } from "$app/paths";
     import { goto } from "$app/navigation";
-    import { page } from "$app/stores";
+    import {
+        isInHiddenView,
+        onlyWhenActive,
+        viewUrl,
+    } from "$lib/keepAlive/viewState";
     import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
+
+    // 同窗口保活：别的标签的页面也一直挂着，window 级监听要先判当前视图
+    const activeOnly = onlyWhenActive();
+    // getContext 只能在初始化时读，先取出本页自己的地址
+    const ownUrl = viewUrl();
     import TocNode from "$lib/TocNode.svelte";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
@@ -717,8 +726,12 @@
         }
     }
 
+    // 保活时读本视图自己的地址：全局 page.url 会随别的标签跳转而变，
+    // 切回来时重新读会导致把别的书当成当前书
+    const routeFileParam = () => ownUrl.searchParams.get("file") || "";
+
     const loadEpub = async () => {
-        const routePath = $page.url.searchParams.get("file") || "";
+        const routePath = routeFileParam();
         const isNewRoutePath =
             routePath && routePath !== sourceEpubPath && routePath !== epubPath;
         const requestedPath = isNewRoutePath
@@ -1041,7 +1054,7 @@
         platform
             .listen<EpubPrepareStageEvent>("epub-prepare-stage", (event) => {
                 if (!isLoading) return;
-                const routePath = $page.url.searchParams.get("file") || "";
+                const routePath = routeFileParam();
                 const activePath = sourceEpubPath || epubPath || routePath;
                 if (
                     event.payload.epubPath &&
@@ -1059,6 +1072,9 @@
             });
 
         const blockGlobalSearch = (e: KeyboardEvent) => {
+            // 保活：隐藏的编辑器也挂着这条捕获监听，不判当前视图会把
+            // 当前标签的 Ctrl+F 也拦下来
+            if (!activeOnly()) return;
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
                 e.preventDefault();
                 showFindReplace = true;
@@ -1748,6 +1764,8 @@
         };
 
         const handleSelectAll = () => {
+            // 保活：隐藏的编辑器页面也会收到这条全局事件
+            if (!activeOnly()) return;
             epubCodeEditorComponent?.selectAll();
         };
 
@@ -3018,6 +3036,7 @@ document.addEventListener("click", function (event) {
     }
 
     async function handleFileDrop(e: DragEvent) {
+        if (isInHiddenView(e.target)) return;
         console.log("File dropped", e.dataTransfer?.files);
         e.preventDefault();
         e.stopPropagation();
@@ -3223,6 +3242,7 @@ document.addEventListener("click", function (event) {
     }
 
     function handleDragOver(e: DragEvent) {
+        if (isInHiddenView(e.target)) return;
         e.preventDefault();
         e.dataTransfer!.dropEffect = "copy";
     }
@@ -4024,6 +4044,9 @@ document.addEventListener("click", function (event) {
     }
 
     function handleKeydown(e: KeyboardEvent) {
+        // 保活：隐藏的编辑器也挂着 <svelte:window>，不判当前视图会把
+        // 可见标签的 Ctrl+F / Ctrl+S 都抢走
+        if (isInHiddenView(e.target)) return;
         if (e.ctrlKey && e.key === "f") {
             e.preventDefault();
             e.stopPropagation();

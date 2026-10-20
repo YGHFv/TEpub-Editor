@@ -1,5 +1,8 @@
 <script lang="ts">
-    import { page } from "$app/stores";
+    import { viewUrl } from "$lib/keepAlive/viewState";
+
+    // 保活视图里页面常驻，全局 page.url 会随别的标签跳转而变
+    const ownUrl = viewUrl();
     import { onDestroy } from "svelte";
     import {
         processWebEpub,
@@ -126,7 +129,7 @@
     let failures: FailedItem[] = [];
     let imageFormat: WebImageFormat = "auto";
 
-    $: rawAction = $page.url.searchParams.get(
+    const rawAction = ownUrl.searchParams.get(
         "tool",
     ) as WebEpubProcessAction | null;
     $: action =

@@ -4,6 +4,18 @@
     import { goto } from "$app/navigation";
     import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
     import { platform } from "$lib/platform";
+    import {
+        isInHiddenView,
+        onlyWhenActive,
+        viewUrl,
+    } from "$lib/keepAlive/viewState";
+
+    // 同窗口保活：其它标签的页面也一直挂着，window 级事件要先判当前视图
+    const activeOnly = onlyWhenActive();
+
+    // 保活视图里页面常驻，window.location 会随别的标签跳转而变；
+    // 本页的查询串在实例内固定（视图按 路径+查询串 区分）
+    const ownUrl = viewUrl();
     // 文本读写不走 fs 插件，统一使用自定义后端命令（platform.invoke 的
     // read_text_file / save_text_file）。
     import Editor from "$lib/Editor.svelte";
@@ -517,8 +529,7 @@
 
     function getUrlFileParam() {
         try {
-            const sp = new URLSearchParams(window.location.search);
-            const f = sp.get("file");
+            const f = ownUrl.searchParams.get("file");
             return f || null;
         } catch (e) {
             console.warn("解析 URL ?file= 失败:", e);
@@ -4200,8 +4211,8 @@
             // 6. 关闭拦截
             await platform.setCurrentWindowTitle("TEpub-Editor-TXT");
             try {
-                const sp = new URLSearchParams(window.location.search);
-                openedFromLibrary = sp.get("fromLibrary") === "1";
+                openedFromLibrary =
+                    ownUrl.searchParams.get("fromLibrary") === "1";
                 if (!libraryData) await loadSharedLibrarySettings();
                 const action = loadGlobalAppSettings(
                     libraryData?.config || {},
@@ -4226,11 +4237,15 @@
 
         init();
 
-        // 监听全选事件
+        // 监听全选事件。保活模式下多个编辑器页面同时挂着，这些事件是
+        // 窗口级的全局广播，隐藏页面不能抢着执行
         const handleSelectAll = () => {
+            if (isInHiddenView(document.activeElement)) return;
+            if (!activeOnly()) return;
             editorComponent?.selectAll();
         };
         const handleContextMenuAction = (event: Event) => {
+            if (!activeOnly()) return;
             const detail = (event as CustomEvent).detail || {};
             if (
                 [
@@ -4603,12 +4618,14 @@
                     console.log("打开 EPUB 文件:", path);
 
                     if (initialLaunch) {
-                        // Initial launch: Reuse the main window
+                        // Initial launch: Reuse the main window。
+                        // 用 goto 而不是改 location.href：整页重载会把标签栏
+                        // 和所有保活页面一起清掉
                         await platform.setCurrentWindowTitle(
                             "TEpub-Editor-EPUB",
                         );
                         await platform.setCurrentWindowSize(1200, 800);
-                        window.location.href = `/epub-editor?file=${encodedPath}`;
+                        await goto(`${base}/epub-editor?file=${encodedPath}`);
                         return;
                     }
 

@@ -194,16 +194,51 @@ body {
   min-height: 0 !important;
 }
 
+/* 保活视图容器（见 src/lib/keepAlive）：页面挂在 .ka-view 里而不是直接挂在
+   .app-frame-body 下，同样要压成「填满剩余区域」，否则各页的 100vh 会把
+   40px 的标题行高度多算一遍，底部多出一条滚动条 */
+.ka-view
+  > :where(
+    .app-container,
+    .epub-editor,
+    .library-app,
+    .search-window,
+    .batch-app,
+    .toolbox-app,
+    .style-library-page,
+    .text-editor-page,
+    .image-tool-app,
+    .diagnose-page,
+    .process-page,
+    .advanced-page,
+    .font-page,
+    .mobile-shell,
+    .editor-page,
+    .mobile-page,
+    .desktop-page,
+    .page,
+    .page-loading,
+    .page-error,
+    .metadata-container
+  ) {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
 /* 原本用 position:fixed;inset:0 铺满视口的页面：改成锚在 app-frame-body
-   里，否则它们会盖到标签栏上面（fixed 不受祖先 overflow 裁剪影响） */
-.app-frame-body :where(.web-epub-page, .rd-app) {
+   里，否则它们会盖到标签栏上面（fixed 不受祖先 overflow 裁剪影响）。
+   保活视图里的页面同理，锚到 .ka-view —— 否则一个隐藏的阅读器会用 fixed
+   盖住整个窗口，而且不会随父级 visibility:hidden 一起消失之外的裁剪。 */
+.app-frame-body :where(.web-epub-page, .rd-app),
+.ka-view :where(.web-epub-page, .rd-app) {
   position: absolute !important;
   inset: 0 !important;
   height: auto !important;
 }
 
 /* 靠页面自身滚动的工具页（工具箱/书库以外这些）在 flex 盒里允许撑高 */
-.app-frame-body :where(.toolbox-app, .style-library-page) {
+.app-frame-body :where(.toolbox-app, .style-library-page),
+.ka-view :where(.toolbox-app, .style-library-page) {
   overflow: visible;
 }
 

@@ -12,6 +12,7 @@
 
 <script lang="ts">
     import FileTreeItem from "$lib/FileTreeItem.svelte";
+    import Icon from "$lib/icons/Icon.svelte";
     import { getFileIcon } from "./fileIcons";
 
     let {
@@ -80,7 +81,11 @@
                 aria-label="&#20445;&#23384;&#25152;&#26377;&#26356;&#25913;"
                 class:dirty={isDirty}
             >
-                {isSaving ? "保存中..." : "\u{1F4BE}"}
+                {#if isSaving}
+                    <span class="save-spinner" aria-hidden="true"></span>
+                {:else}
+                    <Icon name="save" size={17} />
+                {/if}
             </button>
             <button
                 class="icon-btn"
@@ -88,7 +93,7 @@
                 title="&#21047;&#26032; EPUB"
                 aria-label="&#21047;&#26032; EPUB"
             >
-                &#128260;
+                <Icon name="refresh" size={17} />
             </button>
         </div>
     </div>
@@ -210,9 +215,25 @@
         height: var(--control-height);
         padding: 0;
         white-space: nowrap;
-        font-size: 16px;
-        font-weight: 600;
         line-height: 1;
+    }
+
+    /* 保存中：只用一个小转圈，不用「保存中...」文字 —— 34px 的方按钮
+       装不下四个汉字，文字会顶出边框 */
+    .save-spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: save-spin 0.7s linear infinite;
+        opacity: 0.8;
+    }
+
+    @keyframes save-spin {
+        to {
+            transform: rotate(360deg);
+        }
     }
 
     .icon-btn {

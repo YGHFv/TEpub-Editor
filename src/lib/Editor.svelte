@@ -20,6 +20,8 @@
     } from "@codemirror/search";
     import { listen, emit } from "@tauri-apps/api/event";
     import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+    import { onlyWhenActive } from "./keepAlive/viewState";
+    import { platform } from "./platform";
     import { escapeRegExpLiteral, expandExtendedEscapes } from "./findReplace";
     import { EDITOR_FONT_SIZE_KEY } from "./storageKeys";
 
@@ -142,6 +144,9 @@
         });
     }
 
+    // 同窗口保活时，别的标签的页面也一直挂着，需要判断自己是不是当前视图
+    const activeOnly = onlyWhenActive();
+
     onMount(() => {
         // 终极杀手锏：拦截无论在何时发生的异步算绘崩溃！
         const handleGlobalError = (event: ErrorEvent) => {
@@ -152,6 +157,9 @@
         window.addEventListener("error", handleGlobalError);
 
         const blockNativeSearch = (e: KeyboardEvent) => {
+            // 保活：隐藏的编辑器页面也挂着这条监听，不能让它在别的标签里
+            // 抢走 Ctrl+F
+            if (!activeOnly()) return;
             // 捕获真正的 Ctrl+F 或者 F3 强行干掉它的原生行为并开启我们的悬浮窗
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
                 e.preventDefault();
@@ -412,15 +420,18 @@
                     },
                     ".cm-scroller::-webkit-scrollbar": { width: "14px" },
                     ".cm-scroller::-webkit-scrollbar-track": {
-                        background: "color-mix(in srgb, var(--color-border) 32%, transparent)",
+                        background:
+                            "color-mix(in srgb, var(--color-border) 32%, transparent)",
                     },
                     ".cm-scroller::-webkit-scrollbar-thumb": {
-                        background: "linear-gradient(180deg, var(--color-border-strong), var(--color-border))",
+                        background:
+                            "linear-gradient(180deg, var(--color-border-strong), var(--color-border))",
                         borderRadius: "7px",
                         border: "3px solid color-mix(in srgb, var(--color-border) 32%, transparent)",
                     },
                     ".cm-scroller::-webkit-scrollbar-thumb:hover": {
-                        background: "linear-gradient(180deg, var(--color-border-strong), var(--color-border-strong))",
+                        background:
+                            "linear-gradient(180deg, var(--color-border-strong), var(--color-border-strong))",
                     },
                     ".cm-scroller::-webkit-scrollbar-thumb:active": {
                         background: "var(--color-border-strong)",
@@ -688,19 +699,30 @@
             await searchWin.show();
             await searchWin.setFocus();
         } else {
-            searchWin = new WebviewWindow("search-replace", {
-                url: "/search-replace",
-                title: "查找与替换",
-                width: 550,
-                height: 250,
-                minWidth: 550,
-                minHeight: 250,
-                alwaysOnTop: true,
-                resizable: true,
-                minimizable: false,
-                maximizable: false,
-                focus: true,
-            });
+            // 必须走 platform.createWebviewWindow：它按当前深浅色传入 theme 与
+            // backgroundColor。裸 new WebviewWindow 不传这两个，WebView2 会先
+            // 画一帧纯白再等前端切主题 —— 深色下就是"打开查找窗口先闪白"。
+            // decorations 显式保持 true：这是跟随主窗口的面板，不是应用主界面，
+            // 系统标题栏是它唯一的关闭入口（页面里没有关闭按钮，只有 Esc）。
+            await platform.createWebviewWindow(
+                "search-replace",
+                "/search-replace",
+                {
+                    title: "查找与替换",
+                    width: 560,
+                    // 250px 装不下两行输入 + 复选框 + 查找模式 + 状态栏 + 右侧
+                    // 四个按钮（实测需要 ~300 内容高度），同时给滚动留余量
+                    height: 360,
+                    minWidth: 560,
+                    minHeight: 340,
+                    alwaysOnTop: true,
+                    resizable: true,
+                    minimizable: false,
+                    maximizable: false,
+                    decorations: true,
+                    focus: true,
+                },
+            );
         }
 
         // 给窗口一点初始化时间，如果在当前刚创建的话
@@ -909,13 +931,22 @@
     }
 
     :global(.cm-scroller::-webkit-scrollbar-thumb) {
-        background: linear-gradient(180deg, var(--color-border-strong), var(--color-border));
+        background: linear-gradient(
+            180deg,
+            var(--color-border-strong),
+            var(--color-border)
+        );
         border-radius: var(--radius-sm);
-        border: 3px solid color-mix(in srgb, var(--color-border) 32%, transparent);
+        border: 3px solid
+            color-mix(in srgb, var(--color-border) 32%, transparent);
     }
 
     :global(.cm-scroller::-webkit-scrollbar-thumb:hover) {
-        background: linear-gradient(180deg, var(--color-border-strong), var(--color-border));
+        background: linear-gradient(
+            180deg,
+            var(--color-border-strong),
+            var(--color-border)
+        );
     }
 
     :global(.cm-scroller::-webkit-scrollbar-thumb:active) {
@@ -945,10 +976,19 @@
         color: var(--color-accent-deep) !important;
     }
     :root[data-theme="dark"] :global(.cm-selectionBackground) {
-        background: color-mix(in srgb, var(--color-accent) 32%, transparent) !important;
+        background: color-mix(
+            in srgb,
+            var(--color-accent) 32%,
+            transparent
+        ) !important;
     }
-    :root[data-theme="dark"] :global(.cm-editor.cm-focused .cm-selectionBackground) {
-        background: color-mix(in srgb, var(--color-accent) 40%, transparent) !important;
+    :root[data-theme="dark"]
+        :global(.cm-editor.cm-focused .cm-selectionBackground) {
+        background: color-mix(
+            in srgb,
+            var(--color-accent) 40%,
+            transparent
+        ) !important;
     }
 
     :global(.cm-tab) {

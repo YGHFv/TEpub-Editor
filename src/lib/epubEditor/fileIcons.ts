@@ -1,22 +1,27 @@
 /**
  * Shared file-type icon mapping for the EPUB editor UI
  * (file tree, tabs bar). Pure function, no side effects.
+ *
+ * 返回统一图标集里的名字，而不是 emoji：emoji 由系统字体提供，
+ * Windows / macOS / Linux 画出来粗细和配色都不一样，也没法跟随
+ * 深色主题的 currentColor。
  */
-export function getFileIcon(type: string): string {
+import type { IconName } from "$lib/icons/Icon.svelte";
+
+export function getFileIcon(type: string): IconName {
   switch (type) {
     case "folder":
-      return "\u{1F4C1}";
-    case "html":
-      return "\u{1F4C4}";
+      return "folder";
     case "css":
-      return "\u{1F3A8}";
+      return "file-css";
     case "xml":
-      return "⚙️";
+      return "file-xml";
     case "image":
-      return "\u{1F5BC}️";
+      return "image";
     case "font":
-      return "\u{1F524}";
+      return "font";
+    case "html":
     default:
-      return "\u{1F4C4}";
+      return "file";
   }
 }

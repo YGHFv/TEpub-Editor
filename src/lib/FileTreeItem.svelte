@@ -1,4 +1,7 @@
 <script lang="ts">
+    import Icon from "$lib/icons/Icon.svelte";
+    import type { IconName } from "$lib/icons/Icon.svelte";
+
     export let node: any;
     export let expandedFolders: Set<string>;
     export let selectedFile: any;
@@ -8,7 +11,7 @@
         file: any,
         event?: MouseEvent | KeyboardEvent,
     ) => void;
-    export let getFileIcon: (type: string) => string;
+    export let getFileIcon: (type: string) => IconName;
     export let getFileDescription: (node: any) => string;
     export let onFolderAdd:
         ((node: any, event?: MouseEvent) => void) | undefined = undefined;
@@ -42,9 +45,14 @@
             tabindex="0"
         >
             <span class="expand-icon">
-                {isExpanded ? "▼" : "▶"}
+                <Icon
+                    name={isExpanded ? "chevron-down" : "chevron-right"}
+                    size={12}
+                />
             </span>
-            <span class="icon">{getFileIcon(node.file_type)}</span>
+            <span class="icon"
+                ><Icon name={getFileIcon(node.file_type)} size={16} /></span
+            >
             <span class="name">{node.name}</span>
             {#if onFolderAdd}
                 <button
@@ -53,7 +61,7 @@
                     title="添加文件"
                     on:click|stopPropagation={(e) => onFolderAdd?.(node, e)}
                 >
-                    +
+                    <Icon name="plus" size={13} strokeWidth={2} />
                 </button>
             {/if}
         </div>
@@ -88,7 +96,9 @@
         role="button"
         tabindex="0"
     >
-        <span class="icon">{getFileIcon(node.file_type)}</span>
+        <span class="icon"
+            ><Icon name={getFileIcon(node.file_type)} size={16} /></span
+        >
         <div class="file-info">
             <span class="name">{node.name}</span>
             <span class="description">{getFileDescription(node)}</span>
@@ -100,7 +110,7 @@
                 title="更多操作"
                 on:click|stopPropagation={(e) => onFileMenu?.(node, e)}
             >
-                ⋯
+                <Icon name="list" size={13} />
             </button>
         {/if}
     </div>
@@ -136,11 +146,12 @@
 
     .expand-icon {
         margin-right: 4px;
-        font-size: 10px;
         color: var(--color-muted);
         width: 14px;
-        display: inline-block;
-        text-align: center;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
     }
 
     /* 子文件夹样式 */
@@ -182,8 +193,10 @@
 
     .icon {
         margin-right: 8px;
-        font-size: 16px;
         flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        color: var(--color-muted);
     }
 
     .file-info {

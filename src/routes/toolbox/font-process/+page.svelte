@@ -1,5 +1,8 @@
 <script lang="ts">
-    import { page } from "$app/stores";
+    import { viewUrl } from "$lib/keepAlive/viewState";
+
+    // 保活视图里页面常驻，全局 page.url 会随别的标签跳转而变
+    const ownUrl = viewUrl();
     import { onDestroy } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import {
@@ -19,7 +22,7 @@
     let errorText = "";
     let result: (WebEpubFontProcessResult & { url: string }) | null = null;
 
-    $: rawAction = $page.url.searchParams.get("tool");
+    const rawAction = ownUrl.searchParams.get("tool");
     $: action = (
         rawAction === "font-decrypt" || rawAction === "font-subset"
             ? rawAction

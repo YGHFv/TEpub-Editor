@@ -13,6 +13,8 @@
 </script>
 
 <script lang="ts">
+    import Icon from "$lib/icons/Icon.svelte";
+
     let {
         stats,
         tocTree,
@@ -45,8 +47,10 @@
                 <button
                     class="icon-btn"
                     title="全部展开/折叠"
-                    onclick={onToggleAllVolumes}>⇅</button
+                    onclick={onToggleAllVolumes}
                 >
+                    <Icon name="expand-vertical" size={15} />
+                </button>
                 <button
                     class="mini-btn {checkActive ? 'active' : ''}"
                     onpointerdown={onOpenProofCheck}
@@ -72,7 +76,14 @@
                 onkeydown={() => {}}
             >
                 {#if node.type === "Volume"}
-                    <span class="arrow">{node.expanded ? "▼" : "▶"}</span>
+                    <span class="arrow"
+                        ><Icon
+                            name={node.expanded
+                                ? "chevron-down"
+                                : "chevron-right"}
+                            size={12}
+                        /></span
+                    >
                 {/if}
                 <span
                     class="toc-title {invalidSequenceIds.has(node.id)
@@ -215,11 +226,12 @@
         margin-left: auto; /* Push to right */
     }
     .arrow {
-        font-size: 10px;
         margin-right: 8px;
         color: var(--color-muted);
-        width: 12px;
-        display: inline-block;
+        width: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
     }
     .mini-btn {
         font-size: 11px;
@@ -240,7 +252,11 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
+        background: linear-gradient(
+            180deg,
+            var(--color-surface),
+            var(--color-surface-soft)
+        );
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;

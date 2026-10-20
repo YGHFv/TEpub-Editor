@@ -1,4 +1,6 @@
 <script lang="ts">
+    import Icon from "$lib/icons/Icon.svelte";
+
     let {
         isModified,
         onSelectFile,
@@ -26,21 +28,51 @@
 
 <header class="toolbar">
     <div class="btn-group">
-        <button class="btn-primary" onclick={onSelectFile}>📂</button>
+        <button
+            class="btn-primary"
+            title="打开文件"
+            aria-label="打开文件"
+            onclick={onSelectFile}
+        >
+            <Icon name="folder-open" />
+        </button>
         <button
             class={isModified ? "btn-save-modified" : "btn-save-default"}
-            onclick={onSaveFile}>💾</button
+            title="保存 (Ctrl+S)"
+            aria-label="保存"
+            onclick={onSaveFile}><Icon name="save" /></button
         >
-        <button class="btn-secondary" onclick={onUndo}>↩️</button>
-        <button class="btn-secondary" onclick={onRedo}>↪️</button>
-        <button class="btn-secondary" onclick={onToggleSidebar}>📖</button>
-        <button class="btn-secondary" onclick={onOpenEpubModal}>📚</button>
+        <button
+            class="btn-secondary"
+            title="撤销 (Ctrl+Z)"
+            aria-label="撤销"
+            onclick={onUndo}><Icon name="undo" /></button
+        >
+        <button
+            class="btn-secondary"
+            title="重做 (Ctrl+Y)"
+            aria-label="重做"
+            onclick={onRedo}><Icon name="redo" /></button
+        >
+        <button
+            class="btn-secondary"
+            title="章节侧栏"
+            aria-label="章节侧栏"
+            onclick={onToggleSidebar}><Icon name="book-open" /></button
+        >
+        <button
+            class="btn-secondary"
+            title="制作 EPUB"
+            aria-label="制作 EPUB"
+            onclick={onOpenEpubModal}><Icon name="books" /></button
+        >
     </div>
     <div class="toolbar-tail">
         <button
             class="btn-secondary"
             title="查找与替换 (Ctrl+F)"
-            onclick={onOpenSearch}>🔍</button
+            aria-label="查找与替换"
+            onclick={onOpenSearch}><Icon name="search" /></button
         >
         <button
             class="btn-secondary proof-tool-btn"
@@ -48,17 +80,13 @@
             aria-label="校对"
             onclick={onToggleProof}
         >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 4.5h10.2a2.3 2.3 0 0 1 2.3 2.3v3.45" />
-                <path d="M5 8.5h8.5" />
-                <path d="M5 12.5h6.2" />
-                <path d="M5 16.5h4.1" />
-                <path d="m14.2 16.7 2.05 2.05L20.8 14.2" />
-                <path d="M4.5 3.5h11.2a3.8 3.8 0 0 1 3.8 3.8v2.2" />
-            </svg>
+            <Icon name="proof" />
         </button>
-        <button class="btn-secondary" title="偏好设置" onclick={onOpenSettings}
-            >⚙️</button
+        <button
+            class="btn-secondary"
+            title="偏好设置"
+            aria-label="偏好设置"
+            onclick={onOpenSettings}><Icon name="settings" /></button
         >
     </div>
 </header>
@@ -71,7 +99,6 @@
         border-radius: var(--radius-xs);
         border: 1px solid var(--color-border-strong);
         background: var(--color-surface);
-        font-size: 18px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -122,23 +149,17 @@
         padding: 0;
     }
 
-    .proof-tool-btn svg {
-        width: 20px;
-        height: 20px;
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 1.9;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-    }
-
     /* Modern UI overrides */
     button {
         height: var(--control-height);
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
+        background: linear-gradient(
+            180deg,
+            var(--color-surface),
+            var(--color-surface-soft)
+        );
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;

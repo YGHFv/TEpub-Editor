@@ -1,11 +1,16 @@
 <script lang="ts">
     import { base } from "$app/paths";
-    import { page } from "$app/stores";
+    import { viewUrl } from "$lib/keepAlive/viewState";
+
+    // 保活视图里页面常驻，全局 page.url 会随别的标签跳转而变
+    const ownUrl = viewUrl();
     import { onDestroy, onMount, tick } from "svelte";
     import { EditorView } from "@codemirror/view";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import FileTreeItem from "$lib/FileTreeItem.svelte";
+    // 与桌面端共用同一份图标映射（emoji 在 web 端也会因系统字体不同而变形）
+    import { getFileIcon } from "$lib/epubEditor/fileIcons";
     import {
         countMatchesInContent,
         filterFilesInScope,
@@ -143,7 +148,7 @@
     let previewBodyEl: HTMLDivElement | null = null;
     let readerPreviewFontSize = 18;
     let readerTocCollapsed = false;
-    $: readerMode = $page.url.searchParams.get("mode") === "reader";
+    const readerMode = ownUrl.searchParams.get("mode") === "reader";
     $: headTitle = readerMode
         ? "Web EPUB 阅读器 - TEpub Editor"
         : "Web EPUB 编辑器 - TEpub Editor";
@@ -556,25 +561,6 @@
             return;
         }
         status = `${file.path} 暂不支持在 Web 版中直接编辑。`;
-    }
-
-    function getFileIcon(type: string) {
-        switch (type) {
-            case "folder":
-                return "📁";
-            case "html":
-                return "📄";
-            case "css":
-                return "🎨";
-            case "xml":
-                return "⚙️";
-            case "image":
-                return "🖼️";
-            case "font":
-                return "🔤";
-            default:
-                return "📄";
-        }
     }
 
     function getFileDescription(node: WebFileTreeNode) {

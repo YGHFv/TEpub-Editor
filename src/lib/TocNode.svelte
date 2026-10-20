@@ -1,4 +1,6 @@
 <script lang="ts">
+    import Icon from "$lib/icons/Icon.svelte";
+
     export let item: {
         id: string;
         label: string;
@@ -66,7 +68,10 @@
             role="button"
             tabindex="0"
         >
-            {expanded ? "▼" : "▶"}
+            <Icon
+                name={expanded ? "chevron-down" : "chevron-right"}
+                size={12}
+            />
         </span>
         <span class="label" title={item.label}>{item.label}</span>
     </div>
@@ -105,7 +110,6 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 10px;
         color: var(--color-muted);
         margin-right: 4px;
         cursor: pointer;

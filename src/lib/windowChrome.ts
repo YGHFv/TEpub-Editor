@@ -39,3 +39,25 @@ export function detectWindowChrome(): WindowChromeMode {
   if (isLinux()) return "none";
   return "custom";
 }
+
+/** 当前窗口的 label（Tauri 注入的 metadata 是同步可读的，不用等 IPC） */
+export function currentWindowLabel(): string | null {
+  if (typeof window === "undefined") return null;
+  const internals = (window as any).__TAURI_INTERNALS__;
+  const label = internals?.metadata?.currentWindow?.label;
+  return typeof label === "string" ? label : null;
+}
+
+/**
+ * 工具型小窗：查找替换、EPUB 元数据。
+ *
+ * 这些窗口不是"应用主界面"，而是主界面弹出的一个面板：
+ * - 不能画应用标题行（否则系统标题栏 + 自绘标题行两条，窗口内容被挤没）；
+ * - 不能显示二级页面标签（点一下就会把面板导航走，主窗口的搜索桥接直接断掉）。
+ *
+ * 主界面的窗口（main / editor-* / reader-* / toolbox / batch-progress-* …）
+ * 都是 decorations:false 自绘标题行，标签栏只在同窗口模式下出现。
+ */
+export function isUtilityWindowLabel(label: string | null): boolean {
+  return label === "search-replace" || label === "epub-metadata";
+}
