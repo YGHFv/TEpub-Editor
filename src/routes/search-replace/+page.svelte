@@ -339,8 +339,8 @@
         font-family:
             -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
             Arial, sans-serif;
-        background-color: #f0f0f0;
-        color: #333;
+        background-color: var(--color-hover);
+        color: var(--color-text);
         overflow: hidden;
         font-size: 13px;
         user-select: none;
@@ -397,15 +397,15 @@
     input[type="text"] {
         width: 100%;
         padding: 5px 6px;
-        border: 1px solid #999;
+        border: 1px solid var(--color-muted);
         box-sizing: border-box;
         font-size: 13px;
         outline: none;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
     }
 
     input[type="text"]:focus {
-        border-color: #0066b8;
+        border-color: var(--color-accent);
     }
 
     .history-dropdown {
@@ -413,8 +413,8 @@
         top: 100%;
         left: 0;
         right: 0;
-        background: #fff;
-        border: 1px solid #999;
+        background: var(--color-surface);
+        border: 1px solid var(--color-muted);
         border-top: none;
         max-height: 120px;
         overflow-y: auto;
@@ -422,7 +422,7 @@
         padding: 0;
         list-style: none;
         z-index: 1000;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+        box-shadow: var(--shadow-sm);
     }
 
     .history-dropdown li {
@@ -431,8 +431,8 @@
     }
 
     .history-dropdown li:hover {
-        background-color: #0066b8;
-        color: white;
+        background-color: var(--color-accent);
+        color: var(--color-accent-contrast);
     }
 
     .checkbox-row {
@@ -450,15 +450,15 @@
     }
 
     .mode-group {
-        border: 1px solid #ccc;
+        border: 1px solid var(--color-border-strong);
         padding: 6px 12px;
         margin-top: 2px;
         margin-left: 40px;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
     }
 
     .mode-group legend {
-        color: #0066b8;
+        color: var(--color-accent);
         padding: 0 4px;
         font-size: 12px;
     }
@@ -478,9 +478,9 @@
 
     button {
         padding: 6px 12px;
-        border: 1px solid #aaa;
-        background-color: #f8f8f8;
-        border-radius: 2px;
+        border: 1px solid var(--color-muted);
+        background-color: var(--color-surface-soft);
+        border-radius: var(--radius-xs);
         font-size: 13px;
         cursor: pointer;
         transition: background 0.1s;
@@ -489,26 +489,26 @@
     }
 
     button:hover:not(:disabled) {
-        background-color: #e5f1fb;
-        border-color: #0066b8;
+        background-color: var(--color-accent-soft);
+        border-color: var(--color-accent);
     }
 
     button:active:not(:disabled) {
-        background-color: #cce4f7;
-        border-color: #005499;
+        background-color: var(--color-accent-soft);
+        border-color: var(--color-accent-deep);
     }
 
     button:disabled {
-        color: #999;
-        background-color: #f0f0f0;
-        border-color: #ccc;
+        color: var(--color-muted);
+        background-color: var(--color-hover);
+        border-color: var(--color-border-strong);
         cursor: default;
     }
 
     .status-bar {
         margin-top: auto;
         font-size: 12px;
-        color: #666;
+        color: var(--color-muted);
         padding-left: 40px;
         padding-bottom: 2px;
     }
@@ -523,12 +523,13 @@
     .search-window {
         padding: 14px;
         gap: 14px;
-        background: rgba(246, 250, 253, 0.68);
+        /* 让 body 的渐变底透上来；写死浅色 rgba 会在深色下糊成一块发白的板 */
+        background: transparent;
     }
 
     .left-panel,
     .right-panel {
-        background: rgba(255, 255, 255, 0.78);
+        background: var(--color-surface-raised);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-sm);
@@ -555,11 +556,11 @@
     }
 
     input[type="text"] {
-        min-height: 34px;
+        min-height: var(--control-height);
         padding: 7px 10px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: rgba(255, 255, 255, 0.92);
+        background: var(--color-surface);
         color: var(--color-text);
         box-shadow: var(--shadow-xs);
         transition:
@@ -571,7 +572,7 @@
     input[type="text"]:focus {
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
-        background: #fff;
+        background: var(--color-surface);
     }
 
     .history-dropdown {
@@ -603,7 +604,7 @@
     .mode-group {
         border-color: var(--color-border);
         border-radius: var(--radius-md);
-        background: rgba(246, 249, 252, 0.78);
+        background: color-mix(in srgb, var(--color-surface) 55%, transparent);
     }
 
     .mode-group legend {
@@ -612,10 +613,10 @@
     }
 
     button {
-        min-height: 34px;
+        min-height: var(--control-height);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         font-weight: 700;
@@ -641,7 +642,7 @@
 
     button:disabled {
         color: var(--color-muted);
-        background: rgba(246, 249, 252, 0.66);
+        background: color-mix(in srgb, var(--color-surface) 45%, transparent);
         border-color: var(--color-border);
         box-shadow: none;
         opacity: 0.62;

@@ -143,7 +143,7 @@
 <style>
     :global(html),
     :global(body) {
-        background: #f4f5f8;
+        background: var(--color-canvas);
     }
 
     .page {
@@ -151,8 +151,8 @@
         box-sizing: border-box;
         padding: max(10px, env(safe-area-inset-top)) 14px
             max(44px, env(safe-area-inset-bottom));
-        background: #f4f5f8;
-        color: #171b24;
+        background: var(--color-canvas);
+        color: var(--color-text);
     }
 
     .file-input {
@@ -173,7 +173,7 @@
 
     .topbar a {
         width: 34px;
-        height: 34px;
+        height: var(--control-height);
         display: grid;
         place-items: center;
         color: inherit;
@@ -202,24 +202,24 @@
         gap: 10px;
         margin-top: 10px;
         border: 1px solid rgba(23, 27, 36, 0.08);
-        border-radius: 8px;
-        background: #fff;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
         padding: 12px;
     }
 
     button {
         min-height: 36px;
         border: 0;
-        border-radius: 8px;
-        background: #8a5a16;
-        color: #fff;
+        border-radius: var(--radius-sm);
+        background: var(--color-warning);
+        color: var(--color-surface);
         font-weight: 900;
         font-size: 13px;
     }
 
     button.secondary {
-        background: #f1eadf;
-        color: #8a5a16;
+        background: var(--color-surface-soft);
+        color: var(--color-warning);
     }
 
     button:disabled {
@@ -229,7 +229,7 @@
     p,
     code {
         margin: 0;
-        color: #747986;
+        color: var(--color-muted);
         font-size: 13px;
         line-height: 1.5;
         word-break: break-all;

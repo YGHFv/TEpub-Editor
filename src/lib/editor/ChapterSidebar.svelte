@@ -115,11 +115,11 @@
 <style>
     /* 基础按钮样式（与页面同源，保证拆出后视觉一致） */
     button {
-        height: 34px;
+        height: var(--control-height);
         min-width: 40px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        background: #fff;
+        border-radius: var(--radius-xs);
+        border: 1px solid var(--color-border-strong);
+        background: var(--color-surface);
         font-size: 18px;
         display: flex;
         align-items: center;
@@ -128,22 +128,22 @@
         transition: 0.1s;
     }
     button:active {
-        background: #eee;
-        transform: scale(0.96);
+        background: var(--color-border);
+        transform: translateY(0.5px) scale(0.985);
     }
 
     .sidebar {
         width: 280px;
-        background: #f8f8f8;
-        border-right: 1px solid #ddd;
+        background: var(--color-surface-soft);
+        border-right: 1px solid var(--color-border);
         display: flex;
         flex-direction: column;
         flex-shrink: 0;
     }
 
     .sidebar-header-fixed {
-        background: #eee;
-        border-bottom: 1px solid #ddd;
+        background: var(--color-border);
+        border-bottom: 1px solid var(--color-border);
         flex-shrink: 0;
         z-index: 20;
     }
@@ -164,10 +164,10 @@
         height: 26px;
         padding: 0;
         font-size: 14px;
-        border: 1px solid #ccc;
-        background: #fff;
+        border: 1px solid var(--color-border-strong);
+        background: var(--color-surface);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
     }
 
     .toc-list {
@@ -177,7 +177,7 @@
     .toc-item {
         padding: 12px;
         font-size: 14px;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid var(--color-border);
         display: flex;
         /* justify-content: space-between; Removed to fix centering issue */
         align-items: center;
@@ -188,36 +188,36 @@
     }
     .indent {
         padding-left: 28px;
-        background: #fafafa;
+        background: var(--color-surface-soft);
     }
     .toc-item.active {
-        background: #d4e8fa;
-        color: #0066b8;
-        border-left: 4px solid #0066b8;
+        background: var(--color-accent-soft);
+        color: var(--color-accent);
+        border-left: 4px solid var(--color-accent);
         font-weight: bold;
     }
     /* 卷标吸顶 */
     .vol-title {
-        background: #eaeaea;
+        background: var(--color-surface-soft);
         font-weight: bold;
         position: sticky;
         top: 0;
         z-index: 10;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        box-shadow: var(--shadow-xs);
     }
     .text-error {
-        color: #d32f2f;
+        color: var(--color-danger);
         font-weight: bold;
     }
     .toc-count {
-        color: #999;
+        color: var(--color-muted);
         font-size: 11px;
         margin-left: auto; /* Push to right */
     }
     .arrow {
         font-size: 10px;
         margin-right: 8px;
-        color: #888;
+        color: var(--color-muted);
         width: 12px;
         display: inline-block;
     }
@@ -225,13 +225,13 @@
         font-size: 11px;
         height: 26px;
         padding: 0 10px;
-        border-radius: 4px;
-        border: 1px solid #ccc;
-        background: #fff;
+        border-radius: var(--radius-xs);
+        border: 1px solid var(--color-border-strong);
+        background: var(--color-surface);
     }
     .mini-btn.active {
-        background: #0066b8;
-        color: #fff;
+        background: var(--color-accent);
+        color: var(--color-accent-contrast);
     }
 
     /* Modern UI overrides */
@@ -240,7 +240,7 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;
@@ -272,7 +272,7 @@
 
     .sidebar {
         width: 292px;
-        background: rgba(255, 255, 255, 0.82);
+        background: var(--color-surface-raised);
         border-right: 1px solid var(--color-border);
         box-shadow: 10px 0 30px rgba(23, 36, 52, 0.05);
         backdrop-filter: blur(16px);
@@ -281,7 +281,7 @@
     .sidebar-header-fixed {
         background: linear-gradient(
             180deg,
-            rgba(255, 255, 255, 0.92),
+            var(--color-surface),
             rgba(246, 249, 252, 0.92)
         );
         border-bottom: 1px solid var(--color-border);
@@ -296,7 +296,7 @@
     .icon-btn,
     .mini-btn {
         border: 1px solid var(--color-border);
-        background: rgba(255, 255, 255, 0.86);
+        background: var(--color-surface-raised);
         color: var(--color-text-soft);
         border-radius: var(--radius-xs);
         box-shadow: none;
@@ -317,14 +317,14 @@
     .mini-btn.active {
         background: var(--gradient-accent);
         border-color: transparent;
-        color: #fff;
+        color: var(--color-accent-contrast);
     }
 
     .toc-list {
         padding: 8px;
         background: linear-gradient(
             180deg,
-            rgba(255, 255, 255, 0.42),
+            var(--color-surface-soft),
             rgba(246, 249, 252, 0.64)
         );
     }
@@ -361,9 +361,9 @@
     }
 
     .vol-title {
-        background: rgba(255, 255, 255, 0.88);
+        background: var(--color-surface-raised);
         color: var(--color-text);
-        box-shadow: 0 8px 18px rgba(23, 36, 52, 0.06);
+        box-shadow: var(--shadow-sm);
         backdrop-filter: blur(14px);
     }
 
@@ -390,8 +390,8 @@
         margin: 0;
         border-radius: 0;
         border-bottom: 1px solid var(--color-border);
-        background: rgba(255, 255, 255, 0.96);
-        box-shadow: 0 6px 14px rgba(23, 36, 52, 0.08);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-sm);
     }
 
     .vol-title:hover {

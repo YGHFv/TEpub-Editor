@@ -2497,7 +2497,7 @@
                     <input
                         type="text"
                         bind:value={collisionPrompt.inputValue}
-                        style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;"
+                        style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); box-sizing: border-box;"
                         on:keydown={(e) => {
                             if (e.key === "Enter") confirmCollisionPrompt();
                             if (e.key === "Escape") cancelCollisionPrompt();
@@ -2558,7 +2558,7 @@
                     <input
                         type="text"
                         bind:value={renamePrompt.inputValue}
-                        style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;"
+                        style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); box-sizing: border-box;"
                         on:keydown={(e) => {
                             if (e.key === "Enter") confirmRenameBook();
                             if (e.key === "Escape") cancelRenameBook();
@@ -3123,7 +3123,8 @@
 
     .tb-btn.primary {
         background: var(--gradient-accent);
-        color: #fff;
+        /* 用对比色而非 surface：深色下 surface 是深灰，字会糊在渐变底上 */
+        color: var(--color-accent-contrast);
         border: none;
         font-weight: 700;
         padding: 7px 16px;
@@ -3150,7 +3151,7 @@
         height: 12px;
         box-sizing: border-box;
         border: 1.8px solid currentColor;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         opacity: 0.9;
     }
 
@@ -3237,7 +3238,7 @@
         gap: 4px;
         padding: 2px 4px 2px 10px;
         background: var(--color-accent);
-        color: #fff;
+        color: var(--color-accent-contrast);
         border: none;
         border-radius: 999px;
         font-size: 12px;
@@ -3259,7 +3260,7 @@
         border-radius: 50%;
         font-size: 14px;
         line-height: 1;
-        background: rgba(255, 255, 255, 0.2);
+        background: var(--color-surface-soft);
     }
 
     .filter-clear {
@@ -3400,7 +3401,7 @@
         justify-content: center;
         z-index: 1002;
         backdrop-filter: blur(6px);
-        animation: fadeIn 0.18s ease-out;
+        /* entrance via global tepub-fade-in */
     }
 
     @keyframes fadeIn {
@@ -3423,7 +3424,7 @@
         flex-direction: column;
         box-shadow: var(--shadow-pop);
         overflow: hidden;
-        animation: panelIn 0.2s ease-out;
+        /* entrance via global tepub-scale-in */
     }
 
     @keyframes panelIn {
@@ -3445,7 +3446,7 @@
         border-bottom: 1px solid var(--color-border);
         background: linear-gradient(
             180deg,
-            rgba(255, 255, 255, 0.96),
+            var(--color-surface),
             rgba(248, 250, 252, 0.96)
         );
     }
@@ -3770,7 +3771,7 @@
     /* 三级分类 chip：稍带边框区分于自由标签 */
     .tag-chip.tag-chip-tier {
         background: var(--color-accent);
-        color: #fff;
+        color: var(--color-accent-contrast);
     }
 
     .tag-chip-text {
@@ -3907,7 +3908,7 @@
 
     .tier-opt.active {
         background: var(--color-accent);
-        color: #fff;
+        color: var(--color-accent-contrast);
         border-color: var(--color-accent);
     }
 

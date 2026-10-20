@@ -112,16 +112,18 @@
                     },
                 }),
                 EditorView.theme({
+                    // 全部走 design token，深色主题下自动跟随，不再写死浅色底
                     "&": {
                         height: "100%",
-                        backgroundColor: "#fffdf9",
+                        backgroundColor: "var(--color-surface)",
+                        color: "var(--color-text)",
                     },
                     ".cm-content": {
-                        fontFamily:
-                            '"Microsoft YaHei", "PingFang SC", ui-serif, serif',
+                        fontFamily: "var(--font-reading)",
                         lineHeight: "32px",
                         padding: "18px 22px",
-                        color: "#141b24",
+                        color: "var(--color-text)",
+                        caretColor: "var(--color-accent)",
                     },
                     ".cm-line": {
                         minHeight: "32px",
@@ -132,19 +134,25 @@
                     },
                     ".cm-scroller": {
                         overflow: "auto",
+                        backgroundColor: "var(--color-surface)",
+                        color: "var(--color-text)",
                     },
                     ".cm-selectionBackground": {
-                        backgroundColor: "rgba(22, 119, 184, 0.30) !important",
+                        backgroundColor:
+                            "color-mix(in srgb, var(--color-accent) 30%, transparent) !important",
                     },
                     "&.cm-focused .cm-selectionBackground": {
-                        backgroundColor: "rgba(22, 119, 184, 0.40) !important",
+                        backgroundColor:
+                            "color-mix(in srgb, var(--color-accent) 42%, transparent) !important",
                     },
                     ".cm-selectionMatch": {
-                        backgroundColor: "rgba(233, 155, 47, 0.28) !important",
+                        backgroundColor:
+                            "color-mix(in srgb, var(--color-warning) 32%, transparent) !important",
                     },
                     ".cm-toc-title-line": {
-                        backgroundColor: "rgba(37, 99, 235, 0.10)",
-                        boxShadow: "inset 3px 0 0 rgba(37, 99, 235, 0.55)",
+                        backgroundColor:
+                            "color-mix(in srgb, var(--color-accent) 10%, transparent)",
+                        boxShadow: "inset 3px 0 0 var(--color-accent)",
                         cursor: "pointer",
                     },
                 }),

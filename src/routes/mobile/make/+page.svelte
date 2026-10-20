@@ -3469,7 +3469,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 <style>
     :global(html),
     :global(body) {
-        background: #f4f5f8;
+        background: var(--color-canvas);
     }
 
     :global(body) {
@@ -3481,8 +3481,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         box-sizing: border-box;
         padding: max(10px, env(safe-area-inset-top)) 14px
             max(44px, env(safe-area-inset-bottom));
-        background: #f4f5f8;
-        color: #171b24;
+        background: var(--color-canvas);
+        color: var(--color-text);
     }
 
     .file-input {
@@ -3503,7 +3503,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
     .topbar a {
         width: 34px;
-        height: 34px;
+        height: var(--control-height);
         display: grid;
         place-items: center;
         color: inherit;
@@ -3540,8 +3540,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .bottom-actions {
         margin-top: 10px;
         border: 1px solid rgba(23, 27, 36, 0.08);
-        border-radius: 8px;
-        background: #fff;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
         padding: 12px;
     }
 
@@ -3555,13 +3555,13 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         gap: 12px;
         margin-top: 10px;
         border: 1px solid rgba(23, 27, 36, 0.08);
-        border-radius: 8px;
-        background: #fff;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
         padding: 10px 12px;
     }
 
     .web-style-kicker {
-        color: #1677b8;
+        color: var(--color-accent);
         font-size: 12px;
         font-weight: 900;
     }
@@ -3580,7 +3580,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
     .web-style-head p,
     .panel-title p {
-        color: #626a78;
+        color: var(--color-muted);
         font-size: 12px;
         line-height: 1.55;
     }
@@ -3597,8 +3597,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     }
 
     .web-style-actions .secondary {
-        background: #eef1f6;
-        color: #4f5867;
+        background: var(--color-canvas);
+        color: var(--color-text-soft);
     }
 
     .web-style-grid {
@@ -3639,9 +3639,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         place-items: center;
         overflow: hidden;
         border: 1px solid rgba(23, 27, 36, 0.1);
-        border-radius: 8px;
-        background: #f6f8fb;
-        color: #657080;
+        border-radius: var(--radius-sm);
+        background: var(--color-accent-quiet);
+        color: var(--color-muted);
         padding: 0;
         font-size: 13px;
         font-weight: 900;
@@ -3656,8 +3656,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         min-height: 26px;
         box-sizing: border-box;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.88);
-        color: #4f5867;
+        background: var(--color-surface-raised);
+        color: var(--color-text-soft);
         padding: 4px 10px;
         font-size: 12px;
         line-height: 1.2;
@@ -3706,9 +3706,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         aspect-ratio: 360 / 700;
         overflow: hidden;
         border: 1px solid rgba(23, 27, 36, 0.14);
-        border-radius: 6px;
-        background: #ffffff;
-        box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-md);
     }
 
     .chapter-preview iframe {
@@ -3716,13 +3716,13 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         height: 100%;
         display: block;
         border: 0;
-        background: #eef2f7;
+        background: var(--color-canvas);
         overflow: hidden;
     }
 
     .status,
     code {
-        color: #747986;
+        color: var(--color-muted);
         font-size: 13px;
         line-height: 1.5;
         word-break: break-all;
@@ -3731,9 +3731,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     button {
         min-height: 36px;
         border: 0;
-        border-radius: 8px;
-        background: #1677b8;
-        color: #fff;
+        border-radius: var(--radius-sm);
+        background: var(--color-accent);
+        color: var(--color-accent-contrast);
         font-weight: 900;
     }
 
@@ -3774,9 +3774,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         place-items: center;
         overflow: hidden;
         border: 1px solid rgba(23, 27, 36, 0.12);
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         background: #f1f5f8;
-        color: #747986;
+        color: var(--color-muted);
         padding: 0;
         font-size: 11px;
         font-weight: 900;
@@ -3785,7 +3785,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .cover-box b {
         display: block;
         max-width: 4em;
-        color: #7b8491;
+        color: var(--color-muted);
         font-size: 11px;
         line-height: 1.35;
         text-align: center;
@@ -3803,7 +3803,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     }
 
     label span {
-        color: #626a78;
+        color: var(--color-muted);
         font-size: 12px;
         font-weight: 800;
     }
@@ -3812,9 +3812,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         width: 100%;
         box-sizing: border-box;
         border: 1px solid rgba(23, 27, 36, 0.12);
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         padding: 8px 9px;
-        background: #fff;
+        background: var(--color-surface);
         color: inherit;
         font: inherit;
     }
@@ -3826,9 +3826,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     :global(.make-select .custom-select-trigger) {
         min-height: 36px;
         border-color: rgba(23, 27, 36, 0.12);
-        border-radius: 8px;
-        background: #fff;
-        color: #171b24;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
+        color: var(--color-text);
         box-shadow: none;
         font-size: 13px;
         font-weight: 800;
@@ -3839,13 +3839,13 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         overflow-y: auto;
         overscroll-behavior: contain;
         border-color: rgba(23, 27, 36, 0.14);
-        border-radius: 8px;
-        background: #fff;
-        box-shadow: 0 12px 28px rgba(25, 31, 43, 0.14);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-pop);
     }
 
     :global(.make-select .custom-select-menu button) {
-        border-radius: 7px;
+        border-radius: var(--radius-sm);
         font-size: 13px;
         font-weight: 800;
     }
@@ -3855,7 +3855,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     }
 
     :global(.compact-select .custom-select-trigger) {
-        min-height: 34px;
+        min-height: var(--control-height);
         padding: 5px 10px;
         font-size: 13px;
     }
@@ -3872,14 +3872,14 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .rule-actions button {
         min-height: 32px;
         padding: 0 12px;
-        background: #e8f2f8;
-        color: #1677b8;
+        background: var(--color-accent-soft);
+        color: var(--color-accent);
     }
 
     .fold-head,
     .check-head {
         width: 100%;
-        min-height: 34px;
+        min-height: var(--control-height);
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto 20px;
         align-items: center;
@@ -3904,7 +3904,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
     .fold-head small,
     .check-head small {
-        color: #747986;
+        color: var(--color-muted);
         font-size: 12px;
     }
 
@@ -3913,7 +3913,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         height: 20px;
         display: grid;
         place-items: center;
-        color: #8d94a0;
+        color: var(--color-muted);
     }
 
     .chevron-shell svg,
@@ -3944,7 +3944,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     }
 
     .rule-enabled {
-        min-height: 34px;
+        min-height: var(--control-height);
         display: grid;
         place-items: center;
         gap: 0;
@@ -3954,18 +3954,18 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         width: 16px;
         height: 16px;
         padding: 0;
-        accent-color: #1677b8;
+        accent-color: var(--color-accent);
     }
 
     .rule-row button {
-        min-height: 34px;
+        min-height: var(--control-height);
         background: #f2e7e7;
-        color: #9b3d4f;
+        color: var(--color-danger);
         font-size: 18px;
     }
 
     .rule-row input {
-        min-height: 34px;
+        min-height: var(--control-height);
         padding: 5px 10px;
         font-size: 13px;
     }
@@ -3990,8 +3990,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
     .toc-actions button {
         min-height: 32px;
-        background: #e8f2f8;
-        color: #1677b8;
+        background: var(--color-accent-soft);
+        color: var(--color-accent);
     }
 
     .toc-row {
@@ -4001,7 +4001,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         gap: 6px;
         padding: 0 2px 0 calc(2px + var(--depth) * 18px);
         border-radius: 0;
-        border-bottom: 1px solid #eceef2;
+        border-bottom: 1px solid var(--color-border);
         background: transparent;
         color: inherit;
         text-align: left;
@@ -4029,9 +4029,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         display: grid;
         place-items: center;
         align-self: center;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         background: transparent;
-        color: #858b96;
+        color: var(--color-muted);
         padding: 0;
     }
 
@@ -4049,12 +4049,12 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         position: sticky;
         top: 0;
         z-index: 4;
-        background: #fff;
-        box-shadow: 0 1px 0 #eceef2;
+        background: var(--color-surface);
+        box-shadow: 0 1px 0 var(--color-border);
     }
 
     .toc-row.volume.sequence-error {
-        background: #fff4f2;
+        background: var(--color-danger-soft);
     }
 
     .toc-row.sequence-error strong {
@@ -4062,13 +4062,13 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     }
 
     .toc-row.sequence-error {
-        background: #fff4f2;
+        background: var(--color-danger-soft);
     }
 
     .toc-row.active {
-        border-radius: 8px;
-        background: #e8f2f8;
-        box-shadow: inset 3px 0 0 #1677b8;
+        border-radius: var(--radius-sm);
+        background: var(--color-accent-soft);
+        box-shadow: inset 3px 0 0 var(--color-accent);
     }
 
     .fold {
@@ -4078,7 +4078,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         display: grid;
         place-items: center;
         align-self: center;
-        color: #8d94a0;
+        color: var(--color-muted);
     }
 
     .toc-row strong {
@@ -4091,7 +4091,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
     .toc-row small {
         grid-area: meta;
-        color: #858b96;
+        color: var(--color-muted);
         font-size: 11px;
     }
 
@@ -4115,9 +4115,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         gap: 14px;
         max-width: 420px;
         margin: 0 auto;
-        border-radius: 16px;
-        background: rgba(255, 255, 255, 0.98);
-        box-shadow: 0 18px 40px rgba(25, 31, 43, 0.16);
+        border-radius: var(--radius-lg);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-pop);
         padding: 16px;
     }
 
@@ -4141,7 +4141,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
     .sheet-copy p {
         margin: 0;
-        color: #666f7d;
+        color: var(--color-text-soft);
         font-size: 13px;
         line-height: 1.45;
         word-break: break-all;
@@ -4160,8 +4160,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         resize: none;
         box-sizing: border-box;
         border: 1px solid rgba(23, 27, 36, 0.12);
-        border-radius: 10px;
-        background: #fbfcfe;
+        border-radius: var(--radius-md);
+        background: var(--color-surface-soft);
         color: inherit;
         padding: 10px;
         font: inherit;
@@ -4180,19 +4180,19 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
 
     .action-sheet-actions button {
         min-height: 38px;
-        background: #1677b8;
-        color: #fff;
+        background: var(--color-accent);
+        color: var(--color-accent-contrast);
         box-shadow: none;
     }
 
     .action-sheet-actions .sheet-cancel {
-        background: #eef1f6;
-        color: #4f5867;
+        background: var(--color-canvas);
+        color: var(--color-text-soft);
     }
 
     .action-sheet-actions .sheet-danger {
         background: #f4ecee;
-        color: #9b3d4f;
+        color: var(--color-danger);
     }
 
     .check-panel,
@@ -4239,20 +4239,20 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     }
 
     .check-actions button {
-        background: #e8f2f8;
-        color: #1677b8;
+        background: var(--color-accent-soft);
+        color: var(--color-accent);
     }
 
     .check-actions button.secondary {
-        background: #edf6f1;
-        color: #1f7a5a;
+        background: var(--color-success-soft, var(--color-accent-quiet));
+        color: var(--color-success);
     }
 
     .reorder-preview {
         display: grid;
         overflow: hidden;
         border: 1px solid #e6e8ee;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
     }
 
     .reorder-head,
@@ -4261,13 +4261,13 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: 8px;
         align-items: center;
-        min-height: 34px;
+        min-height: var(--control-height);
         padding: 0 9px;
     }
 
     .reorder-head {
         background: #f5f6f9;
-        color: #747986;
+        color: var(--color-muted);
         font-size: 11px;
         font-weight: 900;
     }
@@ -4275,7 +4275,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .reorder-row {
         border-radius: 0;
         border-top: 1px solid #edf0f4;
-        background: #fff;
+        background: var(--color-surface);
         color: inherit;
         text-align: left;
         font-size: 12px;
@@ -4307,12 +4307,12 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         display: inline-grid;
         place-items: center;
         margin-right: 2px;
-        color: #8d94a0;
+        color: var(--color-muted);
         vertical-align: middle;
     }
 
     .reorder-row .changed {
-        color: #1f7a5a;
+        color: var(--color-success);
         font-weight: 900;
     }
 
@@ -4334,8 +4334,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         gap: 2px 8px;
         padding: 7px 9px;
         border: 1px solid #ece1d6;
-        border-radius: 8px;
-        background: #fffaf4;
+        border-radius: var(--radius-sm);
+        background: var(--color-warning-soft);
         color: inherit;
         text-align: left;
     }
@@ -4343,7 +4343,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .check-row strong {
         grid-area: type;
         align-self: center;
-        color: #9b5c1d;
+        color: var(--color-warning);
         font-size: 12px;
     }
 
@@ -4360,7 +4360,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .check-empty {
         grid-area: meta;
         margin: 0;
-        color: #858b96;
+        color: var(--color-muted);
         font-size: 11px;
         line-height: 1.4;
     }

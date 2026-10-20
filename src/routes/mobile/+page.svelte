@@ -334,7 +334,7 @@
 <style>
     :global(html),
     :global(body) {
-        background: #f4f5f7;
+        background: var(--color-canvas);
     }
 
     .file-input {
@@ -346,23 +346,23 @@
     }
 
     .mobile-shell {
-        --text: #171b24;
-        --muted: #626a78;
-        --card: rgba(255, 255, 255, 0.74);
-        --line: rgba(255, 255, 255, 0.58);
+        --text: var(--color-text);
+        --muted: var(--color-muted);
+        --card: var(--color-surface-raised);
+        --line: var(--color-surface-raised);
         position: relative;
         overflow-x: hidden;
         min-height: 100vh;
         box-sizing: border-box;
         color: var(--text);
-        background: #f4f5f7;
+        background: var(--color-canvas);
     }
 
     .mobile-shell.about-mode {
         background:
             radial-gradient(
                 circle at 52% 20%,
-                rgba(255, 255, 255, 0.88),
+                var(--color-surface-raised),
                 transparent 30%
             ),
             linear-gradient(155deg, #f4ecff 0%, #fdf3f6 45%, #edf5ff 100%);
@@ -485,11 +485,11 @@
         box-sizing: border-box;
         padding: 18px;
         border: 1px solid var(--line);
-        border-radius: 22px;
+        border-radius: var(--radius-lg);
         background: var(--card);
         color: inherit;
         text-align: left;
-        box-shadow: 0 20px 46px rgba(99, 82, 130, 0.12);
+        box-shadow: var(--shadow-md);
         backdrop-filter: blur(22px);
     }
 
@@ -504,12 +504,12 @@
         display: grid;
         place-items: center;
         align-self: center;
-        border-radius: 16px;
-        color: #fff;
+        border-radius: var(--radius-lg);
+        color: var(--color-surface);
         background: linear-gradient(
             145deg,
             var(--accent),
-            color-mix(in srgb, var(--accent) 68%, #fff)
+            color-mix(in srgb, var(--accent) 68%, var(--color-surface))
         );
     }
 
@@ -550,7 +550,7 @@
         border: 1px solid var(--line);
         background: var(--card);
         color: inherit;
-        box-shadow: 0 20px 46px rgba(99, 82, 130, 0.12);
+        box-shadow: var(--shadow-md);
         backdrop-filter: blur(22px);
     }
 
@@ -560,7 +560,7 @@
         gap: 16px;
         align-items: center;
         padding: 18px;
-        border-radius: 22px;
+        border-radius: var(--radius-lg);
     }
 
     .settings-card div {
@@ -588,7 +588,7 @@
         width: 44px;
         height: 44px;
         flex: 0 0 auto;
-        border-radius: 16px;
+        border-radius: var(--radius-lg);
         background: linear-gradient(145deg, #8e75d4, #f3b7cb);
     }
 
@@ -610,9 +610,9 @@
         height: 96px;
         display: grid;
         place-items: center;
-        border-radius: 24px;
-        background: rgba(255, 255, 255, 0.64);
-        box-shadow: 0 22px 56px rgba(110, 82, 181, 0.16);
+        border-radius: var(--radius-lg);
+        background: var(--color-surface-raised);
+        box-shadow: var(--shadow-md);
         overflow: hidden;
     }
 
@@ -644,12 +644,12 @@
         gap: 18px;
         margin-top: 38px;
         border: 0;
-        border-radius: 28px;
+        border-radius: var(--radius-lg);
         padding: 16px 20px;
-        background: rgba(255, 255, 255, 0.86);
+        background: var(--color-surface-raised);
         color: inherit;
         text-align: left;
-        box-shadow: 0 18px 36px rgba(103, 84, 128, 0.07);
+        box-shadow: var(--shadow-sm);
         backdrop-filter: blur(24px);
     }
 
@@ -681,7 +681,7 @@
     }
 
     .developer-card small {
-        color: #66616f;
+        color: var(--color-muted);
         font-size: 14px;
         font-weight: 700;
         line-height: 1.35;
@@ -696,7 +696,7 @@
 
     .about-row small {
         overflow: hidden;
-        color: #66616f;
+        color: var(--color-muted);
         font-size: 13px;
         font-weight: 650;
         line-height: 1.25;
@@ -726,9 +726,9 @@
         display: grid;
         gap: 0;
         overflow: hidden;
-        border-radius: 28px;
-        background: rgba(255, 255, 255, 0.86);
-        box-shadow: 0 18px 36px rgba(103, 84, 128, 0.06);
+        border-radius: var(--radius-lg);
+        background: var(--color-surface-raised);
+        box-shadow: var(--shadow-sm);
         backdrop-filter: blur(24px);
     }
 
@@ -761,7 +761,7 @@
         box-sizing: border-box;
         padding: 6px 16px max(4px, env(safe-area-inset-bottom));
         border-top: 0;
-        background: rgba(255, 255, 255, 0.78);
+        background: var(--color-surface-raised);
         box-shadow: none;
         backdrop-filter: blur(28px) saturate(1.18);
     }
@@ -772,7 +772,7 @@
         place-items: center;
         gap: 3px;
         border: 0;
-        border-radius: 22px;
+        border-radius: var(--radius-lg);
         background: transparent;
         color: #8b8f98;
         font-weight: 900;

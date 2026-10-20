@@ -113,8 +113,7 @@
     const TOOLBOX_WINDOW_WIDTH = 1200;
     const TOOLBOX_WINDOW_HEIGHT = 740;
     const THEME_OPTIONS = [
-        { value: "modern", label: "现代" },
-        { value: "classic", label: "经典" },
+        { value: "light", label: "浅色" },
         { value: "dark", label: "深色" },
     ];
     const REGEX_LEVEL_OPTIONS = [
@@ -915,9 +914,10 @@
     }
 
     function setUiTheme(value: string) {
-        if (value !== "modern" && value !== "classic" && value !== "dark")
-            return;
-        appSettings.uiTheme = value;
+        const normalized =
+            value === "modern" || value === "classic" ? "light" : value;
+        if (normalized !== "light" && normalized !== "dark") return;
+        appSettings.uiTheme = normalized as typeof appSettings.uiTheme;
         saveGlobalSettings();
     }
 
@@ -1401,6 +1401,18 @@
                             on:change={saveGlobalSettings}
                         />
                     </label>
+                    <label class="set-row toggle-row">
+                        <span class="set-label"
+                            >显示 EPUB 预览滚动条
+                            <small>关闭时预览内容水平居中，不会有右侧留白</small
+                            ></span
+                        >
+                        <input
+                            type="checkbox"
+                            bind:checked={appSettings.previewScrollbar}
+                            on:change={saveGlobalSettings}
+                        />
+                    </label>
                 </section>
             {:else if toolboxSettingsActiveTab === "assoc"}
                 <section class="settings-section">
@@ -1759,7 +1771,7 @@
         align-items: center;
         justify-content: center;
         border-color: var(--color-border);
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         background: var(--color-surface);
         font-size: 17px;
         transition:
@@ -1781,7 +1793,7 @@
         height: 11px;
         box-sizing: border-box;
         border: 1.7px solid currentColor;
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
     }
 
     .desktop-view-icon::before {
@@ -1816,7 +1828,7 @@
     .toolbox-settings-btn.active {
         border-color: var(--color-accent);
         background: var(--color-accent);
-        color: #ffffff;
+        color: var(--color-accent-contrast);
     }
 
     .toolbox-status-announcer {
@@ -1941,7 +1953,7 @@
     }
 
     .toolbox-regex-enabled {
-        min-height: 34px;
+        min-height: var(--control-height);
         display: grid;
         place-items: center;
     }
@@ -2059,7 +2071,7 @@
 
     .api-kind-switch button.active {
         background: var(--color-accent);
-        color: white;
+        color: var(--color-accent-contrast);
     }
 
     .toolbox-content {
@@ -2104,10 +2116,10 @@
 
     .toolbox-filter-tabs button {
         flex: 0 0 auto;
-        min-height: 34px;
+        min-height: var(--control-height);
         padding: 0 11px;
         border: 0;
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         background: transparent;
         color: var(--color-muted);
         cursor: pointer;
@@ -2132,8 +2144,19 @@
             var(--shadow-xs);
     }
 
+    .toolbox-search input:focus,
+    .toolbox-search input:focus-visible {
+        /* 焦点环由外层 .toolbox-search:focus-within 画，
+           内层 input 再画一次就是截图里的“双重框”。 */
+        box-shadow: none;
+    }
+
     .toolbox-filter-tabs button:focus-visible,
-    .toolbox-search:focus-within,
+    .toolbox-search:focus-within {
+        outline: none;
+        border-color: var(--color-accent);
+        box-shadow: var(--focus-ring);
+    }
     .toolbox-settings-btn:focus-visible {
         outline: none;
         box-shadow: var(--focus-ring);
@@ -2148,7 +2171,7 @@
         gap: 7px;
         padding: 0 10px;
         border: 1px solid var(--color-border);
-        border-radius: 7px;
+        border-radius: var(--radius-sm);
         background: var(--color-surface);
         color: var(--color-muted);
     }
@@ -2181,7 +2204,7 @@
         min-height: 0;
         box-sizing: border-box;
         border: 0;
-        border-radius: 7px;
+        border-radius: var(--radius-sm);
         background: transparent;
         color: var(--color-text);
         text-align: left;
@@ -2247,21 +2270,36 @@
     }
 
     .tool-card-convert .tool-icon {
-        background: color-mix(in srgb, #2f8f65 12%, var(--color-surface));
-        color: #24724f;
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, #2f8f65 18%, transparent);
+        background: color-mix(
+            in srgb,
+            var(--color-success) 12%,
+            var(--color-surface)
+        );
+        color: var(--color-success);
+        box-shadow: inset 0 0 0 1px
+            color-mix(in srgb, var(--color-success) 18%, transparent);
     }
 
     .tool-card-security .tool-icon {
-        background: color-mix(in srgb, #c07a20 13%, var(--color-surface));
-        color: #9a5e12;
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, #c07a20 20%, transparent);
+        background: color-mix(
+            in srgb,
+            var(--color-warning) 13%,
+            var(--color-surface)
+        );
+        color: var(--color-warning-deep);
+        box-shadow: inset 0 0 0 1px
+            color-mix(in srgb, var(--color-warning) 20%, transparent);
     }
 
     .tool-card-optimize .tool-icon {
-        background: color-mix(in srgb, #7a6aa8 12%, var(--color-surface));
-        color: #62538e;
-        box-shadow: inset 0 0 0 1px color-mix(in srgb, #7a6aa8 18%, transparent);
+        background: color-mix(
+            in srgb,
+            var(--color-violet) 12%,
+            var(--color-surface)
+        );
+        color: var(--color-violet-deep);
+        box-shadow: inset 0 0 0 1px
+            color-mix(in srgb, var(--color-violet) 18%, transparent);
     }
 
     .tool-copy {
@@ -2331,7 +2369,7 @@
     }
 
     .web-toolbox-footer a {
-        color: #1677ff;
+        color: var(--color-accent);
         font-weight: 800;
         text-decoration: none;
     }
@@ -2443,7 +2481,7 @@
             min-width: 0;
             width: 100%;
             padding: 8px 16px;
-            border-radius: 20px;
+            border-radius: var(--radius-lg);
         }
 
         .web-footer-line {

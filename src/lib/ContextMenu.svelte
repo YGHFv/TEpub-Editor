@@ -324,14 +324,14 @@
         position: fixed;
         z-index: 999999;
         min-width: 160px;
-        background: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        box-shadow: var(--shadow-sm);
         padding: 6px 0;
         font-family: system-ui, sans-serif;
         font-size: 13px;
-        color: #333;
+        color: var(--color-text);
         cursor: default;
         user-select: none;
     }
@@ -346,14 +346,14 @@
     }
 
     .menu-item:hover {
-        background: #f0f0f0;
+        background: var(--color-hover);
     }
 
     .menu-item.danger {
-        color: #d32f2f;
+        color: var(--color-danger);
     }
     .menu-item.danger:hover {
-        background: #ffebee;
+        background: var(--color-danger-soft);
     }
 
     .menu-item .icon {
@@ -365,7 +365,7 @@
 
     .separator {
         height: 1px;
-        background: #eee;
+        background: var(--color-border);
         margin: 4px 0;
     }
 
@@ -374,7 +374,7 @@
         min-width: 176px;
         padding: 6px;
         background: var(--color-surface-raised);
-        border: 1px solid rgba(255, 255, 255, 0.78);
+        border: 1px solid var(--color-surface-raised);
         border-radius: var(--radius-md);
         box-shadow: var(--shadow-pop);
         font-family: var(--font-ui);

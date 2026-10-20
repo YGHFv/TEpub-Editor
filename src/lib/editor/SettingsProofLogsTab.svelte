@@ -63,11 +63,11 @@
 <style>
     /* 基础按钮样式（与页面同源，保证拆出后视觉一致） */
     button {
-        height: 34px;
+        height: var(--control-height);
         min-width: 40px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        background: #fff;
+        border-radius: var(--radius-xs);
+        border: 1px solid var(--color-border-strong);
+        background: var(--color-surface);
         font-size: 18px;
         display: flex;
         align-items: center;
@@ -76,21 +76,21 @@
         transition: 0.1s;
     }
     button:active {
-        background: #eee;
-        transform: scale(0.96);
+        background: var(--color-border);
+        transform: translateY(0.5px) scale(0.985);
     }
 
     .mini-action {
-        height: 34px;
+        height: var(--control-height);
         min-width: 0;
         padding: 0 12px;
-        border: 1px solid #d7e0ea;
-        border-radius: 10px;
-        background: #fff;
-        color: #526071;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
+        color: var(--color-text-soft);
         font-size: 12px;
         font-weight: 700;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+        box-shadow: var(--shadow-xs);
     }
 
     .proof-log-settings {
@@ -106,7 +106,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        color: #52606d;
+        color: var(--color-text-soft);
         font-size: 12px;
     }
 
@@ -133,15 +133,15 @@
         display: grid;
         gap: 4px;
         padding: 9px 10px;
-        border: 1px solid #e0e6ed;
-        border-radius: 8px;
-        background: #fff;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
         text-align: left;
     }
 
     .proof-log-list button.active {
-        border-color: #1677b8;
-        background: #eef8ff;
+        border-color: var(--color-accent);
+        background: var(--color-accent-quiet);
         box-shadow: 0 0 0 3px rgba(22, 119, 184, 0.1);
     }
 
@@ -150,13 +150,13 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        color: #1b2d3f;
+        color: var(--color-text);
         font-size: 12px;
         font-weight: 800;
     }
 
     .proof-log-meta {
-        color: #748295;
+        color: var(--color-muted);
         font-size: 11px;
     }
 
@@ -166,10 +166,10 @@
         min-height: 0;
         resize: none;
         padding: 10px;
-        border: 1px solid #d6e0eb;
-        border-radius: 8px;
-        background: #fbfcfe;
-        color: #334155;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-soft);
+        color: var(--color-text-soft);
         font-family: Consolas, "Microsoft YaHei", monospace;
         font-size: 11px;
         line-height: 1.55;
@@ -188,7 +188,7 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;

@@ -2089,7 +2089,7 @@
     }
 
     .preview-toggle button {
-        min-height: 34px;
+        min-height: var(--control-height);
         padding: 7px 10px;
         border: 0;
         border-radius: 0;
@@ -2106,7 +2106,7 @@
 
     .preview-toggle button.active {
         background: var(--color-accent);
-        color: white;
+        color: var(--color-accent-contrast);
     }
 
     .preview-toggle button:disabled {
@@ -2505,7 +2505,7 @@
     .segmented button,
     .ghost,
     .primary {
-        min-height: 34px;
+        min-height: var(--control-height);
         padding: 7px 12px;
     }
 
@@ -2513,7 +2513,7 @@
     .primary {
         border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
         background: var(--color-accent);
-        color: white;
+        color: var(--color-accent-contrast);
     }
 
     .segmented button.active:hover:not(:disabled),
@@ -2525,7 +2525,7 @@
             transparent
         );
         background: var(--color-accent-deep);
-        color: white;
+        color: var(--color-accent-contrast);
     }
 
     .danger-ghost {
@@ -2607,7 +2607,7 @@
     textarea {
         box-sizing: border-box;
         width: 100%;
-        min-height: 34px;
+        min-height: var(--control-height);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
         background: var(--color-canvas);
@@ -2626,7 +2626,7 @@
     .custom-select-trigger {
         box-sizing: border-box;
         width: 100%;
-        min-height: 34px;
+        min-height: var(--control-height);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -2690,7 +2690,7 @@
 
     .custom-select-menu button {
         width: 100%;
-        min-height: 34px;
+        min-height: var(--control-height);
         padding: 7px 10px;
         border: 0;
         border-radius: var(--radius-xs);
@@ -2710,7 +2710,7 @@
 
     .custom-select-menu button.active {
         background: var(--color-accent);
-        color: var(--color-accent-contrast, #fff);
+        color: var(--color-accent-contrast, var(--color-surface));
     }
 
     input[type="range"] {

@@ -70,6 +70,12 @@
         replacePattern = text;
         showReplaceHistory = false;
     }
+
+    // 点输入框本身不再切换历史面板，否则和右侧 ▾ 按钮的语义重复
+    function closeHistory() {
+        showFindHistory = false;
+        showReplaceHistory = false;
+    }
 </script>
 
 <div class="find-replace-panel">
@@ -82,12 +88,19 @@
                 class="fr-input"
                 bind:value={findPattern}
                 onkeydown={(e) => e.key === "Enter" && onFindNext()}
+                onfocus={closeHistory}
+                onclick={closeHistory}
+                autocomplete="off"
+            />
+            <button
+                class="fr-dropdown-btn"
                 onclick={() => {
                     showFindHistory = !showFindHistory;
                     showReplaceHistory = false;
                 }}
                 title="&#26174;&#31034;&#26597;&#25214;&#21382;&#21490;"
-            />
+                >&#9662;</button
+            >
             {#if showFindHistory && findHistory.length > 0}
                 <div class="fr-history-dropdown">
                     {#each findHistory as item, i}
@@ -141,10 +154,9 @@
                 type="text"
                 class="fr-input"
                 bind:value={replacePattern}
-                onfocus={() => {
-                    showFindHistory = false;
-                    showReplaceHistory = false;
-                }}
+                onfocus={closeHistory}
+                onclick={closeHistory}
+                autocomplete="off"
             />
             <button
                 class="fr-dropdown-btn"
@@ -231,8 +243,8 @@
 
 <style>
     .find-replace-panel {
-        background: #f0f0f0;
-        border-top: 1px solid #ccc;
+        background: var(--color-hover);
+        border-top: 1px solid var(--color-border-strong);
         padding: 6px 10px;
         font-size: 13px;
         flex-shrink: 0;
@@ -263,7 +275,7 @@
 
     .fr-label {
         font-weight: 600;
-        color: #555;
+        color: var(--color-text-soft);
         min-width: 40px;
         text-align: right;
     }
@@ -271,24 +283,24 @@
     .fr-input {
         flex: 1;
         padding: 6px 10px;
-        border: 1px solid #ccc;
-        border-radius: 4px;
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-xs);
         font-size: 13px;
         font-family: "Consolas", "Monaco", monospace;
-        background: #fff;
+        background: var(--color-surface);
     }
 
     .fr-input:focus {
         outline: none;
-        border-color: #2196f3;
+        border-color: var(--color-accent);
         box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
     }
 
     .fr-btn {
         padding: 4px 8px;
-        border: 1px solid #bbb;
-        border-radius: 4px;
-        background: linear-gradient(to bottom, #fff, #e8e8e8);
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-xs);
+        background: linear-gradient(to bottom, var(--color-surface), var(--color-border));
         cursor: pointer;
         font-size: 12px;
         display: flex;
@@ -302,17 +314,17 @@
     }
 
     .fr-btn:hover {
-        background: linear-gradient(to bottom, #f5f5f5, #ddd);
-        border-color: #999;
+        background: linear-gradient(to bottom, var(--color-surface-soft), var(--color-border));
+        border-color: var(--color-muted);
     }
 
     .fr-btn:active {
-        background: #ddd;
+        background: var(--color-border);
     }
 
     .fr-danger {
-        background: linear-gradient(to bottom, #fff0e6, #ffddcc);
-        border-color: #e65c00;
+        background: linear-gradient(to bottom, var(--color-warning-soft), #ffddcc);
+        border-color: var(--color-warning);
     }
 
     .fr-danger:hover {
@@ -347,10 +359,10 @@
         height: 30px;
         min-height: 30px;
         padding: 0 8px;
-        border-color: #ccc;
-        border-radius: 4px;
-        background: #fff;
-        color: #333;
+        border-color: var(--color-border-strong);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        color: var(--color-text);
         box-shadow: none;
         font-size: 12px;
         font-weight: 600;
@@ -359,23 +371,23 @@
     .fr-options :global(.fr-custom-select.open .custom-select-trigger),
     .fr-options
         :global(.fr-custom-select .custom-select-trigger:focus-visible) {
-        border-color: #2196f3;
+        border-color: var(--color-accent);
         box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
     }
 
     .fr-options :global(.fr-custom-select .custom-select-menu) {
         top: auto;
         bottom: calc(100% + 4px);
-        border-color: #ccc;
-        border-radius: 4px;
-        background: #fff;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+        border-color: var(--color-border-strong);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-md);
     }
 
     .fr-options :global(.fr-custom-select .custom-select-menu button) {
         min-height: 28px;
         padding: 5px 8px;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         font-size: 12px;
         font-weight: 600;
     }
@@ -385,7 +397,7 @@
         align-items: center;
         gap: 4px;
         cursor: pointer;
-        color: #555;
+        color: var(--color-text-soft);
     }
 
     .fr-checkbox input {
@@ -395,7 +407,7 @@
 
     .fr-message {
         margin-left: auto;
-        color: #2196f3;
+        color: var(--color-accent);
         font-weight: 500;
         min-width: 80px;
         text-align: right;
@@ -416,18 +428,18 @@
 
     .fr-dropdown-btn {
         padding: 6px 8px;
-        border: 1px solid #ccc;
+        border: 1px solid var(--color-border-strong);
         border-left: none;
         border-top-right-radius: 4px;
         border-bottom-right-radius: 4px;
-        background: linear-gradient(to bottom, #fff, #e8e8e8);
+        background: linear-gradient(to bottom, var(--color-surface), var(--color-border));
         cursor: pointer;
         font-size: 10px;
-        color: #666;
+        color: var(--color-muted);
     }
 
     .fr-dropdown-btn:hover {
-        background: linear-gradient(to bottom, #f5f5f5, #ddd);
+        background: linear-gradient(to bottom, var(--color-surface-soft), var(--color-border));
     }
 
     .fr-history-dropdown {
@@ -436,10 +448,10 @@
         left: 0;
         right: 0;
         margin-bottom: 2px;
-        background: #fff;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-xs);
+        box-shadow: var(--shadow-sm);
         z-index: 200;
         max-height: 400px;
         overflow-y: auto;
@@ -449,7 +461,7 @@
         display: flex;
         align-items: center;
         padding: 6px 10px;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid var(--color-border);
     }
 
     .fr-history-item:last-child {
@@ -457,7 +469,7 @@
     }
 
     .fr-history-item:hover {
-        background: #f5f5f5;
+        background: var(--color-surface-soft);
     }
 
     .fr-history-text {
@@ -475,24 +487,24 @@
         border: none;
         cursor: pointer;
         font-size: 12px;
-        color: #999;
+        color: var(--color-muted);
         padding: 2px 6px;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         margin-left: 8px;
     }
 
     .fr-history-del:hover {
         background: #ffdddd;
-        color: #d32f2f;
+        color: var(--color-danger);
     }
 
     /* Modern UI overrides */
     .find-replace-panel {
-        background: rgba(255, 255, 255, 0.86);
-        border-top: 1px solid var(--color-border);
+        background: var(--color-surface);
+        border-top: 1px solid var(--color-border-strong);
         padding: 9px 12px;
-        box-shadow: 0 -10px 26px rgba(23, 36, 52, 0.05);
-        backdrop-filter: blur(14px);
+        box-shadow: 0 -8px 20px color-mix(in srgb, var(--color-border) 42%, transparent);
+        backdrop-filter: none;
     }
 
     .fr-row {
@@ -507,7 +519,7 @@
     .fr-input,
     .fr-dropdown-btn {
         border-color: var(--color-border);
-        background: rgba(255, 255, 255, 0.92);
+        background: var(--color-surface);
         color: var(--color-text);
         border-radius: var(--radius-xs);
     }
@@ -530,13 +542,13 @@
         border-left: none;
         border-top-left-radius: 0;
         border-bottom-left-radius: 0;
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: var(--color-surface);
     }
 
     .fr-btn {
         border-color: var(--color-border);
         border-radius: var(--radius-xs);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: var(--color-surface);
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         transition:
@@ -564,7 +576,7 @@
     }
 
     .fr-danger:hover {
-        background: #ffe7eb;
+        background: var(--color-danger-soft);
         border-color: rgba(215, 68, 82, 0.42);
     }
 

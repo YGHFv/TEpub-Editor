@@ -363,7 +363,7 @@
 
     .tag-chip.tag-chip-tier {
         background: var(--color-accent);
-        color: #fff;
+        color: var(--color-accent-contrast);
     }
 
     .tag-chip-text {
@@ -492,7 +492,7 @@
 
     .tier-opt.active {
         background: var(--color-accent);
-        color: #fff;
+        color: var(--color-accent-contrast);
         border-color: var(--color-accent);
     }
 

@@ -467,7 +467,7 @@
 <style>
     :global(html),
     :global(body) {
-        background: #f4f5f8;
+        background: var(--color-canvas);
     }
 
     .page {
@@ -475,8 +475,8 @@
         box-sizing: border-box;
         padding: max(10px, env(safe-area-inset-top)) 14px
             max(44px, env(safe-area-inset-bottom));
-        background: #f4f5f8;
-        color: #171b24;
+        background: var(--color-canvas);
+        color: var(--color-text);
     }
 
     .file-input {
@@ -497,7 +497,7 @@
 
     .topbar a {
         width: 34px;
-        height: 34px;
+        height: var(--control-height);
         display: grid;
         place-items: center;
         color: inherit;
@@ -529,8 +529,8 @@
     .picker,
     .form {
         border: 1px solid rgba(23, 27, 36, 0.08);
-        border-radius: 8px;
-        background: #fff;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
         padding: 12px;
     }
 
@@ -582,9 +582,9 @@
         place-items: center;
         overflow: hidden;
         border: 1px solid rgba(23, 27, 36, 0.12);
-        border-radius: 8px;
-        background: #eef3f1;
-        color: #7a828f;
+        border-radius: var(--radius-sm);
+        background: var(--color-success-soft, var(--color-accent-quiet));
+        color: var(--color-muted);
         font-size: 12px;
         font-weight: 800;
         text-align: center;
@@ -602,7 +602,7 @@
     }
 
     label span {
-        color: #626a78;
+        color: var(--color-muted);
         font-size: 12px;
         font-weight: 800;
     }
@@ -613,9 +613,9 @@
         min-width: 0;
         box-sizing: border-box;
         border: 1px solid rgba(23, 27, 36, 0.12);
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         padding: 8px 9px;
-        background: #fff;
+        background: var(--color-surface);
         color: inherit;
         font: inherit;
         font-size: 13px;
@@ -629,17 +629,17 @@
     button {
         min-height: 36px;
         border: 0;
-        border-radius: 8px;
-        background: #1f7a5a;
-        color: #fff;
+        border-radius: var(--radius-sm);
+        background: var(--color-success);
+        color: var(--color-surface);
         font-weight: 900;
         font-size: 13px;
     }
 
     button.secondary {
         border: 1px solid rgba(31, 122, 90, 0.26);
-        background: #edf6f1;
-        color: #1f7a5a;
+        background: var(--color-success-soft, var(--color-accent-quiet));
+        color: var(--color-success);
     }
 
     .action-row {
@@ -656,7 +656,7 @@
     p,
     code {
         margin: 0;
-        color: #747986;
+        color: var(--color-muted);
         font-size: 13px;
         line-height: 1.5;
         word-break: break-all;

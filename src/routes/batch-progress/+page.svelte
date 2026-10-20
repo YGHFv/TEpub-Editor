@@ -1233,19 +1233,19 @@
             var(--color-border)
         );
         background: var(--color-accent);
-        color: var(--color-accent-contrast, #fff);
+        color: var(--color-accent-contrast, var(--color-surface));
     }
 
     .cancel-btn {
-        border-color: color-mix(in srgb, #d14343 28%, var(--color-border));
-        background: color-mix(in srgb, #d14343 10%, var(--color-surface));
-        color: #9b1c1c;
+        border-color: color-mix(in srgb, var(--color-danger) 28%, var(--color-border));
+        background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+        color: var(--color-danger);
     }
 
     .retry-btn {
-        border-color: color-mix(in srgb, #b7791f 32%, var(--color-border));
-        background: color-mix(in srgb, #b7791f 12%, var(--color-surface));
-        color: #8a4b08;
+        border-color: color-mix(in srgb, var(--color-warning) 32%, var(--color-border));
+        background: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface));
+        color: var(--color-warning);
     }
 
     .report-btn {
@@ -1450,9 +1450,9 @@
     }
 
     .completion-summary span.error {
-        border-color: color-mix(in srgb, #d14343 26%, var(--color-border));
-        background: color-mix(in srgb, #d14343 10%, var(--color-canvas));
-        color: #9b1c1c;
+        border-color: color-mix(in srgb, var(--color-danger) 26%, var(--color-border));
+        background: color-mix(in srgb, var(--color-danger) 10%, var(--color-canvas));
+        color: var(--color-danger);
     }
 
     .queue-panel,
@@ -1499,7 +1499,7 @@
 
     .segmented button.active {
         background: var(--color-accent);
-        color: var(--color-accent-contrast, #fff);
+        color: var(--color-accent-contrast, var(--color-surface));
     }
 
     .count-pill {
@@ -1663,7 +1663,7 @@
     }
 
     .icon-text-btn.danger:hover:not(:disabled) {
-        color: #9b1c1c;
+        color: var(--color-danger);
     }
 
     .status-running .queue-status {
@@ -1671,13 +1671,13 @@
     }
 
     .status-error .queue-status {
-        background: color-mix(in srgb, #d14343 12%, transparent);
-        color: #9b1c1c;
+        background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+        color: var(--color-danger);
     }
 
     .status-warning .queue-status {
-        background: color-mix(in srgb, #b7791f 14%, transparent);
-        color: #8a4b08;
+        background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+        color: var(--color-warning);
     }
 
     .log-list {
@@ -1694,11 +1694,11 @@
     }
 
     .log-line.level-warning {
-        color: #8a4b08;
+        color: var(--color-warning);
     }
 
     .log-line.level-error {
-        color: #9b1c1c;
+        color: var(--color-danger);
     }
 
     .empty {

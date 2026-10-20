@@ -94,9 +94,9 @@
 <style>
     .font-settings-status {
         padding: 8px 10px;
-        border-radius: 8px;
-        background: #f5f9fc;
-        color: #486277;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-soft);
+        color: var(--color-text-soft);
         font-size: 12px;
         line-height: 1.5;
     }
@@ -117,7 +117,7 @@
         width: 110px;
         flex-shrink: 0;
         font-weight: bold;
-        color: #444;
+        color: var(--color-text-soft);
         font-size: 13px;
         line-height: 1.4;
     }
@@ -132,7 +132,7 @@
     .ai-settings-form .set-row textarea {
         flex: 1 1 auto;
         min-width: 0;
-        min-height: 34px;
+        min-height: var(--control-height);
         box-sizing: border-box;
         font-size: 13px;
     }
@@ -164,11 +164,11 @@
         width: 16px;
         height: 16px;
         min-height: 0;
-        accent-color: #0b92b3;
+        accent-color: var(--color-teal);
     }
 
     .ai-settings-form .ai-toggle-row small {
-        color: #667085;
+        color: var(--color-muted);
         font-size: 11px;
         line-height: 1.45;
     }
@@ -182,7 +182,7 @@
     .set-row textarea {
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: rgba(255, 255, 255, 0.9);
+        background: var(--color-surface);
         color: var(--color-text);
         transition:
             border-color var(--transition-fast),
@@ -195,7 +195,7 @@
         outline: none;
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
-        background: #fff;
+        background: var(--color-surface);
     }
 
     .set-row :global(.custom-select) {

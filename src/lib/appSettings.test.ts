@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { loadAppSettings, saveAppSettings } from "./appSettings";
+import {
+  DEFAULT_APP_SETTINGS,
+  isPreviewScrollbarEnabled,
+  loadAppSettings,
+  normalizeAppSettings,
+  saveAppSettings,
+} from "./appSettings";
 
 describe("app settings persistence", () => {
   afterEach(() => {
@@ -22,6 +28,37 @@ describe("app settings persistence", () => {
     expect(loaded.txtEditorCloseAction).toBe("exit");
     expect(saved.aiProviders).toEqual(loaded.aiProviders);
     expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+});
+
+describe("preview scrollbar setting", () => {
+  afterEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("defaults to hidden", () => {
+    expect(DEFAULT_APP_SETTINGS.previewScrollbar).toBe(false);
+    expect(normalizeAppSettings({}).previewScrollbar).toBe(false);
+    expect(isPreviewScrollbarEnabled()).toBe(false);
+  });
+
+  it("keeps an explicit true after save and reload", () => {
+    saveAppSettings({
+      ...loadAppSettings(),
+      previewScrollbar: true,
+    });
+    expect(loadAppSettings().previewScrollbar).toBe(true);
+    expect(isPreviewScrollbarEnabled()).toBe(true);
+  });
+
+  it("falls back to false for non-boolean stored values", () => {
+    expect(
+      normalizeAppSettings({ previewScrollbar: "yes" }).previewScrollbar,
+    ).toBe(false);
+    expect(normalizeAppSettings({ previewScrollbar: 1 }).previewScrollbar).toBe(
+      false,
+    );
   });
 });
 // @vitest-environment happy-dom

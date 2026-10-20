@@ -32,7 +32,8 @@
     }
 
     // ===== 状态 =====
-    let epubPath = "";
+    let epubPath = ""; // 当前实际打开（可能已预处理）的路径
+    let bookSourcePath = ""; // 用于进度 / 书签的稳定书源路径
     let bookTitle = "";
     let bookAuthor = "";
     let spine: SpineEntry[] = [];
@@ -41,6 +42,8 @@
     let totalCols = 0;
     let totalSpreads = 0;
     let currentSpread = 0;
+    let scrollChapterIdx = 0;
+    let scrollChapterOffset = 0;
 
     let loading = true;
     let loadingMsg = "正在解压 EPUB…";
@@ -59,6 +62,11 @@
     let columnLayout: ColumnLayout = "single"; // 平移翻页下的列布局
     type PageMode = "paginated" | "scroll";
     let pageMode: PageMode = "paginated"; // 翻页样式
+    // 翻页样式切换期间，避免 Svelte 重渲染把旧页面的滚动位置写回进度。
+    let suppressProgressSave = false;
+    // 抑制期间用户仍可能滚动或布局被锚回。解除抑制后补存最后位置，
+    // 避免中间态落盘，也避免最后一次滚动永远丢失。
+    let progressSavePending = false;
 
     let fontSize = 19; // 文字主体 px
     let lineHeight = 1.85; // 行距倍数
@@ -102,6 +110,7 @@
     interface Bookmark {
         ch: number;
         sp: number;
+        scrollOffset?: number;
         title: string; // 章节标题
         preview: string; // 该处章节标题或附近文字片段
         time: number; // 时间戳
@@ -133,6 +142,7 @@
     let viewportEl: HTMLDivElement;
     // 目录面板容器：打开目录面板时用来自动滚动到当前章节行
     let tocPanelEl: HTMLDivElement | null = null;
+    let canvasEl: HTMLDivElement;
     let pageEl: HTMLDivElement;
 
     // 已渲染的合并 HTML（注入到 pageEl）
@@ -153,6 +163,8 @@
     let chapterBgStyle: string[] = [];
     let renderedSet = new Set<number>(); // 已 hydrate 的章节索引集合
     let hydrateScheduled = false;
+    let hydrateId: any = null;
+    let destroyed = false;
     const RENDER_RADIUS = 2; // 首屏渲染当前章节前后各 N 章（共 2N+1 章）
 
     // 时钟
@@ -165,6 +177,11 @@
 
     // 进度
     let progressKey = "";
+
+    // 用户通过 End 跳到书末后，后台增量水合会不断重测总列数。
+    // 保持“仍在书末”的意图，直到用户主动离开末页。
+    let keepAtBookEnd = false;
+    let pinningBookEnd = false;
 
     // ===== 工具函数 =====
     function pad2(n: number): string {
@@ -192,6 +209,101 @@
             else baseParts.push(p);
         }
         return baseParts.join("/");
+    }
+
+    function safeDecode(value: string): string {
+        try {
+            return decodeURIComponent(value);
+        } catch {
+            return value;
+        }
+    }
+
+    function migrateLegacyReaderKeys(processedPath: string) {
+        const sourcePath = bookSourcePath || epubPath;
+        if (!sourcePath || !processedPath || processedPath === sourcePath)
+            return;
+        const pairs = [
+            [readerProgressKey(processedPath), readerProgressKey(sourcePath)],
+            [readerBookmarksKey(processedPath), readerBookmarksKey(sourcePath)],
+        ];
+        try {
+            for (const [legacyKey, stableKey] of pairs) {
+                if (!localStorage.getItem(stableKey)) {
+                    const legacy = localStorage.getItem(legacyKey);
+                    if (legacy !== null)
+                        localStorage.setItem(stableKey, legacy);
+                }
+            }
+        } catch {}
+    }
+
+    // XML documents can expose inline style declarations as inert attributes.
+    // Reassigning cssText in the final HTML document makes them live declarations
+    // again, so display:none, text-align, margins, etc. actually take effect.
+    function normalizeInlineStyles(root: ParentNode) {
+        for (const el of Array.from(root.querySelectorAll("[style]"))) {
+            const cssText = el.getAttribute("style") || "";
+            if (!cssText.trim()) continue;
+            (el as HTMLElement).style.cssText = cssText;
+        }
+    }
+
+    const adoptedChapterStyleCss = new Set<string>();
+    const adoptedChapterStyleSheets = new Set<CSSStyleSheet>();
+
+    // Svelte's @html insertion leaves EPUB style elements inert in this
+    // WebView2 build. Constructable stylesheets are applied by the CSS engine
+    // and restore the book's font, color and layout rules. Linked CSS is
+    // repeated in every chapter, so adopt each distinct stylesheet only once.
+    function adoptChapterStyles(root: ParentNode) {
+        const pending: {
+            node: HTMLStyleElement;
+            sheet: CSSStyleSheet;
+            css: string;
+        }[] = [];
+        for (const node of Array.from(
+            root.querySelectorAll("style"),
+        ) as HTMLStyleElement[]) {
+            const css = node.textContent || "";
+            if (!css.trim()) continue;
+            if (adoptedChapterStyleCss.has(css)) {
+                node.remove();
+                continue;
+            }
+            try {
+                const sheet = new CSSStyleSheet();
+                sheet.replaceSync(css);
+                pending.push({ node, sheet, css });
+            } catch (error) {
+                console.warn("EPUB style adoption failed:", error);
+            }
+        }
+        if (pending.length === 0) return;
+        try {
+            document.adoptedStyleSheets = [
+                ...document.adoptedStyleSheets,
+                ...pending.map((entry) => entry.sheet),
+            ];
+        } catch (error) {
+            console.warn("EPUB stylesheet registration failed:", error);
+            return;
+        }
+        for (const entry of pending) {
+            adoptedChapterStyleCss.add(entry.css);
+            adoptedChapterStyleSheets.add(entry.sheet);
+            entry.node.remove();
+        }
+    }
+
+    function clearAdoptedChapterStyles() {
+        if (adoptedChapterStyleSheets.size > 0) {
+            document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+                (sheet) => !adoptedChapterStyleSheets.has(sheet),
+            );
+            adoptedChapterStyleSheets.clear();
+        }
+        adoptedChapterStyleCss.clear();
     }
 
     // 注：之前需要 mimeForExt / bytesToBlobUrl 把 IPC 回来的二进制转 blob，
@@ -239,10 +351,15 @@
                     "prepare_epub_for_open",
                     { epubPath },
                 );
-                // 注意：Rust 端字段是 snake_case `processed_path`（与编辑器对齐）。
-                // 之前这里用 preparedPath，永远 undefined，混淆 EPUB 进不来。
-                if (prepared && prepared.processed_path)
-                    epubPath = prepared.processed_path;
+                // EpubPrepareResult 使用 camelCase 序列化；兼容旧版/其他调用端的
+                // snake_case 字段，否则伪加密与文件名混淆修复会被静默跳过。
+                const preparedPath =
+                    prepared?.processedPath || prepared?.processed_path;
+                if (preparedPath) {
+                    migrateLegacyReaderKeys(preparedPath);
+                    epubPath = preparedPath;
+                    loadBookmarks();
+                }
             } catch (e) {
                 // 非致命，继续尝试
                 console.warn("prepare_epub_for_open 失败，继续:", e);
@@ -486,6 +603,7 @@
                 // 颜色 / 对齐 / 字体规则生效。link[rel=stylesheet] 不直接移除，下面会
                 // IPC 读其内容并替换为 style 标签，连带把 url() 字体文件转成 blob URL。
                 doc.querySelectorAll("script").forEach((n) => n.remove());
+                normalizeInlineStyles(doc);
 
                 Array.from(
                     doc.querySelectorAll('link[rel="stylesheet"]'),
@@ -874,6 +992,13 @@
                 const chapterPath = spine[i].path;
                 const bodyClass = body?.getAttribute("class") || "";
                 let bodyStyle = body?.getAttribute("style") || "";
+                if (body && bodyStyle) {
+                    // Ensure the CSS declaration block is live before serializing it.
+                    // XML-parsed inline styles otherwise survive as inert attributes,
+                    // so styles such as display:none and background URLs are lost.
+                    body.style.cssText = bodyStyle;
+                    bodyStyle = body.style.cssText;
+                }
                 if (bodyStyle) {
                     bodyStyle = bodyStyle.replace(URL_RE, (match, _q, url) => {
                         const trimmed = url.trim();
@@ -917,9 +1042,10 @@
             }
 
             // 12) 进度恢复（兼容旧格式：纯 currentSpread 数字 / 新格式：{ch,sp}）
-            progressKey = readerProgressKey(epubPath);
+            progressKey = readerProgressKey(bookSourcePath || epubPath);
             let initialChIdx = 0;
             let initialSpInCh = 0;
+            let initialScrollOffset = 0;
             try {
                 const raw = localStorage.getItem(progressKey);
                 if (raw) {
@@ -933,6 +1059,15 @@
                         }
                         if (typeof parsed.sp === "number" && parsed.sp >= 0) {
                             initialSpInCh = parsed.sp;
+                        }
+                        if (
+                            parsed.mode === "scroll" &&
+                            typeof parsed.scrollOffset === "number"
+                        ) {
+                            initialScrollOffset = Math.max(
+                                0,
+                                parsed.scrollOffset,
+                            );
                         }
                     }
                     // 旧格式（纯 currentSpread 数字）由于无法精确还原章节，进新版后从 0 开始
@@ -964,6 +1099,10 @@
 
             loading = false;
             await tick();
+            // @html creates a fresh HTML subtree; XML inline declarations must be
+            // rebound after that insertion, not only in the parsed XML document.
+            if (pageEl) normalizeInlineStyles(pageEl);
+            if (pageEl) adoptChapterStyles(pageEl);
             requestAnimationFrame(() => {
                 applyBasicLayout();
                 // 同步 measure 列布局，让 chapterStartCols 立刻可用
@@ -978,8 +1117,34 @@
                     );
                     if (sec) extractChapterBgFromCss(i, sec);
                 }
+                restoreInitialPosition();
+                // 启动后台增量 hydrate（idle 时段执行，不抢占用户阅读）
+                scheduleHydrate();
+            });
+
+            function restoreInitialPosition() {
                 // 锚定到 initialChIdx 的 initialSpInCh 处
                 const meta = (pageEl as any).__rd;
+                if (pageMode === "scroll") {
+                    const sec = pageEl?.querySelector<HTMLElement>(
+                        `section.rd-chapter[data-idx="${initialChIdx}"]`,
+                    );
+                    if (sec && viewportEl) {
+                        const sectionTop =
+                            sec.getBoundingClientRect().top -
+                            viewportEl.getBoundingClientRect().top +
+                            viewportEl.scrollTop;
+                        viewportEl.scrollTop = Math.max(
+                            0,
+                            sectionTop + initialScrollOffset,
+                        );
+                        syncCurrentSpreadForScroll({
+                            ch: initialChIdx,
+                            offset: initialScrollOffset,
+                        });
+                    }
+                    return;
+                }
                 if (meta && chapterStartCols.length > initialChIdx) {
                     const startCol = chapterStartCols[initialChIdx] || 0;
                     const targetCol = startCol + initialSpInCh * meta.numCols;
@@ -988,9 +1153,7 @@
                         currentSpread = Math.max(0, totalSpreads - 1);
                 }
                 applyTransform();
-                // 启动后台增量 hydrate（idle 时段执行，不抢占用户阅读）
-                scheduleHydrate();
-            });
+            }
         } catch (e: any) {
             console.error(e);
             errorMsg = String(e);
@@ -1013,6 +1176,277 @@
             else hi = mid - 1;
         }
         return lo;
+    }
+
+    function getScrollReadingPosition(): { ch: number; offset: number } {
+        const sections =
+            pageEl?.querySelectorAll<HTMLElement>("section.rd-chapter") || [];
+        if (sections.length === 0) {
+            return {
+                ch: Math.max(0, Math.min(spine.length - 1, scrollChapterIdx)),
+                offset: scrollChapterOffset,
+            };
+        }
+        const scrollTop = viewportEl?.scrollTop ?? 0;
+        let ch = 0;
+        let found = false;
+        for (let i = sections.length - 1; i >= 0; i--) {
+            // A section's own offsetTop includes the page's top padding, while
+            // scrollTop is measured in the viewport's scroll coordinate space.
+            // Compare viewport-relative positions so the top margin cannot make
+            // every later chapter look invisible.
+            const sectionTop =
+                sections[i].getBoundingClientRect().top -
+                viewportTop() +
+                scrollTop;
+            if (sectionTop <= scrollTop + 1 && sections[i].offsetHeight > 0) {
+                ch = i;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            // Zero-height placeholders can share offsetTop with the next real
+            // chapter. Prefer the chapter that actually occupies the viewport.
+            for (let i = 0; i < sections.length; i++) {
+                const rect = sections[i].getBoundingClientRect();
+                if (rect.height > 0 && rect.bottom > viewportTop() + 1) {
+                    ch = i;
+                    break;
+                }
+            }
+        }
+        const sectionTop =
+            sections[ch].getBoundingClientRect().top -
+            viewportTop() +
+            scrollTop;
+        return {
+            ch,
+            offset: Math.max(0, scrollTop - sectionTop),
+        };
+    }
+
+    function viewportTop(): number {
+        return viewportEl?.getBoundingClientRect().top ?? 0;
+    }
+
+    // 滚动模式的 currentSpread 是“虚拟页号”。所有依赖章节标题 / 进度 /
+    // 书签的派生状态都从它读取，因此必须随真实 scrollTop 同步，不能只在
+    // 模式切换时更新一次。
+    function syncCurrentSpreadForScroll(position = getScrollReadingPosition()) {
+        scrollChapterIdx = position.ch;
+        scrollChapterOffset = position.offset;
+        // 滚动模式的原生滚动位置不叫 scrollLeft；因此“是否在章首”和目录高亮
+        // 必须以真实像素偏移为准，不能沿用分页模式的 virtual spread 列号。
+        if (pageMode === "scroll") return currentSpread;
+        if (chapterStartCols.length < 2) return currentSpread;
+        const meta = (pageEl as any).__rd;
+        const pageH = Math.max(1, meta?.pageH || viewportEl?.clientHeight || 1);
+        const start = chapterStartCols[position.ch] ?? 0;
+        const next = chapterStartCols[position.ch + 1] ?? totalSpreads;
+        const pagesIntoChapter = Math.floor(position.offset / pageH);
+        const maxPageInChapter = Math.max(0, next - start - 1);
+        const spread = Math.max(
+            0,
+            Math.min(
+                Math.max(0, totalSpreads - 1),
+                start + Math.min(pagesIntoChapter, maxPageInChapter),
+            ),
+        );
+        if (currentSpread !== spread) currentSpread = spread;
+        return spread;
+    }
+
+    function scrollToChapterOffset(ch: number, offset: number) {
+        const section = pageEl?.querySelector<HTMLElement>(
+            `section.rd-chapter[data-idx="${ch}"]`,
+        );
+        if (!section || !viewportEl) return;
+        // In scroll mode the page is laid out as a normal block, so offsetTop
+        // is relative to the padded page, not to the scroll container. Convert
+        // through viewport coordinates before assigning scrollTop.
+        const sectionTop =
+            section.getBoundingClientRect().top -
+            viewportEl.getBoundingClientRect().top +
+            viewportEl.scrollTop;
+        const target = Math.max(0, sectionTop + offset);
+        viewportEl.scrollTop = target;
+        scrollChapterIdx = ch;
+        scrollChapterOffset = Math.max(0, viewportEl.scrollTop - sectionTop);
+        syncCurrentSpreadForScroll({
+            ch: scrollChapterIdx,
+            offset: scrollChapterOffset,
+        });
+    }
+
+    type ReadingAnchor = {
+        mode: PageMode;
+        ch: number;
+        colInCh: number;
+        scrollOffset: number;
+    };
+
+    function captureReadingAnchor(): ReadingAnchor {
+        const meta = (pageEl as any).__rd;
+        if (meta?.mode === "scroll") {
+            const position = getScrollReadingPosition();
+            return {
+                mode: "scroll",
+                ch: position.ch,
+                colInCh: 0,
+                scrollOffset: position.offset,
+            };
+        }
+        const numCols = meta?.numCols ?? 1;
+        const curLeftCol = currentSpread * numCols;
+        const ch = chapterIdxForSpread(currentSpread);
+        return {
+            mode: "paginated",
+            ch,
+            colInCh: Math.max(0, curLeftCol - (chapterStartCols[ch] || 0)),
+            scrollOffset: 0,
+        };
+    }
+
+    function keepBookEndAfterReflow() {
+        if (!keepAtBookEnd) return false;
+        if (pageMode === "scroll") {
+            snapScrollToBookEnd();
+            return true;
+        }
+        currentSpread = Math.max(0, totalSpreads - 1);
+        applyTransform();
+        return true;
+    }
+
+    function snapScrollToBookEnd() {
+        if (!viewportEl) return;
+        const lastIdx = spine.length - 1;
+        const lastSection = pageEl?.querySelector<HTMLElement>(
+            `section.rd-chapter[data-idx="${lastIdx}"]`,
+        );
+        let sectionBottom = viewportEl.scrollHeight;
+        if (lastSection) {
+            const range = document.createRange();
+            range.selectNodeContents(lastSection);
+            sectionBottom =
+                range.getBoundingClientRect().bottom -
+                viewportEl.getBoundingClientRect().top +
+                viewportEl.scrollTop;
+        }
+        pinningBookEnd = true;
+        viewportEl.scrollTop = Math.max(
+            0,
+            Math.min(
+                sectionBottom - viewportEl.clientHeight,
+                viewportEl.scrollHeight - viewportEl.clientHeight,
+            ),
+        );
+        syncCurrentSpreadForScroll();
+        saveProgress();
+        requestAnimationFrame(() => {
+            pinningBookEnd = false;
+        });
+    }
+
+    function restoreReadingAnchor(anchor: ReadingAnchor) {
+        if (keepBookEndAfterReflow()) return;
+        if (anchor.mode === "scroll" || pageMode === "scroll") {
+            scrollToChapterOffset(anchor.ch, anchor.scrollOffset);
+            return;
+        }
+        const meta = (pageEl as any).__rd;
+        if (!meta) return;
+        const newCol = (chapterStartCols[anchor.ch] || 0) + anchor.colInCh;
+        currentSpread = Math.max(
+            0,
+            Math.min(totalSpreads - 1, Math.floor(newCol / meta.numCols)),
+        );
+        applyTransform();
+    }
+
+    function navigateEpubLink(rawHref: string) {
+        const href = rawHref.trim();
+        if (!href || /^javascript:/i.test(href)) {
+            return;
+        }
+        if (/^(?:https?:|mailto:|tel:)/i.test(href)) {
+            void platform.openExternal(href);
+            return;
+        }
+
+        const hashAt = href.indexOf("#");
+        const pathPart = hashAt >= 0 ? href.slice(0, hashAt) : href;
+        const fragment = hashAt >= 0 ? href.slice(hashAt + 1) : "";
+        const currentIdx =
+            pageMode === "scroll"
+                ? getScrollReadingPosition().ch
+                : chapterIdxForSpread(currentSpread);
+        const targetPath =
+            pathPart && pathPart !== "#"
+                ? resolveRelative(spine[currentIdx]?.path || "", pathPart)
+                : spine[currentIdx]?.path || "";
+        const targetIdx = spine.findIndex((entry) => entry.path === targetPath);
+        if (targetIdx < 0) return;
+
+        if (!renderedSet.has(targetIdx)) {
+            const anchor = captureReadingAnchor();
+            if (hydrateChapterDom(targetIdx)) {
+                recomputeLayout(true);
+                restoreReadingAnchor(anchor);
+            }
+        }
+        const navigateWhenReady = (attempt = 0) => {
+            if (!renderedSet.has(targetIdx) && attempt < 60) {
+                window.setTimeout(() => navigateWhenReady(attempt + 1), 50);
+                return;
+            }
+            const section = pageEl?.querySelector<HTMLElement>(
+                `section.rd-chapter[data-idx="${targetIdx}"]`,
+            );
+            if (!section) return;
+
+            let target: HTMLElement | null = null;
+            if (fragment) {
+                const decoded = safeDecode(fragment);
+                target =
+                    Array.from(
+                        section.querySelectorAll<HTMLElement>("[id]"),
+                    ).find((el) => el.id === decoded) || null;
+            }
+
+            if (pageMode === "scroll") {
+                const offset =
+                    target && target !== section
+                        ? target.getBoundingClientRect().top -
+                          section.getBoundingClientRect().top
+                        : 0;
+                scrollToChapterOffset(targetIdx, Math.max(0, offset));
+                return;
+            }
+
+            const meta = (pageEl as any).__rd;
+            if (!meta) return;
+            const sectionLeft = section.getBoundingClientRect().left;
+            const pageLeft = pageEl.getBoundingClientRect().left;
+            const sectionCol = Math.max(
+                0,
+                Math.round((sectionLeft - pageLeft) / meta.stride),
+            );
+            const targetX = target
+                ? target.getBoundingClientRect().left - pageLeft
+                : 0;
+            const targetCol = target
+                ? Math.max(0, Math.floor(targetX / meta.stride))
+                : sectionCol;
+            currentSpread = Math.floor(
+                Math.max(sectionCol, targetCol) / meta.numCols,
+            );
+            if (currentSpread >= totalSpreads)
+                currentSpread = Math.max(0, totalSpreads - 1);
+            applyTransform();
+        };
+        navigateWhenReady();
     }
 
     // ===== 增量 hydrate =====
@@ -1049,12 +1483,7 @@
         if (idx < 0 || idx >= chapterFullHtml.length) return false;
         if (renderedSet.has(idx)) return false;
 
-        const meta = (pageEl as any).__rd;
-        const numCols = meta?.numCols ?? 1;
-        const curLeftCol = currentSpread * numCols;
-        const curCh = chapterIdxForSpread(currentSpread);
-        const curChStart = chapterStartCols[curCh] || 0;
-        const colInCh = curLeftCol - curChStart;
+        const anchor = captureReadingAnchor();
 
         if (!hydrateChapterDom(idx)) return false;
 
@@ -1067,16 +1496,7 @@
         // 闪回第一页（用户翻页后下一帧 hydrate 触发，立刻被拽回开头）。
         // 之前为了避免"抖动"加的 if (nextSpread !== currentSpread) 优化在这里反噬，
         // 必须去掉 —— 同帧内多次 scrollLeft 写入浏览器只 paint 最后一次，无抖动。
-        const newMeta = (pageEl as any).__rd;
-        if (newMeta) {
-            const newChStart = chapterStartCols[curCh] || 0;
-            const newCol = newChStart + colInCh;
-            let nextSpread = Math.floor(newCol / newMeta.numCols);
-            if (nextSpread >= totalSpreads)
-                nextSpread = Math.max(0, totalSpreads - 1);
-            currentSpread = nextSpread;
-        }
-        applyTransform();
+        restoreReadingAnchor(anchor);
         return true;
     }
 
@@ -1094,6 +1514,8 @@
         const newSection = tmp.firstElementChild;
         if (!newSection) return false;
         placeholder.replaceWith(newSection);
+        normalizeInlineStyles(newSection);
+        adoptChapterStyles(newSection);
         renderedSet.add(idx);
         extractChapterBgFromCss(idx, newSection as HTMLElement);
         return true;
@@ -1130,24 +1552,24 @@
                       );
 
         function tick(deadline: any) {
+            hydrateId = null;
+            if (destroyed) {
+                hydrateScheduled = false;
+                return;
+            }
             if (renderedSet.size >= chapterFullHtml.length) {
                 hydrateScheduled = false;
                 return;
             }
             if (Date.now() - lastPageTurnAt < USER_NAV_HYDRATE_PAUSE_MS) {
-                ric(tick);
+                hydrateId = ric(tick);
                 return;
             }
 
             // 锚定信息：在 DOM 改动前记录 user 当前所在章节内列偏移；批量 hydrate 完
             // 再用同一锚点把 currentSpread 拉回（章节膨胀会让其他章节列号整体后移，
             // 用户原本在的"章节内列"必须保持，否则画面会跳）。
-            const meta = (pageEl as any).__rd;
-            const numCols = meta?.numCols ?? 1;
-            const curLeftCol = currentSpread * numCols;
-            const curCh = chapterIdxForSpread(currentSpread);
-            const curChStart = chapterStartCols[curCh] || 0;
-            const colInCh = curLeftCol - curChStart;
+            const anchor = captureReadingAnchor();
 
             let hydrated = 0;
             // 每批至多 BATCH_SIZE 章，且尊重 idle deadline：留 5ms 余量做 measure。
@@ -1155,7 +1577,10 @@
                 hydrated < HYDRATE_BATCH_SIZE &&
                 deadline.timeRemaining() > 5
             ) {
-                const cur = chapterIdxForSpread(currentSpread);
+                const cur =
+                    pageMode === "scroll"
+                        ? currentChapterIdx
+                        : chapterIdxForSpread(currentSpread);
                 let nextIdx = -1,
                     bestDist = Infinity;
                 for (let i = 0; i < chapterFullHtml.length; i++) {
@@ -1174,25 +1599,16 @@
             if (hydrated > 0) {
                 // 整批一次 recompute + anchor
                 recomputeLayout(true);
-                const newMeta = (pageEl as any).__rd;
-                if (newMeta) {
-                    const newChStart = chapterStartCols[curCh] || 0;
-                    const newCol = newChStart + colInCh;
-                    let nextSpread = Math.floor(newCol / newMeta.numCols);
-                    if (nextSpread >= totalSpreads)
-                        nextSpread = Math.max(0, totalSpreads - 1);
-                    currentSpread = nextSpread;
-                }
-                applyTransform();
+                restoreReadingAnchor(anchor);
             }
 
             if (renderedSet.size < chapterFullHtml.length) {
-                ric(tick);
+                hydrateId = ric(tick);
             } else {
                 hydrateScheduled = false;
             }
         }
-        ric(tick);
+        hydrateId = ric(tick);
     }
 
     // 翻页前确保即将进入的章节已 hydrate，避免用户翻到占位。
@@ -1222,28 +1638,14 @@
             pendingChapters.clear();
             // 锚定信息：批量 hydrate 会让 chapterStartCols 整体后移，要按"原章节内
             // 列偏移"恢复 currentSpread（与 hydrateChapter / scheduleHydrate 同思路）。
-            const meta = (pageEl as any).__rd;
-            const numCols = meta?.numCols ?? 1;
-            const curLeftCol = currentSpread * numCols;
-            const curCh = chapterIdxForSpread(currentSpread);
-            const curChStart = chapterStartCols[curCh] || 0;
-            const colInCh = curLeftCol - curChStart;
+            const anchor = captureReadingAnchor();
             let any = false;
             for (const idx of ids) {
                 if (!renderedSet.has(idx) && hydrateChapterDom(idx)) any = true;
             }
             if (any) {
                 recomputeLayout(true);
-                const newMeta = (pageEl as any).__rd;
-                if (newMeta) {
-                    const newChStart = chapterStartCols[curCh] || 0;
-                    const newCol = newChStart + colInCh;
-                    let nextSpread = Math.floor(newCol / newMeta.numCols);
-                    if (nextSpread >= totalSpreads)
-                        nextSpread = Math.max(0, totalSpreads - 1);
-                    currentSpread = nextSpread;
-                }
-                applyTransform();
+                restoreReadingAnchor(anchor);
             }
         }, 140);
     }
@@ -1257,6 +1659,32 @@
     const COLS_BUFFER = 8; // 缓存命中时多留 8 列，吸收字号/边距小幅变化
 
     let lastTotalCols = 0; // 上次成功测得的总列数
+
+    function setCanvasWidth(
+        cols: number,
+        layout?: {
+            numCols: number;
+            pageInnerW: number;
+            columnGap: number;
+        },
+    ) {
+        if (!canvasEl || !pageEl) return;
+        const meta = (pageEl as any).__rd;
+        const numCols = layout?.numCols ?? meta?.numCols ?? 1;
+        const pageInnerW =
+            layout?.pageInnerW ?? meta?.pageInnerW ?? canvasEl.clientWidth;
+        const columnGap = layout?.columnGap ?? meta?.columnGap ?? 0;
+        const safeCols = Math.max(
+            cols,
+            numCols,
+            lastTotalCols + COLS_BUFFER,
+            24,
+        );
+        canvasEl.style.width =
+            safeCols * pageInnerW +
+            Math.max(0, safeCols - 1) * columnGap +
+            "px";
+    }
 
     // 拆分为两步：applyBasicLayout（同步、毫秒级）让用户首屏立即可见，
     // measurePageMetrics（异步、可慢）后台测总列数 / 章节起点。
@@ -1344,17 +1772,31 @@
             viewportEl.style.boxSizing = "border-box";
             viewportEl.style.overflowY = "auto";
             viewportEl.style.overflowX = "hidden";
-            pageEl.style.width = usableW + "px";
+            // 100% resolves against viewport's content box (after padding and
+            // the vertical scrollbar), so text is never clipped on the right.
+            canvasEl.style.width = "100%";
+            canvasEl.style.height = "auto";
+            pageEl.style.width = "100%";
             pageEl.style.height = "auto";
             pageEl.style.transform = "";
             viewportEl.scrollLeft = 0;
-            // 滚动模式不用列布局：清掉 column 相关属性
-            pageEl.style.columnWidth = "auto";
-            pageEl.style.columnCount = "auto";
+            // 滚动模式必须回到普通块级流。这里不能写 auto：内联的
+            // column-width:auto 会与页面样式里的 column-count:1 组合，WebView2
+            // 仍可能按可用高度生成大量纵向分片，表现为滚动页高度数百万像素。
+            // 清掉平移模式留下的内联列属性，让滚动模式 CSS 完整接管。
+            pageEl.style.removeProperty("column-width");
+            pageEl.style.removeProperty("column-count");
+            pageEl.style.removeProperty("column-gap");
+            pageEl.style.removeProperty("column-fill");
+            pageEl.style.height = "auto";
+            const scrollPageW = Math.max(
+                1,
+                viewportEl.clientWidth - horizPad * 2,
+            );
             (pageEl as any).__rd = {
-                pageInnerW: usableW,
+                pageInnerW: scrollPageW,
                 columnGap: 0,
-                stride: usableW,
+                stride: scrollPageW,
                 numCols: 1,
                 pageH,
                 mode: "scroll",
@@ -1362,9 +1804,9 @@
             // 滚动模式下 chapterStartCols / totalCols 不再以列定义；为兼容现有派生只放 1 项
             return {
                 tryCols: 1,
-                pageInnerW: usableW,
+                pageInnerW: scrollPageW,
                 columnGap: 0,
-                stride: usableW,
+                stride: scrollPageW,
                 numCols: 1,
                 pageH,
             };
@@ -1386,27 +1828,31 @@
 
         pageEl.style.transform = "";
         viewportEl.scrollLeft = 0;
+        // 滚动模式会清掉列属性；切回平移翻页时必须显式恢复，否则页面会按
+        // 普通块级文档重排成超宽超长的一张画布，左右翻页与页码全部失效。
+        pageEl.style.columnWidth = pageInnerW + "px";
+        pageEl.style.columnCount = String(numCols);
+        pageEl.style.columnGap = columnGap + "px";
+        pageEl.style.columnFill = "auto";
+        pageEl.style.height = pageH + "px";
+        // Reader diagnostics may inject temporary style nodes. They must not
+        // survive a mode switch and override the column layout.
+        pageEl
+            .querySelectorAll<HTMLStyleElement>("style[data-rd-probe]")
+            .forEach((node) => node.remove());
 
-        // tryCols：lastTotalCols 命中（最快）→ 文本量估算（避开 2000 极值）→ COLS_MAX 兜底
-        // 估算：根据 viewport 容量 × 字号 × 系数 算每列容字数，再除全文长度
-        // 系数 0.4 适应 HTML 中夹杂标签（标签不占可视字数）
-        const charsPerCol = Math.max(
-            40,
-            Math.floor(
-                (pageH / (fontSize * lineHeight)) *
-                    (pageInnerW / fontSize) *
-                    0.4,
-            ),
-        );
-        const estCols = combinedHtml
-            ? Math.ceil(combinedHtml.length / charsPerCol) + 20
-            : 100;
-        const tryCols =
-            lastTotalCols > 0
-                ? Math.min(COLS_MAX, lastTotalCols + COLS_BUFFER)
-                : Math.min(COLS_MAX, Math.max(100, estCols));
+        // Keep the multicol container at one viewport row width. Chromium lets
+        // column fragments overflow to the right while the element itself stays
+        // narrow. Giving this element a huge explicit width makes every section
+        // take that full width and prevents column fragmentation.
         pageEl.style.width =
-            tryCols * pageInnerW + Math.max(0, tryCols - 1) * columnGap + "px";
+            numCols * pageInnerW + Math.max(0, numCols - 1) * columnGap + "px";
+        // The page element must stay exactly one row wide for Chromium to
+        // fragment columns correctly. The canvas carries the full scroll width.
+        const estimatedCols = Math.max(
+            1,
+            Math.ceil(combinedHtml.length / Math.max(120, pageInnerW * 1.2)),
+        );
 
         (pageEl as any).__rd = {
             pageInnerW,
@@ -1419,9 +1865,25 @@
             vertPad,
             fullW,
             fullH,
+            tryCols: estimatedCols,
         };
+        // The canvas must use the newly computed layout. Reading __rd before the
+        // assignment above kept the previous spread's dimensions and could clip
+        // the final page (especially after changing column count or margins).
+        setCanvasWidth(estimatedCols, {
+            numCols,
+            pageInnerW,
+            columnGap,
+        });
 
-        return { tryCols, pageInnerW, columnGap, stride, numCols, pageH };
+        return {
+            tryCols: (pageEl as any).__rd.tryCols,
+            pageInnerW,
+            columnGap,
+            stride,
+            numCols,
+            pageH,
+        };
     }
 
     function normalizeOpeningHeaderImages() {
@@ -1465,7 +1927,10 @@
             });
             const total = Math.max(
                 1,
-                Math.ceil(pageEl.scrollHeight / Math.max(1, ph)),
+                Math.ceil(
+                    (canvasEl?.scrollHeight || pageEl.scrollHeight) /
+                        Math.max(1, ph),
+                ),
             );
             chapterStartCols.push(total);
             totalCols = total;
@@ -1485,25 +1950,13 @@
         pageEl.appendChild(sentinel);
         void pageEl.offsetWidth;
 
-        let pr = pageEl.getBoundingClientRect();
-        let sentX = sentinel.getBoundingClientRect().left - pr.left;
-        let sentCol = Math.floor(sentX / stride);
-
-        // 估算不够 → 倍增重试一次（最高到 COLS_MAX）
-        if (sentCol >= tryCols - 2 && tryCols < COLS_MAX) {
-            tryCols = COLS_MAX;
-            pageEl.style.width =
-                tryCols * pageInnerW +
-                Math.max(0, tryCols - 1) * columnGap +
-                "px";
-            void pageEl.offsetWidth;
-            pr = pageEl.getBoundingClientRect();
-            sentX = sentinel.getBoundingClientRect().left - pr.left;
-            sentCol = Math.floor(sentX / stride);
-        }
+        const pr = pageEl.getBoundingClientRect();
+        const sentX = sentinel.getBoundingClientRect().left - pr.left;
+        const sentCol = Math.max(0, Math.floor(sentX / stride));
 
         totalCols = Math.max(1, sentCol + 1);
         totalSpreads = Math.ceil(totalCols / numCols);
+        setCanvasWidth(totalCols);
 
         chapterStartCols = [];
         const sections =
@@ -1517,25 +1970,49 @@
         chapterStartCols.push(totalCols);
 
         lastTotalCols = totalCols;
+        void tryCols;
     }
 
     function recomputeLayout(measureNow = true) {
+        // 重新测量会短暂把 scrollLeft / scrollTop 归零；若这时正好触发滚动
+        // 监听，会把旧位置或章节开头误写成阅读进度。
+        const wasSuppressed = suppressProgressSave;
+        suppressProgressSave = true;
         const initial = applyBasicLayout();
-        if (!initial) return;
+        if (!initial) {
+            suppressProgressSave = wasSuppressed;
+            flushPendingProgressSave();
+            return;
+        }
         normalizeOpeningHeaderImages();
         if (measureNow) {
             measurePageMetrics(initial);
+            queueMicrotask(() => {
+                suppressProgressSave = wasSuppressed;
+                flushPendingProgressSave();
+            });
         } else {
             // 让 paint 先把首屏画出来，下一帧再做昂贵的 sentinel 测量
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
-                    measurePageMetrics(initial);
-                    if (currentSpread >= totalSpreads)
-                        currentSpread = Math.max(0, totalSpreads - 1);
-                    applyTransform();
+                    try {
+                        measurePageMetrics(initial);
+                        if (currentSpread >= totalSpreads)
+                            currentSpread = Math.max(0, totalSpreads - 1);
+                        applyTransform();
+                    } finally {
+                        suppressProgressSave = wasSuppressed;
+                        flushPendingProgressSave();
+                    }
                 });
             });
         }
+    }
+
+    function flushPendingProgressSave() {
+        if (suppressProgressSave || !progressSavePending) return;
+        progressSavePending = false;
+        saveProgress();
     }
 
     function applyTransform() {
@@ -1544,7 +2021,7 @@
         if (!meta) return;
         if (meta.mode === "scroll") {
             // 滚动模式：不需要操纵 scrollLeft；保存当前 scrollTop 作进度
-            saveProgress();
+            if (!suppressProgressSave) saveProgress();
             return;
         }
         const { pageInnerW, columnGap, numCols } = meta;
@@ -1554,36 +2031,32 @@
         // transform 在长元素上会触发整层提升为 composited layer，超 GPU 纹理上限时
         // 退化为软件渲染 / 图层切片，翻页极卡。scrollLeft 走浏览器原生的瓦片
         // 渲染 + 视口剔除路径，长容器横向翻页能保持丝滑。
-        viewportEl.scrollLeft = offset;
-        saveProgress();
+        const maxScrollLeft = Math.max(
+            0,
+            viewportEl.scrollWidth - viewportEl.clientWidth,
+        );
+        viewportEl.scrollLeft = Math.min(offset, maxScrollLeft);
+        if (!suppressProgressSave) saveProgress();
     }
 
     function saveProgress() {
         if (!progressKey) return;
+        if (suppressProgressSave) {
+            progressSavePending = true;
+            return;
+        }
         try {
             const meta = (pageEl as any).__rd;
             if (meta?.mode === "scroll") {
                 // 滚动模式：保存 scrollTop 对应的章节内偏移
-                const scrollTop = viewportEl?.scrollTop ?? 0;
-                const sections =
-                    pageEl?.querySelectorAll<HTMLElement>(
-                        "section.rd-chapter",
-                    ) || [];
-                let ch = 0;
-                for (let i = sections.length - 1; i >= 0; i--) {
-                    if (sections[i].offsetTop <= scrollTop) {
-                        ch = i;
-                        break;
-                    }
-                }
-                const chTop = sections[ch]?.offsetTop ?? 0;
-                const offsetInCh = scrollTop - chTop;
+                const { ch, offset } = getScrollReadingPosition();
+                syncCurrentSpreadForScroll({ ch, offset });
                 localStorage.setItem(
                     progressKey,
                     JSON.stringify({
                         ch,
                         sp: 0,
-                        scrollOffset: offsetInCh,
+                        scrollOffset: offset,
                         mode: "scroll",
                     }),
                 );
@@ -1605,6 +2078,7 @@
     // recomputeLayout，currentSpread 会被锚回到不同的列号，applyTransform
     // 第二次又改 scrollLeft，浏览器在两个 scrollLeft 之间渲染一帧 = 抖动。
     function nextSpread() {
+        keepAtBookEnd = false;
         if (currentSpread + 1 < totalSpreads) {
             markPageTurn();
             currentSpread += 1;
@@ -1617,6 +2091,7 @@
         }
     }
     function prevSpread() {
+        keepAtBookEnd = false;
         if (currentSpread > 0) {
             markPageTurn();
             currentSpread -= 1;
@@ -1629,42 +2104,74 @@
         }
     }
     function goToSpread(idx: number) {
+        keepAtBookEnd = false;
         markPageTurn();
         currentSpread = Math.max(0, Math.min(totalSpreads - 1, idx));
         ensureChapterReady(chapterIdxForSpread(currentSpread));
         applyTransform();
     }
     function goToChapter(idx: number) {
-        // 跳转目标章节必须先 hydrate，否则会跳到占位
-        ensureChapterReady(idx);
+        if (idx < 0 || idx >= spine.length) return;
+        keepAtBookEnd = false;
+        // 占位章节只有标题行；直接按占位测量会落到错误列。先同步 hydrate
+        // 并重排，再按最新的 chapterStartCols 定位。
+        if (!renderedSet.has(idx)) {
+            const anchor = captureReadingAnchor();
+            if (hydrateChapterDom(idx)) {
+                recomputeLayout(true);
+                restoreReadingAnchor(anchor);
+            }
+        }
+        if (pageMode === "scroll") {
+            scrollToChapterOffset(idx, 0);
+            return;
+        }
         const meta = (pageEl as any).__rd;
-        if (!meta || !chapterStartCols[idx]) {
+        if (!meta || chapterStartCols.length <= idx) {
             currentSpread = 0;
         } else {
             const col = chapterStartCols[idx];
             currentSpread = Math.floor(col / meta.numCols);
+            if (currentSpread >= totalSpreads)
+                currentSpread = Math.max(0, totalSpreads - 1);
         }
+        applyTransform();
+    }
+    function goToEnd() {
+        if (spine.length === 0) return;
+        markPageTurn();
+        const lastIdx = spine.length - 1;
+        if (!renderedSet.has(lastIdx)) {
+            const anchor = captureReadingAnchor();
+            if (hydrateChapterDom(lastIdx)) {
+                recomputeLayout(true);
+                restoreReadingAnchor(anchor);
+            }
+        }
+        if (pageMode === "scroll") {
+            // Scroll containers can have extra scrollable space below the
+            // chapter's last line (padding, hydration placeholders and CSS
+            // margins). Seeking by "chapter height - viewport" can therefore
+            // stop short and hide the actual end of the book.
+            keepAtBookEnd = true;
+            snapScrollToBookEnd();
+            return;
+        }
+        keepAtBookEnd = true;
+        currentSpread = Math.max(0, totalSpreads - 1);
         applyTransform();
     }
 
     // ===== 模式切换 =====
     function setMode(m: ReadMode) {
         if (m === readMode) return;
-        // 切换前记录"当前阅读位置 = 当前左侧页的列"
-        const meta = (pageEl as any).__rd;
-        const curLeftCol = meta ? currentSpread * meta.numCols : 0;
+        const anchor = captureReadingAnchor();
         readMode = m;
         columnLayout = m === "landscape" ? "double" : "single";
         persistSettings();
         requestAnimationFrame(() => {
             recomputeLayout();
-            const newMeta = (pageEl as any).__rd;
-            if (newMeta) {
-                currentSpread = Math.floor(curLeftCol / newMeta.numCols);
-                if (currentSpread >= totalSpreads)
-                    currentSpread = totalSpreads - 1;
-            }
-            applyTransform();
+            restoreReadingAnchor(anchor);
         });
     }
     function setColumnLayout(c: ColumnLayout) {
@@ -1674,99 +2181,111 @@
     // 翻页样式：平移 (paginated) / 滚动 (scroll) 之间切换
     function setPageMode(m: PageMode) {
         if (m === pageMode) return;
-        // 切换前记录章节内进度（保存为 章节 + 章节内列偏移）
-        const meta = (pageEl as any).__rd;
-        const numCols = meta?.numCols ?? 1;
-        const curLeftCol = meta ? currentSpread * numCols : 0;
-        const ch = chapterIdxForSpread(currentSpread);
-        const colInCh = curLeftCol - (chapterStartCols[ch] || 0);
-
+        keepAtBookEnd = false;
+        const anchor = captureReadingAnchor();
+        const section = pageEl?.querySelector<HTMLElement>(
+            `section.rd-chapter[data-idx="${anchor.ch}"]`,
+        );
+        const chapterProgress =
+            anchor.mode === "scroll"
+                ? Math.max(
+                      0,
+                      Math.min(
+                          1,
+                          anchor.scrollOffset /
+                              Math.max(1, section?.scrollHeight ?? 1),
+                      ),
+                  )
+                : (() => {
+                      const chapterSpan =
+                          (chapterStartCols[anchor.ch + 1] ?? totalCols) -
+                          (chapterStartCols[anchor.ch] || 0);
+                      return chapterSpan > 0
+                          ? Math.max(
+                                0,
+                                Math.min(1, anchor.colInCh / chapterSpan),
+                            )
+                          : 0;
+                  })();
+        suppressProgressSave = true;
         pageMode = m;
         persistSettings();
         requestAnimationFrame(() => {
-            // 滚动模式与平移模式的 measure 完全不同：
-            //   - paginated：保留 column 多列布局，scrollLeft 翻页
-            //   - scroll：取消 column，单列纵向流，scrollTop 翻页
-            // 这里统一调 recomputeLayout，下面 applyBasicLayout 内部会按 pageMode 分支配置 pageEl。
+            // recomputeLayout measures synchronously in both modes; only read
+            // chapterStartCols/totalCols after that call has completed.
             recomputeLayout();
-            // 还原位置
+            const newMeta = (pageEl as any).__rd;
+            if (!newMeta) {
+                suppressProgressSave = false;
+                flushPendingProgressSave();
+                return;
+            }
             if (pageMode === "paginated") {
-                const newMeta = (pageEl as any).__rd;
-                if (newMeta) {
-                    const newStart = chapterStartCols[ch] || 0;
-                    const newCol = newStart + colInCh;
-                    currentSpread = Math.floor(newCol / newMeta.numCols);
-                    if (currentSpread >= totalSpreads)
-                        currentSpread = totalSpreads - 1;
-                }
+                const start = chapterStartCols[anchor.ch] || 0;
+                const end = chapterStartCols[anchor.ch + 1] ?? totalCols;
+                const newCol =
+                    anchor.mode === "scroll"
+                        ? Math.round(start + chapterProgress * (end - start))
+                        : start + anchor.colInCh;
+                currentSpread = Math.floor(newCol / newMeta.numCols);
+                if (currentSpread >= totalSpreads)
+                    currentSpread = Math.max(0, totalSpreads - 1);
                 applyTransform();
             } else {
-                // 滚动模式：把 viewport 滚动到目标章节
-                const sec = pageEl?.querySelector<HTMLElement>(
-                    `section.rd-chapter[data-idx="${ch}"]`,
+                const newSection = pageEl?.querySelector<HTMLElement>(
+                    `section.rd-chapter[data-idx="${anchor.ch}"]`,
                 );
-                if (sec && viewportEl) {
-                    viewportEl.scrollTop = sec.offsetTop;
-                }
+                const verticalOffset =
+                    anchor.mode === "scroll"
+                        ? anchor.scrollOffset
+                        : chapterProgress *
+                          Math.max(
+                              0,
+                              (newSection?.scrollHeight ?? 1) -
+                                  viewportEl.clientHeight * 0.5,
+                          );
+                scrollToChapterOffset(anchor.ch, verticalOffset);
             }
+            suppressProgressSave = false;
+            saveProgress();
+            progressSavePending = false;
         });
     }
 
     // 滚动模式下的"下一屏 / 上一屏"
     function scrollNext() {
         if (!viewportEl) return;
+        keepAtBookEnd = false;
         markPageTurn();
         viewportEl.scrollTop = Math.min(
             viewportEl.scrollTop + viewportEl.clientHeight - 40,
             viewportEl.scrollHeight - viewportEl.clientHeight,
         );
+        syncCurrentSpreadForScroll();
         saveProgress();
     }
     function scrollPrev() {
         if (!viewportEl) return;
+        keepAtBookEnd = false;
         markPageTurn();
         viewportEl.scrollTop = Math.max(
             0,
             viewportEl.scrollTop - viewportEl.clientHeight + 40,
         );
+        syncCurrentSpreadForScroll();
         saveProgress();
     }
 
     // ===== 字号 / 行距 / 段距 / 边距 / 字体（统一 reflow + 锚回章节进度） =====
     function applyTypographyChange(mutate: () => void) {
-        const meta = (pageEl as any).__rd;
-        const curLeftCol = meta ? currentSpread * meta.numCols : 0;
-        let chapter = chapterIdxForSpread(currentSpread);
-        const chStart = chapterStartCols[chapter] || 0;
-        const chEnd = chapterStartCols[chapter + 1] || totalCols;
-        const chProgress =
-            chEnd > chStart ? (curLeftCol - chStart) / (chEnd - chStart) : 0;
+        const anchor = captureReadingAnchor();
 
         mutate();
         persistSettings();
 
         requestAnimationFrame(() => {
             recomputeLayout();
-            if (pageMode === "paginated") {
-                const newStart = chapterStartCols[chapter] || 0;
-                const newEnd = chapterStartCols[chapter + 1] || totalCols;
-                const newCol = Math.round(
-                    newStart + chProgress * (newEnd - newStart),
-                );
-                const newMeta = (pageEl as any).__rd;
-                currentSpread = newMeta
-                    ? Math.floor(newCol / newMeta.numCols)
-                    : 0;
-                if (currentSpread >= totalSpreads)
-                    currentSpread = totalSpreads - 1;
-                applyTransform();
-            } else {
-                // 滚动模式：滚到当前章节顶部
-                const sec = pageEl?.querySelector<HTMLElement>(
-                    `section.rd-chapter[data-idx="${chapter}"]`,
-                );
-                if (sec && viewportEl) viewportEl.scrollTop = sec.offsetTop;
-            }
+            restoreReadingAnchor(anchor);
         });
     }
     function changeFont(delta: number) {
@@ -1947,7 +2466,7 @@
 
     // 书签持久化（按 epubPath 独立，不与 settings 共享）
     function bookmarkKey(): string {
-        return readerBookmarksKey(epubPath);
+        return readerBookmarksKey(bookSourcePath || epubPath);
     }
     function loadBookmarks() {
         try {
@@ -1959,7 +2478,9 @@
                     (b) =>
                         b &&
                         typeof b.ch === "number" &&
-                        typeof b.sp === "number",
+                        typeof b.sp === "number" &&
+                        (b.scrollOffset === undefined ||
+                            typeof b.scrollOffset === "number"),
                 );
         } catch {}
     }
@@ -1969,15 +2490,33 @@
         } catch {}
     }
     function addBookmark() {
-        const ch = chapterIdxForSpread(currentSpread);
+        const scrollPosition =
+            pageMode === "scroll" ? getScrollReadingPosition() : null;
+        const ch = scrollPosition?.ch ?? chapterIdxForSpread(currentSpread);
         const meta = (pageEl as any).__rd;
         const numCols = meta?.numCols ?? 1;
         const curLeftCol = currentSpread * numCols;
-        const sp = Math.floor(
-            (curLeftCol - (chapterStartCols[ch] || 0)) / numCols,
-        );
+        const sp = scrollPosition
+            ? Math.floor(
+                  scrollPosition.offset /
+                      Math.max(1, viewportEl?.clientHeight ?? 1),
+              )
+            : Math.floor((curLeftCol - (chapterStartCols[ch] || 0)) / numCols);
         // 防止同一位置重复添加
-        if (bookmarks.some((b) => b.ch === ch && b.sp === sp)) return;
+        if (
+            bookmarks.some(
+                (b) =>
+                    b.ch === ch &&
+                    (scrollPosition
+                        ? Math.abs(
+                              (b.scrollOffset ??
+                                  b.sp * viewportEl.clientHeight) -
+                                  scrollPosition.offset,
+                          ) < 120
+                        : b.sp === sp),
+            )
+        )
+            return;
         const title = spine[ch]?.title || `第 ${ch + 1} 章`;
         // preview 取当前可见列内的文本片段（前 60 字）
         let preview = "";
@@ -1986,12 +2525,35 @@
                 `section.rd-chapter[data-idx="${ch}"]`,
             );
             if (sec) {
-                const txt = (sec.textContent || "").trim().replace(/\s+/g, " ");
+                const clone = sec.cloneNode(true) as HTMLElement;
+                clone
+                    .querySelectorAll(
+                        "style, script, .rd-opening-header-spacer, .rd-end-sentinel",
+                    )
+                    .forEach((node) => node.remove());
+                clone
+                    .querySelectorAll<HTMLElement>("[style]")
+                    .forEach((node) => {
+                        if (getComputedStyle(node).display === "none")
+                            node.remove();
+                    });
+                const txt = (clone.textContent || "")
+                    .trim()
+                    .replace(/\s+/g, " ");
                 preview = txt.slice(0, 60);
             }
         } catch {}
         bookmarks = [
-            { ch, sp, title, preview, time: Date.now() },
+            {
+                ch,
+                sp,
+                ...(scrollPosition
+                    ? { scrollOffset: scrollPosition.offset }
+                    : {}),
+                title,
+                preview,
+                time: Date.now(),
+            },
             ...bookmarks,
         ];
         saveBookmarks();
@@ -2001,7 +2563,25 @@
         saveBookmarks();
     }
     function gotoBookmark(b: Bookmark) {
-        ensureChapterReady(b.ch);
+        if (b.ch < 0 || b.ch >= spine.length) return;
+        keepAtBookEnd = false;
+        if (!renderedSet.has(b.ch)) {
+            const anchor = captureReadingAnchor();
+            if (hydrateChapterDom(b.ch)) {
+                recomputeLayout(true);
+                restoreReadingAnchor(anchor);
+            }
+        }
+        if (pageMode === "scroll") {
+            scrollToChapterOffset(
+                b.ch,
+                b.scrollOffset ??
+                    b.sp * Math.max(1, (pageEl as any).__rd?.pageH ?? 0),
+            );
+            activePanel = "";
+            toolbarOpen = false;
+            return;
+        }
         const meta = (pageEl as any).__rd;
         const numCols = meta?.numCols ?? 1;
         const startCol = chapterStartCols[b.ch] || 0;
@@ -2015,10 +2595,16 @@
     }
 
     // ===== 派生：当前页码 / 章节进度 =====
-    $: numColsView = readMode === "landscape" ? 2 : 1;
+    $: numColsView =
+        pageMode === "paginated" && readMode === "landscape" ? 2 : 1;
     $: leftPageIdx = currentSpread * numColsView; // 左侧页索引（0-based）
-    $: displayPageNum = Math.min(totalCols, leftPageIdx + 1);
+    $: displayPageNum =
+        pageMode === "scroll"
+            ? Math.min(spine.length, currentChapterIdx + 1)
+            : Math.min(totalCols, leftPageIdx + 1);
     $: currentChapterIdx = (() => {
+        if (pageMode === "scroll")
+            return Math.max(0, Math.min(spine.length - 1, scrollChapterIdx));
         if (chapterStartCols.length < 2) return 0;
         let lo = 0,
             hi = chapterStartCols.length - 2;
@@ -2046,7 +2632,9 @@
     // 章节首页（页 = 章节起始列）不显示，让头图 / 章节标题尽情贴顶展示；
     // 章节中后页才显示状态栏文字。
     $: isChapterFirstPage =
-        leftPageIdx === (chapterStartCols[currentChapterIdx] ?? 0);
+        pageMode === "scroll"
+            ? scrollChapterOffset < 8
+            : leftPageIdx === (chapterStartCols[currentChapterIdx] ?? 0);
 
     // 当前章节的全屏背景样式：从 chapterBgStyle 取（已在 loadEpub 中提取自 EPUB
     // body inline style 的 background-* 部分）。空字符串表示该章节没有自带背景，
@@ -2057,6 +2645,25 @@
     // 阅读进度百分比（页码尚未计算完成时用，右下角 fallback 显示）
     $: progressPercent = (() => {
         if (!spine.length) return 0;
+        if (pageMode === "scroll") {
+            const section = pageEl?.querySelector<HTMLElement>(
+                `section.rd-chapter[data-idx="${currentChapterIdx}"]`,
+            );
+            const inCh = section
+                ? Math.max(
+                      0,
+                      Math.min(
+                          1,
+                          scrollChapterOffset /
+                              Math.max(1, section.offsetHeight),
+                      ),
+                  )
+                : 0;
+            return Math.min(
+                100,
+                Math.max(0, ((currentChapterIdx + inCh) / spine.length) * 100),
+            );
+        }
         // 用 章节数 + 章节内 spread 估算一个粗略百分比
         const ch = currentChapterIdx;
         const sp = leftPageIdx - (chapterStartCols[ch] || 0);
@@ -2073,18 +2680,32 @@
     // 会抛 TypeError 让整个组件渲染失败 → 白屏。这里必须用可选链兜底。
     $: isBookmarked = (() => {
         if (!pageEl) return false;
-        const ch = chapterIdxForSpread(currentSpread);
+        const scrollPosition =
+            pageMode === "scroll" ? getScrollReadingPosition() : null;
+        const ch = scrollPosition?.ch ?? chapterIdxForSpread(currentSpread);
         const meta = (pageEl as any)?.__rd;
         const numCols = meta?.numCols ?? 1;
         const curLeftCol = currentSpread * numCols;
-        const sp = Math.floor(
-            (curLeftCol - (chapterStartCols[ch] || 0)) / numCols,
+        const sp = scrollPosition
+            ? Math.floor(
+                  scrollPosition.offset /
+                      Math.max(1, viewportEl?.clientHeight ?? 1),
+              )
+            : Math.floor((curLeftCol - (chapterStartCols[ch] || 0)) / numCols);
+        return bookmarks.some(
+            (b) =>
+                b.ch === ch &&
+                (scrollPosition && b.scrollOffset !== undefined
+                    ? Math.abs(b.scrollOffset - scrollPosition.offset) < 120
+                    : b.sp === sp),
         );
-        return bookmarks.some((b) => b.ch === ch && b.sp === sp);
     })();
 
     // ===== 事件 =====
     function onKeydown(e: KeyboardEvent) {
+        // 焦点在阅读区域时，按键由 onFrameKeydown 处理；两个监听器都执行
+        // 会造成一次 ArrowRight 前进两页。
+        if (e.defaultPrevented) return;
         if (activePanel) return;
         if (!arrowTurnPage) {
             // 仍允许 Esc 关闭
@@ -2093,14 +2714,16 @@
         }
         if (e.key === "ArrowLeft" || e.key === "PageUp") {
             e.preventDefault();
-            prevSpread();
+            if (e.key === "ArrowLeft" && pageMode === "scroll") return;
+            pageMode === "scroll" ? scrollPrev() : prevSpread();
         } else if (
             e.key === "ArrowRight" ||
             e.key === "PageDown" ||
             e.key === " "
         ) {
             e.preventDefault();
-            nextSpread();
+            if (e.key === "ArrowRight" && pageMode === "scroll") return;
+            pageMode === "scroll" ? scrollNext() : nextSpread();
         } else if (e.key === "ArrowUp") {
             e.preventDefault();
             pageMode === "scroll" ? scrollPrev() : prevSpread();
@@ -2109,10 +2732,11 @@
             pageMode === "scroll" ? scrollNext() : nextSpread();
         } else if (e.key === "Home") {
             e.preventDefault();
-            goToSpread(0);
+            if (pageMode === "scroll" && viewportEl) viewportEl.scrollTop = 0;
+            else goToSpread(0);
         } else if (e.key === "End") {
             e.preventDefault();
-            goToSpread(totalSpreads - 1);
+            goToEnd();
         } else if (e.key === "Escape") {
             back();
         } else if (e.key === "+" || e.key === "=") {
@@ -2158,15 +2782,33 @@
                 epubType.split(/\s+/).includes("noteref");
             const href = anchor.getAttribute("href") || "";
             if (isNoteref && href.startsWith("#")) {
-                const note = document.getElementById(
-                    decodeURIComponent(href.slice(1)),
+                const fragmentId = safeDecode(href.slice(1));
+                const noteChapter =
+                    pageMode === "scroll"
+                        ? currentChapterIdx
+                        : chapterIdxForSpread(currentSpread);
+                const currentSection = pageEl?.querySelector<HTMLElement>(
+                    `section.rd-chapter[data-idx="${noteChapter}"]`,
                 );
+                const note =
+                    Array.from(
+                        currentSection?.querySelectorAll<HTMLElement>("[id]") ||
+                            [],
+                    ).find((el) => el.id === fragmentId) ||
+                    pageEl?.querySelector<HTMLElement>(
+                        `#${CSS.escape(fragmentId)}`,
+                    );
                 if (note) {
                     e.stopPropagation();
                     footnotePopupHtml = note.innerHTML;
                     activePanel = "";
                     return;
                 }
+            }
+            if (href) {
+                e.stopPropagation();
+                navigateEpubLink(href);
+                return;
             }
         }
 
@@ -2212,32 +2854,21 @@
 
     function onFrameKeydown(event: KeyboardEvent) {
         if (event.target !== event.currentTarget) return;
-        if (event.key === "ArrowLeft") {
+        // Arrow keys bubble to the window listener exactly once. Space is kept
+        // local to toggle the toolbar instead of turning the page.
+        if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            if (pageMode === "scroll") scrollPrev();
-            else prevSpread();
-        } else if (event.key === "ArrowRight") {
-            event.preventDefault();
-            if (pageMode === "scroll") scrollNext();
-            else nextSpread();
-        } else if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
+            event.stopPropagation();
             activePanel = activePanel ? "" : "menu";
         }
     }
 
     function onResize() {
         if (loading) return;
-        const meta = (pageEl as any).__rd;
-        const curLeftCol = meta ? currentSpread * meta.numCols : 0;
+        const anchor = captureReadingAnchor();
         requestAnimationFrame(() => {
             recomputeLayout();
-            const newMeta = (pageEl as any).__rd;
-            currentSpread = newMeta
-                ? Math.floor(curLeftCol / newMeta.numCols)
-                : 0;
-            if (currentSpread >= totalSpreads) currentSpread = totalSpreads - 1;
-            applyTransform();
+            restoreReadingAnchor(anchor);
         });
     }
 
@@ -2261,7 +2892,10 @@
             loading = false;
             return;
         }
-        epubPath = decodeURIComponent(epubPath);
+        // URLSearchParams has already decoded the query value. Decoding it a
+        // second time would corrupt real filenames containing sequences such
+        // as "%20" or "%E5".
+        bookSourcePath = epubPath;
         loadBookmarks();
 
         tickClock();
@@ -2290,7 +2924,19 @@
     });
 
     onDestroy(() => {
+        destroyed = true;
+        clearAdoptedChapterStyles();
+        if (pageMode === "scroll" && !loading) saveProgress();
         if (clockTimer) clearInterval(clockTimer);
+        if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+        scrollSaveTimer = null;
+        if (ensureTimer) clearTimeout(ensureTimer);
+        if (hydrateId !== null) {
+            if (typeof cancelIdleCallback === "function")
+                cancelIdleCallback(hydrateId);
+            else clearTimeout(hydrateId);
+            hydrateId = null;
+        }
         window.removeEventListener("keydown", onKeydown);
         window.removeEventListener("resize", onResize);
         window.removeEventListener("wheel", onWheel as any);
@@ -2302,9 +2948,30 @@
     // 滚动模式下，监听 viewport 滚动以保存进度（节流）
     let scrollSaveTimer: any = null;
     function onViewportScroll() {
-        if (pageMode !== "scroll") return;
-        if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
-        scrollSaveTimer = setTimeout(() => saveProgress(), 300);
+        if (destroyed) return;
+        if (pageMode !== "scroll") {
+            // Do not infer "user left the book end" from programmatic
+            // scrollLeft changes. applyTransform() clamps to the same
+            // maxScrollLeft repeatedly, and those writes also fire scroll
+            // events. Only explicit navigation clears keepAtBookEnd.
+            return;
+        }
+        if (keepAtBookEnd && !pinningBookEnd) keepAtBookEnd = false;
+        if (suppressProgressSave) {
+            progressSavePending = true;
+            return;
+        }
+        syncCurrentSpreadForScroll();
+        // Do not reset the debounce on every scroll event. Background hydration
+        // triggers a layout/scroll event roughly once per idle batch, so a
+        // sliding 300ms timer can postpone the save for the entire hydration
+        // run. Keep the first timer and let it write the latest position.
+        if (!scrollSaveTimer) {
+            scrollSaveTimer = setTimeout(() => {
+                scrollSaveTimer = null;
+                saveProgress();
+            }, 300);
+        }
     }
 
     // ===== 模板辅助函数（避免在模板里写复杂表达式让 Svelte 5 parser 出错）=====
@@ -2399,8 +3066,10 @@
             bind:this={viewportEl}
             on:scroll={onViewportScroll}
         >
-            <div class="rd-page" bind:this={pageEl}>
-                {@html combinedHtml}
+            <div class="rd-canvas" bind:this={canvasEl}>
+                <div class="rd-page" bind:this={pageEl}>
+                    {@html combinedHtml}
+                </div>
             </div>
         </div>
     </div>
@@ -2923,7 +3592,7 @@
         --rd-text-soft: #6b7280;
         --rd-accent: #2563eb;
         --rd-border: rgba(37, 99, 235, 0.18);
-        --rd-tools-bg: rgba(255, 255, 255, 0.96);
+        --rd-tools-bg: var(--color-surface);
     }
     .rd-app[data-theme="dark"] {
         --rd-bg: #1c1c1c;
@@ -3022,10 +3691,10 @@
         overflow: auto;
         padding: 18px;
         box-sizing: border-box;
-        border-radius: 10px;
+        border-radius: var(--radius-md);
         background: var(--rd-paper, #fffdf8);
         color: var(--rd-text, #222);
-        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.32);
+        box-shadow: var(--shadow-md);
     }
     .rd-footnote-popup :global(img) {
         display: block;
@@ -3065,9 +3734,13 @@
     }
     .rd-app[data-page-mode="scroll"] .rd-viewport::-webkit-scrollbar-thumb {
         background: var(--rd-text-soft);
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
     }
 
+    .rd-canvas {
+        min-width: 100%;
+        min-height: 100%;
+    }
     .rd-page {
         column-width: var(--page-w, 100%);
         column-gap: var(--col-gap, 0px);
@@ -3081,6 +3754,19 @@
     .rd-app[data-page-mode="scroll"] .rd-page {
         column-width: auto;
         column-count: 1;
+        height: auto;
+    }
+    .rd-app[data-page-mode="scroll"] .rd-page :global(.epub-body) {
+        /* Chromium can leave a chapter's wrapper clamped to one page-height
+           inside a one-column multicol container. The content then overflows
+           the box, so scroll anchors and the final chapter use stale heights. */
+        display: block;
+        height: auto;
+        min-height: 0;
+        max-height: none;
+    }
+    .rd-app[data-page-mode="scroll"] .rd-canvas {
+        width: 100% !important;
         height: auto;
     }
 
@@ -3109,7 +3795,7 @@
         max-width: 640px;
         background: rgba(0, 0, 0, 0.04);
         padding: 8px 12px;
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         font-size: 12px;
         white-space: pre-wrap;
         word-break: break-all;
@@ -3380,7 +4066,7 @@
         width: 24px;
         height: 2px;
         background: var(--rd-accent);
-        border-radius: 2px;
+        border-radius: var(--radius-xs);
         margin-top: 36px;
     }
     .rd-tab-icon {
@@ -3435,7 +4121,7 @@
         border: 1px solid var(--rd-border);
         color: var(--rd-text);
         padding: 6px 10px;
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         cursor: pointer;
         font-size: 13px;
         transition:
@@ -3485,7 +4171,7 @@
         border: 1px solid var(--rd-border);
         color: var(--rd-text);
         padding: 6px 12px;
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         cursor: pointer;
         font-size: 13px;
         flex: 1;
@@ -3514,7 +4200,7 @@
     .rd-theme-chip {
         height: 60px;
         border: 2px solid transparent;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         cursor: pointer;
         color: inherit;
         font-size: 12px;
@@ -3571,7 +4257,7 @@
         align-items: stretch;
         gap: 6px;
         border: 1px solid var(--rd-border);
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         overflow: hidden;
         background: rgba(0, 0, 0, 0.02);
     }
@@ -3614,7 +4300,7 @@
         border: 1px solid var(--rd-border);
         color: var(--rd-text-soft);
         padding: 4px 10px;
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         cursor: pointer;
         font-size: 12px;
     }
@@ -3653,7 +4339,7 @@
         position: absolute;
         inset: 0;
         background: var(--rd-border);
-        border-radius: 22px;
+        border-radius: var(--radius-lg);
         transition: background 0.15s;
         cursor: pointer;
     }

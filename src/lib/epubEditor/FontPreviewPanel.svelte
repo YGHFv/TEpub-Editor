@@ -69,7 +69,7 @@
         display: flex;
         flex-direction: column;
         overflow: auto;
-        background: #fafbfc;
+        background: var(--color-surface-soft);
         padding: 24px;
         gap: 16px;
     }
@@ -80,7 +80,7 @@
         align-items: baseline;
         justify-content: space-between;
         gap: 16px;
-        border-bottom: 1px solid #e6e9ef;
+        border-bottom: 1px solid var(--color-border);
         padding-bottom: 12px;
     }
 
@@ -92,14 +92,14 @@
     }
 
     .font-internal-name {
-        color: #5f6b7a;
+        color: var(--color-text-soft);
         font-size: 16px;
         font-weight: 600;
         margin-left: 8px;
     }
 
     .font-preview-tip {
-        color: #7a8699;
+        color: var(--color-muted);
         font-size: 13px;
         white-space: nowrap;
     }
@@ -110,10 +110,10 @@
         min-height: 240px;
         height: min(320px, 42vh);
         box-sizing: border-box;
-        color: #13233a;
-        background: #fff;
-        border: 1px solid #e6e9ef;
-        border-radius: 10px;
+        color: var(--color-text);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
         padding: 20px;
         resize: vertical;
         outline: none;
@@ -125,13 +125,13 @@
     }
 
     .font-preview-sample:focus {
-        border-color: #4a90d9;
+        border-color: var(--color-accent);
         box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.16);
     }
 
     .font-stats {
         flex-shrink: 0;
-        border-top: 1px solid #e6e9ef;
+        border-top: 1px solid var(--color-border);
         padding-top: 14px;
         display: flex;
         flex-direction: column;
@@ -139,13 +139,13 @@
     }
 
     .font-stats-line {
-        color: #3a4a5f;
+        color: var(--color-text-soft);
         font-size: 14px;
         line-height: 1.5;
     }
 
     .font-stats-error {
-        color: #c0392b;
+        color: var(--color-danger);
     }
 
     .font-stats-missing-title {
@@ -154,7 +154,7 @@
     }
 
     .font-missing-chars {
-        color: #a73838;
+        color: var(--color-danger);
         font-size: 15px;
         line-height: 1.6;
         word-break: break-all;
@@ -168,16 +168,16 @@
     }
 
     ::-webkit-scrollbar-track {
-        background: #f1f1f1;
+        background: var(--color-surface-soft);
     }
 
     ::-webkit-scrollbar-thumb {
-        background: #888;
-        border-radius: 4px;
+        background: var(--color-muted);
+        border-radius: var(--radius-xs);
     }
 
     ::-webkit-scrollbar-thumb:hover {
-        background: #555;
+        background: var(--color-text-soft);
     }
 
     /* Modern UI overrides */
@@ -211,12 +211,12 @@
     }
 
     .font-preview-sample {
-        background: rgba(255, 255, 255, 0.92);
+        background: var(--color-surface);
         border-color: var(--color-border);
         border-radius: var(--radius-md);
         color: var(--color-text);
         box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.72),
+            inset 0 1px 0 var(--color-surface-raised),
             var(--shadow-xs);
     }
 
@@ -239,7 +239,7 @@
     }
 
     ::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, #bacbda, #93a8bb);
+        background: linear-gradient(180deg, var(--color-border-strong), var(--color-border));
         border-radius: 999px;
     }
 </style>

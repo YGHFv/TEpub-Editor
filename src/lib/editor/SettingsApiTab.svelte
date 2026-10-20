@@ -179,11 +179,11 @@
 <style>
     /* 基础按钮样式（与页面同源，保证拆出后视觉一致） */
     button {
-        height: 34px;
+        height: var(--control-height);
         min-width: 40px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        background: #fff;
+        border-radius: var(--radius-xs);
+        border: 1px solid var(--color-border-strong);
+        background: var(--color-surface);
         font-size: 18px;
         display: flex;
         align-items: center;
@@ -192,32 +192,32 @@
         transition: 0.1s;
     }
     button:active {
-        background: #eee;
-        transform: scale(0.96);
+        background: var(--color-border);
+        transform: translateY(0.5px) scale(0.985);
     }
 
     .mini-action {
-        height: 34px;
+        height: var(--control-height);
         min-width: 0;
         padding: 0 12px;
-        border: 1px solid #d7e0ea;
-        border-radius: 10px;
-        background: #fff;
-        color: #526071;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
+        color: var(--color-text-soft);
         font-size: 12px;
         font-weight: 700;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+        box-shadow: var(--shadow-xs);
     }
 
     .mini-action.primary {
-        border-color: #1677b8;
-        background: #e6f2fb;
-        color: #11679f;
+        border-color: var(--color-accent);
+        background: var(--color-accent-soft);
+        color: var(--color-accent-deep);
     }
 
     .mini-action.danger {
-        border-color: #f1b8b8;
-        color: #c03535;
+        border-color: color-mix(in srgb, var(--color-danger-soft) 88%, var(--color-danger));
+        color: var(--color-danger);
     }
 
     .font-settings-head {
@@ -230,21 +230,21 @@
     .font-settings-title {
         font-size: 14px;
         font-weight: 800;
-        color: #253547;
+        color: var(--color-text);
     }
 
     .font-settings-note {
         margin-top: 4px;
         font-size: 12px;
         line-height: 1.5;
-        color: #708093;
+        color: var(--color-muted);
     }
 
     .font-settings-status {
         padding: 8px 10px;
-        border-radius: 8px;
-        background: #f5f9fc;
-        color: #486277;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-soft);
+        color: var(--color-text-soft);
         font-size: 12px;
         line-height: 1.5;
     }
@@ -275,14 +275,14 @@
     .api-empty,
     .api-item,
     .api-editor {
-        border: 1px solid #e1e6ee;
-        border-radius: 8px;
-        background: #fff;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
     }
 
     .api-empty {
         padding: 10px 12px;
-        color: #667085;
+        color: var(--color-muted);
         font-size: 13px;
         line-height: 1.5;
     }
@@ -322,15 +322,15 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: 14px;
-        color: #253547;
+        color: var(--color-text);
     }
 
     .api-item-title span {
         flex: 0 0 auto;
         padding: 2px 7px;
         border-radius: 999px;
-        background: #eaf5fc;
-        color: #176b94;
+        background: var(--color-accent-quiet);
+        color: var(--color-accent-deep);
         font-size: 11px;
         font-weight: 800;
     }
@@ -340,7 +340,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 6px 12px;
-        color: #708093;
+        color: var(--color-muted);
         font-size: 12px;
         line-height: 1.4;
     }
@@ -355,7 +355,7 @@
         padding: 12px;
         display: grid;
         gap: 12px;
-        background: #f9fbfd;
+        background: var(--color-surface-soft);
     }
 
     .api-editor-head {
@@ -363,7 +363,7 @@
     }
 
     .api-editor-head strong {
-        color: #253547;
+        color: var(--color-text);
         font-size: 14px;
     }
 
@@ -371,7 +371,7 @@
         width: 110px;
         flex-shrink: 0;
         font-weight: bold;
-        color: #444;
+        color: var(--color-text-soft);
         font-size: 13px;
         line-height: 1.4;
     }
@@ -385,7 +385,7 @@
     .ai-settings-form .set-row input:not([type="checkbox"]) {
         flex: 1 1 auto;
         min-width: 0;
-        min-height: 34px;
+        min-height: var(--control-height);
         box-sizing: border-box;
         font-size: 13px;
     }
@@ -396,7 +396,7 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;
@@ -433,7 +433,7 @@
     .set-row input {
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: rgba(255, 255, 255, 0.9);
+        background: var(--color-surface);
         color: var(--color-text);
         transition:
             border-color var(--transition-fast),
@@ -445,6 +445,6 @@
         outline: none;
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
-        background: #fff;
+        background: var(--color-surface);
     }
 </style>

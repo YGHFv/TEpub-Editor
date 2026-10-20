@@ -126,11 +126,11 @@
 <style>
     /* 基础按钮样式（与页面同源，保证拆出后视觉一致） */
     button {
-        height: 34px;
+        height: var(--control-height);
         min-width: 40px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        background: #fff;
+        border-radius: var(--radius-xs);
+        border: 1px solid var(--color-border-strong);
+        background: var(--color-surface);
         font-size: 18px;
         display: flex;
         align-items: center;
@@ -139,8 +139,8 @@
         transition: 0.1s;
     }
     button:active {
-        background: #eee;
-        transform: scale(0.96);
+        background: var(--color-border);
+        transform: translateY(0.5px) scale(0.985);
     }
 
     .rules-list {
@@ -163,11 +163,11 @@
         flex: 1;
         height: 32px;
         padding: 0 10px;
-        border: 1px solid #ccc;
+        border: 1px solid var(--color-border-strong);
         border-right: none;
         border-radius: 6px 0 0 6px;
         font-size: 13px;
-        background: #fff;
+        background: var(--color-surface);
         min-width: 0;
         z-index: 1;
     }
@@ -175,9 +175,9 @@
         width: 32px;
         height: 32px;
         min-width: 32px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        background: #fff;
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -185,19 +185,19 @@
         transition: 0.1s;
     }
     .rule-btn:hover {
-        background: #fee;
-        color: #d32f2f;
-        border-color: #ffcdd2;
+        background: var(--color-danger-soft);
+        color: var(--color-danger);
+        border-color: color-mix(in srgb, var(--color-danger-soft) 92%, var(--color-danger));
     }
     .rule-btn.add:hover {
-        background: #f3f8ff;
-        color: #0066b8;
-        border-color: #b9d8ff;
+        background: var(--color-accent-quiet);
+        color: var(--color-accent);
+        border-color: var(--color-accent-soft);
     }
     .rules-header {
         font-size: 13px;
         font-weight: bold;
-        color: #666;
+        color: var(--color-muted);
         margin-bottom: 5px;
     }
     .rule-helper-row {
@@ -211,10 +211,10 @@
         min-width: 0;
         height: 32px;
         padding: 0 10px;
-        border: 1px solid #ccc;
-        border-radius: 6px;
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-xs);
         font-size: 13px;
-        background: #fff;
+        background: var(--color-surface);
     }
 
     /* Modern UI overrides */
@@ -223,7 +223,7 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;
@@ -255,7 +255,7 @@
 
     .rule-btn {
         border: 1px solid var(--color-border);
-        background: rgba(255, 255, 255, 0.86);
+        background: var(--color-surface-raised);
         color: var(--color-text-soft);
         border-radius: var(--radius-xs);
         box-shadow: none;
@@ -268,7 +268,7 @@
     .rule-input {
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: rgba(255, 255, 255, 0.9);
+        background: var(--color-surface);
         color: var(--color-text);
         transition:
             border-color var(--transition-fast),
@@ -280,13 +280,13 @@
         outline: none;
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
-        background: #fff;
+        background: var(--color-surface);
     }
     .rule-prefix-input:focus {
         outline: none;
         border-color: var(--color-accent);
         box-shadow: var(--focus-ring);
-        background: #fff;
+        background: var(--color-surface);
     }
 
     .rule-btn:hover {

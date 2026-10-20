@@ -73,15 +73,15 @@
         overflow: hidden;
         cursor: pointer;
         transition:
-            box-shadow var(--transition-normal),
+            box-shadow var(--transition-fast),
             transform var(--transition-fast);
         position: relative;
         border: 2px solid transparent;
     }
 
     .book-card:hover {
-        box-shadow: var(--shadow-sm);
-        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+        transform: translateY(-1px);
     }
 
     .book-card.selected {
@@ -163,10 +163,10 @@
         top: 6px;
         right: 6px;
         background: rgba(0, 0, 0, 0.6);
-        color: #fff;
+        color: var(--color-surface);
         font-size: 9px;
         padding: 2px 6px;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         font-weight: 700;
         letter-spacing: 0.5px;
     }

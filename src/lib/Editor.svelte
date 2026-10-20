@@ -412,18 +412,18 @@
                     },
                     ".cm-scroller::-webkit-scrollbar": { width: "14px" },
                     ".cm-scroller::-webkit-scrollbar-track": {
-                        background: "rgba(226, 235, 244, 0.72)",
+                        background: "color-mix(in srgb, var(--color-border) 32%, transparent)",
                     },
                     ".cm-scroller::-webkit-scrollbar-thumb": {
-                        background: "linear-gradient(180deg, #bacbda, #93a8bb)",
+                        background: "linear-gradient(180deg, var(--color-border-strong), var(--color-border))",
                         borderRadius: "7px",
-                        border: "3px solid rgba(226, 235, 244, 0.72)",
+                        border: "3px solid color-mix(in srgb, var(--color-border) 32%, transparent)",
                     },
                     ".cm-scroller::-webkit-scrollbar-thumb:hover": {
-                        background: "linear-gradient(180deg, #9dafc0, #748b9f)",
+                        background: "linear-gradient(180deg, var(--color-border-strong), var(--color-border-strong))",
                     },
                     ".cm-scroller::-webkit-scrollbar-thumb:active": {
-                        background: "#748b9f",
+                        background: "var(--color-border-strong)",
                     },
                     // 纯净的着色标题，禁止任何 padding/margin/fontSize 扰乱物理行高
                     ".cm-title-line": {
@@ -905,21 +905,50 @@
     }
 
     :global(.cm-scroller::-webkit-scrollbar-track) {
-        background: rgba(226, 235, 244, 0.72);
+        background: color-mix(in srgb, var(--color-border) 32%, transparent);
     }
 
     :global(.cm-scroller::-webkit-scrollbar-thumb) {
-        background: linear-gradient(180deg, #bacbda, #93a8bb);
-        border-radius: 7px;
-        border: 3px solid rgba(226, 235, 244, 0.72);
+        background: linear-gradient(180deg, var(--color-border-strong), var(--color-border));
+        border-radius: var(--radius-sm);
+        border: 3px solid color-mix(in srgb, var(--color-border) 32%, transparent);
     }
 
     :global(.cm-scroller::-webkit-scrollbar-thumb:hover) {
-        background: linear-gradient(180deg, #9dafc0, #748b9f);
+        background: linear-gradient(180deg, var(--color-border-strong), var(--color-border));
     }
 
     :global(.cm-scroller::-webkit-scrollbar-thumb:active) {
-        background: #748b9f;
+        background: var(--color-border);
+    }
+
+    /* Dark: keep CodeMirror content area dark-consistent; gutter uses token system already */
+    :root[data-theme="dark"] :global(.cm-editor) {
+        background: var(--color-surface) !important;
+        color: var(--color-text) !important;
+    }
+    :root[data-theme="dark"] :global(.cm-content) {
+        color: var(--color-text);
+    }
+    :root[data-theme="dark"] :global(.cm-gutters) {
+        background: var(--color-surface-soft) !important;
+        color: var(--color-muted) !important;
+        border-right-color: var(--color-border) !important;
+    }
+    :root[data-theme="dark"] :global(.cm-cursor),
+    :root[data-theme="dark"] :global(.cm-dropCursor) {
+        border-left-color: var(--color-text) !important;
+    }
+    :root[data-theme="dark"] :global(.cm-title-line) {
+        mix-blend-mode: normal !important;
+        background: var(--color-accent-soft) !important;
+        color: var(--color-accent-deep) !important;
+    }
+    :root[data-theme="dark"] :global(.cm-selectionBackground) {
+        background: color-mix(in srgb, var(--color-accent) 32%, transparent) !important;
+    }
+    :root[data-theme="dark"] :global(.cm-editor.cm-focused .cm-selectionBackground) {
+        background: color-mix(in srgb, var(--color-accent) 40%, transparent) !important;
     }
 
     :global(.cm-tab) {

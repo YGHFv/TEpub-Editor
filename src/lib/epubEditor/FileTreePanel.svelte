@@ -111,8 +111,8 @@
 <style>
     .file-tree {
         width: 240px;
-        background: #fff;
-        border-right: 1px solid #ddd;
+        background: var(--color-surface);
+        border-right: 1px solid var(--color-border);
         display: flex;
         flex-direction: column;
         flex-shrink: 0;
@@ -121,8 +121,8 @@
     .tree-header {
         height: 40px; /* Matched with tabs-bar */
         padding: 0 16px;
-        border-bottom: 1px solid #eee;
-        background: #fafafa;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -132,7 +132,7 @@
     .tree-header h3 {
         margin: 0;
         font-size: 16px;
-        color: #333;
+        color: var(--color-text);
         flex: 1;
     }
 
@@ -147,7 +147,7 @@
         border: none;
         cursor: pointer;
         padding: 4px;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
         font-size: 16px;
         display: flex;
         align-items: center;
@@ -156,7 +156,7 @@
     }
 
     .icon-btn:hover:not(:disabled) {
-        background: #e0e0e0;
+        background: var(--color-border);
     }
 
     .icon-btn:disabled {
@@ -165,7 +165,7 @@
     }
 
     .icon-btn.dirty {
-        color: #ff9800;
+        color: var(--color-warning);
         filter: drop-shadow(0 0 2px rgba(255, 152, 0, 0.5));
     }
 
@@ -178,14 +178,14 @@
     /* Modern UI overrides */
     .file-tree {
         width: 260px;
-        background: rgba(255, 255, 255, 0.82);
+        background: var(--color-surface-raised);
         border-right: 1px solid var(--color-border);
         box-shadow: 10px 0 30px rgba(23, 36, 52, 0.05);
         backdrop-filter: blur(16px);
     }
 
     .tree-header {
-        background: rgba(255, 255, 255, 0.78);
+        background: var(--color-surface-raised);
         border-bottom: 1px solid var(--color-border);
         backdrop-filter: blur(18px) saturate(1.12);
         height: 52px;
@@ -207,7 +207,7 @@
     .header-actions .icon-btn {
         width: 34px;
         min-width: 34px;
-        height: 34px;
+        height: var(--control-height);
         padding: 0;
         white-space: nowrap;
         font-size: 16px;
@@ -220,7 +220,7 @@
         height: 32px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-xs);
-        background: rgba(255, 255, 255, 0.82);
+        background: var(--color-surface-raised);
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         transition:
@@ -253,7 +253,7 @@
         padding: 10px;
         background: linear-gradient(
             180deg,
-            rgba(255, 255, 255, 0.44),
+            var(--color-surface-soft),
             rgba(246, 249, 252, 0.64)
         );
     }

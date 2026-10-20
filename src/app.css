@@ -1,3 +1,9 @@
+/* =========================================================
+   TEpub Editor — Design Tokens + Base (P1+P2)
+   单主色蓝 · 中性灰阶 · 语义色各一 · 统一 radius/shadow/motion
+   约束：token 定义行之外不出现硬编码 #hex / rgb 硬色
+   ========================================================= */
+
 :root {
   --font-ui:
     "LXGW WenKai Screen", "HarmonyOS Sans SC", "Microsoft YaHei UI",
@@ -8,6 +14,7 @@
     "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", "Monaco",
     "Courier New", monospace;
 
+  /* ——— Neutral ——— */
   --color-canvas: #eef4f8;
   --color-canvas-glow: #fbf7ec;
   --color-surface: #ffffff;
@@ -20,67 +27,105 @@
   --color-text: #172434;
   --color-text-soft: #4d5d70;
   --color-muted: #7c8a9a;
+
+  /* ——— Accent: 单主色蓝，soft/quiet 由主色派生 ——— */
   --color-accent: #1677b8;
   --color-accent-deep: #0d5f95;
   --color-accent-soft: #e2f3ff;
   --color-accent-quiet: #f1f8fd;
+  --color-accent-contrast: #ffffff;
+
+  /* ——— Semantic ——— */
   --color-teal: #18a6a1;
   --color-danger: #d74452;
   --color-danger-soft: #fff0f2;
   --color-warning: #e99b2f;
   --color-warning-soft: #fff6df;
+  /* warning 本身太亮，当文字色放浅底上只有 2:1，另给一个可读的深一档 */
+  --color-warning-deep: #8a5a00;
   --color-success: #238a62;
+  --color-violet: #7a6aa8;
+  --color-violet-deep: #62538e;
 
+  /* ——— Gradients（由 token 派生，不在组件里另写） ——— */
   --gradient-app:
     radial-gradient(
       circle at 12% 0%,
-      rgba(255, 246, 218, 0.95),
+      color-mix(in srgb, var(--color-canvas-glow) 92%, transparent),
       transparent 30%
     ),
     radial-gradient(
       circle at 88% 8%,
-      rgba(218, 242, 255, 0.9),
+      color-mix(in srgb, var(--color-accent-soft) 92%, transparent),
       transparent 32%
     ),
-    linear-gradient(135deg, #f7fbff 0%, #eef4f8 48%, #f8f4ea 100%);
-  --gradient-accent: linear-gradient(135deg, #1a88ce 0%, #13a6a2 100%);
-  --gradient-danger: linear-gradient(135deg, #e45b67 0%, #c73646 100%);
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--color-surface) 96%, var(--color-canvas)),
+      var(--color-canvas) 48%,
+      var(--color-canvas-glow) 100%
+    );
+  --gradient-accent: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-teal) 100%
+  );
+  --gradient-danger: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-danger) 88%, white),
+    var(--color-danger) 100%
+  );
 
+  /* ——— Radius / Shadow（克制：不靠阴影堆层次） ——— */
   --radius-xs: 6px;
-  --radius-sm: 9px;
-  --radius-md: 14px;
-  --radius-lg: 22px;
-  --shadow-xs: 0 1px 2px rgba(23, 36, 52, 0.06);
-  --shadow-sm: 0 8px 22px rgba(23, 36, 52, 0.08);
-  --shadow-md: 0 18px 44px rgba(23, 36, 52, 0.14);
-  --shadow-pop: 0 24px 70px rgba(23, 36, 52, 0.22);
-  --focus-ring: 0 0 0 3px rgba(22, 119, 184, 0.18);
-  --control-height: 34px;
-  --transition-fast: 120ms ease;
-  --transition-normal: 180ms ease;
-}
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --shadow-xs: 0 1px 2px rgba(23, 36, 52, 0.05);
+  --shadow-sm: 0 2px 8px rgba(23, 36, 52, 0.06);
+  --shadow-md: 0 8px 24px rgba(23, 36, 52, 0.1);
+  --shadow-pop: 0 16px 48px rgba(23, 36, 52, 0.16);
 
-:root {
-  --web-tool-canvas: #eef2f7;
-  --web-tool-surface: #ffffff;
-  --web-tool-surface-translucent: rgba(255, 255, 255, 0.78);
-  --web-tool-text: #172033;
-  --web-tool-text-soft: #46566c;
-  --web-tool-muted: #718096;
-  --web-tool-border: #d8e1eb;
-  --web-tool-border-strong: #9eb1c7;
-  --web-tool-accent: #17699a;
-  --web-tool-accent-soft: #e4f1f8;
-  --web-tool-error: #b42323;
-  --web-tool-error-bg: #fff1f1;
-  --web-tool-error-border: #efb3b3;
+  /* ——— Motion ——— */
+  --ease-default: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-fast: 150ms;
+  --motion-normal: 250ms;
+  --motion-stagger-step: 40ms;
+  --motion-stagger-cap: 240ms;
+  --transition-fast: var(--motion-fast) var(--ease-default);
+  --transition-normal: var(--motion-normal) var(--ease-default);
+
+  --focus-ring: 0 0 0 3px
+    color-mix(in srgb, var(--color-accent) 18%, transparent);
+  --control-height: 34px;
+
+  /* ——— 兼容：旧 --web-tool-* 全部别名到 --color-*（不再双轨） ——— */
+  --web-tool-canvas: var(--color-canvas);
+  --web-tool-surface: var(--color-surface);
+  --web-tool-surface-translucent: var(--color-surface-raised);
+  --web-tool-text: var(--color-text);
+  --web-tool-text-soft: var(--color-text-soft);
+  --web-tool-muted: var(--color-muted);
+  --web-tool-border: var(--color-border);
+  --web-tool-border-strong: var(--color-border-strong);
+  --web-tool-accent: var(--color-accent);
+  --web-tool-accent-soft: var(--color-accent-soft);
+  --web-tool-error: var(--color-danger);
+  --web-tool-error-bg: var(--color-danger-soft);
+  --web-tool-error-border: color-mix(
+    in srgb,
+    var(--color-danger) 28%,
+    transparent
+  );
   --web-tool-content-width: 1040px;
   --web-tool-gap: 14px;
-  --web-tool-radius-sm: 7px;
-  --web-tool-radius-md: 12px;
-  --web-tool-control-height: 36px;
+  --web-tool-radius-sm: var(--radius-xs);
+  --web-tool-radius-md: var(--radius-md);
+  --web-tool-control-height: var(--control-height);
 }
 
+/* ================= Base ================= */
 html,
 body {
   margin: 0;
@@ -132,12 +177,272 @@ button {
   color: inherit;
 }
 
+button:disabled,
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+:where(*):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: color-mix(
+    in srgb,
+    var(--color-border) 42%,
+    var(--color-surface-soft)
+  );
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-border-strong) 92%, white),
+    var(--color-border-strong)
+  );
+  border: 2px solid
+    color-mix(in srgb, var(--color-border) 42%, var(--color-surface-soft));
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-border-strong) 88%, var(--color-text-soft)),
+    color-mix(in srgb, var(--color-border-strong) 92%, var(--color-muted))
+  );
+}
+
+.app-container,
+.epub-editor,
+.metadata-container,
+.search-window {
+  color: var(--color-text);
+}
+
+/* ================= Atomic: Button ================= */
+.btn,
+.mini-btn,
+.icon-btn,
+.rule-btn,
+.prompt-btn,
+.fr-btn,
+.cover-source-btn,
+.btn-secondary,
+.btn-small,
+.epub-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control-height);
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-soft);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.btn:hover:not(:disabled),
+.mini-btn:hover:not(:disabled),
+.icon-btn:hover:not(:disabled),
+.rule-btn:hover:not(:disabled),
+.prompt-btn:hover:not(:disabled),
+.fr-btn:hover,
+.cover-source-btn:hover:not(:disabled),
+.btn-secondary:hover:not(:disabled),
+.btn-small:hover:not(:disabled),
+.epub-cancel:hover:not(:disabled) {
+  background: var(--color-hover);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.btn:active:not(:disabled),
+.mini-btn:active:not(:disabled),
+.icon-btn:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+.btn-primary,
+.btn.primary,
+.epub-confirm,
+.prompt-btn.confirm,
+.cover-source-btn.primary,
+.mini-btn.active,
+.proof-primary,
+.settings-shell-action-primary {
+  border-color: transparent;
+  background: var(--gradient-accent);
+  color: var(--color-accent-contrast);
+  box-shadow: none;
+}
+
+.btn-primary:hover:not(:disabled),
+.btn.primary:hover:not(:disabled),
+.epub-confirm:hover:not(:disabled),
+.prompt-btn.confirm:hover:not(:disabled),
+.cover-source-btn.primary:hover:not(:disabled),
+.proof-primary:hover:not(:disabled),
+.settings-shell-action-primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 92%, white),
+    color-mix(in srgb, var(--color-teal) 92%, white)
+  );
+  color: var(--color-accent-contrast);
+}
+
+.btn-primary:active:not(:disabled),
+.btn.primary:active:not(:disabled),
+.epub-confirm:active:not(:disabled),
+.settings-shell-action-primary:active:not(:disabled) {
+  border-color: transparent;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 92%, black),
+    color-mix(in srgb, var(--color-teal) 88%, black)
+  );
+  color: var(--color-accent-contrast);
+}
+
+.btn-primary:disabled,
+.btn.primary:disabled,
+.settings-shell-action-primary:disabled {
+  color: color-mix(in srgb, var(--color-accent-contrast) 80%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 52%, transparent),
+    color-mix(in srgb, var(--color-teal) 52%, transparent)
+  );
+  box-shadow: none;
+}
+
+.btn.danger,
+.btn-save-modified,
+.fr-danger,
+.fr-close-btn {
+  background: var(--color-danger-soft);
+  border-color: color-mix(in srgb, var(--color-danger) 28%, transparent);
+  color: var(--color-danger);
+}
+
+.btn.danger:hover:not(:disabled),
+.btn-save-modified:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--color-danger-soft) 88%,
+    var(--color-danger) 12%
+  );
+  border-color: color-mix(in srgb, var(--color-danger) 36%, transparent);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-soft);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-hover);
+  border-color: transparent;
+}
+
+/* ================= Atomic: Input / Field ================= */
+/* 只做“兜底默认值”，一律用 :where() 归零特异性，
+   保证任何页面/组件自己的输入样式都能覆盖它，
+   避免出现外层容器 + 内层 input 各画一层边框的双重框。 */
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"])),
+:where(textarea),
+:where(.set-row input),
+:where(.set-row textarea),
+:where(.fr-input),
+:where(.fr-dropdown-btn),
+:where(.epub-input-small),
+:where(.epub-textarea),
+:where(.rule-input),
+:where(.prompt-input),
+:where(.search-box input) {
+  min-height: var(--control-height);
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  box-sizing: border-box;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background var(--transition-fast);
+}
+
+:where(input)::placeholder,
+:where(textarea)::placeholder {
+  color: var(--color-muted);
+}
+
+:where(input):focus,
+:where(textarea):focus,
+:where(.fr-input):focus,
+:where(.epub-input-small):focus,
+:where(.epub-textarea):focus,
+:where(.rule-input):focus,
+:where(.prompt-input):focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* ================= Atomic: Card / Panel ================= */
+/* 只定义真正通用的 .card，不再批量套用到各页面自有面板类名上，
+   否则会和页面本地边框/阴影叠加成双层描边与多余投影。 */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.card-hover {
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.card-hover:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* ================= Settings Shell ================= */
 .settings-shell {
-  border-radius: 14px;
   overflow: hidden;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.18);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
 }
 
 .settings-shell-header {
@@ -189,7 +494,8 @@ button {
   gap: 8px;
   padding: 16px;
   border-right: 1px solid var(--color-border);
-  background: #eef5fb;
+  /* 与内容区同色，仅用 1px 分隔线分区，避免左侧一整条色带 */
+  background: var(--color-surface);
 }
 
 .settings-shell-tabs .tab-btn {
@@ -199,9 +505,9 @@ button {
   min-width: 0;
   justify-content: flex-start;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: #6b7b8e;
+  color: var(--color-text-soft);
   padding: 10px 14px;
   text-align: left;
   font-size: 15px;
@@ -214,12 +520,16 @@ button {
 }
 
 .settings-shell-tabs .tab-btn:hover {
-  background: #e3eef8;
+  background: color-mix(
+    in srgb,
+    var(--color-accent-quiet) 72%,
+    var(--color-accent-soft) 28%
+  );
 }
 
 .settings-shell-tabs .tab-btn.active {
-  background: #d7ebfb;
-  color: #005f9e;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-deep);
 }
 
 .settings-shell-body {
@@ -230,7 +540,8 @@ button {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: var(--color-surface);
+  background: var(--color-surface); /* 统一单实色，不在 body 层加槽内灰层 */
+  border-top: 0;
 }
 
 .settings-shell-footer {
@@ -247,39 +558,10 @@ button {
   min-width: 132px;
   min-height: 42px;
   padding: 9px 18px;
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.02em;
-}
-
-.settings-shell-action-primary {
-  border-color: transparent;
-  background: var(--gradient-accent);
-  color: #fff;
-  box-shadow: 0 12px 26px rgba(22, 119, 184, 0.22);
-}
-
-.settings-shell-action-primary:hover:not(:disabled) {
-  border-color: transparent;
-  background: linear-gradient(135deg, #218fd4 0%, #16b0aa 100%);
-  color: #fff;
-}
-
-.settings-shell-action-primary:active:not(:disabled) {
-  border-color: transparent;
-  background: linear-gradient(135deg, #187fbe 0%, #119792 100%);
-  color: #fff;
-}
-
-.settings-shell-action-primary:disabled {
-  color: rgba(255, 255, 255, 0.82);
-  background: linear-gradient(
-    135deg,
-    rgba(26, 136, 206, 0.52) 0%,
-    rgba(19, 166, 162, 0.52) 100%
-  );
-  box-shadow: none;
 }
 
 .settings-shell.library-settings-panel {
@@ -419,42 +701,26 @@ button {
   min-width: 110px;
 }
 
-.settings-shell .set-control,
-.settings-shell .set-row input,
-.settings-shell .set-row textarea {
+.settings-shell .set-control {
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: 13px;
-  box-sizing: border-box;
+  min-height: var(--control-height);
 }
 
-.settings-shell .set-control {
-  min-height: 34px;
-}
-
-.settings-shell input.set-control,
-.settings-shell textarea.set-control,
-.settings-shell .set-row input,
-.settings-shell .set-row textarea {
-  padding: 6px 10px;
+/* CustomSelect 的 .set-control 是包裹层，尺寸交给内部 trigger，
+   否则会与 trigger 叠加成双层背景 / 双层描边。 */
+.settings-shell .custom-select.set-control {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .settings-shell .set-row textarea {
   resize: vertical;
   font-family: var(--font-ui);
   line-height: 1.55;
-}
-
-.settings-shell .set-control:focus,
-.settings-shell .set-row input:focus,
-.settings-shell .set-row textarea:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: var(--focus-ring);
 }
 
 .settings-shell .toggle-row {
@@ -481,19 +747,18 @@ button {
   margin-left: 4px;
 }
 
-.settings-shell .toggle-row input[type="checkbox"] {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+.settings-shell .toggle-row input[type="checkbox"],
+.settings-shell .set-row input[type="checkbox"],
+.settings-shell .settings-toggle-card input[type="checkbox"] {
   accent-color: var(--color-accent);
   cursor: pointer;
 }
 
+.settings-shell .toggle-row input[type="checkbox"],
 .settings-shell .set-row input[type="checkbox"] {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
-  accent-color: var(--color-accent);
 }
 
 .settings-shell .settings-toggle-list {
@@ -509,7 +774,7 @@ button {
   gap: 16px;
   padding: 16px 18px;
   border: 1px solid var(--color-border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   background: color-mix(
     in srgb,
     var(--color-surface) 94%,
@@ -526,9 +791,9 @@ button {
   border-color: color-mix(
     in srgb,
     var(--color-border) 55%,
-    var(--color-accent)
+    var(--color-accent) 45%
   );
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  box-shadow: var(--shadow-xs);
   background: color-mix(
     in srgb,
     var(--color-surface) 90%,
@@ -559,130 +824,203 @@ button {
   width: 18px;
   height: 18px;
   margin: 0;
-  accent-color: var(--color-accent);
-  cursor: pointer;
 }
 
-button:disabled,
-input:disabled,
-textarea:disabled {
-  cursor: not-allowed;
+/* ================= Animations (克制) ================= */
+@keyframes tepub-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-*:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+@keyframes tepub-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-::selection {
-  background: rgba(22, 119, 184, 0.24);
+@keyframes tepub-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+.anim-enter {
+  animation: tepub-rise-in var(--motion-normal) var(--ease-out) backwards;
 }
 
-::-webkit-scrollbar-track {
-  background: rgba(226, 235, 244, 0.72);
+.anim-fade {
+  animation: tepub-fade-in var(--motion-fast) var(--ease-default) backwards;
 }
 
-::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #bacbda, #93a8bb);
-  border: 2px solid rgba(226, 235, 244, 0.72);
-  border-radius: 999px;
+.anim-scale {
+  animation: tepub-scale-in var(--motion-normal) var(--ease-out) backwards;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #9dafc0, #748b9f);
+.stagger > * {
+  animation: tepub-rise-in var(--motion-fast) var(--ease-out) backwards;
 }
 
-.app-container,
-.epub-editor,
-.metadata-container,
-.search-window {
-  color: var(--color-text);
+.stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: var(--motion-stagger-step);
+}
+.stagger > *:nth-child(3) {
+  animation-delay: calc(var(--motion-stagger-step) * 2);
+}
+.stagger > *:nth-child(4) {
+  animation-delay: calc(var(--motion-stagger-step) * 3);
+}
+.stagger > *:nth-child(5) {
+  animation-delay: calc(var(--motion-stagger-step) * 4);
+}
+.stagger > *:nth-child(6) {
+  animation-delay: calc(var(--motion-stagger-step) * 5);
+}
+.stagger > *:nth-child(n + 7) {
+  animation-delay: var(--motion-stagger-cap);
 }
 
-/* ===== 经典主题 (Classic Theme) ===== */
-
-:root[data-theme="classic"] {
-  --font-ui:
-    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-reading: "Songti SC", "SimSun", "Noto Serif CJK SC", serif;
-  --font-code: "Consolas", "Monaco", "Courier New", monospace;
-
-  --color-canvas: #ffffff;
-  --color-canvas-glow: #ffffff;
-  --color-surface: #ffffff;
-  --color-surface-soft: #fafafa;
-  --color-surface-raised: rgba(255, 255, 255, 0.95);
-  --color-hover: #f0f0f0;
-  --color-active: #d4e8fa;
-  --color-border: #ddd;
-  --color-border-strong: #ccc;
-  --color-text: #333;
-  --color-text-soft: #666;
-  --color-muted: #999;
-  --color-accent: #0066b8;
-  --color-accent-deep: #0050a0;
-  --color-accent-soft: #d4e8fa;
-  --color-accent-quiet: #e8f0fe;
-  --color-teal: #00897b;
-  --color-danger: #d32f2f;
-  --color-danger-soft: #ffebee;
-  --color-warning: #f57c00;
-  --color-warning-soft: #fff3e0;
-  --color-success: #2e7d32;
-
-  --gradient-app: #ffffff;
-  --gradient-accent: #0066b8;
-  --gradient-danger: #d32f2f;
-
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.12);
-  --shadow-pop: 0 8px 30px rgba(0, 0, 0, 0.2);
-
-  --focus-ring: 0 0 0 2px rgba(0, 102, 184, 0.25);
-  --control-height: 34px;
-  --transition-fast: 0.1s ease;
-  --transition-normal: 0.15s ease;
+/* 页面进场：仅 fade，无位移，避免给 fixed 弹窗建 containing block */
+.page-enter {
+  animation: tepub-fade-in var(--motion-fast) var(--ease-out) backwards;
 }
 
-/* 经典主题滚动条 */
-:root[data-theme="classic"] ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* 卡片落位带 stagger，用 rise-in（安全区在 grid 内，不含 fixed 后代） */
+.page-enter-stagger > * {
+  animation: tepub-rise-in var(--motion-fast) var(--ease-out) backwards;
+}
+.page-enter-stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.page-enter-stagger > *:nth-child(2) {
+  animation-delay: var(--motion-stagger-step);
+}
+.page-enter-stagger > *:nth-child(3) {
+  animation-delay: calc(var(--motion-stagger-step) * 2);
+}
+.page-enter-stagger > *:nth-child(4) {
+  animation-delay: calc(var(--motion-stagger-step) * 3);
+}
+.page-enter-stagger > *:nth-child(5) {
+  animation-delay: calc(var(--motion-stagger-step) * 4);
+}
+.page-enter-stagger > *:nth-child(6) {
+  animation-delay: calc(var(--motion-stagger-step) * 5);
+}
+.page-enter-stagger > *:nth-child(n + 7) {
+  animation-delay: var(--motion-stagger-cap);
 }
 
-:root[data-theme="classic"] ::-webkit-scrollbar-track {
-  background: #f0f0f0;
+/* 弹窗：容器 scale-in + 遮罩 fade-in */
+.dialog-enter {
+  animation: tepub-scale-in var(--motion-fast) var(--ease-out) backwards;
+}
+.overlay-enter {
+  animation: tepub-fade-in var(--motion-fast) var(--ease-default) backwards;
 }
 
-:root[data-theme="classic"] ::-webkit-scrollbar-thumb {
-  background: #c0c0c0;
-  border: 1px solid #f0f0f0;
-  border-radius: 4px;
+/* —— 自动挂载（零特异度，页面可自行覆盖）—— */
+/* 壳进场：仅淡入，不位移，避免给 fixed 弹窗建 containing block */
+:where(
+    .library-app,
+    .toolbox-app,
+    .app-container,
+    .epub-editor,
+    .metadata-container,
+    .search-window,
+    .batch-app,
+    .process-page,
+    .advanced-page,
+    .font-page,
+    .diagnose-page,
+    .text-editor-page,
+    .web-epub-page,
+    .image-tool-app
+  ) {
+  animation: tepub-fade-in var(--motion-fast) var(--ease-out) backwards;
 }
 
-:root[data-theme="classic"] ::-webkit-scrollbar-thumb:hover {
-  background: #a0a0a0;
+/* 弹窗遮罩与容器：自动淡入/缩放（与 .overlay-enter/.dialog-enter 等价） */
+:where(
+    .settings-overlay,
+    .dialog-overlay,
+    .modal-overlay,
+    .context-overlay,
+    .saving-overlay
+  ) {
+  animation: tepub-fade-in var(--motion-fast) var(--ease-default) backwards;
+}
+:where(.settings-shell, .settings-panel, .dialog, .modal-content, .prompt-dialog) {
+  animation: tepub-scale-in var(--motion-fast) var(--ease-out) backwards;
 }
 
-/* 经典主题文本选区 */
-:root[data-theme="classic"] ::selection {
-  background: rgba(0, 102, 184, 0.2);
+/* 书库网格：自动错位入场（仅在 grid 内，安全） */
+:where(.book-grid) > * {
+  animation: tepub-rise-in var(--motion-fast) var(--ease-out) backwards;
+}
+:where(.book-grid) > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+:where(.book-grid) > *:nth-child(2) {
+  animation-delay: var(--motion-stagger-step);
+}
+:where(.book-grid) > *:nth-child(3) {
+  animation-delay: calc(var(--motion-stagger-step) * 2);
+}
+:where(.book-grid) > *:nth-child(4) {
+  animation-delay: calc(var(--motion-stagger-step) * 3);
+}
+:where(.book-grid) > *:nth-child(5) {
+  animation-delay: calc(var(--motion-stagger-step) * 4);
+}
+:where(.book-grid) > *:nth-child(6) {
+  animation-delay: calc(var(--motion-stagger-step) * 5);
+}
+:where(.book-grid) > *:nth-child(n + 7) {
+  animation-delay: var(--motion-stagger-cap);
 }
 
-/* ===== 深色主题 (Dark Theme) ===== */
+/* 上下文菜单：轻量缩放入场 */
+:where(.context-menu) {
+  animation: tepub-scale-in var(--motion-fast) var(--ease-out) backwards;
+  transform-origin: top left;
+}
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* 兼容：历史存量 data-theme="classic"/"modern" 静默等同浅色（:root 默认即浅色） */
+:root[data-theme="classic"],
+:root[data-theme="modern"] {
+  /* 仅保留别名，不再定义独立色板 */
+}
+
+/* ===== 深色主题 (Dark) ===== */
 :root[data-theme="dark"] {
   --font-ui:
     "LXGW WenKai Screen", "HarmonyOS Sans SC", "Microsoft YaHei UI",
@@ -709,62 +1047,78 @@ textarea:disabled {
   --color-accent-deep: #93c5fd;
   --color-accent-soft: #1e3a5f;
   --color-accent-quiet: #172a42;
+  --color-accent-contrast: #10151b;
   --color-teal: #4fd1c5;
   --color-danger: #f87171;
   --color-danger-soft: #3b1c1c;
   --color-warning: #fbbf24;
   --color-warning-soft: #3d3518;
+  /* 深色下 warning 已经足够亮，deep 就是它本身 */
+  --color-warning-deep: #fbbf24;
   --color-success: #4ade80;
+  --color-violet: #a78bfa;
+  --color-violet-deep: #c4b5fd;
 
   --gradient-app: linear-gradient(
     135deg,
-    #14181d 0%,
-    #1a1f27 48%,
-    #151a20 100%
+    var(--color-canvas) 0%,
+    var(--color-canvas-glow) 48%,
+    color-mix(in srgb, var(--color-canvas) 92%, black) 100%
   );
-  --gradient-accent: linear-gradient(135deg, #60a5fa 0%, #4fd1c5 100%);
-  --gradient-danger: linear-gradient(135deg, #f87171 0%, #dc2626 100%);
+  --gradient-accent: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-teal) 100%
+  );
+  --gradient-danger: linear-gradient(
+    135deg,
+    var(--color-danger) 0%,
+    color-mix(in srgb, var(--color-danger) 72%, black) 100%
+  );
 
-  --radius-xs: 6px;
-  --radius-sm: 9px;
-  --radius-md: 14px;
-  --radius-lg: 22px;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-sm: 0 8px 22px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 18px 44px rgba(0, 0, 0, 0.5);
-  --shadow-pop: 0 24px 70px rgba(0, 0, 0, 0.6);
-  --focus-ring: 0 0 0 3px rgba(96, 165, 250, 0.28);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.34);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.44);
+  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.56);
+  --focus-ring: 0 0 0 3px
+    color-mix(in srgb, var(--color-accent) 28%, transparent);
   --control-height: 34px;
-  --transition-fast: 120ms ease;
-  --transition-normal: 180ms ease;
-}
-
-/* 深色主题滚动条 */
-:root[data-theme="dark"] ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
 }
 
 :root[data-theme="dark"] ::-webkit-scrollbar-track {
-  background: rgba(36, 43, 56, 0.72);
+  background: color-mix(
+    in srgb,
+    var(--color-surface-soft) 72%,
+    transparent
+  );
 }
 
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #3d4b5f, #2d3748);
-  border: 2px solid rgba(36, 43, 56, 0.72);
-  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    var(--color-border-strong),
+    var(--color-border)
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--color-surface-soft) 72%,
+    transparent
+  );
 }
 
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #4d5d70, #3d4b5f);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-border-strong) 92%, white),
+    var(--color-border-strong)
+  );
 }
 
-/* 深色主题文本选区 */
 :root[data-theme="dark"] ::selection {
-  background: rgba(96, 165, 250, 0.28);
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
 }
 
-/* Dark theme compatibility for older component-local light surfaces. */
+/* Dark 兼容：收敛 !important 范围，改走 token */
 :root[data-theme="dark"] .app-container,
 :root[data-theme="dark"] .epub-editor,
 :root[data-theme="dark"] .main-body {
@@ -812,10 +1166,17 @@ textarea:disabled {
   color: var(--color-text) !important;
 }
 
+/* 设置弹窗内部保持与外壳同一实色（和浅色主题一致），
+   否则深色下中间会凭空多出一条更暗的槽，与侧边 tab 割裂。 */
 :root[data-theme="dark"] .settings-body,
 :root[data-theme="dark"] .settings-shell-body,
 :root[data-theme="dark"] .settings-footer,
-:root[data-theme="dark"] .settings-shell-footer,
+:root[data-theme="dark"] .settings-shell-footer {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text);
+}
+
 :root[data-theme="dark"] .tree-content,
 :root[data-theme="dark"] .toc-list,
 :root[data-theme="dark"] .toc-container,
@@ -829,8 +1190,11 @@ textarea:disabled {
   color: var(--color-text);
 }
 
+/* 侧边 tab 列与内容区同一实色，只靠 1px 竖线分区；
+   不再用更亮的 surface-soft，否则深色下左侧会浮起一条亮带、
+   左下角还会因为 tab 列贯穿 footer 行形成 L 形台阶。 */
 :root[data-theme="dark"] .settings-shell-tabs {
-  background: var(--color-surface-soft) !important;
+  background: var(--color-surface) !important;
   border-color: var(--color-border) !important;
 }
 
@@ -838,7 +1202,8 @@ textarea:disabled {
   color: var(--color-text-soft) !important;
 }
 
-:root[data-theme="dark"] .settings-shell .settings-section,
+/* .settings-section 保持透明（与浅色一致），
+   否则深色下会在内容区里多出一块带硬边的灰底卡片。 */
 :root[data-theme="dark"] .meta-section,
 :root[data-theme="dark"] .proof-preview,
 :root[data-theme="dark"] .proof-regex-preview,
@@ -908,21 +1273,26 @@ textarea:disabled {
     color-mix(in srgb, var(--color-accent) 18%, transparent) !important;
 }
 
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] textarea,
-:root[data-theme="dark"] .set-control,
-:root[data-theme="dark"] .set-row input,
-:root[data-theme="dark"] .set-row textarea,
-:root[data-theme="dark"] .fr-input,
-:root[data-theme="dark"] .fr-dropdown-btn,
-:root[data-theme="dark"] .epub-input-small,
-:root[data-theme="dark"] .epub-textarea,
-:root[data-theme="dark"] .rule-input,
-:root[data-theme="dark"] .prompt-input,
-:root[data-theme="dark"] .search-box input {
-  background: #151b24 !important;
-  border-color: var(--color-border) !important;
-  color: var(--color-text) !important;
+/* 深色输入兜底：同样用 :where() 压到 0,1,0，
+   让页面自己的输入样式永远能覆盖，不会把内层 input 也刷成有框有底。 */
+:root[data-theme="dark"] :where(input),
+:root[data-theme="dark"] :where(textarea),
+:root[data-theme="dark"] :where(.set-control),
+:root[data-theme="dark"] :where(.set-row input),
+:root[data-theme="dark"] :where(.set-row textarea),
+:root[data-theme="dark"] :where(.fr-input),
+:root[data-theme="dark"] :where(.fr-dropdown-btn),
+:root[data-theme="dark"] :where(.epub-input-small),
+:root[data-theme="dark"] :where(.epub-textarea),
+:root[data-theme="dark"] :where(.rule-input),
+:root[data-theme="dark"] :where(.prompt-input) {
+  background: color-mix(
+    in srgb,
+    var(--color-canvas) 88%,
+    var(--color-surface)
+  );
+  border-color: var(--color-border);
+  color: var(--color-text);
 }
 
 :root[data-theme="dark"] input::placeholder,
@@ -972,7 +1342,9 @@ textarea:disabled {
 :root[data-theme="dark"] .proof-primary {
   background: var(--gradient-accent) !important;
   border-color: transparent !important;
-  color: #ffffff !important;
+  /* 渐变主色是亮色，文字必须用对比色；
+     用 --color-surface 在深色下会变成深灰字，和浅色主题的主按钮完全不同 */
+  color: var(--color-accent-contrast) !important;
 }
 
 :root[data-theme="dark"] .btn.danger,
@@ -986,6 +1358,11 @@ textarea:disabled {
     transparent
   ) !important;
   color: var(--color-danger) !important;
+}
+
+:root[data-theme="dark"] .tool-import-drop {
+  border-color: var(--color-border-strong) !important;
+  background: var(--color-surface) !important;
 }
 
 :root[data-theme="dark"] .code-block .line-number,

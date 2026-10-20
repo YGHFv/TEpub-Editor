@@ -279,7 +279,7 @@
 
     .preview-btn.primary {
         background: var(--gradient-accent);
-        color: #fff;
+        color: var(--color-accent-contrast);
         border: none;
     }
 

@@ -55,13 +55,16 @@
         role="button"
         tabindex="0"
     >
+        <!-- 无子节点时用 class 隐藏占位，不要写内联 visibility:visible：
+             内联声明会盖过祖先的 visibility:hidden，目录层切走后
+             这个箭头会单独留在预览区上 -->
         <span
             class="expand-icon"
+            class:is-empty={!item.children?.length}
             on:click={toggle}
             on:keypress={(e) => e.key === "Enter" && toggle(e)}
             role="button"
             tabindex="0"
-            style="visibility: {item.children?.length ? 'visible' : 'hidden'}"
         >
             {expanded ? "▼" : "▶"}
         </span>
@@ -92,8 +95,8 @@
     }
 
     .node-content:hover {
-        background: #f0f0f0;
-        color: #2196f3;
+        background: var(--color-hover);
+        color: var(--color-accent);
     }
 
     .expand-icon {
@@ -103,7 +106,7 @@
         align-items: center;
         justify-content: center;
         font-size: 10px;
-        color: #999;
+        color: var(--color-muted);
         margin-right: 4px;
         cursor: pointer;
         flex-shrink: 0; /* 防止被压缩 */
@@ -112,12 +115,18 @@
     }
 
     .expand-icon:hover {
-        color: #666;
+        color: var(--color-muted);
+    }
+
+    /* 叶子节点不显示箭头，但要保留 20px 占位让标签左对齐。
+       用 visibility 而不是 display:none —— 占位宽度不能丢 */
+    .expand-icon.is-empty {
+        visibility: hidden;
     }
 
     .label {
         font-size: 15px;
-        color: #333;
+        color: var(--color-text);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -125,7 +134,7 @@
     }
 
     .node-content:hover .label {
-        color: #2196f3;
+        color: var(--color-accent);
     }
 
     /* Modern UI overrides */

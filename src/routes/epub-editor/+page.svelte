@@ -12,6 +12,7 @@
     import FontPreviewPanel from "$lib/epubEditor/FontPreviewPanel.svelte";
     import Toast from "$lib/Toast.svelte";
     import { toastInfo, toastSuccess, toastError } from "$lib/toast";
+    import { loadAppSettings, type GlobalAppSettings } from "$lib/appSettings";
     import {
         DEFAULT_FONT_PREVIEW_TEXT,
         type FontGlyphAnalyzeResult,
@@ -63,83 +64,11 @@
             }
         });
 
-        const handleMessage = (event: MessageEvent) => {
-            if (event.data && event.data.type === "previewClick") {
-                if (event.data.text) {
-                    if (event.data.context) {
-                        epubCodeEditorComponent?.selectTextWithContext(
-                            event.data.text,
-                            event.data.context,
-                        );
-                    } else {
-                        // Fallback to strict text matching
-                        epubCodeEditorComponent?.selectText(event.data.text);
-                    }
-                } else if (event.data.percent !== undefined) {
-                    // Fallback to percent
-                    epubCodeEditorComponent?.scrollToRatio(event.data.percent);
-                }
-            }
-            // NOTE: Removed 'previewSelection' handling to prevent sync loop.
-            // Selecting text in preview should NOT sync back to editor and then to preview again.
-        };
-        window.addEventListener("message", handleMessage);
-
         return () => {
             isUnmounted = true;
             unlistenClose?.();
-            window.removeEventListener("message", handleMessage);
         };
     });
-
-    // Editor -> Preview Sync
-    function handleEditorClick(line: number) {
-        const iframeWindow = previewPane?.getContentWindow();
-        if (!iframeWindow) return;
-
-        const view = epubCodeEditorComponent?.getView();
-        if (!view) return;
-
-        const lineContent = view.state.doc.line(line).text;
-        const cleanText = lineContent
-            .replace(/<[^>]+>/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-
-        if (cleanText.length < 2) return;
-
-        iframeWindow.postMessage(
-            {
-                type: "editorClickText",
-                text: cleanText,
-            },
-            "*",
-        );
-    }
-
-    let editorSelectionTimeout: any;
-    function handleEditorSelection(text: string) {
-        const iframeWindow = previewPane?.getContentWindow();
-        if (!iframeWindow) return;
-
-        if (editorSelectionTimeout) clearTimeout(editorSelectionTimeout);
-        editorSelectionTimeout = setTimeout(() => {
-            const cleanText = text
-                .replace(/<[^>]+>/g, "")
-                .replace(/\s+/g, " ")
-                .trim();
-            // Prevent flashing on short selections
-            if (!cleanText || cleanText.length < 2) return;
-
-            iframeWindow.postMessage(
-                {
-                    type: "editorSelection",
-                    text: cleanText,
-                },
-                "*",
-            );
-        }, 300);
-    }
 
     interface EpubFileNode {
         name: string;
@@ -334,6 +263,10 @@
         fontStatsError = "";
     }
 
+    // 预览滚动条开关（设置 → 通用），默认关闭
+    let appSettings: GlobalAppSettings = loadAppSettings();
+    let restoreSettingsListener: (() => void) | null = null;
+
     let showPrompt = false;
     let promptTitle = "";
     let promptValue = "";
@@ -499,25 +432,50 @@
     let multiSelectedFiles = new Set<string>();
     const MAX_HISTORY = 10;
 
-    function handleEditorScroll(event: Event) {
-        const iframeWindow = previewPane?.getContentWindow();
-        if (!iframeWindow || !editorContentDiv) return;
+    // 编辑器 -> 预览：按「点击的段落 / 选中的文字」定位，而不是按滚动比例。
+    // 滚动联动会让预览跟着手抖，且两边的换行密度不同，比例对不上位置。
+    // 预览 iframe 已被撑到正文高度、由外层 .preview-container 滚动，
+    // 所以由 PreviewPane 把命中位置换算成外层 scrollTop。
+    function revealInPreview(text: string, mode: "center" | "nearest") {
+        const clean = text.replace(/[\s ]+/g, " ").trim();
+        if (!clean) return;
+        previewPane?.revealText(clean, mode);
+    }
 
-        const target = event.target as HTMLElement;
-        const scrollTop = target.scrollTop;
-        const scrollHeight = target.scrollHeight - target.clientHeight;
+    // 用户在编辑器里点某一行：把该行的可见文字同步到预览
+    function handleEditorClick(line: number) {
+        const view = epubCodeEditorComponent?.getView();
+        if (!view) return;
+        const lineContent = view.state.doc.line(line).text;
+        const cleanText = lineContent
+            .replace(/<[^>]+>/g, " ")
+            .replace(/[\s ]+/g, " ")
+            .trim();
+        if (cleanText.length < 2) return;
+        revealInPreview(cleanText, "center");
+    }
 
-        if (scrollHeight <= 0) return;
+    // 在编辑器里拖选一段文字：预览滚动到离当前视野最近的命中处
+    let editorSelectionTimeout: ReturnType<typeof setTimeout> | null = null;
+    function handleEditorSelection(text: string) {
+        if (editorSelectionTimeout) clearTimeout(editorSelectionTimeout);
+        editorSelectionTimeout = setTimeout(() => {
+            const cleanText = text.replace(/<[^>]+>/g, "");
+            if (cleanText.replace(/[\s ]+/g, "").length < 2) return;
+            revealInPreview(cleanText, "nearest");
+        }, 300);
+    }
 
-        const scrollPercent = scrollTop / scrollHeight;
-
-        iframeWindow.postMessage(
-            {
-                type: "editorScroll",
-                percent: scrollPercent,
-            },
-            "*",
-        );
+    // 预览 -> 编辑器：点了预览里的某段文字，把编辑器定位到对应位置
+    function handlePreviewClick(payload: { text: string; context: string }) {
+        if (payload.context && payload.context.length >= 3) {
+            epubCodeEditorComponent?.selectTextWithContext(
+                payload.text,
+                payload.context,
+            );
+        } else {
+            epubCodeEditorComponent?.selectText(payload.text);
+        }
     }
 
     // HTML 判定的唯一来源：flatHtmlFiles（flattenFiles）与查找替换的
@@ -4081,6 +4039,22 @@ document.addEventListener("click", function (event) {
 
     onMount(() => {
         loadSearchHistory();
+        // 编辑器是独立窗口，设置窗口改完开关后要立刻同步过来。
+        // 自定义事件只在本窗口内冒泡，另一个 WebviewWindow 改 localStorage
+        // 时只有 storage 事件会跨窗口送达，两个都要听
+        const syncSettings = () => {
+            appSettings = loadAppSettings();
+        };
+        window.addEventListener("tepub-settings-updated", syncSettings);
+        window.addEventListener("storage", syncSettings);
+        restoreSettingsListener = () => {
+            window.removeEventListener("tepub-settings-updated", syncSettings);
+            window.removeEventListener("storage", syncSettings);
+        };
+        return () => {
+            restoreSettingsListener?.();
+            restoreSettingsListener = null;
+        };
     });
 </script>
 
@@ -4336,37 +4310,45 @@ document.addEventListener("click", function (event) {
                     </button>
                 </div>
             </div>
-            {#if activeTab === "preview"}
-                <PreviewPane
-                    bind:this={previewPane}
-                    content={previewContent}
-                    errors={previewError}
-                    hasSelectedFile={!!selectedFile}
-                />
-            {:else}
-                <div class="toc-container">
-                    {#if isTocLoading}
-                        <div class="loading toc-loading">
-                            &#23569;&#22899;&#31048;&#31095;&#20013;&#183;&#183;&#183;&#183;&#183;&#183;
-                        </div>
-                    {:else if tocList.length === 0}
-                        <div class="empty">
-                            &#26242;&#26080;&#30446;&#24405;&#25110;&#26410;&#25214;&#21040;
-                            toc.ncx
-                        </div>
-                    {:else}
-                        <div class="toc-list">
-                            {#each tocList as item}
-                                <TocNode
-                                    bind:this={tocNodeRefs[item.id]}
-                                    {item}
-                                    onSelect={handleTocClick}
-                                />
-                            {/each}
-                        </div>
-                    {/if}
+            <div class="preview-stack">
+                <div
+                    class="preview-slot"
+                    class:is-hidden={activeTab !== "preview"}
+                >
+                    <PreviewPane
+                        bind:this={previewPane}
+                        content={previewContent}
+                        errors={previewError}
+                        hasSelectedFile={!!selectedFile}
+                        onPreviewClick={handlePreviewClick}
+                        showScrollbar={appSettings.previewScrollbar}
+                    />
                 </div>
-            {/if}
+                <div class="preview-slot" class:is-hidden={activeTab !== "toc"}>
+                    <div class="toc-container">
+                        {#if isTocLoading}
+                            <div class="loading toc-loading">
+                                &#23569;&#22899;&#31048;&#31095;&#20013;&#183;&#183;&#183;&#183;&#183;&#183;
+                            </div>
+                        {:else if tocList.length === 0}
+                            <div class="empty">
+                                &#26242;&#26080;&#30446;&#24405;&#25110;&#26410;&#25214;&#21040;
+                                toc.ncx
+                            </div>
+                        {:else}
+                            <div class="toc-list">
+                                {#each tocList as item}
+                                    <TocNode
+                                        bind:this={tocNodeRefs[item.id]}
+                                        {item}
+                                        onSelect={handleTocClick}
+                                    />
+                                {/each}
+                            </div>
+                        {/if}
+                    </div>
+                </div>
+            </div>
         </aside>
     </div>
 {/if}
@@ -4433,7 +4415,7 @@ document.addEventListener("click", function (event) {
     .dialog {
         background: white;
         padding: 20px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         min-width: 300px;
     }
@@ -4446,7 +4428,7 @@ document.addEventListener("click", function (event) {
 
     .dialog-content {
         margin-bottom: 20px;
-        color: #333;
+        color: var(--color-text);
     }
 
     .dialog-actions {
@@ -4457,31 +4439,31 @@ document.addEventListener("click", function (event) {
 
     .btn {
         padding: 8px 16px;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
         border: none;
         cursor: pointer;
         font-weight: 500;
     }
 
     .btn.primary {
-        background: #2196f3;
-        color: white;
+        background: var(--color-accent);
+        color: var(--color-accent-contrast);
     }
 
     .btn.danger {
-        background: #f44336;
-        color: white;
+        background: var(--color-danger);
+        color: var(--color-accent-contrast);
     }
 
     .btn.secondary {
-        background: #e0e0e0;
-        color: #333;
+        background: var(--color-border);
+        color: var(--color-text);
     }
 
     .epub-editor {
         display: flex;
         height: 100vh;
-        background: #f5f5f5;
+        background: var(--color-surface-soft);
     }
 
     .page-loading,
@@ -4492,13 +4474,13 @@ document.addEventListener("click", function (event) {
         width: 100%;
         min-height: 100vh;
         font-size: 36px;
-        color: #888;
+        color: var(--color-muted);
         font-weight: 500;
         letter-spacing: 3px;
     }
 
     .error {
-        color: #d32f2f;
+        color: var(--color-danger);
     }
 
     .placeholder {
@@ -4508,7 +4490,7 @@ document.addEventListener("click", function (event) {
         width: 100%;
         height: 100%;
         font-size: 18px;
-        color: #999;
+        color: var(--color-muted);
         font-weight: 400;
         letter-spacing: 2px;
     }
@@ -4524,11 +4506,11 @@ document.addEventListener("click", function (event) {
 
     .editor-pane {
         flex: 1;
-        background: #fff;
+        background: var(--color-surface);
         display: flex;
         flex-direction: column;
-        border-left: 1px solid #ddd;
-        border-right: 1px solid #ddd;
+        border-left: 1px solid var(--color-border);
+        border-right: 1px solid var(--color-border);
         min-width: 0;
         min-height: 0;
         position: relative;
@@ -4546,9 +4528,9 @@ document.addEventListener("click", function (event) {
         text-align: right;
         padding-right: 12px;
         user-select: none;
-        border-right: 1px solid #e0e0e0;
+        border-right: 1px solid var(--color-border);
         min-width: 40px;
-        background: #f8f8f8;
+        background: var(--color-surface-soft);
         flex-shrink: 0;
     }
 
@@ -4587,7 +4569,7 @@ document.addEventListener("click", function (event) {
     }
 
     .code-block :global(.string) {
-        color: #0451a5;
+        color: var(--color-accent-deep);
     }
 
     .code-block :global(.comment) {
@@ -4600,7 +4582,7 @@ document.addEventListener("click", function (event) {
     }
 
     .code-block :global(.value) {
-        color: #0451a5;
+        color: var(--color-accent-deep);
     }
 
     .code-block :global(.selector) {
@@ -4623,16 +4605,48 @@ document.addEventListener("click", function (event) {
 
     .preview-pane {
         width: 320px; /* Standard Android/iPhone Width */
-        background: #fff;
+        background: var(--color-surface);
         display: flex;
         flex-direction: column;
-        border-left: 1px solid #ddd;
+        border-left: 1px solid var(--color-border);
+    }
+
+    /* 预览/目录常驻挂载、只切换显隐。
+       用 {#if} 销毁重建会让 iframe 每次回来都重量一次高度，
+       外层滚动条先消失再出现，肉眼就是「闪一下」 */
+    .preview-stack {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    .preview-slot {
+        grid-area: 1 / 1;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* 用 visibility 而不是 display:none —— 后者让 iframe 脱离布局，
+       切回来时整篇重新排版，书页高度先短后长，滚动条会闪一下 */
+    .preview-slot.is-hidden {
+        visibility: hidden;
+        pointer-events: none;
+    }
+
+    /* 兜底：隐藏层里的元素若自带 visibility: visible（内联或组件内样式），
+       会盖过继承来的 hidden 单独画在预览区上（目录树的展开箭头就踩过）。
+       后代一律压住，显示回来时选择器失配，自然恢复 */
+    .preview-slot.is-hidden :global(*) {
+        visibility: hidden !important;
     }
 
     .preview-header {
         height: 40px; /* Matched with tabs-bar */
-        background: #fafafa;
-        border-bottom: 1px solid #eee;
+        background: var(--color-surface-soft);
+        border-bottom: 1px solid var(--color-border);
         display: flex;
         align-items: center;
         box-sizing: border-box;
@@ -4649,7 +4663,7 @@ document.addEventListener("click", function (event) {
         border: none;
         background: transparent;
         font-size: 16px; /* Matched with tree-header h3 */
-        color: #666;
+        color: var(--color-muted);
         cursor: pointer;
         border-bottom: 2px solid transparent;
         transition: all 0.2s;
@@ -4657,20 +4671,20 @@ document.addEventListener("click", function (event) {
     }
 
     .tab:hover {
-        background: #f0f0f0;
-        color: #333;
+        background: var(--color-hover);
+        color: var(--color-text);
     }
 
     .tab.active {
-        color: #2196f3;
-        border-bottom: 2px solid #2196f3;
-        background: #fff;
+        color: var(--color-accent);
+        border-bottom: 2px solid var(--color-accent);
+        background: var(--color-surface);
     }
 
     .toc-container {
         flex: 1;
         overflow-y: auto;
-        background: #fff;
+        background: var(--color-surface);
         padding: 0;
     }
 
@@ -4683,7 +4697,7 @@ document.addEventListener("click", function (event) {
     .toc-container .loading {
         padding: 20px;
         text-align: center;
-        color: #999;
+        color: var(--color-muted);
         font-size: 14px;
     }
 
@@ -4693,7 +4707,7 @@ document.addEventListener("click", function (event) {
         justify-content: center;
         height: 100%;
         width: 100%;
-        color: #999;
+        color: var(--color-muted);
         font-size: 14px;
     }
 
@@ -4703,16 +4717,16 @@ document.addEventListener("click", function (event) {
     }
 
     ::-webkit-scrollbar-track {
-        background: #f1f1f1;
+        background: var(--color-surface-soft);
     }
 
     ::-webkit-scrollbar-thumb {
-        background: #888;
-        border-radius: 4px;
+        background: var(--color-muted);
+        border-radius: var(--radius-xs);
     }
 
     ::-webkit-scrollbar-thumb:hover {
-        background: #555;
+        background: var(--color-text-soft);
     }
 
     .image-preview-container {
@@ -4721,7 +4735,7 @@ document.addEventListener("click", function (event) {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: #f0f0f0;
+        background: var(--color-hover);
         overflow: auto;
         padding: 20px;
         height: 100%;
@@ -4730,13 +4744,13 @@ document.addEventListener("click", function (event) {
     .image-preview-container img {
         max-width: 100%;
         max-height: 100%;
-        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-        background-color: #fff;
+        box-shadow: var(--shadow-sm);
+        background-color: var(--color-surface);
         background-image:
-            linear-gradient(45deg, #eee 25%, transparent 25%),
-            linear-gradient(-45deg, #eee 25%, transparent 25%),
-            linear-gradient(45deg, transparent 75%, #eee 75%),
-            linear-gradient(-45deg, transparent 75%, #eee 75%);
+            linear-gradient(45deg, var(--color-border) 25%, transparent 25%),
+            linear-gradient(-45deg, var(--color-border) 25%, transparent 25%),
+            linear-gradient(45deg, transparent 75%, var(--color-border) 75%),
+            linear-gradient(-45deg, transparent 75%, var(--color-border) 75%);
         background-size: 20px 20px;
         background-position:
             0 0,
@@ -4746,7 +4760,7 @@ document.addEventListener("click", function (event) {
     }
 
     .loading-inline {
-        color: #666;
+        color: var(--color-muted);
         font-size: 14px;
     }
 
@@ -4765,24 +4779,24 @@ document.addEventListener("click", function (event) {
 
     .prompt-dialog {
         background: white;
-        border-radius: 12px;
+        border-radius: var(--radius-md);
         padding: 24px;
         min-width: 320px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        box-shadow: var(--shadow-pop);
     }
 
     .prompt-title {
         font-size: 16px;
         font-weight: 600;
         margin-bottom: 16px;
-        color: #333;
+        color: var(--color-text);
     }
 
     .prompt-input {
         width: 100%;
         padding: 10px 12px;
-        border: 1px solid #ddd;
-        border-radius: 6px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
         font-size: 14px;
         margin-bottom: 16px;
         box-sizing: border-box;
@@ -4790,7 +4804,7 @@ document.addEventListener("click", function (event) {
 
     .prompt-input:focus {
         outline: none;
-        border-color: #4a90d9;
+        border-color: var(--color-accent);
         box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
     }
 
@@ -4803,7 +4817,7 @@ document.addEventListener("click", function (event) {
     .prompt-btn {
         padding: 8px 16px;
         border: none;
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         font-size: 14px;
         cursor: pointer;
         transition: all 0.2s;
@@ -4815,17 +4829,17 @@ document.addEventListener("click", function (event) {
     }
 
     .prompt-btn.cancel {
-        background: #f0f0f0;
-        color: #666;
+        background: var(--color-hover);
+        color: var(--color-muted);
     }
 
     .prompt-btn.cancel:hover {
-        background: #e0e0e0;
+        background: var(--color-border);
     }
 
     .prompt-btn.confirm {
-        background: #4a90d9;
-        color: white;
+        background: var(--color-accent);
+        color: var(--color-accent-contrast);
     }
 
     .prompt-btn.confirm:hover {
@@ -4845,7 +4859,7 @@ document.addEventListener("click", function (event) {
     }
 
     .preview-header {
-        background: rgba(255, 255, 255, 0.78);
+        background: var(--color-surface-raised);
         border-bottom: 1px solid var(--color-border);
         backdrop-filter: blur(18px) saturate(1.12);
     }
@@ -4858,7 +4872,7 @@ document.addEventListener("click", function (event) {
         background: var(--color-surface);
         border-left: 0;
         border-right: 1px solid var(--color-border);
-        box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.68);
+        box-shadow: inset 1px 0 0 var(--color-surface-raised);
     }
 
     .editor-content {
@@ -4867,7 +4881,7 @@ document.addEventListener("click", function (event) {
 
     .preview-pane {
         width: 340px;
-        background: rgba(255, 255, 255, 0.76);
+        background: var(--color-surface-raised);
         border-left: 1px solid var(--color-border);
         box-shadow: -10px 0 30px rgba(23, 36, 52, 0.05);
         backdrop-filter: blur(16px);
@@ -4902,7 +4916,7 @@ document.addEventListener("click", function (event) {
     }
 
     .toc-container {
-        background: rgba(255, 255, 255, 0.72);
+        background: var(--color-surface-raised);
         border-radius: var(--radius-md);
     }
 
@@ -4942,7 +4956,7 @@ document.addEventListener("click", function (event) {
     .dialog,
     .prompt-dialog {
         background: var(--color-surface-raised);
-        border: 1px solid rgba(255, 255, 255, 0.78);
+        border: 1px solid var(--color-surface-raised);
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-pop);
         color: var(--color-text);
@@ -4968,7 +4982,11 @@ document.addEventListener("click", function (event) {
     .prompt-btn {
         border-radius: var(--radius-sm);
         border: 1px solid var(--color-border);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: linear-gradient(
+            180deg,
+            var(--color-surface),
+            var(--color-surface-soft)
+        );
         color: var(--color-text-soft);
         transition:
             background var(--transition-fast),
@@ -4990,27 +5008,27 @@ document.addEventListener("click", function (event) {
     .prompt-btn.confirm {
         background: var(--gradient-accent);
         border-color: transparent;
-        color: #fff;
-        box-shadow: 0 10px 22px rgba(22, 119, 184, 0.2);
+        color: var(--color-accent-contrast);
+        box-shadow: none;
     }
 
     .btn.danger,
     .prompt-btn.confirm.delete {
         background: var(--gradient-danger);
         border-color: transparent;
-        color: #fff;
+        color: var(--color-surface);
     }
 
     .btn.secondary,
     .prompt-btn.cancel {
-        background: rgba(255, 255, 255, 0.86);
+        background: var(--color-surface-raised);
         color: var(--color-text-soft);
     }
 
     .prompt-input {
         border-color: var(--color-border);
         border-radius: var(--radius-sm);
-        background: rgba(255, 255, 255, 0.94);
+        background: var(--color-surface);
         color: var(--color-text);
     }
 
@@ -5024,7 +5042,11 @@ document.addEventListener("click", function (event) {
     }
 
     ::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, #bacbda, #93a8bb);
+        background: linear-gradient(
+            180deg,
+            var(--color-border-strong),
+            var(--color-border)
+        );
         border-radius: 999px;
     }
 

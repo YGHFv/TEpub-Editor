@@ -86,7 +86,7 @@
         display: flex;
         align-items: center;
         gap: 2px;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
         line-height: 1.4;
     }
     .toc-row.current {
@@ -108,7 +108,7 @@
         color: var(--rd-text-soft, #888);
         cursor: pointer;
         font-size: 10px;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
     }
     .toc-toggle:hover {
         background: rgba(0, 0, 0, 0.06);
@@ -127,7 +127,7 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
     }
     .toc-label:hover {
         background: rgba(0, 0, 0, 0.04);

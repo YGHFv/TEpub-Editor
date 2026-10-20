@@ -4,7 +4,7 @@ import {
   writeScopedSettingsRaw,
 } from "$lib/webAccount";
 
-export type UiTheme = "modern" | "classic" | "dark";
+export type UiTheme = "light" | "dark";
 export type AiProviderKind = "text" | "image";
 
 export interface TocRegexRule {
@@ -49,6 +49,9 @@ export interface GlobalAppSettings {
   closeLibraryOnEpubOpen: boolean;
   closeLibraryOnToolboxOpen: boolean;
   closeToolboxOnToolOpen: boolean;
+  /** EPUB 编辑/阅读预览是否显示滚动条。默认隐藏：滚动条会占掉右侧 8px，
+      书页就不在预览列正中，观感很别扭 */
+  previewScrollbar: boolean;
   txtEditorCloseAction: "exit" | "library";
   aiProofing: AiProofingConfig;
   aiProviders: AiProviderConfig[];
@@ -94,7 +97,7 @@ export const DEFAULT_TOC_REGEX_RULES: TocRegexRule[] = [
 ];
 
 export const DEFAULT_APP_SETTINGS: GlobalAppSettings = {
-  uiTheme: "modern",
+  uiTheme: "light",
   assocEpubRead: false,
   assocEpubEdit: false,
   assocTxtMakeEpub: false,
@@ -102,6 +105,7 @@ export const DEFAULT_APP_SETTINGS: GlobalAppSettings = {
   closeLibraryOnEpubOpen: true,
   closeLibraryOnToolboxOpen: true,
   closeToolboxOnToolOpen: true,
+  previewScrollbar: false,
   txtEditorCloseAction: "library",
   aiProofing: { ...DEFAULT_AI_PROOFING },
   aiProviders: [],
@@ -212,7 +216,13 @@ export function providerToProofingConfig(
 }
 
 function isUiTheme(value: unknown): value is UiTheme {
-  return value === "modern" || value === "classic" || value === "dark";
+  return value === "light" || value === "dark";
+}
+
+function migrateUiTheme(value: unknown): UiTheme | null {
+  if (value === "modern" || value === "classic") return "light";
+  if (isUiTheme(value)) return value;
+  return null;
 }
 
 function isCloseAction(value: unknown): value is "exit" | "library" {
@@ -244,9 +254,7 @@ export function normalizeAppSettings(
   const settings: GlobalAppSettings = {
     ...DEFAULT_APP_SETTINGS,
     ...raw,
-    uiTheme: isUiTheme(raw.uiTheme)
-      ? raw.uiTheme
-      : DEFAULT_APP_SETTINGS.uiTheme,
+    uiTheme: migrateUiTheme(raw.uiTheme) ?? DEFAULT_APP_SETTINGS.uiTheme,
     assocEpubRead: Boolean(raw.assocEpubRead),
     assocEpubEdit: Boolean(raw.assocEpubEdit),
     assocTxtMakeEpub: Boolean(raw.assocTxtMakeEpub),
@@ -266,6 +274,8 @@ export function normalizeAppSettings(
       typeof raw.closeToolboxOnToolOpen === "boolean"
         ? raw.closeToolboxOnToolOpen
         : true,
+    previewScrollbar:
+      typeof raw.previewScrollbar === "boolean" ? raw.previewScrollbar : false,
     txtEditorCloseAction: isCloseAction(raw.txtEditorCloseAction)
       ? raw.txtEditorCloseAction
       : "library",
@@ -357,14 +367,19 @@ export function saveAppSettings(
   return normalized;
 }
 
+/** 「预览是否显示滚动条」，默认关闭 */
+export function isPreviewScrollbarEnabled(): boolean {
+  return loadAppSettings().previewScrollbar === true;
+}
+
 export function applyTheme(theme: UiTheme) {
   if (typeof document === "undefined") return;
-  document.documentElement.setAttribute("data-theme", theme);
+  const normalized = migrateUiTheme(theme) ?? "light";
+  document.documentElement.setAttribute("data-theme", normalized);
   const meta = document.querySelector('meta[name="theme-color"]');
   const colors: Record<UiTheme, string> = {
-    modern: "#eef4f8",
-    classic: "#f3f3f3",
+    light: "#eef4f8",
     dark: "#151b23",
   };
-  if (meta) meta.setAttribute("content", colors[theme]);
+  if (meta) meta.setAttribute("content", colors[normalized]);
 }

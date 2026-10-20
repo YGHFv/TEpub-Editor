@@ -492,7 +492,7 @@
         white-space: nowrap;
         overflow: visible;
         padding: 2px 10px 2px 4px;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         transition:
             background 0.15s,
             box-shadow 0.15s;
@@ -542,7 +542,7 @@
         background: transparent;
         cursor: col-resize;
         z-index: 3;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         transition: background 0.12s;
     }
 
@@ -612,7 +612,7 @@
         justify-content: center;
         width: 36px;
         height: 50px;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         overflow: hidden;
         background: var(--color-surface-soft);
     }
@@ -649,15 +649,15 @@
         -webkit-mask-image: linear-gradient(
             90deg,
             transparent 0,
-            #000 8px,
-            #000 calc(100% - 8px),
+            var(--color-text) 8px,
+            var(--color-text) calc(100% - 8px),
             transparent 100%
         );
         mask-image: linear-gradient(
             90deg,
             transparent 0,
-            #000 8px,
-            #000 calc(100% - 8px),
+            var(--color-text) 8px,
+            var(--color-text) calc(100% - 8px),
             transparent 100%
         );
     }
@@ -701,7 +701,7 @@
     /* 已激活筛选的标签：实色高亮，区分于普通可点击标签 */
     .col-tag.active {
         background: var(--color-accent);
-        color: #fff;
+        color: var(--color-accent-contrast);
         border-color: var(--color-accent);
     }
 

@@ -66,11 +66,11 @@
 <style>
     /* 基础按钮样式（与页面同源，保证拆出后视觉一致） */
     button {
-        height: 34px;
+        height: var(--control-height);
         min-width: 40px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        background: #fff;
+        border-radius: var(--radius-xs);
+        border: 1px solid var(--color-border-strong);
+        background: var(--color-surface);
         font-size: 18px;
         display: flex;
         align-items: center;
@@ -78,21 +78,21 @@
         outline: none;
         transition: 0.1s;
     }
-    button:active {
-        background: #eee;
-        transform: scale(0.96);
+    button:active:not(:disabled) {
+        background: var(--color-active);
+        transform: translateY(0.5px);
     }
 
     .toolbar {
         padding-top: env(safe-area-inset-top);
-        background: #f3f3f3;
+        background: var(--color-surface-soft);
         height: 44px;
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding-left: 10px;
         padding-right: 10px;
-        border-bottom: 1px solid #ddd;
+        border-bottom: 1px solid var(--color-border);
         z-index: 100;
     }
     .btn-group {
@@ -105,26 +105,14 @@
         margin-left: auto;
     }
     .btn-primary {
-        background: #0066b8;
-        color: #fff;
-        border: none;
+        background: var(--gradient-accent);
+        color: var(--color-accent-contrast);
+        border-color: transparent;
     }
     .btn-save-modified {
-        background: #d32f2f;
-        color: #fff;
-        border: none;
-        animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-        0% {
-            opacity: 1;
-        }
-        50% {
-            opacity: 0.7;
-        }
-        100% {
-            opacity: 1;
-        }
+        background: var(--color-danger);
+        color: var(--color-accent-contrast);
+        border-color: transparent;
     }
 
     .proof-tool-btn {
@@ -150,7 +138,7 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;
@@ -183,7 +171,7 @@
     .toolbar {
         height: 52px;
         padding: env(safe-area-inset-top) 14px 0;
-        background: rgba(255, 255, 255, 0.78);
+        background: var(--color-surface-raised);
         border-bottom: 1px solid var(--color-border);
         box-shadow: var(--shadow-xs);
         backdrop-filter: blur(18px) saturate(1.15);
@@ -196,20 +184,19 @@
     .btn-primary {
         background: var(--gradient-accent);
         border-color: transparent;
-        color: #fff;
-        box-shadow: 0 10px 22px rgba(22, 119, 184, 0.2);
+        color: var(--color-accent-contrast);
+        box-shadow: none;
     }
 
     .btn-secondary,
     .btn-save-default {
-        background: rgba(255, 255, 255, 0.84);
+        background: var(--color-surface-raised);
         color: var(--color-text-soft);
     }
 
     .btn-save-modified {
         background: var(--gradient-danger);
         border-color: transparent;
-        color: #fff;
-        animation: pulse 2s infinite;
+        color: var(--color-surface);
     }
 </style>

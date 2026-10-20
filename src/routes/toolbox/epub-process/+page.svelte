@@ -396,8 +396,8 @@
 <style>
     :global(body) {
         margin: 0;
-        background: #edf1f5;
-        color: #172033;
+        background: var(--color-canvas);
+        color: var(--color-text);
         font-family: Inter, "Microsoft YaHei", sans-serif;
     }
     button {
@@ -408,9 +408,10 @@
     }
     .process-page {
         min-height: 100dvh;
+        display: flow-root;
     }
     .kicker {
-        color: #7b899d;
+        color: var(--color-muted);
         font-size: 9px;
         font-weight: 800;
         letter-spacing: 0.15em;
@@ -418,14 +419,14 @@
     .secondary {
         min-height: 36px;
         padding: 0 16px;
-        border-radius: 7px;
+        border-radius: var(--radius-sm);
         font-size: 12px;
         font-weight: 800;
         cursor: pointer;
     }
     .secondary {
-        border: 1px solid #d1dae5;
-        background: #fff;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
     }
     button:disabled {
         cursor: wait;
@@ -452,10 +453,10 @@
         align-items: center;
         gap: 18px;
         padding: 22px;
-        border: 1px solid #d8e1eb;
-        border-radius: 12px;
-        background: #fff;
-        box-shadow: 0 8px 25px rgba(42, 62, 84, 0.05);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
+        box-shadow: none;
     }
     .intro-card > div:nth-child(2) {
         min-width: 0;
@@ -465,9 +466,9 @@
         height: 64px;
         display: grid;
         place-items: center;
-        border-radius: 14px;
-        background: #e4f1f8;
-        color: #17699a;
+        border-radius: var(--radius-md);
+        background: var(--color-accent-quiet);
+        color: var(--color-accent);
         font-size: 12px;
         font-weight: 900;
         letter-spacing: 0.08em;
@@ -479,7 +480,7 @@
     .intro-card p {
         margin: 0;
         overflow-wrap: anywhere;
-        color: #46566c;
+        color: var(--color-text-soft);
         font-size: 13px;
         line-height: 1.55;
     }
@@ -487,7 +488,7 @@
         display: block;
         margin-top: 5px;
         overflow-wrap: anywhere;
-        color: #8491a2;
+        color: var(--color-muted);
         font-size: 11px;
     }
     .output-note {
@@ -495,14 +496,14 @@
         display: grid;
         gap: 5px;
         padding-left: 20px;
-        border-left: 1px solid #e0e6ed;
+        border-left: 1px solid var(--color-border);
     }
     .output-note span {
-        color: #8491a2;
+        color: var(--color-muted);
         font-size: 10px;
     }
     .output-note strong {
-        color: #31516b;
+        color: var(--color-text-soft);
         font-family: ui-monospace, Consolas, monospace;
         font-size: 11px;
     }
@@ -514,9 +515,9 @@
         justify-content: space-between;
         gap: 20px;
         padding: 15px 18px;
-        border: 1px solid #d8e1eb;
-        border-radius: 9px;
-        background: #fff;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
     }
     .format-panel > div:first-child {
         display: grid;
@@ -526,31 +527,31 @@
         font-size: 12px;
     }
     .format-panel span {
-        color: #8290a2;
+        color: var(--color-muted);
         font-size: 10px;
     }
     .segments {
         display: flex;
         gap: 3px;
         padding: 3px;
-        border: 1px solid #d5dee8;
-        border-radius: 7px;
-        background: #f5f7fa;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-soft);
     }
     .segments button {
         min-width: 66px;
         padding: 6px 10px;
         border: 0;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
         background: transparent;
-        color: #6b7b90;
+        color: var(--color-muted);
         font-size: 11px;
         cursor: pointer;
     }
     .segments button.active {
-        background: #fff;
-        color: #17699a;
-        box-shadow: 0 1px 4px rgba(28, 58, 84, 0.12);
+        background: var(--color-surface);
+        color: var(--color-accent);
+        box-shadow: var(--shadow-xs);
         font-weight: 800;
     }
     .drop-zone {
@@ -563,22 +564,22 @@
         justify-content: center;
         gap: 10px;
         border: 1px dashed #9eb1c7;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.78);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-raised);
         cursor: pointer;
         transition: 0.18s ease;
     }
     .drop-zone:hover,
     .drop-zone.drag-active {
-        border-color: #17699a;
-        background: #fff;
-        box-shadow: 0 10px 32px rgba(42, 74, 103, 0.1);
+        border-color: var(--color-accent);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-sm);
     }
     .drop-zone strong {
         font-size: 18px;
     }
     .drop-zone > span:not(.upload-icon):not(.choose):not(.spinner) {
-        color: #728197;
+        color: var(--color-muted);
         font-size: 12px;
     }
     .features {
@@ -592,20 +593,20 @@
         grid-template-columns: 36px minmax(0, 1fr);
         gap: 2px 10px;
         padding: 14px 18px;
-        border: 1px solid #d8e1eb;
-        border-radius: 9px;
-        background: #fff;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
     }
     .features b {
         grid-row: 1 / 3;
-        color: #17699a;
+        color: var(--color-accent);
         font-size: 11px;
     }
     .features strong {
         font-size: 13px;
     }
     .features span {
-        color: #758398;
+        color: var(--color-muted);
         font-size: 11px;
         line-height: 1.45;
     }
@@ -615,25 +616,25 @@
         display: grid;
         place-items: center;
         border-radius: 50%;
-        background: #e4f1f8;
-        color: #17699a;
+        background: var(--color-accent-quiet);
+        color: var(--color-accent);
         font-size: 28px;
         font-weight: 300;
     }
     .choose {
         margin-top: 8px;
         padding: 8px 17px;
-        border-radius: 6px;
-        background: #17699a;
-        color: #fff;
+        border-radius: var(--radius-xs);
+        background: var(--color-accent);
+        color: var(--color-accent-contrast);
         font-size: 11px;
         font-weight: 800;
     }
     .spinner {
         width: 28px;
         height: 28px;
-        border: 3px solid #d7e2ec;
-        border-top-color: #17699a;
+        border: 3px solid var(--color-border);
+        border-top-color: var(--color-accent);
         border-radius: 50%;
         animation: spin 0.75s linear infinite;
     }
@@ -648,9 +649,9 @@
         }
     }
     .results-panel {
-        border: 1px solid #d8e1eb;
-        border-radius: 10px;
-        background: #fff;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
         overflow: hidden;
     }
     .results-head {
@@ -677,7 +678,7 @@
         gap: 11px;
         padding: 13px;
         border: 1px solid #cce5d7;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         background: #f9fffb;
     }
     .result-list article.unchanged {
@@ -686,7 +687,7 @@
     }
     .result-list article.failed {
         border-color: #eccaca;
-        background: #fffafa;
+        background: var(--color-danger-soft);
     }
     .result-list article.pending {
         border-color: #d8e1e9;
@@ -707,7 +708,7 @@
         color: #c32b2b;
     }
     .unchanged .state {
-        background: #edf1f5;
+        background: var(--color-canvas);
         color: #68778b;
     }
     .result-copy {
@@ -734,9 +735,9 @@
         min-height: 32px;
         padding: 0 12px;
         border: 1px solid #b9cfdd;
-        border-radius: 6px;
-        background: #fff;
-        color: #17699a;
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        color: var(--color-accent);
         font-size: 10px;
         font-weight: 800;
         cursor: pointer;
@@ -754,7 +755,7 @@
         .tool-mark {
             width: 50px;
             height: 50px;
-            border-radius: 11px;
+            border-radius: var(--radius-md);
         }
         .intro-card h2 {
             font-size: 18px;
@@ -763,7 +764,7 @@
             grid-column: 1 / -1;
             padding: 10px 0 0;
             border-left: 0;
-            border-top: 1px solid #e0e6ed;
+            border-top: 1px solid var(--color-border);
         }
         .format-panel {
             align-items: flex-start;

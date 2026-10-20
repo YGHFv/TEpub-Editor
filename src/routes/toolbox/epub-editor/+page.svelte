@@ -15,7 +15,12 @@
     } from "$lib/findReplace";
     import TocNode from "$lib/TocNode.svelte";
     import ToolImportPage from "$lib/ToolImportPage.svelte";
+    import {
+        describePreviewClick,
+        revealTextInPreview,
+    } from "$lib/epubEditor/previewSync";
     import { hasUnsavedEpubChanges } from "$lib/unsavedChanges";
+    import { loadAppSettings, type GlobalAppSettings } from "$lib/appSettings";
     import {
         EPUB_FIND_HISTORY_KEY,
         EPUB_REPLACE_HISTORY_KEY,
@@ -107,6 +112,7 @@
     let activeTab: "files" | "metadata" = "files";
     let rightTab: "preview" | "toc" = "preview";
     let restorePageOverflow: (() => void) | null = null;
+    let restoreSettingsListener: (() => void) | null = null;
     let expandedFolders = new Set<string>();
     let multiSelectedFiles = new Set<string>();
     let selectedTreePath = "";
@@ -129,6 +135,11 @@
     let currentMatchInfo: { path: string; from: number; to: number } | null =
         null;
     let previewBuildId = 0;
+    // 预览滚动条开关（设置 → 通用），默认关闭
+    let appSettings: GlobalAppSettings = loadAppSettings();
+    let previewFrameHeight = 0;
+    let previewIframeEl: HTMLIFrameElement | null = null;
+    let previewBodyEl: HTMLDivElement | null = null;
     let readerPreviewFontSize = 18;
     let readerTocCollapsed = false;
     $: readerMode = $page.url.searchParams.get("mode") === "reader";
@@ -145,6 +156,182 @@
     $: currentPreviewTitle = selectedFile
         ? fileTitleMap.get(selectedFile.path) || selectedFile.name
         : doc?.metadata.title || doc?.fileName || "未选择章节";
+
+    /* 刻意不在 previewHtml 清空时把 previewFrameHeight 归零：
+       换章节时 previewHtml 会先被置空再填新内容，归零会让新 iframe
+       先以 min-height 挂载、量完再长高，外层滚动条就闪一下。
+       保留上一次高度，新章节挂载即占住位置，只做一次高度修正。 */
+
+    /* 让 iframe 长到内容高度、由外层预览区统一滚动。
+       否则滚动条会画在白色书页框内部（iframe 自有滚动条），观感很差。 */
+    function measurePreviewFrame() {
+        const frame = previewIframeEl;
+        if (!frame) return;
+        let innerDoc: Document | null = null;
+        try {
+            innerDoc = frame.contentDocument;
+        } catch {
+            innerDoc = null;
+        }
+        const innerBody = innerDoc?.body;
+        if (!innerBody) return;
+        // 用 body 的 scrollHeight —— 它是内容真实高度；
+        // documentElement.scrollHeight 的下限是 iframe 视口，量不出「内容更短」。
+        // 但 scrollHeight 不含 body 自身外边距，书的 CSS 常给 body 上下留 8px，
+        // 漏掉这 16px 会让 iframe 比内容矮一截，章节末尾被裁、正文还能内部滚
+        const bodyStyle = getComputedStyle(innerBody);
+        const verticalMargin =
+            (parseFloat(bodyStyle.marginTop) || 0) +
+            (parseFloat(bodyStyle.marginBottom) || 0);
+        const contentHeight =
+            Math.max(innerBody.scrollHeight || 0, innerBody.offsetHeight || 0) +
+            verticalMargin;
+        if (contentHeight <= 0) return;
+        // 短章节（封面这类）也要占满可视高度，否则白页框下会空出一条灰底；
+        // 长章节则用实测内容高度，让外层预览区滚动而不是 iframe 自己滚。
+        const host = frame.closest<HTMLElement>(".preview-body");
+        // 目录页签下预览区是 display:none，量不到真实高度；
+        // 此时保留上一次的高度，避免切回来时先缩再长、滚动条闪一下
+        if (host && host.clientHeight <= 0) return;
+        let availableHeight = 0;
+        if (host) {
+            const hostStyle = getComputedStyle(host);
+            // 外层边框是书页框（.mobile-frame）的，iframe 自己在框内，
+            // 所以要从可用高度里扣掉父级边框和预览区内边距
+            const shellStyle = frame.parentElement
+                ? getComputedStyle(frame.parentElement)
+                : null;
+            const verticalChrome =
+                parseFloat(hostStyle.paddingTop) +
+                parseFloat(hostStyle.paddingBottom) +
+                parseFloat(shellStyle?.borderTopWidth || "0") +
+                parseFloat(shellStyle?.borderBottomWidth || "0");
+            availableHeight = Math.floor(host.clientHeight - verticalChrome);
+        }
+        previewFrameHeight = Math.max(contentHeight, availableHeight);
+    }
+
+    // 图片解码、字体回流都会改变高度，分几个时间点补测
+    function schedulePreviewMeasure() {
+        measurePreviewFrame();
+        requestAnimationFrame(measurePreviewFrame);
+        setTimeout(measurePreviewFrame, 80);
+        setTimeout(measurePreviewFrame, 320);
+        setTimeout(measurePreviewFrame, 900);
+    }
+
+    /* 编辑器 -> 预览：按「点击的段落 / 选中的文字」定位，而不是按滚动比例。
+       滚动联动会让预览跟着抖动，两边换行密度也不同，百分比对不上位置。
+       预览 iframe 已被撑到正文高度、由 .preview-body 滚动，
+       所以把命中位置换算成外层 scrollTop（由 previewSync 完成）。 */
+    function revealInPreview(text: string, mode: "center" | "nearest") {
+        const clean = text.replace(/[\s ]+/g, " ").trim();
+        if (!clean) return;
+        revealTextInPreview(previewBodyEl, previewIframeEl, clean, { mode });
+    }
+
+    function handleEditorClick(line: number) {
+        const view = epubCodeEditorComponent?.getView();
+        if (!view) return;
+        const cleanText = view.state.doc
+            .line(line)
+            .text.replace(/<[^>]+>/g, " ")
+            .replace(/[\s ]+/g, " ")
+            .trim();
+        if (cleanText.length < 2) return;
+        revealInPreview(cleanText, "center");
+    }
+
+    let editorSelectionTimeout: ReturnType<typeof setTimeout> | null = null;
+    function handleEditorSelection(text: string) {
+        if (editorSelectionTimeout) clearTimeout(editorSelectionTimeout);
+        editorSelectionTimeout = setTimeout(() => {
+            const plain = text.replace(/<[^>]+>/g, "");
+            if (plain.replace(/[\s ]+/g, "").length < 2) return;
+            revealInPreview(plain, "nearest");
+        }, 300);
+    }
+
+    /* 预览 -> 编辑器：点了预览里的某段文字，把编辑器定位过去。
+       有块级上下文时用上下文匹配，能区分重复的短句。 */
+    function handlePreviewClick(payload: { text: string; context: string }) {
+        if (payload.context && payload.context.length >= 3) {
+            epubCodeEditorComponent?.selectTextWithContext(
+                payload.text,
+                payload.context,
+            );
+        } else {
+            epubCodeEditorComponent?.selectText(payload.text);
+        }
+    }
+
+    /* 正文内部的尺寸一变就重量高度。
+       只靠几个固定 setTimeout 会漏掉「晚到的图片把内容撑高」：
+       iframe 停在旧高度，内部就长出滚动条，而且再也不会消失。 */
+    let previewContentObserver: ResizeObserver | null = null;
+    function watchPreviewContent() {
+        previewContentObserver?.disconnect();
+        const innerBody = previewIframeEl?.contentDocument?.body;
+        if (!innerBody || typeof ResizeObserver === "undefined") return;
+        previewContentObserver = new ResizeObserver(() =>
+            measurePreviewFrame(),
+        );
+        previewContentObserver.observe(innerBody);
+    }
+
+    function trackPreviewWidth(node: HTMLElement) {
+        let lastWidth = node.clientWidth;
+        const observer = new ResizeObserver(() => {
+            // 把可视高度写到 CSS 变量，供 iframe 在实测完成前先占满一屏，
+            // 避免首帧只有一个默认高度、随后再长高的跳动
+            const style = getComputedStyle(node);
+            const inner =
+                node.clientHeight -
+                parseFloat(style.paddingTop) -
+                parseFloat(style.paddingBottom);
+            if (inner > 0) node.style.setProperty("--preview-h", `${inner}px`);
+
+            const width = node.clientWidth;
+            if (width <= 0) return;
+            // 从不可见/零宽恢复时，lastWidth 还是旧值，差值会超过阈值，
+            // 自然走进下面的补测分支
+            if (Math.abs(width - lastWidth) < 2) return;
+            lastWidth = width;
+            schedulePreviewMeasure();
+        });
+        observer.observe(node);
+        return {
+            destroy: () => {
+                observer.disconnect();
+                previewContentObserver?.disconnect();
+                previewContentObserver = null;
+            },
+        };
+    }
+
+    /* 预览点击 -> 编辑器定位。每次换章节都要重新绑到新文档上 */
+    let unbindPreviewClick: (() => void) | null = null;
+    function bindPreviewClickHandler() {
+        unbindPreviewClick?.();
+        unbindPreviewClick = null;
+        const innerDoc = previewIframeEl?.contentDocument;
+        if (!innerDoc) return;
+        const handler = (event: Event) => {
+            const payload = describePreviewClick(
+                event.target as Element | null,
+            );
+            if (payload) handlePreviewClick(payload);
+        };
+        innerDoc.addEventListener("click", handler, true);
+        unbindPreviewClick = () =>
+            innerDoc.removeEventListener("click", handler, true);
+    }
+
+    function handlePreviewFrameLoad() {
+        schedulePreviewMeasure();
+        watchPreviewContent();
+        bindPreviewClickHandler();
+    }
 
     $: dirty = editorText !== savedEditorText;
     $: hasUnsavedChanges = hasUnsavedEpubChanges(
@@ -544,6 +731,17 @@
             document.body.style.overflow = bodyOverflow;
             document.documentElement.style.overflow = htmlOverflow;
         };
+        // 编辑器常驻在独立窗口/标签页里，改完设置回来要立刻生效。
+        // 自定义事件只在本窗口冒泡，跨窗口改 localStorage 只有 storage 事件会送达
+        const syncSettings = () => {
+            appSettings = loadAppSettings();
+        };
+        window.addEventListener("tepub-settings-updated", syncSettings);
+        window.addEventListener("storage", syncSettings);
+        restoreSettingsListener = () => {
+            window.removeEventListener("tepub-settings-updated", syncSettings);
+            window.removeEventListener("storage", syncSettings);
+        };
     });
 
     onDestroy(() => {
@@ -551,6 +749,7 @@
         revokeImagePreviewUrl();
         revokeCoverPreviewUrl();
         restorePageOverflow?.();
+        restoreSettingsListener?.();
     });
 
     async function loadEpubFile(file: File) {
@@ -1243,6 +1442,11 @@
       html { overflow-x: hidden; }
       body { box-sizing: border-box; max-width: ${bodyMaxWidth}; margin: 0 auto; padding: ${bodyPadding}; font-size: ${bodyFontSize}; line-height: 1.8; overflow-x: hidden; }
       img, svg, video { max-width: 100%; height: auto; }
+      /* 滚动统一交给外层 .preview-body。iframe 在过渡高度上会短暂出现内部
+         滚动条，它把正文宽度挤窄 ~15px、文字重排后内容反而更高，
+         量出的高度永远追不上，那条滚动条就会「闪出来不消失」。 */
+      html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+      ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
       .tepub-footnote-backdrop { position: fixed; inset: 0; z-index: 9998; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background: rgba(15, 23, 42, .72); }
       .tepub-footnote-dialog { position: relative; width: min(90vw, 720px); max-height: 88vh; overflow: auto; padding: 16px; box-sizing: border-box; border-radius: 8px; background: #fff; box-shadow: 0 16px 48px rgba(0, 0, 0, .32); }
       .tepub-footnote-dialog img { display: block; max-width: 100%; max-height: calc(88vh - 40px); width: auto; height: auto; margin: 0 auto; }
@@ -1510,6 +1714,12 @@
         if (replacePattern)
             replaceHistory = addToHistory(replacePattern, replaceHistory);
         saveSearchHistory();
+    }
+
+    // 点输入框本身不再切换历史面板，避免和 ▾ 按钮的语义重复
+    function closeHistoryPanels() {
+        showFindHistory = false;
+        showReplaceHistory = false;
     }
 
     function selectFindHistory(value: string) {
@@ -1809,33 +2019,19 @@
             class:reader-toc-collapsed={readerMode && readerTocCollapsed}
         >
             <aside class="left-panel">
-                <div class="tree-header">
-                    <h2>{readerMode ? "目录" : "文件结构"}</h2>
-                    <div class="tree-actions">
-                        {#if readerMode}
+                {#if readerMode}
+                    <div class="tree-header">
+                        <h2>目录</h2>
+                        <div class="tree-actions">
                             <button
                                 type="button"
                                 on:click={pickFile}
                                 disabled={busy}
                                 title="重新选择 EPUB">换书</button
                             >
-                        {:else}
-                            <button
-                                type="button"
-                                class="primary"
-                                on:click={exportEpub}
-                                disabled={busy}
-                                title="导出 EPUB">导出</button
-                            >
-                        {/if}
+                        </div>
                     </div>
-                </div>
-
-                <section class="book-summary">
-                    <strong>{doc.metadata.title || doc.fileName}</strong>
-                    <span>{doc.metadata.creator || "未知作者"}</span>
-                    <small>{doc.fileName}</small>
-                </section>
+                {/if}
 
                 {#if readerMode}
                     <div class="toc-container reader-toc-container">
@@ -1970,7 +2166,7 @@
             {#if !readerMode}
                 <section class="editor-panel">
                     <div class="editor-head">
-                        <div>
+                        <div class="editor-title">
                             <strong
                                 >{selectedFile?.path ||
                                     selectedImage?.path ||
@@ -1978,6 +2174,13 @@
                             >
                         </div>
                         <div class="editor-actions">
+                            <button
+                                type="button"
+                                class="primary"
+                                on:click={exportEpub}
+                                disabled={busy}
+                                title="导出 EPUB">导出</button
+                            >
                             <button
                                 type="button"
                                 class="primary"
@@ -1996,6 +2199,8 @@
                                 language={getFileLanguage(selectedFile.kind)}
                                 onChange={handleEditorChange}
                                 onSave={stageCurrentFile}
+                                onClick={handleEditorClick}
+                                onSelectionChange={handleEditorSelection}
                                 onOpenSearch={() => {
                                     setTimeout(
                                         () =>
@@ -2038,12 +2243,19 @@
                                         bind:value={findPattern}
                                         on:keydown={(e) =>
                                             e.key === "Enter" && findNext()}
+                                        on:focus={closeHistoryPanels}
+                                        on:click={closeHistoryPanels}
+                                        autocomplete="off"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="fr-dropdown-btn"
                                         on:click={() => {
                                             showFindHistory = !showFindHistory;
                                             showReplaceHistory = false;
                                         }}
-                                        title="显示查找历史"
-                                    />
+                                        title="显示查找历史">▾</button
+                                    >
                                     {#if showFindHistory && findHistory.length > 0}
                                         <div class="fr-history-dropdown">
                                             {#each findHistory as item, i}
@@ -2106,10 +2318,9 @@
                                         type="text"
                                         class="fr-input"
                                         bind:value={replacePattern}
-                                        on:focus={() => {
-                                            showFindHistory = false;
-                                            showReplaceHistory = false;
-                                        }}
+                                        on:focus={closeHistoryPanels}
+                                        on:click={closeHistoryPanels}
+                                        autocomplete="off"
                                     />
                                     <button
                                         type="button"
@@ -2276,20 +2487,32 @@
                             >
                         </div>
                     {/if}
-                    {#if readerMode || rightTab === "preview"}
-                        <div class="preview-body">
+                    <div class="preview-stack">
+                        <div
+                            class="preview-body"
+                            class:hide-scrollbar={!appSettings.previewScrollbar}
+                            class:is-hidden={!readerMode &&
+                                rightTab !== "preview"}
+                            use:trackPreviewWidth
+                            bind:this={previewBodyEl}
+                        >
                             {#if selectedFile?.kind === "xhtml" && previewHtml}
                                 <div
                                     class="mobile-frame"
                                     class:reader-frame={readerMode}
                                 >
                                     <iframe
+                                        bind:this={previewIframeEl}
                                         class="chapter-preview"
                                         title={readerMode
                                             ? "章节阅读预览"
                                             : "章节预览"}
                                         srcdoc={previewHtml}
                                         sandbox="allow-same-origin allow-scripts"
+                                        style:height={previewFrameHeight
+                                            ? `${previewFrameHeight}px`
+                                            : null}
+                                        on:load={handlePreviewFrameLoad}
                                     ></iframe>
                                 </div>
                             {:else if (!selectedFile && !selectedImage) || selectedFile?.kind === "xhtml"}
@@ -2300,26 +2523,30 @@
                                 </div>
                             {/if}
                         </div>
-                    {:else}
-                        <div class="toc-container">
-                            {#if tocTree.length === 0}
-                                <p class="panel-empty">
-                                    未读取到 NAV / NCX 目录。
-                                </p>
-                            {:else}
-                                <div class="toc-list">
-                                    {#each tocTree as item (item.id)}
-                                        <TocNode
-                                            {item}
-                                            selectedSrc={selectedFile?.path ||
-                                                ""}
-                                            onSelect={handleTocSelect}
-                                        />
-                                    {/each}
-                                </div>
-                            {/if}
-                        </div>
-                    {/if}
+                        {#if !readerMode}
+                            <div
+                                class="toc-container"
+                                class:is-hidden={rightTab !== "toc"}
+                            >
+                                {#if tocTree.length === 0}
+                                    <p class="panel-empty">
+                                        未读取到 NAV / NCX 目录。
+                                    </p>
+                                {:else}
+                                    <div class="toc-list">
+                                        {#each tocTree as item (item.id)}
+                                            <TocNode
+                                                {item}
+                                                selectedSrc={selectedFile?.path ||
+                                                    ""}
+                                                onSelect={handleTocSelect}
+                                            />
+                                        {/each}
+                                    </div>
+                                {/if}
+                            </div>
+                        {/if}
+                    </div>
                 </section>
             </aside>
         </main>
@@ -2356,23 +2583,11 @@
         position: fixed;
         inset: 0;
         height: 100vh;
-        --radius-sm: 6px;
+        /* 不自建色板子集，直接继承 :root 的 design token，避免与全局样式漂移 */
         --font-code: Consolas, "Cascadia Mono", "Microsoft YaHei", monospace;
-        --color-surface: #fffdf9;
-        --color-surface-soft: #f8fafc;
-        --color-text: #172033;
-        --color-text-soft: #334155;
-        --color-muted: #64748b;
-        --color-border: #d8e0eb;
-        --color-hover: #f1f5f9;
-        --color-accent: #1677b8;
-        --color-accent-deep: #155e96;
-        --color-accent-soft: #e8f2f8;
-        --shadow-xs: none;
-        --transition-fast: 0.12s ease;
-        background: #eef2f7;
-        color: #172033;
-        font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+        background: var(--color-canvas);
+        color: var(--color-text);
+        font-family: var(--font-ui);
         overflow: hidden;
     }
 
@@ -2399,12 +2614,12 @@
     }
 
     button {
-        height: 34px;
+        height: var(--control-height);
         padding: 0 12px;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        background: #ffffff;
-        color: #172033;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        color: var(--color-text);
         font: inherit;
         cursor: pointer;
     }
@@ -2421,19 +2636,23 @@
     button.primary {
         border-color: var(--color-accent);
         background: var(--color-accent);
-        color: #ffffff;
+        color: var(--color-accent-contrast);
         font-weight: 800;
     }
 
     button.danger {
-        border-color: #fecaca;
-        background: #fff1f2;
-        color: #be123c;
+        border-color: color-mix(
+            in srgb,
+            var(--color-danger-soft) 92%,
+            var(--color-danger)
+        );
+        background: var(--color-danger-soft);
+        color: var(--color-danger);
         font-weight: 800;
     }
 
     button.danger:hover:not(:disabled) {
-        border-color: #f43f5e;
+        border-color: var(--color-danger);
     }
 
     button.active {
@@ -2459,7 +2678,7 @@
 
     .workspace.reader-workspace {
         grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-        background: #eef2f7;
+        background: var(--color-canvas);
     }
 
     .workspace.reader-workspace.reader-toc-collapsed {
@@ -2472,18 +2691,18 @@
         min-height: 0;
         border: 0;
         border-radius: 0;
-        background: #ffffff;
+        background: var(--color-surface);
         overflow: hidden;
     }
 
     .left-panel {
         display: grid;
-        grid-template-rows: auto auto auto minmax(0, 1fr);
-        border-right: 1px solid #d8e0eb;
+        grid-template-rows: auto minmax(0, 1fr);
+        border-right: 1px solid var(--color-border);
     }
 
     .reader-workspace .left-panel {
-        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
     }
 
     .reader-workspace.reader-toc-collapsed .left-panel {
@@ -2493,38 +2712,11 @@
     .right-panel {
         display: grid;
         grid-template-rows: minmax(0, 1fr);
-        border-left: 1px solid #d8e0eb;
+        border-left: 1px solid var(--color-border);
     }
 
     .reader-workspace .right-panel {
         border-left: 0;
-    }
-
-    .book-summary {
-        display: grid;
-        gap: 4px;
-        min-height: 58px;
-        padding: 10px 12px;
-        border-bottom: 1px solid #e2e8f0;
-        box-sizing: border-box;
-        background: #f8fafc;
-    }
-
-    .book-summary strong {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .book-summary span,
-    .book-summary small {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: #64748b;
-        font-size: 12px;
     }
 
     .tree-header {
@@ -2534,8 +2726,8 @@
         justify-content: space-between;
         gap: 8px;
         padding: 0 10px 0 12px;
-        border-bottom: 1px solid #e2e8f0;
-        background: #fafafa;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
         box-sizing: border-box;
     }
 
@@ -2552,23 +2744,41 @@
     }
 
     .tabs {
+        /* 顶到左栏最上沿，高度与右侧预览栏头一致，三栏首行对齐 */
+        height: 50px;
         display: grid;
         grid-template-columns: repeat(2, 1fr);
         gap: 0;
         padding: 0;
-        border-bottom: 1px solid #e2e8f0;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
+        box-sizing: border-box;
     }
 
-    .tabs button {
-        height: 40px;
+    /* 文件/信息/预览/目录 四个页签共用一套（非选中态）样式，
+       之前左右两栏各写一份，颜色和字重不一致，看着像两种控件 */
+    .tabs button,
+    .preview-header > button {
+        height: 50px;
         border: 0;
         border-radius: 0;
-        background: #f8fafc;
+        background: transparent;
+        color: var(--color-muted);
         font-weight: 700;
+        transition:
+            background var(--transition-fast),
+            color var(--transition-fast);
     }
 
-    .tabs button.active {
-        background: #ffffff;
+    .tabs button:hover,
+    .preview-header > button:hover {
+        background: var(--color-hover);
+        color: var(--color-text);
+    }
+
+    .tabs button.active,
+    .preview-header > button.active {
+        background: var(--color-surface);
         color: var(--color-accent);
         box-shadow: inset 0 -2px 0 var(--color-accent);
     }
@@ -2627,7 +2837,7 @@
     }
 
     .metadata-form span {
-        color: #64748b;
+        color: var(--color-muted);
         font-size: 12px;
     }
 
@@ -2636,15 +2846,15 @@
         width: 100%;
         min-width: 0;
         box-sizing: border-box;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        background: #ffffff;
-        color: #172033;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        color: var(--color-text);
         font: inherit;
     }
 
     .metadata-form input {
-        height: 34px;
+        height: var(--control-height);
         padding: 0 9px;
     }
 
@@ -2661,10 +2871,10 @@
         aspect-ratio: 3 / 4;
         display: grid;
         place-items: center;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        background: #f8fafc;
-        color: #64748b;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface-soft);
+        color: var(--color-muted);
         font-size: 12px;
         overflow: hidden;
     }
@@ -2689,8 +2899,8 @@
     .editor-panel {
         display: grid;
         grid-template-rows: auto minmax(0, 1fr) auto;
-        border-left: 1px solid #eef2f7;
-        border-right: 1px solid #eef2f7;
+        border-left: 1px solid var(--color-canvas);
+        border-right: 1px solid var(--color-canvas);
     }
 
     .editor-head {
@@ -2699,12 +2909,16 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        padding: 10px 12px;
-        border-bottom: 1px solid #e2e8f0;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--color-border);
+        /* 与左右两栏的栏头同色同高，三栏顶部连成一条 */
+        background: var(--color-surface-soft);
         box-sizing: border-box;
     }
 
-    .editor-head div {
+    /* 只作用于标题容器，不能用 .editor-head div ——
+       否则右侧 .editor-actions 也会被变成垂直网格，按钮被压扁错位 */
+    .editor-title {
         min-width: 0;
         display: grid;
         gap: 0;
@@ -2724,9 +2938,11 @@
         gap: 6px;
     }
 
+    /* 导出/暂存与右侧「预览/目录」同高，三个栏头视觉一致 */
     .editor-actions button {
-        height: 28px;
-        padding: 0 9px;
+        height: 26px;
+        padding: 0 10px;
+        font-size: 12px;
     }
 
     .editor-content {
@@ -2734,7 +2950,7 @@
         height: 100%;
         min-height: 0;
         box-sizing: border-box;
-        background: #fffdf9;
+        background: var(--color-surface);
         overflow: hidden;
     }
 
@@ -2744,7 +2960,7 @@
 
     .editor-content :global(.cm-editor) {
         height: 100%;
-        background: #fffdf9;
+        background: var(--color-surface);
     }
 
     .editor-content :global(.cm-scroller) {
@@ -2753,13 +2969,13 @@
 
     .editor-content :global(.cm-content) {
         padding: 18px 20px;
-        color: #172033;
+        color: var(--color-text);
     }
 
     .find-replace-panel {
         min-height: 0;
-        background: #f0f0f0;
-        border-top: 1px solid #cbd5e1;
+        background: var(--color-hover);
+        border-top: 1px solid var(--color-border);
         padding: 6px 10px;
         font-size: 13px;
         flex-shrink: 0;
@@ -2782,7 +2998,7 @@
     .fr-label {
         flex: 0 0 64px;
         font-weight: 600;
-        color: #555;
+        color: var(--color-text-soft);
         text-align: right;
         white-space: nowrap;
     }
@@ -2799,10 +3015,10 @@
         min-width: 0;
         height: 30px;
         padding: 5px 10px;
-        border: 1px solid #cbd5e1;
-        border-radius: 4px;
-        background: #ffffff;
-        color: #172033;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        color: var(--color-text);
         font:
             13px Consolas,
             "Cascadia Mono",
@@ -2813,7 +3029,7 @@
 
     .fr-input:focus {
         outline: none;
-        border-color: #2196f3;
+        border-color: var(--color-accent);
         box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
     }
 
@@ -2840,10 +3056,14 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border: 1px solid #bbb;
-        border-radius: 4px;
-        background: linear-gradient(to bottom, #fff, #e8e8e8);
-        color: #172033;
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-xs);
+        background: linear-gradient(
+            to bottom,
+            var(--color-surface),
+            var(--color-border)
+        );
+        color: var(--color-text);
         cursor: pointer;
         font-size: 12px;
         white-space: nowrap;
@@ -2863,14 +3083,18 @@
 
     .fr-btn:hover,
     .fr-dropdown-btn:hover {
-        background: linear-gradient(to bottom, #f5f5f5, #ddd);
-        border-color: #999;
+        background: linear-gradient(
+            to bottom,
+            var(--color-surface-soft),
+            var(--color-border)
+        );
+        border-color: var(--color-muted);
     }
 
     .fr-danger {
         border-color: #d99;
-        background: linear-gradient(to bottom, #fee, #fcc);
-        color: #be123c;
+        background: linear-gradient(to bottom, var(--color-danger-soft), #fcc);
+        color: var(--color-danger);
     }
 
     .fr-danger:hover {
@@ -2910,10 +3134,10 @@
         height: 30px;
         min-height: 30px;
         padding: 0 8px;
-        border-color: #cbd5e1;
-        border-radius: 4px;
-        background: #ffffff;
-        color: #172033;
+        border-color: var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        color: var(--color-text);
         box-shadow: none;
         font-size: 12px;
         font-weight: 600;
@@ -2922,23 +3146,23 @@
     .fr-options :global(.fr-custom-select.open .custom-select-trigger),
     .fr-options
         :global(.fr-custom-select .custom-select-trigger:focus-visible) {
-        border-color: #2196f3;
+        border-color: var(--color-accent);
         box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
     }
 
     .fr-options :global(.fr-custom-select .custom-select-menu) {
         top: auto;
         bottom: calc(100% + 4px);
-        border-color: #cbd5e1;
-        border-radius: 4px;
-        background: #ffffff;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+        border-color: var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-md);
     }
 
     .fr-options :global(.fr-custom-select .custom-select-menu button) {
         min-height: 28px;
         padding: 5px 8px;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         font-size: 12px;
         font-weight: 600;
     }
@@ -2947,7 +3171,7 @@
         display: flex;
         align-items: center;
         gap: 4px;
-        color: #555;
+        color: var(--color-text-soft);
         cursor: pointer;
         white-space: nowrap;
     }
@@ -2959,7 +3183,7 @@
     .fr-message {
         margin-left: auto;
         min-width: 84px;
-        color: #1677b8;
+        color: var(--color-accent);
         font-weight: 600;
         text-align: right;
         overflow: hidden;
@@ -2976,9 +3200,9 @@
         max-height: 280px;
         margin-bottom: 2px;
         overflow-y: auto;
-        border: 1px solid #cbd5e1;
-        border-radius: 4px;
-        background: #ffffff;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
         box-shadow: 0 4px 8px rgba(15, 23, 42, 0.15);
     }
 
@@ -2994,7 +3218,7 @@
     }
 
     .fr-history-item:hover {
-        background: #f5f5f5;
+        background: var(--color-surface-soft);
     }
 
     .fr-history-text {
@@ -3016,12 +3240,12 @@
         padding: 0;
         border: 0;
         background: transparent;
-        color: #999;
+        color: var(--color-muted);
     }
 
     .fr-history-del:hover {
         background: #fdd;
-        color: #d32f2f;
+        color: var(--color-danger);
     }
 
     .editor-image-preview {
@@ -3029,7 +3253,7 @@
         display: grid;
         place-items: center;
         padding: 18px;
-        background: #f8fafc;
+        background: var(--color-surface-soft);
         box-sizing: border-box;
         overflow: auto;
     }
@@ -3038,12 +3262,12 @@
         max-width: 100%;
         max-height: 100%;
         object-fit: contain;
-        border: 1px solid #e2e8f0;
-        background: #ffffff;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
     }
 
     .editor-image-preview span {
-        color: #64748b;
+        color: var(--color-muted);
         font-size: 13px;
     }
 
@@ -3051,7 +3275,7 @@
         min-height: 0;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
-        background: #f1f5f9;
+        background: var(--color-hover);
     }
 
     .preview-header {
@@ -3061,25 +3285,12 @@
         grid-template-columns: repeat(2, 1fr);
         gap: 0;
         padding: 0;
-        border-bottom: 1px solid #d8e0eb;
-        background: #f8fafc;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
         box-sizing: border-box;
     }
 
-    .preview-header button {
-        height: 50px;
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-        color: #64748b;
-        font-weight: 800;
-    }
-
-    .preview-header button.active {
-        color: var(--color-accent);
-        background: #ffffff;
-        box-shadow: inset 0 -2px 0 var(--color-accent);
-    }
+    /* 页签样式与左侧 .tabs 共用，见 .tabs button 处的合并规则 */
 
     .reader-preview-header {
         height: 56px;
@@ -3100,12 +3311,12 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        color: #172033;
+        color: var(--color-text);
         font-size: 15px;
     }
 
     .reader-preview-title span {
-        color: #64748b;
+        color: var(--color-muted);
         font-size: 12px;
         font-weight: 700;
     }
@@ -3121,10 +3332,10 @@
     .reader-preview-actions button {
         height: 32px;
         padding: 0 12px;
-        border: 1px solid #cbd5e1;
-        border-radius: 4px;
-        background: #ffffff;
-        color: #334155;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        color: var(--color-text-soft);
         font-weight: 800;
     }
 
@@ -3145,71 +3356,137 @@
     }
 
     .reader-preview-actions .reader-toc-toggle.active {
-        border-color: #334155;
-        background: #172033;
-        color: #ffffff;
+        border-color: var(--color-text-soft);
+        background: var(--color-text);
+        color: var(--color-surface);
+    }
+
+    /* 预览与目录常驻挂载、只切换显隐：
+       若用 {#if} 销毁重建，iframe 回来时要重新量高度，
+       外层的滚动条会先消失再出现，肉眼就是「闪一下」 */
+    .preview-stack {
+        min-height: 0;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr);
+        overflow: hidden;
+    }
+
+    .preview-stack > .preview-body,
+    .preview-stack > .toc-container {
+        grid-area: 1 / 1;
+        min-width: 0;
+        min-height: 0;
+    }
+
+    /* 用 visibility 而不是 display:none —— 后者会让 iframe 脱离布局，
+       切回来时整篇重新排版，书页高度先短后长，滚动条就闪一下。
+       visibility:hidden 保留布局和测量结果，切换纯粹是一次重绘 */
+    .preview-stack > .is-hidden {
+        visibility: hidden;
+        pointer-events: none;
+    }
+
+    /* 兜底：隐藏层里的元素若自带 visibility: visible（内联或组件内样式），
+       会盖过继承来的 hidden 单独画在预览区上（目录树的展开箭头就踩过）。
+       后代一律压住，显示回来时选择器失配，自然恢复 */
+    .preview-stack > .is-hidden :global(*) {
+        visibility: hidden !important;
     }
 
     .preview-body {
         min-height: 0;
         display: flex;
-        align-items: stretch;
+        align-items: flex-start;
         justify-content: center;
         padding: 10px;
-        background: #f0f0f0;
-        overflow: hidden;
+        background: var(--color-hover);
+        /* 预览区自己滚动，滚动条贴在最右侧的预览列边缘，
+           而不是画在白色书页框里面 */
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+        /* 预留滚动条槽位，长短章节切换时书页不会左右跳一下 */
+        scrollbar-gutter: stable;
+    }
+
+    /* 设置里关掉预览滚动条（默认）时，连槽位一起取消。
+       只藏滚动条本体而留着 scrollbar-gutter，书页仍然偏左，
+       不会回到预览列正中 */
+    .preview-body.hide-scrollbar {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+        scrollbar-gutter: auto;
+    }
+
+    .preview-body.hide-scrollbar::-webkit-scrollbar {
+        width: 0;
+        height: 0;
+        display: none;
     }
 
     .reader-workspace .preview-body {
         padding: 18px clamp(16px, 3vw, 42px);
-        background: #eef2f7;
+        background: var(--color-canvas);
+    }
+
+    .reader-workspace .mobile-frame {
+        align-self: flex-start;
     }
 
     .mobile-frame,
     .preview-empty {
         width: min(100%, 340px);
-        height: 100%;
         min-height: 0;
         box-sizing: border-box;
+    }
+
+    /* 空态仍占满可视高度；有内容时由 iframe 实测高度决定 */
+    .preview-empty {
+        align-self: stretch;
+        height: 100%;
     }
 
     .mobile-frame {
         display: flex;
         flex-direction: column;
-        border: 1px solid #d8e0eb;
-        background: #ffffff;
+        /* 高度跟随 iframe 内容，由外层 .preview-body 负责滚动 */
+        height: auto;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
         box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
         overflow: hidden;
     }
 
     .reader-frame {
         width: min(100%, 1080px);
-        border-color: #cbd5e1;
+        border-color: var(--color-border);
         box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
     }
 
     .chapter-preview {
         width: 100%;
-        height: 100%;
-        min-height: 0;
+        /* 高度由 JS 实测正文高度写入 inline style。
+           测量完成前先铺满预览区可视高度（--preview-h 由 trackPreviewWidth 写入），
+           不要写死 min-height：那会让 iframe 先矮后高，外层滚动条闪一下 */
+        height: var(--preview-h, 100%);
         border: 0;
         box-sizing: border-box;
-        background: #ffffff;
+        background: var(--color-surface);
     }
 
     .preview-empty {
         display: grid;
         place-items: center;
-        border: 1px dashed #cbd5e1;
-        background: #ffffff;
-        color: #64748b;
+        border: 1px dashed var(--color-border);
+        background: var(--color-surface);
+        color: var(--color-muted);
         font-size: 13px;
     }
 
     .editor-empty {
         display: grid;
         place-items: center;
-        color: #64748b;
+        color: var(--color-muted);
     }
 
     .right-panel {
@@ -3218,22 +3495,22 @@
     }
 
     .panel-empty {
-        color: #64748b;
+        color: var(--color-muted);
         font-size: 13px;
         line-height: 1.6;
     }
 
     .toc-container {
         min-height: 0;
-        background: #ffffff;
+        background: var(--color-surface);
         overflow: auto;
     }
 
     .toc-list {
         max-height: none;
         padding: 0;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
     }
 
     .toc-list {
@@ -3252,10 +3529,10 @@
         display: grid;
         gap: 4px;
         padding: 6px;
-        border: 1px solid #cbd5e1;
-        border-radius: 6px;
-        background: #ffffff;
-        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-xs);
+        background: var(--color-surface);
+        box-shadow: var(--shadow-pop);
     }
 
     .file-menu-popover button {
@@ -3266,14 +3543,23 @@
     }
 
     @media (max-width: 760px) {
+        /* 窄屏下标题和两个按钮挤不进 50px，改为自动高度纵向排布 */
         .editor-head {
+            height: auto;
+            min-height: 50px;
             align-items: stretch;
             flex-direction: column;
+            gap: 8px;
+            padding: 10px 12px;
         }
 
         .editor-actions {
             width: 100%;
             justify-content: stretch;
+        }
+
+        .editor-actions button {
+            flex: 1 1 auto;
         }
 
         .workspace {
@@ -3306,7 +3592,7 @@
         .editor-panel,
         .right-panel {
             border: 0;
-            border-bottom: 1px solid #d8e0eb;
+            border-bottom: 1px solid var(--color-border);
         }
     }
 
@@ -3317,7 +3603,7 @@
     :global(:root[data-tepub-client="web-mobile"]) .import-shell {
         height: 100dvh;
         grid-template-rows: minmax(0, 1fr);
-        background: #f4f5f8;
+        background: var(--color-canvas);
         overflow: auto;
     }
 
@@ -3344,7 +3630,7 @@
     :global(:root[data-tepub-client="web-mobile"]) .editor-panel,
     :global(:root[data-tepub-client="web-mobile"]) .right-panel {
         border: 0;
-        border-bottom: 1px solid #d8e0eb;
+        border-bottom: 1px solid var(--color-border);
     }
 
     :global(:root[data-tepub-client="web-mobile"]) .editor-head {

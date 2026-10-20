@@ -86,11 +86,11 @@
 <style>
     /* 基础按钮样式（与页面同源，保证拆出后视觉一致） */
     button {
-        height: 34px;
+        height: var(--control-height);
         min-width: 40px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        background: #fff;
+        border-radius: var(--radius-xs);
+        border: 1px solid var(--color-border-strong);
+        background: var(--color-surface);
         font-size: 18px;
         display: flex;
         align-items: center;
@@ -99,21 +99,21 @@
         transition: 0.1s;
     }
     button:active {
-        background: #eee;
-        transform: scale(0.96);
+        background: var(--color-border);
+        transform: translateY(0.5px) scale(0.985);
     }
 
     .mini-action {
-        height: 34px;
+        height: var(--control-height);
         min-width: 0;
         padding: 0 12px;
-        border: 1px solid #d7e0ea;
-        border-radius: 10px;
-        background: #fff;
-        color: #526071;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
+        color: var(--color-text-soft);
         font-size: 12px;
         font-weight: 700;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+        box-shadow: var(--shadow-xs);
     }
 
     .font-settings-panel {
@@ -132,21 +132,21 @@
     .font-settings-title {
         font-size: 14px;
         font-weight: 800;
-        color: #253547;
+        color: var(--color-text);
     }
 
     .font-settings-note {
         margin-top: 4px;
         font-size: 12px;
         line-height: 1.5;
-        color: #708093;
+        color: var(--color-muted);
     }
 
     .font-settings-status {
         padding: 8px 10px;
-        border-radius: 8px;
-        background: #f5f9fc;
-        color: #486277;
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-soft);
+        color: var(--color-text-soft);
         font-size: 12px;
         line-height: 1.5;
     }
@@ -163,9 +163,9 @@
         display: grid;
         gap: 6px;
         padding: 10px 12px;
-        border: 1px solid #e0e6ed;
-        border-radius: 8px;
-        background: #fff;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
     }
 
     .font-settings-item-top {
@@ -182,17 +182,17 @@
 
     .font-settings-meta strong {
         font-size: 13px;
-        color: #1b2d3f;
+        color: var(--color-text);
     }
 
     .font-settings-meta span {
         font-size: 11px;
-        color: #7b8794;
+        color: var(--color-muted);
     }
 
     .font-settings-item code {
         font-size: 11px;
-        color: #466176;
+        color: var(--color-text-soft);
         white-space: normal;
         word-break: break-word;
     }
@@ -211,7 +211,7 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, #ffffff, var(--color-surface-soft));
+        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;

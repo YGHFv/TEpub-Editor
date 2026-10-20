@@ -122,22 +122,22 @@
         min-width: 0;
         padding: 6px 8px;
         font-weight: 600;
-        color: #555;
-        background: #f0f0f0;
-        border-radius: 4px;
+        color: var(--color-text-soft);
+        background: var(--color-hover);
+        border-radius: var(--radius-xs);
         cursor: pointer;
         user-select: none;
         font-size: 14px;
     }
 
     .node-label:hover {
-        background: #e8e8e8;
+        background: var(--color-border);
     }
 
     .expand-icon {
         margin-right: 4px;
         font-size: 10px;
-        color: #666;
+        color: var(--color-muted);
         width: 14px;
         display: inline-block;
         text-align: center;
@@ -146,7 +146,7 @@
     /* 子文件夹样式 */
     .children {
         margin-left: 14px;
-        border-left: 1px solid #eee;
+        border-left: 1px solid var(--color-border);
         padding-left: 4px;
     }
 
@@ -158,7 +158,7 @@
     }
 
     .folder-node.subpath > .node-label:hover {
-        background: #f5f5f5;
+        background: var(--color-surface-soft);
     }
 
     .file-node {
@@ -167,17 +167,17 @@
         min-width: 0;
         padding: 4px 8px 4px 18px;
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-xs);
         transition: background 0.1s;
     }
 
     .file-node:hover {
-        background: #f5f5f5;
+        background: var(--color-surface-soft);
     }
 
     .file-node.selected {
-        background: #e3f2fd;
-        color: #1976d2;
+        background: var(--color-accent-soft);
+        color: var(--color-accent);
     }
 
     .icon {
@@ -208,7 +208,7 @@
 
     .description {
         font-size: 11px;
-        color: #999;
+        color: var(--color-muted);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -221,9 +221,9 @@
 
     .node-label {
         padding: 8px 10px;
-        border: 1px solid rgba(255, 255, 255, 0.58);
+        border: 1px solid var(--color-surface-raised);
         border-radius: var(--radius-sm);
-        background: rgba(255, 255, 255, 0.62);
+        background: var(--color-surface-raised);
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         transition:
@@ -306,7 +306,7 @@
         padding: 0;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: rgba(255, 255, 255, 0.82);
+        background: var(--color-surface-raised);
         color: var(--color-muted);
         font: inherit;
         font-weight: 800;

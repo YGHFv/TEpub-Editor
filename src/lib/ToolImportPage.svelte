@@ -144,14 +144,14 @@
         border: 1px solid var(--web-tool-border);
         border-radius: var(--web-tool-radius-md);
         background: var(--web-tool-surface);
-        box-shadow: 0 8px 25px rgba(42, 62, 84, 0.05);
+        box-shadow: var(--shadow-sm);
     }
     .tool-import-mark {
         width: 64px;
         height: 64px;
         display: grid;
         place-items: center;
-        border-radius: 14px;
+        border-radius: var(--radius-md);
         background: var(--web-tool-accent-soft);
         color: var(--web-tool-accent);
         font-size: 12px;
@@ -159,7 +159,7 @@
         letter-spacing: 0.04em;
     }
     .tool-import-kicker {
-        color: #7b899d;
+        color: var(--color-muted);
         font-size: 9px;
         font-weight: 800;
         letter-spacing: 0.15em;
@@ -181,7 +181,7 @@
     .tool-import-copy small {
         display: block;
         margin-top: 5px;
-        color: #8491a2;
+        color: var(--color-muted);
         font-size: 11px;
     }
     .tool-import-output {
@@ -189,14 +189,14 @@
         display: grid;
         gap: 5px;
         padding-left: 20px;
-        border-left: 1px solid #e0e6ed;
+        border-left: 1px solid var(--color-border);
     }
     .tool-import-output span {
-        color: #8491a2;
+        color: var(--color-muted);
         font-size: 10px;
     }
     .tool-import-output strong {
-        color: #31516b;
+        color: var(--color-text-soft);
         font:
             11px ui-monospace,
             Consolas,
@@ -214,7 +214,7 @@
         gap: 2px 10px;
         padding: 14px 18px;
         border: 1px solid var(--web-tool-border);
-        border-radius: 9px;
+        border-radius: var(--radius-sm);
         background: var(--web-tool-surface);
     }
     .tool-import-features b {
@@ -246,13 +246,13 @@
         background: var(--web-tool-surface-translucent);
         color: var(--web-tool-text);
         cursor: pointer;
-        transition: 0.18s ease;
+        transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
     }
     .tool-import-drop:hover:not(:disabled),
     .tool-import-drop.drag-active {
         border-color: var(--web-tool-accent);
         background: var(--web-tool-surface);
-        box-shadow: 0 10px 32px rgba(42, 74, 103, 0.1);
+        box-shadow: var(--shadow-md);
     }
     .tool-import-drop:disabled {
         cursor: wait;
@@ -273,15 +273,15 @@
         font-size: 18px;
     }
     .tool-import-hint {
-        color: #728197;
+        color: var(--color-muted);
         font-size: 12px;
     }
     .tool-import-action {
         margin-top: 8px;
         padding: 8px 17px;
-        border-radius: 6px;
+        border-radius: var(--radius-xs);
         background: var(--web-tool-accent);
-        color: #fff;
+        color: var(--color-accent-contrast);
         font-size: 11px;
         font-weight: 800;
     }
@@ -296,8 +296,8 @@
     .tool-import-spinner {
         width: 28px;
         height: 28px;
-        border: 3px solid #d7e2ec;
-        border-top-color: #17699a;
+        border: 3px solid var(--color-border);
+        border-top-color: var(--color-accent);
         border-radius: 50%;
         animation: spin 0.75s linear infinite;
     }
@@ -326,7 +326,7 @@
         .tool-import-output {
             grid-column: 1 / -1;
             padding: 10px 0 0;
-            border-top: 1px solid #e0e6ed;
+            border-top: 1px solid var(--color-border);
             border-left: 0;
         }
         .tool-import-features {

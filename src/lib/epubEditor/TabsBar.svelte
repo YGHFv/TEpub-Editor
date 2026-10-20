@@ -70,8 +70,8 @@
 <style>
     .tabs-bar {
         display: flex;
-        background: #f3f3f3;
-        border-bottom: 1px solid #ddd;
+        background: var(--color-surface-soft);
+        border-bottom: 1px solid var(--color-border);
         overflow-x: auto;
         overflow-y: hidden;
         gap: 0;
@@ -87,21 +87,21 @@
         padding: 8px 12px;
         min-width: 120px;
         max-width: 200px;
-        border-right: 1px solid #ddd;
+        border-right: 1px solid var(--color-border);
         cursor: pointer;
-        background: #e8e8e8;
+        background: var(--color-border);
         transition: background 0.2s;
         user-select: none;
         flex-shrink: 0;
     }
 
     .editor-tab:hover {
-        background: #d8d8d8;
+        background: var(--color-surface-soft);
     }
 
     .editor-tab.active {
-        background: #fff;
-        border-bottom: 2px solid #2196f3;
+        background: var(--color-surface);
+        border-bottom: 2px solid var(--color-accent);
         position: relative;
     }
 
@@ -117,7 +117,7 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        color: #333;
+        color: var(--color-text);
     }
 
     .tab-close {
@@ -126,14 +126,14 @@
         height: 20px;
         border: none;
         background: transparent;
-        color: #999;
+        color: var(--color-muted);
         font-size: 16px;
         font-family:
             "Segoe UI Symbol", "Segoe UI", "Microsoft YaHei UI", sans-serif;
         font-weight: 400;
         line-height: 1;
         cursor: pointer;
-        border-radius: 3px;
+        border-radius: var(--radius-xs);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -142,20 +142,20 @@
     }
 
     .tab-close:hover {
-        background: #ccc;
-        color: #333;
+        background: var(--color-border-strong);
+        color: var(--color-text);
     }
 
     /* Mod Indicator */
     .modified-indicator {
-        color: #ff9800;
+        color: var(--color-warning);
         margin-left: 4px;
         font-weight: bold;
     }
 
     /* Modern UI overrides */
     .tabs-bar {
-        background: rgba(255, 255, 255, 0.78);
+        background: var(--color-surface-raised);
         border-bottom: 1px solid var(--color-border);
         backdrop-filter: blur(18px) saturate(1.12);
     }
@@ -171,8 +171,8 @@
         min-width: 132px;
         border: 1px solid transparent;
         border-bottom: 0;
-        border-radius: 13px 13px 0 0;
-        background: rgba(255, 255, 255, 0.48);
+        border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+        background: var(--color-surface-soft);
         color: var(--color-text-soft);
         transition:
             background var(--transition-fast),
