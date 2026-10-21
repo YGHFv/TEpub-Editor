@@ -53,7 +53,10 @@
                 <span class="tab-icon"
                     ><Icon name={getFileIcon(tab.file_type)} size={14} /></span
                 >
-                <span class="tab-name" title={tab.name}
+                <!-- 名字被 132~200px 的标签宽度截断，悬停要能看到完整路径 -->
+                <span
+                    class="tab-name"
+                    title={`${tab.path}${modifiedFiles.has(tab.path) ? " · 已修改" : ""}`}
                     >{tab.name}{#if modifiedFiles.has(tab.path)}
                         <span class="modified-indicator">*</span>
                     {/if}</span

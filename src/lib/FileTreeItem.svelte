@@ -53,7 +53,9 @@
             <span class="icon"
                 ><Icon name={getFileIcon(node.file_type)} size={16} /></span
             >
-            <span class="name">{node.name}</span>
+            <!-- 目录名可能很长，也可能就是混淆名恢复后的完整路径；
+                 悬停给完整路径，和顶部标签栏「短标签 + 悬停看全」一致 -->
+            <span class="name" title={node.path}>{node.name}</span>
             {#if onFolderAdd}
                 <button
                     type="button"
@@ -99,9 +101,12 @@
         <span class="icon"
             ><Icon name={getFileIcon(node.file_type)} size={16} /></span
         >
+        <!-- 两行都是省略号截断的：名字给完整路径，描述给完整说明 -->
         <div class="file-info">
-            <span class="name">{node.name}</span>
-            <span class="description">{getFileDescription(node)}</span>
+            <span class="name" title={node.path}>{node.name}</span>
+            <span class="description" title={getFileDescription(node)}
+                >{getFileDescription(node)}</span
+            >
         </div>
         {#if onFileMenu}
             <button

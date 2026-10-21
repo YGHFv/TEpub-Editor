@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { repairEpubContainerBytes } from "./webEpubNormalize";
 
 export type WebEpubProcessAction =
   "file-encrypt" | "file-decrypt" | "epub-reformat" | "image-convert";
@@ -894,7 +895,12 @@ export async function processWebEpub(
 ) {
   let zip: JSZip;
   try {
-    zip = await JSZip.loadAsync(await file.arrayBuffer());
+    // 与编辑器同一条前置修复：伪加密 / XOR 混淆书在这里也要能读，
+    // 否则「EPUB 处理」里的解密、重构等功能对它们直接报「无法读取」
+    const repair = repairEpubContainerBytes(
+      new Uint8Array(await file.arrayBuffer()),
+    );
+    zip = await JSZip.loadAsync(repair.bytes);
   } catch (error) {
     throw new Error(`无法读取 EPUB：${String(error)}`);
   }

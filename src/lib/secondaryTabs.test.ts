@@ -9,6 +9,7 @@ import {
   getTabs,
   isHomeRoute,
   pushTab,
+  setTabDetail,
   subscribeTabs,
   tabIdFor,
   tabTitleFor,
@@ -79,5 +80,32 @@ describe("secondary tab state", () => {
     expect(getTabs().some((tab) => tab.id === "/reader")).toBe(false);
     closeTab(HOME_TAB.id);
     expect(getTabs()).not.toContainEqual(HOME_TAB);
+  });
+
+  it("prefers a page-supplied detail over the ?file= label", () => {
+    // web 版 EPUB 编辑器用 <input type=file> 选书，地址里没有书名，
+    // 只能由页面自己上报（可以是多行）
+    pushTab("/toolbox/epub-editor");
+    setTabDetail(
+      "/toolbox/epub-editor",
+      "测试书\n当前文件：OEBPS/Text/c1.xhtml",
+    );
+    const tab = getTabs().find((item) => item.id === "/toolbox/epub-editor");
+    expect(tab?.detail).toBe("测试书\n当前文件：OEBPS/Text/c1.xhtml");
+    expect(
+      tabTooltipFor("/toolbox/epub-editor", "", "EPUB 编辑器", tab?.detail),
+    ).toBe("测试书\n当前文件：OEBPS/Text/c1.xhtml");
+    // 清空后回到只显示页面名
+    setTabDetail("/toolbox/epub-editor", "");
+    expect(
+      getTabs().find((item) => item.id === "/toolbox/epub-editor")?.detail,
+    ).toBe(undefined);
+  });
+
+  it("keeps tab detail out of the visible title", () => {
+    pushTab("/reader", "?file=a.epub");
+    expect(
+      getTabs().find((tab) => tab.id === "/reader?file=a.epub")?.title,
+    ).toBe("EPUB 阅读器");
   });
 });

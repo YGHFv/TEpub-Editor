@@ -49,6 +49,8 @@
         type WebEpubMetadata,
         type WebEpubNavItem,
     } from "$lib/webEpub";
+    import { resolveEpubCover } from "$lib/epubEditor/cover";
+    import { setTabDetail, tabIdFor } from "$lib/secondaryTabs";
 
     type WebFileTreeNode = {
         name: string;
@@ -120,6 +122,8 @@
     let rightTab: "preview" | "toc" = "preview";
     let restorePageOverflow: (() => void) | null = null;
     let restoreSettingsListener: (() => void) | null = null;
+    /** 本页在顶部标签栏里的 id（含 ?mode=reader），用于上报悬停说明 */
+    const ownTabId = tabIdFor(ownUrl.pathname, ownUrl.search);
     let expandedFolders = new Set<string>();
     let multiSelectedFiles = new Set<string>();
     let selectedTreePath = "";
@@ -754,6 +758,48 @@
         restoreSettingsListener?.();
     });
 
+    /**
+     * 把当前打开的书 / 文件报到顶部标签栏的悬停提示里。
+     *
+     * web 版是用 <input type=file> 选书的，地址里没有 ?file=，标签栏原本
+     * 只能显示「EPUB 编辑器」。按「书 → 当前文件」分两行给出，和标签栏
+     * 「短标签 + 悬停看全」的约定一致。
+     */
+    function publishTabDetail() {
+        if (!doc) {
+            setTabDetail(ownTabId, "");
+            return;
+        }
+        const book = doc.metadata.title || doc.fileName;
+        const lines = [book];
+        const currentPath =
+            selectedFile?.path || selectedImage?.path || selectedTreePath;
+        if (currentPath && currentPath !== doc.opfPath) {
+            lines.push(`当前文件：${currentPath}`);
+        } else if (!currentPath) {
+            lines.push(
+                `${doc.files.length} 个文件 · ${doc.spine.length} 个阅读项`,
+            );
+        }
+        setTabDetail(ownTabId, lines.join("\n"));
+    }
+
+    /**
+     * 导入时做过的自动修复要告诉用户 —— 否则他看到的是一本「改过名字」
+     * 的书，导出后和源文件不一样，却不知道是哪一步改的。
+     */
+    function normalizationSuffix(current: WebEpubDocument) {
+        const notes: string[] = [];
+        if (current.normalization.repairedEncryption)
+            notes.push("已解除伪加密");
+        if (current.normalization.xorKey !== null) notes.push("已解混淆");
+        if (current.normalization.renamedEntries > 0)
+            notes.push(
+                `已恢复 ${current.normalization.renamedEntries} 个可读文件名`,
+            );
+        return notes.length ? `；${notes.join("，")}` : "";
+    }
+
     async function loadEpubFile(file: File) {
         busy = true;
         status = "正在解包 EPUB...";
@@ -775,8 +821,10 @@
             expandedFolders = defaultExpandedFolders(doc.files);
             resetMetadataDraft();
             await loadFileTitles();
-            await loadCoverPreview();
-            status = `已导入 ${file.name}，读取到 ${doc.files.length} 个文件 / ${doc.spine.length} 个阅读项`;
+            // 阅读模式没有元数据面板，封面取来也没地方画，白占一个 blob URL
+            if (!readerMode) await loadCoverPreview();
+            publishTabDetail();
+            status = `已导入 ${file.name}，读取到 ${doc.files.length} 个文件 / ${doc.spine.length} 个阅读项${normalizationSuffix(doc)}`;
             const firstEditable =
                 doc.spine
                     .map((item) => fileByPath(item.manifest?.fullPath))
@@ -845,6 +893,7 @@
                 previewHtml = "";
             }
             currentMatchInfo = null;
+            publishTabDetail();
             status = `已打开 ${file.path}`;
             return true;
         } catch (error) {
@@ -918,25 +967,6 @@
         revokePreviewUrls();
     }
 
-    function isLikelyCover(file: WebEpubFileEntry) {
-        if (!doc) return false;
-        const manifestItem = doc.manifest.find(
-            (item) => item.fullPath === file.path,
-        );
-        const haystack =
-            `${manifestItem?.id || ""} ${manifestItem?.href || ""} ${manifestItem?.properties || ""} ${file.name}`.toLowerCase();
-        return (
-            haystack.includes("cover-image") ||
-            /\bcover\b/.test(haystack) ||
-            haystack.includes("封面")
-        );
-    }
-
-    function pickInitialImage() {
-        const files = doc?.files.filter((file) => file.kind === "image") ?? [];
-        return files.find(isLikelyCover) || files[0] || null;
-    }
-
     function revokeImagePreviewUrl() {
         if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
         imagePreviewUrl = "";
@@ -949,14 +979,23 @@
 
     async function loadCoverPreview() {
         revokeCoverPreviewUrl();
-        const cover = pickInitialImage();
-        if (!doc || !cover) return;
+        const current = doc;
+        if (!current) return;
         try {
+            // 按声明解析：properties="cover-image" → <meta name="cover">
+            // → guide 包装页里的图 → 名字像封面的图 → 最大的图
+            const cover = await resolveEpubCover({
+                files: current.files,
+                hints: current.coverHints,
+                readText: (path) => readWebEpubText(current, path),
+            });
+            if (!cover || doc !== current) return;
             const blob = await readWebEpubBlob(
-                doc,
+                current,
                 cover.path,
                 mimeForPath(cover.path),
             );
+            if (doc !== current) return;
             coverPreviewUrl = URL.createObjectURL(blob);
         } catch {
             coverPreviewUrl = "";
@@ -985,6 +1024,7 @@
             revokePreviewUrls();
             currentMatchInfo = null;
             imagePreviewUrl = URL.createObjectURL(blob);
+            publishTabDetail();
             status = `已打开图片 ${file.path}`;
             return true;
         } catch (error) {
@@ -1417,21 +1457,96 @@
         );
     }
 
+    const XLINK_NS = "http://www.w3.org/1999/xlink";
+
+    /** 把一处相对引用换成 blob URL；换不上就原样返回 */
+    function previewUrlFor(
+        htmlPath: string,
+        value: string,
+        urlByPath: Map<string, string>,
+    ) {
+        const targetPath = resolveRelativePath(htmlPath, value);
+        return targetPath ? urlByPath.get(targetPath) || "" : "";
+    }
+
+    /** srcset：逗号分隔的「地址 描述符」，只换地址，描述符（2x / 640w）留着 */
+    function rewriteSrcset(
+        value: string,
+        htmlPath: string,
+        urlByPath: Map<string, string>,
+    ) {
+        const parts = value.split(",");
+        let changed = false;
+        const rewritten = parts.map((part) => {
+            const trimmed = part.trim();
+            if (!trimmed) return part;
+            const spaceIndex = trimmed.search(/\s/);
+            const url = spaceIndex < 0 ? trimmed : trimmed.slice(0, spaceIndex);
+            const descriptor = spaceIndex < 0 ? "" : trimmed.slice(spaceIndex);
+            const replacement = previewUrlFor(htmlPath, url, urlByPath);
+            if (!replacement || replacement === url) return part;
+            changed = true;
+            return `${replacement}${descriptor}`;
+        });
+        return changed ? rewritten.join(", ") : "";
+    }
+
+    /**
+     * 把章节里所有相对资源换成 blob URL。
+     *
+     * 必须覆盖的几处（少一处就有一类书显示空白）：
+     * - 普通 src/href/poster；
+     * - SVG 的 `xlink:href`：封面包装页 `<svg><image xlink:href="../Images/
+     *   cover.jpg"/></svg>` 就是这样写的。它在 DOM 里是**带命名空间**的属性，
+     *   getAttribute("href") 读不到，得走 getAttributeNS；
+     * - srcset（浏览器优先用它，漏改的话即使 src 换好了也加载失败）；
+     * - `<object data>`；
+     * - 行内 style 属性里的 url()，以及页面里 style 标签内的 url()。
+     */
     function rewriteHtmlResources(
         source: string,
         htmlPath: string,
         urlByPath: Map<string, string>,
     ) {
         const htmlDoc = new DOMParser().parseFromString(source, "text/html");
-        const attrs = ["src", "href", "poster"];
+        const attrs = ["src", "href", "poster", "data"];
         for (const element of Array.from(htmlDoc.querySelectorAll("*"))) {
             for (const attr of attrs) {
                 const value = element.getAttribute(attr);
                 if (!value) continue;
-                const targetPath = resolveRelativePath(htmlPath, value);
-                const url = targetPath ? urlByPath.get(targetPath) : "";
+                const url = previewUrlFor(htmlPath, value, urlByPath);
                 if (url) element.setAttribute(attr, url);
             }
+
+            // 带命名空间的 xlink:href：serialize 时保留原前缀，iframe 能认
+            const xlinkHref = element.getAttributeNS(XLINK_NS, "href");
+            if (xlinkHref) {
+                const url = previewUrlFor(htmlPath, xlinkHref, urlByPath);
+                if (url) element.setAttributeNS(XLINK_NS, "xlink:href", url);
+            } else if (element.hasAttribute("xlink:href")) {
+                const raw = element.getAttribute("xlink:href") || "";
+                const url = previewUrlFor(htmlPath, raw, urlByPath);
+                if (url) element.setAttribute("xlink:href", url);
+            }
+
+            const srcset = element.getAttribute("srcset");
+            if (srcset) {
+                const rewritten = rewriteSrcset(srcset, htmlPath, urlByPath);
+                if (rewritten) element.setAttribute("srcset", rewritten);
+            }
+
+            const inlineStyle = element.getAttribute("style");
+            if (inlineStyle && /url\s*\(/i.test(inlineStyle)) {
+                element.setAttribute(
+                    "style",
+                    rewriteCssUrls(inlineStyle, htmlPath, urlByPath),
+                );
+            }
+        }
+        for (const style of Array.from(htmlDoc.querySelectorAll("style"))) {
+            const css = style.textContent || "";
+            if (!/url\s*\(/i.test(css)) continue;
+            style.textContent = rewriteCssUrls(css, htmlPath, urlByPath);
         }
         const style = htmlDoc.createElement("style");
         const bodyMaxWidth = readerMode ? "980px" : "820px";
@@ -1513,11 +1628,31 @@
             else assets.add(file.path);
         };
         for (const element of Array.from(htmlDoc.querySelectorAll("*"))) {
-            for (const attr of ["src", "href", "poster"]) {
+            // 属性名必须和 rewriteHtmlResources 保持一致：这里漏收集，
+            // 那边就没有 blob URL 可换，图照样是破的
+            for (const attr of ["src", "href", "poster", "data"]) {
                 const value = element.getAttribute(attr);
                 if (!value) continue;
                 const path = resolveRelativePath(htmlPath, value);
                 if (path) addPath(path);
+            }
+            const xlinkHref =
+                element.getAttributeNS(XLINK_NS, "href") ||
+                element.getAttribute("xlink:href") ||
+                "";
+            if (xlinkHref) {
+                const path = resolveRelativePath(htmlPath, xlinkHref);
+                if (path) addPath(path);
+            }
+            const srcset = element.getAttribute("srcset") || "";
+            if (srcset) {
+                for (const part of srcset.split(",")) {
+                    const trimmed = part.trim();
+                    if (!trimmed) continue;
+                    const url = trimmed.split(/\s+/)[0];
+                    const path = resolveRelativePath(htmlPath, url);
+                    if (path) addPath(path);
+                }
             }
             const inlineStyle = element.getAttribute("style");
             if (inlineStyle) {
@@ -2174,7 +2309,11 @@
                 <section class="editor-panel">
                     <div class="editor-head">
                         <div class="editor-title">
+                            <!-- 路径常被省略号截断，悬停给完整路径 -->
                             <strong
+                                title={selectedFile?.path ||
+                                    selectedImage?.path ||
+                                    "未选择文件"}
                                 >{selectedFile?.path ||
                                     selectedImage?.path ||
                                     "未选择文件"}</strong
@@ -2437,7 +2576,9 @@
                     {#if readerMode}
                         <div class="preview-header reader-preview-header">
                             <div class="reader-preview-title">
-                                <strong>{currentPreviewTitle}</strong>
+                                <strong title={currentPreviewTitle}
+                                    >{currentPreviewTitle}</strong
+                                >
                                 <span>{previewNavLabel()}</span>
                             </div>
                             <div class="reader-preview-actions">

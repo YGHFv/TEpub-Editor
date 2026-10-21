@@ -95,7 +95,12 @@
     /** 标签上只写页面名，完整信息（含书名）放悬停提示 */
     function tooltipFor(tab: SecondaryTab) {
         const [, ...rest] = tab.id.split("?");
-        return tabTooltipFor(tab.id.split("?")[0], rest.join("?"), tab.title);
+        return tabTooltipFor(
+            tab.id.split("?")[0],
+            rest.join("?"),
+            tab.title,
+            tab.detail,
+        );
     }
 
     function close(event: MouseEvent, tab: SecondaryTab) {

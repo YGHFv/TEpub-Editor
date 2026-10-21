@@ -14,6 +14,17 @@ export interface SecondaryTab {
   id: string;
   href: string;
   title: string;
+  /**
+   * 页面自己登记的悬停说明，只出现在 tooltip 里，不占标签宽度。
+   *
+   * 有些页面把文件放在查询串里（/reader?file=…），fileLabel 能直接读；
+   * web 版 EPUB 编辑器是用 <input type=file> 选书的，地址里没有书，
+   * 只能由页面自己上报，否则标签显示「EPUB 编辑器」、悬停也是同一句。
+   *
+   * 允许多行：编辑器这类页面按「书 → 当前章节/文件」分行写，
+   * 原生 title 会照换行显示（多级信息一眼看全）。
+   */
+  detail?: string;
 }
 
 const STORAGE_KEY = "tepub-secondary-tabs";
@@ -97,9 +108,24 @@ export function tabTitleFor(pathname: string) {
   return titleForRoute(pathname);
 }
 
-/** 悬停提示：页面名 + 文件名，用来区分同类型的多个标签 */
-export function tabTooltipFor(pathname: string, search = "", title?: string) {
+/**
+ * 悬停提示：页面名 + 文件名，用来区分同类型的多个标签。
+ *
+ * `detail` 是页面自己上报的说明（web 版 EPUB 编辑器用它显示书名），
+ * 有它就优先用它 —— 地址里读不到文件时这是唯一的信息来源。
+ */
+export function tabTooltipFor(
+  pathname: string,
+  search = "",
+  title?: string,
+  detail?: string,
+) {
   const label = title || tabTitleFor(pathname);
+  const custom = (detail || "").trim();
+  // 页面自己上报时原样用（可能已经是多行「书 ⏎ 当前文件」），
+  // 不再拼「页面名 · 」—— 否则第一行会变成「EPUB 编辑器 · 书名」，
+  // 多级结构被压平，和顶部标签栏的短标签重复
+  if (custom) return custom;
   const file = fileLabel(search);
   return file ? `${label} · ${file}` : label;
 }
@@ -130,7 +156,13 @@ function readStored(): SecondaryTab[] {
         // id 形如 "/reader?file=..."：标题只用路径算，查询串不参与。
         // 老版本可能存过「EPUB 阅读器 · 书名」，按路径重算一遍统一成短标题
         const path = tab.id.split("?")[0];
-        return { ...tab, title: tabTitleFor(path) || tab.title || path };
+        return {
+          ...tab,
+          title: tabTitleFor(path) || tab.title || path,
+          // detail 是本窗口临时登记的（书名/当前文件），刷新后不复原，
+          // 页面挂载时会重新上报；这里清掉免得显示上一本书的名字
+          detail: undefined,
+        };
       });
   } catch {
     return [];
@@ -167,21 +199,49 @@ export function subscribeTabs(listener: (tabs: SecondaryTab[]) => void) {
  * 记录一次二级页面访问；同一页面已存在时只更新标题，不新增标签。
  * 查询串参与 id：「阅读器 + 某本书」才算同一个标签。
  */
-export function pushTab(pathname: string, search = "", title?: string) {
+export function pushTab(
+  pathname: string,
+  search = "",
+  title?: string,
+  detail?: string,
+) {
   if (isHomeRoute(pathname)) return getTabs();
   const path = appRoutePath(pathname);
   const id = tabIdFor(path, search);
   const label = title || tabTitleFor(path) || path;
   const existing = tabs.find((tab) => tab.id === id);
   if (existing) {
-    if (existing.title !== label) {
+    const nextDetail = detail === undefined ? existing.detail : detail;
+    if (existing.title !== label || existing.detail !== nextDetail) {
       commit(
-        tabs.map((tab) => (tab.id === id ? { ...tab, title: label } : tab)),
+        tabs.map((tab) =>
+          tab.id === id
+            ? { ...tab, title: label, detail: nextDetail || undefined }
+            : tab,
+        ),
       );
     }
     return getTabs();
   }
-  commit([...tabs, { id, href: `${base}${id}`, title: label }]);
+  commit([
+    { id, href: `${base}${id}`, title: label, detail: detail || undefined },
+  ]);
+  return getTabs();
+}
+
+/**
+ * 只更新悬停说明，不动标题。页面在内容变化时调用（打开另一本书、切换文件）。
+ * 标签不存在时什么都不做 —— 首页没有标签。
+ */
+export function setTabDetail(id: string, detail: string) {
+  const clean = (detail || "").trim();
+  const existing = tabs.find((tab) => tab.id === id);
+  if (!existing || (existing.detail || "") === clean) return getTabs();
+  commit(
+    tabs.map((tab) =>
+      tab.id === id ? { ...tab, detail: clean || undefined } : tab,
+    ),
+  );
   return getTabs();
 }
 
