@@ -168,8 +168,11 @@
        先以 min-height 挂载、量完再长高，外层滚动条就闪一下。
        保留上一次高度，新章节挂载即占住位置，只做一次高度修正。 */
 
-    /* 让 iframe 长到内容高度、由外层预览区统一滚动。
-       否则滚动条会画在白色书页框内部（iframe 自有滚动条），观感很差。 */
+    /* 让 iframe 长到内容高度，滚动交给外面那个框。
+       普通预览的框是手机框（.mobile-frame）：它自己有固定尺寸，正文在框内
+       滚动，手机不会随章节变长而拉成一条长纸带；阅读模式的框是宽屏页
+       （.reader-frame），没有高度上限，仍由外层 .preview-body 滚动。
+       两种情况下"可见高度"都是父框的 clientHeight，量法一致。 */
     function measurePreviewFrame() {
         const frame = previewIframeEl;
         if (!frame) return;
@@ -193,26 +196,28 @@
             Math.max(innerBody.scrollHeight || 0, innerBody.offsetHeight || 0) +
             verticalMargin;
         if (contentHeight <= 0) return;
-        // 短章节（封面这类）也要占满可视高度，否则白页框下会空出一条灰底；
-        // 长章节则用实测内容高度，让外层预览区滚动而不是 iframe 自己滚。
-        const host = frame.closest<HTMLElement>(".preview-body");
-        // 目录页签下预览区是 display:none，量不到真实高度；
-        // 此时保留上一次的高度，避免切回来时先缩再长、滚动条闪一下
+        // 短章节（封面这类）也要占满一屏，否则框里下面会空出一块底色；
+        // 长章节则用实测内容高度，让框自己滚动。
+        //
+        // 量谁的高度要看模式：
+        // - 手机框有 height:100% + max-height，高度由预览列决定，直接量它；
+        // - 阅读模式的 .reader-frame 是 height:auto，高度就是 iframe 的高度，
+        //   量它等于拿自己的结果当输入（永远收敛不了），要量外层 .preview-body。
+        const shell = frame.parentElement;
+        const host = readerMode
+            ? frame.closest<HTMLElement>(".preview-body")
+            : shell;
+        // 目录页签下预览区是 visibility:hidden，尺寸仍在；
+        // 真的量不到（列被压成 0）时保留上一次高度，避免切回来先缩再长
         if (host && host.clientHeight <= 0) return;
         let availableHeight = 0;
         if (host) {
             const hostStyle = getComputedStyle(host);
-            // 外层边框是书页框（.mobile-frame）的，iframe 自己在框内，
-            // 所以要从可用高度里扣掉父级边框和预览区内边距
-            const shellStyle = frame.parentElement
-                ? getComputedStyle(frame.parentElement)
-                : null;
-            const verticalChrome =
-                parseFloat(hostStyle.paddingTop) +
-                parseFloat(hostStyle.paddingBottom) +
-                parseFloat(shellStyle?.borderTopWidth || "0") +
-                parseFloat(shellStyle?.borderBottomWidth || "0");
-            availableHeight = Math.floor(host.clientHeight - verticalChrome);
+            availableHeight = Math.floor(
+                host.clientHeight -
+                    parseFloat(hostStyle.paddingTop) -
+                    parseFloat(hostStyle.paddingBottom),
+            );
         }
         previewFrameHeight = Math.max(contentHeight, availableHeight);
     }
@@ -287,6 +292,7 @@
 
     function trackPreviewWidth(node: HTMLElement) {
         let lastWidth = node.clientWidth;
+        let lastHeight = node.clientHeight;
         const observer = new ResizeObserver(() => {
             // 把可视高度写到 CSS 变量，供 iframe 在实测完成前先占满一屏，
             // 避免首帧只有一个默认高度、随后再长高的跳动
@@ -298,11 +304,19 @@
             if (inner > 0) node.style.setProperty("--preview-h", `${inner}px`);
 
             const width = node.clientWidth;
+            const height = node.clientHeight;
             if (width <= 0) return;
-            // 从不可见/零宽恢复时，lastWidth 还是旧值，差值会超过阈值，
-            // 自然走进下面的补测分支
-            if (Math.abs(width - lastWidth) < 2) return;
+            // 宽高任一变化都要重量：宽度决定正文折行（内容高度），
+            // 高度决定手机框的可视高度——窗口拉高拉矮后不重量，
+            // iframe 会停在旧高度，正文上下多出空白或被裁
+            if (
+                Math.abs(width - lastWidth) < 2 &&
+                Math.abs(height - lastHeight) < 2
+            ) {
+                return;
+            }
             lastWidth = width;
+            lastHeight = height;
             schedulePreviewMeasure();
         });
         observer.observe(node);
@@ -2499,6 +2513,7 @@
                             {#if selectedFile?.kind === "xhtml" && previewHtml}
                                 <div
                                     class="mobile-frame"
+                                    class:hide-scrollbar={!appSettings.previewScrollbar}
                                     class:reader-frame={readerMode}
                                 >
                                     <iframe
@@ -3400,12 +3415,16 @@
         justify-content: center;
         padding: 10px;
         background: var(--color-hover);
-        /* 预览区自己滚动，滚动条贴在最右侧的预览列边缘，
-           而不是画在白色书页框里面 */
+        /* 滚动交给手机框（.mobile-frame）自己，这里只负责底色和留白；
+           否则框的高度上限等于列高，滚动条又画到列边缘去了 */
+        overflow: hidden;
+        overscroll-behavior: contain;
+    }
+
+    /* 阅读模式是宽页，没有手机框的高度上限，仍由预览列整体滚动 */
+    .reader-workspace .preview-body {
         overflow-y: auto;
         overflow-x: hidden;
-        overscroll-behavior: contain;
-        /* 预留滚动条槽位，长短章节切换时书页不会左右跳一下 */
         scrollbar-gutter: stable;
     }
 
@@ -3424,6 +3443,19 @@
         display: none;
     }
 
+    /* 手机框自己滚，滚动条要跟着设置一起藏（两者用同一个开关） */
+    .mobile-frame.hide-scrollbar {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+        scrollbar-gutter: auto;
+    }
+
+    .mobile-frame.hide-scrollbar::-webkit-scrollbar {
+        width: 0;
+        height: 0;
+        display: none;
+    }
+
     .reader-workspace .preview-body {
         padding: 18px clamp(16px, 3vw, 42px);
         background: var(--color-canvas);
@@ -3435,7 +3467,9 @@
 
     .mobile-frame,
     .preview-empty {
-        width: min(100%, 340px);
+        /* 和安装版一致：手机框按设计值 320px 宽，不带 // 340 的列宽派生。
+           原来写 340 时框比安装版宽一圈，同一本书两边预览换行位置不同 */
+        width: min(100%, 320px);
         min-height: 0;
         box-sizing: border-box;
     }
@@ -3449,12 +3483,27 @@
     .mobile-frame {
         display: flex;
         flex-direction: column;
-        /* 高度跟随 iframe 内容，由外层 .preview-body 负责滚动 */
-        height: auto;
+        /* 手机框保持手机尺寸：高撑满预览列但最多 700（320 宽的设计高度），
+           章节再长也不往下长，正文在框内滚动。写 height:auto 时框会随
+           正文一路拉长，长章节下"手机"成了一条没有底边的长纸带 */
+        height: 100%;
+        max-height: 700px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
         border: 1px solid var(--color-border);
         background: var(--color-surface);
         box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
-        overflow: hidden;
+    }
+
+    /* 阅读模式是宽页阅读，不是手机：取消高度上限，交回 .preview-body 滚动 */
+    .reader-frame {
+        width: min(100%, 1080px);
+        height: auto;
+        max-height: none;
+        overflow: visible;
+        border-color: var(--color-border);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
     }
 
     /* 书页外框跟着纸色走：iframe 底色已经是深色了，
@@ -3464,18 +3513,16 @@
         background: var(--color-canvas, #191e26);
     }
 
-    .reader-frame {
-        width: min(100%, 1080px);
-        border-color: var(--color-border);
-        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
-    }
-
     .chapter-preview {
         width: 100%;
         /* 高度由 JS 实测正文高度写入 inline style。
            测量完成前先铺满预览区可视高度（--preview-h 由 trackPreviewWidth 写入），
            不要写死 min-height：那会让 iframe 先矮后高，外层滚动条闪一下 */
         height: var(--preview-h, 100%);
+        /* 手机框是纵向 flex 容器，iframe 默认会被压缩到框高，
+           于是正文在 iframe 内部滚、框自己反而不滚（滚动条跑进书页里）。
+           inline 的实测高度要能撑开，这里必须禁止收缩 */
+        flex-shrink: 0;
         border: 0;
         box-sizing: border-box;
         background: var(--color-surface);

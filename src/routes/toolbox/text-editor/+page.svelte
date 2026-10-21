@@ -17,6 +17,15 @@
         type WebTextHistorySnapshot,
     } from "$lib/webTextHistory";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import Icon from "$lib/icons/Icon.svelte";
+    import SettingsShell from "$lib/SettingsShell.svelte";
+    import SettingsTocTab, {
+        type CustomRegexRule,
+    } from "$lib/editor/SettingsTocTab.svelte";
+    import {
+        TOC_PRESET_PATTERNS,
+        buildTitlePrefixRegex,
+    } from "$lib/tocRegexPresets";
     import TxtCodeEditor from "$lib/TxtCodeEditor.svelte";
     import ToolImportPage from "$lib/ToolImportPage.svelte";
     import { hasUnsavedTextChanges } from "$lib/unsavedChanges";
@@ -164,6 +173,14 @@
     let tocRules: TocRegexRule[] = normalizeRules(
         loadAppSettings().customRegexRules,
     );
+    // 编辑器设置面板：和安装版 /editor 打开的是同一套 shell、同一份数据
+    let settingsOpen = false;
+    let settingsTab = "toc";
+    let settingsMessage = "";
+    let settingsPrefixLevel = 3;
+    let settingsPrefixText = "";
+    // 由 $: 重新计算，见下方 settingsRules
+    let settingsRules: CustomRegexRule[] = [];
     let chapters: RawChapter[] = [];
     let tocItems: TocItem[] = [];
     let selectedTocId = "";
@@ -1368,12 +1385,89 @@
         void scanToc();
     }
 
+    // ===== 编辑器设置（目录栏右上角的齿轮） =====
+    // 面板与安装版 /editor 用的是同一个 SettingsShell + SettingsTocTab，
+    // 数据也落在同一处，所以"打开设置改完，安装版里就是新值"。
+    /**
+     * 只放网页端真正会生效的页签。
+     *
+     * 显示选项（自动换行/空格/换行符）目前只存在于安装版 /editor 自己的
+     * DEFAULT_SETTINGS 里，web 的 TxtCodeEditor 也没读它们；摆出来会是
+     * "改了但界面没反应"的假开关，所以不提供。字体、历史版本、API、
+     * 智能校对依赖 Tauri IPC 或安装版文件系统，同样不放。
+     */
+    const textEditorSettingsTabs = [{ id: "toc", label: "目录正则" }];
+
+    function openEditorSettings() {
+        settingsMessage = "";
+        settingsTab = "toc";
+        settingsOpen = true;
+    }
+
+    /**
+     * SettingsTocTab 只认 { level, pattern }；本页的 tocRules 还带 enabled
+     * （决定这条规则参不参与扫描）。设置面板里新增/修改/删除时，
+     * 新条目默认启用，改已有条目时保留原 enabled 值。
+     *
+     * 本组件是旧式响应式（$:）写法，这里也必须用 $: —— 一旦出现
+     * $state/$derived，Svelte 会把整个组件切成 runes 模式，
+     * 文件里原有的 $: 语句会全部报错。
+     */
+    $: settingsRules = tocRules.map<CustomRegexRule>((rule) => ({
+        level: rule.level,
+        pattern: rule.pattern,
+    }));
+
+    function updateSettingsRule(
+        index: number,
+        patch: Partial<CustomRegexRule>,
+    ) {
+        updateTocRule(index, patch);
+    }
+
+    function removeSettingsRule(index: number) {
+        removeTocRule(index);
+    }
+
+    function addSettingsRule() {
+        addTocRule(3);
+    }
+
+    function addTocPrefixRule(level: number, prefix: string) {
+        tocRules = [
+            ...tocRules,
+            {
+                enabled: true,
+                level: level <= 1 ? 1 : 3,
+                pattern: buildTitlePrefixRegex(prefix),
+            },
+        ];
+    }
+
+    function applyEditorSettings() {
+        persistTocRules();
+        settingsOpen = false;
+        void scanToc();
+    }
+
+    /**
+     * 保存目录正则。
+     *
+     * 写的是 appSettings.customRegexRules —— 安装版 /editor 的「目录」设置页
+     * 读写的是同一个 key（app-settings），所以两边改完彼此都能看到，
+     * 不需要额外的"同步"逻辑。
+     */
     function saveTocRules() {
+        persistTocRules();
+        status = "目录正则已保存";
+    }
+
+    /** 真正落盘的部分，供侧栏「保存」和设置面板「保存并应用」共用 */
+    function persistTocRules() {
         const settings = loadAppSettings();
         settings.customRegexRules = normalizeRules(tocRules);
         saveAppSettings(settings);
         tocRules = settings.customRegexRules.map((rule) => ({ ...rule }));
-        status = "目录正则已保存";
     }
 
     function proofRowTitle(row: ProofRegexPreviewRow | ProofConvertPreviewRow) {
@@ -1577,11 +1671,27 @@
                         <h2>目录</h2>
                         <small>{tocItems.length} 项</small>
                     </div>
-                    <button
-                        type="button"
-                        on:click={() => scanToc()}
-                        disabled={!content}>扫描</button
-                    >
+                    <div class="toc-head-actions">
+                        <button
+                            type="button"
+                            class="toc-icon-btn"
+                            title="重新扫描目录"
+                            aria-label="重新扫描目录"
+                            on:click={() => scanToc()}
+                            disabled={!content}
+                        >
+                            <Icon name="refresh" size={16} />
+                        </button>
+                        <button
+                            type="button"
+                            class="toc-icon-btn"
+                            title="编辑器设置"
+                            aria-label="编辑器设置"
+                            on:click={openEditorSettings}
+                        >
+                            <Icon name="settings" size={16} />
+                        </button>
+                    </div>
                 </div>
                 <div class="toc-list" bind:this={tocListEl}>
                     {#if visibleTocItems.length === 0}
@@ -2258,6 +2368,50 @@
             </aside>
         </main>
     {/if}
+
+    <!-- 编辑器设置：目录栏右上角齿轮打开。
+         与安装版 /editor 共用 SettingsShell 和各个 Tab 组件，数据也同在
+         appSettings（localStorage 的 app-settings）里 —— 所以在哪边改都一样。
+
+         这里只放网页端真正会生效的页签：目录正则（扫描用）和显示选项。
+         字体导入、历史版本、API/智能校对依赖 Tauri IPC 或安装版的文件系统，
+         网页端摆出来只会点了报错，故不提供。 -->
+    {#if settingsOpen}
+        <div
+            role="presentation"
+            class="modal-overlay"
+            on:click={() => (settingsOpen = false)}
+        >
+            <div role="presentation" on:click|stopPropagation>
+                <SettingsShell
+                    title="编辑器设置"
+                    tabs={textEditorSettingsTabs}
+                    activeTab={settingsTab}
+                    onTabChange={(tabId) => (settingsTab = tabId)}
+                    onClose={() => (settingsOpen = false)}
+                    actionLabel="保存并应用"
+                    onAction={applyEditorSettings}
+                    shellClass="editor-settings-modal"
+                    contentClass="editor-settings-content"
+                >
+                    <SettingsTocTab
+                        rules={settingsRules}
+                        presetPatterns={TOC_PRESET_PATTERNS}
+                        bind:prefixLevel={settingsPrefixLevel}
+                        bind:prefixText={settingsPrefixText}
+                        onAddPrefix={addTocPrefixRule}
+                        onUpdateRule={updateSettingsRule}
+                        onRemoveRule={removeSettingsRule}
+                        onResetRules={resetTocRules}
+                        onAddRule={addSettingsRule}
+                    />
+                    {#if settingsMessage}
+                        <p class="settings-inline-hint">{settingsMessage}</p>
+                    {/if}
+                </SettingsShell>
+            </div>
+        </div>
+    {/if}
 </div>
 
 <style>
@@ -2383,6 +2537,79 @@
         gap: 10px;
         background: var(--color-surface-soft);
         border-bottom: 1px solid var(--color-border);
+    }
+
+    .toc-head-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+    }
+
+    /* 目录栏右上角的图标按钮：与工具箱 / EPUB 编辑器的 icon-btn 同一套
+       尺寸与渐变（34px 方按钮 + 1px 边框 + surface→soft 渐变） */
+    .toc-icon-btn {
+        width: 34px;
+        min-width: 34px;
+        height: var(--control-height);
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: linear-gradient(
+            180deg,
+            var(--color-surface),
+            var(--color-surface-soft)
+        );
+        color: var(--color-text-soft);
+        box-shadow: var(--shadow-xs);
+        cursor: pointer;
+        transition:
+            transform var(--transition-fast),
+            border-color var(--transition-fast),
+            background var(--transition-fast),
+            box-shadow var(--transition-fast),
+            color var(--transition-fast);
+    }
+
+    .toc-icon-btn:hover:not(:disabled) {
+        border-color: var(--color-border-strong);
+        background: var(--color-hover);
+        color: var(--color-text);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .toc-icon-btn:active:not(:disabled) {
+        background: var(--color-active);
+        transform: translateY(1px) scale(0.98);
+        box-shadow: var(--shadow-xs);
+    }
+
+    .toc-icon-btn:disabled {
+        opacity: 0.52;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+
+    /* 设置面板：与各页面的 .modal-overlay 一致 */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        box-sizing: border-box;
+        background: rgba(15, 23, 42, 0.45);
+    }
+
+    .settings-inline-hint {
+        margin-top: 10px;
+        color: var(--color-muted);
+        font-size: 12px;
     }
 
     .toc-head small {

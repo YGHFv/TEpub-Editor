@@ -19,14 +19,12 @@
     } from "$lib/webToolRoutes";
     import {
         applyTheme,
-        DEFAULT_TOC_REGEX_RULES,
         loadAppSettings,
         newAiProvider,
         providerToProofingConfig,
         saveAppSettings,
         type AiProviderConfig,
         type GlobalAppSettings,
-        type TocRegexRule,
     } from "$lib/appSettings";
     import {
         getWebAccountSession,
@@ -118,11 +116,6 @@
         { value: "light", label: "浅色" },
         { value: "dark", label: "深色" },
     ];
-    const REGEX_LEVEL_OPTIONS = [
-        { value: "1", label: "卷" },
-        { value: "3", label: "章" },
-    ];
-
     const tools: Tool[] = [
         {
             id: "library",
@@ -377,15 +370,14 @@
     let statusText = "";
     let showSettings = false;
     let webDesktopViewEnabled = false;
-    let toolboxSettingsActiveTab:
-        "account" | "general" | "assoc" | "regex" | "api" = "general";
+    let toolboxSettingsActiveTab: "account" | "general" | "assoc" | "api" =
+        "general";
     $: toolboxSettingsTabs = [
         ...(usesWebScopedSettings() ? [{ id: "account", label: "账号" }] : []),
         { id: "general", label: "通用" },
         ...(usesWebScopedSettings()
             ? []
             : [{ id: "assoc", label: "文件关联" }]),
-        { id: "regex", label: "目录正则" },
         { id: "api", label: "API 配置" },
     ];
     let appSettings: GlobalAppSettings = loadAppSettings();
@@ -415,17 +407,47 @@
      * 设置「使用多窗口打开二级页面」关闭（默认）时直接在当前窗口跳转，
      * 顶部标签栏负责切回；打开时才建独立窗口。返回 null 表示走了跳转，
      * 调用方不要再对窗口做 show/hide。
+     *
+     * web 端没有"独立窗口"，等价物是浏览器标签页（见 openWebTool）。
      */
     async function createToolWindow(
         label: string,
         options: Record<string, any> & { url: string },
     ) {
         const { url, ...windowOptions } = options;
+        if (platform.isWeb) {
+            openWebTool(url);
+            return null;
+        }
         if (!appSettings.secondaryWindows) {
             await goto(url);
             return null;
         }
         return platform.createWebviewWindow(label, url, windowOptions);
+    }
+
+    /**
+     * web 端打开工具页。
+     *
+     * 「打开工具时隐藏工具箱主页」在桌面上说的是"工具一开，工具箱就让位"。
+     * web 里它的等价物只有两种：
+     *   勾选   → 当前页跳转，工具箱被工具页替换（= 让位，原有行为）
+     *   取消   → 工具箱留下，工具在新标签页里打开
+     * 所以取消勾选才会开新标签 —— 勾选时开新标签的话工具箱并没有"消失"，
+     * 语义就反了。
+     */
+    function openWebTool(url: string) {
+        // "#" 表示该工具在 web 端没有对应页面（webToolRoute 的兜底值）：
+        // 既不能跳也不能开新标签，新标签会停在空白页、跳到 "#" 会把地址栏弄脏
+        if (!url || url === "#") return;
+        if (appSettings.closeToolboxOnToolOpen !== false) {
+            void goto(url);
+            return;
+        }
+        const absolute = new URL(url, window.location.href).href;
+        const opened = window.open(absolute, "_blank", "noopener");
+        // 弹窗被拦截时退化成当前页跳转，至少不让点击变成"没反应"
+        if (!opened) void goto(url);
     }
 
     async function pickFile(tool: Tool) {
@@ -527,7 +549,9 @@
             ((platform.isWeb || isMobileClient) && isWebRouteTool(tool.id))
         ) {
             event.preventDefault();
-            void goto(webToolHref(tool.id));
+            // 手机端没有"标签页"，保持当前页跳转；web 端按开关决定新标签还是原地
+            if (platform.isWeb) openWebTool(webToolHref(tool.id));
+            else void goto(webToolHref(tool.id));
             return;
         }
         if (tool.id === "epub-style-library") {
@@ -574,6 +598,11 @@
     }
 
     async function openLibrary() {
+        // web 端没有多窗口：直接按开关决定开新标签还是原地跳
+        if (platform.isWeb) {
+            openWebTool(appPath("/library"));
+            return;
+        }
         if (isRootToolbox()) {
             await goto(appPath("/library"));
             return;
@@ -618,7 +647,7 @@
 
     async function openImageTools() {
         if (platform.isWeb && typeof window !== "undefined") {
-            await goto(appPath("/toolbox/image-tools"));
+            openWebTool(appPath("/toolbox/image-tools"));
             return;
         }
 
@@ -941,76 +970,6 @@
         saveGlobalSettings();
     }
 
-    /**
-     * 刚点「添加」还没填内容的新规则。
-     *
-     * 不能直接塞进 customRegexRules 再保存：normalizeTocRegexRules 会丢掉
-     * pattern 为空的行（空正则会匹配每一行，扫描目录时会把全书切成章），
-     * 结果就是点一下行立刻消失。所以空行只留在内存里，等用户敲进第一个
-     * 字符再并入正式列表并落盘。
-     */
-    let draftRegexRules: TocRegexRule[] = [];
-    $: displayRegexRules = [
-        ...appSettings.customRegexRules,
-        ...draftRegexRules,
-    ];
-
-    function updateTocRegexRule(index: number, patch: Partial<TocRegexRule>) {
-        const persistedCount = appSettings.customRegexRules.length;
-        if (index < persistedCount) {
-            appSettings.customRegexRules = appSettings.customRegexRules.map(
-                (rule, i) => (i === index ? { ...rule, ...patch } : rule),
-            );
-            saveGlobalSettings();
-            return;
-        }
-        const draftIndex = index - persistedCount;
-        const next = draftRegexRules.map((rule, i) =>
-            i === draftIndex ? { ...rule, ...patch } : rule,
-        );
-        const draft = next[draftIndex];
-        if (draft && draft.pattern.trim()) {
-            // 有内容了：并入正式列表（保存时才真正生效）
-            appSettings.customRegexRules = [
-                ...appSettings.customRegexRules,
-                draft,
-            ];
-            draftRegexRules = next.filter((_, i) => i !== draftIndex);
-            saveGlobalSettings();
-            return;
-        }
-        draftRegexRules = next;
-    }
-
-    function addTocRegexRule(level: number) {
-        draftRegexRules = [
-            ...draftRegexRules,
-            { enabled: true, level: level <= 1 ? 1 : 3, pattern: "" },
-        ];
-    }
-
-    function removeTocRegexRule(index: number) {
-        const persistedCount = appSettings.customRegexRules.length;
-        if (index >= persistedCount) {
-            draftRegexRules = draftRegexRules.filter(
-                (_, i) => i !== index - persistedCount,
-            );
-            return;
-        }
-        appSettings.customRegexRules = appSettings.customRegexRules.filter(
-            (_, i) => i !== index,
-        );
-        saveGlobalSettings();
-    }
-
-    function resetTocRegexRules() {
-        draftRegexRules = [];
-        appSettings.customRegexRules = DEFAULT_TOC_REGEX_RULES.map((rule) => ({
-            ...rule,
-        }));
-        saveGlobalSettings();
-    }
-
     function providerKindLabel(kind: AiProviderConfig["kind"]) {
         return kind === "image" ? "生图模型" : "文字模型";
     }
@@ -1162,7 +1121,6 @@
             tabId === "account" ||
             tabId === "general" ||
             tabId === "assoc" ||
-            tabId === "regex" ||
             tabId === "api"
         ) {
             if (tabId === "assoc" && usesWebScopedSettings()) return;
@@ -1466,14 +1424,31 @@
                             on:change={saveGlobalSettings}
                         />
                     </label>
-                    <label class="set-row toggle-row">
-                        <span class="set-label">打开工具时隐藏工具箱主页</span>
-                        <input
-                            type="checkbox"
-                            bind:checked={appSettings.closeToolboxOnToolOpen}
-                            on:change={saveGlobalSettings}
-                        />
-                    </label>
+                    <!-- 只在多窗口模式下有意义：同窗口标签栏模式里工具页是
+                         标签，工具箱一直是第一个标签，没有"隐藏主页"这回事。
+                         关掉多窗口时整行不渲染，省得留一个点了没反应的开关。
+                         这里不改写 closeToolboxOnToolOpen 的存值 —— 重新打开
+                         多窗口时用户上次的选择应该还在；web 端它也仍有语义
+                         （决定工具开新标签还是原地跳，见 openWebTool）。 -->
+                    {#if appSettings.secondaryWindows || platform.isWeb}
+                        <label class="set-row toggle-row">
+                            <span class="set-label"
+                                >打开工具时隐藏工具箱主页
+                                {#if platform.isWeb && !appSettings.secondaryWindows}
+                                    <small
+                                        >取消后工具在新标签页打开，工具箱留在原标签</small
+                                    >
+                                {/if}</span
+                            >
+                            <input
+                                type="checkbox"
+                                bind:checked={
+                                    appSettings.closeToolboxOnToolOpen
+                                }
+                                on:change={saveGlobalSettings}
+                            />
+                        </label>
+                    {/if}
                     <label class="set-row toggle-row">
                         <span class="set-label"
                             >显示 EPUB 预览滚动条
@@ -1538,85 +1513,6 @@
                                 )}
                         />
                     </label>
-                </section>
-            {:else if toolboxSettingsActiveTab === "regex"}
-                <section class="settings-section">
-                    <div class="api-section-head">
-                        <div>
-                            <div class="section-title">目录正则</div>
-                            <p class="section-hint">
-                                用于 TXT 编辑器目录扫描和网页 EPUB
-                                制作页；取消勾选的规则不会参与扫描。
-                            </p>
-                        </div>
-                        <button
-                            class="toolbox-mini-btn"
-                            type="button"
-                            on:click={resetTocRegexRules}>重置</button
-                        >
-                    </div>
-                    <div class="toolbox-regex-list">
-                        {#each displayRegexRules as rule, index}
-                            <div class="toolbox-regex-row">
-                                <label
-                                    class="toolbox-regex-enabled"
-                                    title="是否应用该正则"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={rule.enabled !== false}
-                                        on:change={(e) =>
-                                            updateTocRegexRule(index, {
-                                                enabled: (
-                                                    e.currentTarget as HTMLInputElement
-                                                ).checked,
-                                            })}
-                                    />
-                                </label>
-                                <CustomSelect
-                                    className="set-control toolbox-regex-level"
-                                    value={String(rule.level <= 1 ? 1 : 3)}
-                                    options={REGEX_LEVEL_OPTIONS}
-                                    on:change={(e) =>
-                                        updateTocRegexRule(index, {
-                                            level: Number(e.detail),
-                                        })}
-                                />
-                                <input
-                                    class="set-control"
-                                    type="text"
-                                    value={rule.pattern}
-                                    on:input={(e) =>
-                                        updateTocRegexRule(index, {
-                                            pattern: (
-                                                e.currentTarget as HTMLInputElement
-                                            ).value,
-                                        })}
-                                    placeholder="输入目录匹配正则"
-                                />
-                                <button
-                                    class="toolbox-mini-btn danger"
-                                    type="button"
-                                    on:click={() => removeTocRegexRule(index)}
-                                    >删除</button
-                                >
-                            </div>
-                        {/each}
-                    </div>
-                    <div class="toolbox-regex-actions">
-                        <button
-                            class="toolbox-mini-btn"
-                            type="button"
-                            on:click={() => addTocRegexRule(1)}
-                            >添加卷规则</button
-                        >
-                        <button
-                            class="toolbox-mini-btn"
-                            type="button"
-                            on:click={() => addTocRegexRule(3)}
-                            >添加章规则</button
-                        >
-                    </div>
                 </section>
             {:else if toolboxSettingsActiveTab === "api"}
                 <section class="settings-section">
@@ -1990,41 +1886,6 @@
 
     .account-submit {
         margin-top: 4px;
-    }
-
-    .toolbox-regex-list {
-        display: grid;
-        gap: 8px;
-    }
-
-    .toolbox-regex-row {
-        display: grid;
-        grid-template-columns: 28px 72px minmax(0, 1fr) auto;
-        gap: 8px;
-        align-items: center;
-    }
-
-    .toolbox-regex-enabled {
-        min-height: var(--control-height);
-        display: grid;
-        place-items: center;
-    }
-
-    .toolbox-regex-enabled input {
-        width: 16px;
-        height: 16px;
-        accent-color: var(--color-accent);
-    }
-
-    :global(.toolbox-regex-level .custom-select-trigger) {
-        min-height: 36px;
-    }
-
-    .toolbox-regex-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        margin-top: 10px;
     }
 
     .api-item {

@@ -596,7 +596,10 @@ textarea:disabled {
    避免出现外层容器 + 内层 input 各画一层边框的双重框。 */
 :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"])),
 :where(textarea),
-:where(.set-row input),
+/* .set-row 里既有文本框也有开关：开关本身是 16px 的方框，被这条兜底的
+   min-height:34px + padding + border 一套，外面就多出一个 34px 高的空框，
+   看着像「复选框外面又套了一个框」。排除掉这两类才只作用于文本框 */
+:where(.set-row input:not([type="checkbox"]):not([type="radio"])),
 :where(.set-row textarea),
 :where(.fr-input),
 :where(.fr-dropdown-btn),
@@ -624,7 +627,16 @@ textarea:disabled {
   color: var(--color-muted);
 }
 
-:where(input):focus,
+/* 焦点环只给"输入框"这一类能用边框表达焦点的地方。
+   checkbox / radio / file 不能吃这条：
+   - 它们没有可改的边框，--focus-ring 的 box-shadow 会画在勾选框外面，
+     看起来就是「复选框外面又套了一个框」；
+   - 它们被点的时候 :focus 就成立（不像按钮要点成 :focus-visible），
+     所以每点一次开关都会亮一圈。
+   键盘用户仍能通过 :focus-visible 拿到下面那条通用的焦点环。 */
+:where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"])
+):focus,
 :where(textarea):focus,
 :where(.fr-input):focus,
 :where(.epub-input-small):focus,
@@ -634,6 +646,16 @@ textarea:disabled {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: var(--focus-ring);
+}
+
+/* 复选框/单选框的键盘焦点：只画一条紧贴的 outline。
+   必须显式清掉 box-shadow —— 上面第 405 行的 :where(*):focus-visible
+   也会命中它们，不清掉就是 outline + box-shadow 两个框叠在一起。 */
+:where(input[type="checkbox"], input[type="radio"]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+  box-shadow: none;
 }
 
 /* ================= Atomic: Card / Panel ================= */
@@ -1495,10 +1517,12 @@ textarea:disabled {
 
 /* 深色输入兜底：同样用 :where() 压到 0,1,0，
    让页面自己的输入样式永远能覆盖，不会把内层 input 也刷成有框有底。 */
-:root[data-theme="dark"] :where(input),
+:root[data-theme="dark"]
+  :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"])),
 :root[data-theme="dark"] :where(textarea),
 :root[data-theme="dark"] :where(.set-control),
-:root[data-theme="dark"] :where(.set-row input),
+:root[data-theme="dark"]
+  :where(.set-row input:not([type="checkbox"]):not([type="radio"])),
 :root[data-theme="dark"] :where(.set-row textarea),
 :root[data-theme="dark"] :where(.fr-input),
 :root[data-theme="dark"] :where(.fr-dropdown-btn),

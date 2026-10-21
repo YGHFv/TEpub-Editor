@@ -460,8 +460,8 @@
 
     // 编辑器 -> 预览：按「点击的段落 / 选中的文字」定位，而不是按滚动比例。
     // 滚动联动会让预览跟着手抖，且两边的换行密度不同，比例对不上位置。
-    // 预览 iframe 已被撑到正文高度、由外层 .preview-container 滚动，
-    // 所以由 PreviewPane 把命中位置换算成外层 scrollTop。
+    // 预览 iframe 已被撑到正文高度、由手机框（.mobile-frame）自己滚动，
+    // 所以由 PreviewPane 把命中位置换算成那个滚动容器的 scrollTop。
     function revealInPreview(text: string, mode: "center" | "nearest") {
         const clean = text.replace(/[\s ]+/g, " ").trim();
         if (!clean) return;

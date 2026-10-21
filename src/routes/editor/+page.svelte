@@ -56,6 +56,14 @@
         saveAppSettings as saveGlobalAppSettings,
     } from "$lib/appSettings";
     import {
+        DEFAULT_VOLUME_REGEX,
+        DEFAULT_CHAPTER_REGEX,
+        DEFAULT_META_VOLUME_REGEX,
+        DEFAULT_META_BODY_REGEX,
+        TOC_PRESET_PATTERNS,
+        buildTitlePrefixRegex,
+    } from "$lib/tocRegexPresets";
+    import {
         applyTitleRewrite,
         applyBuiltinRegexPreview,
         applyChineseConvertPreview,
@@ -240,19 +248,12 @@
     }
 
     // --- [2. 默认配置 (三大正则回归 & 新增动态生成规则)] ---
-    const DEFAULT_META_VOLUME_REGEX =
-        "^\\s*(?:内容简介|本书相关|完本感言)\\s*(?:[:：].*)?$";
-    const DEFAULT_META_BODY_REGEX =
-        "^\\s*(?:简介|序(?:章|言)?|前言|楔子|后记|尾声)\\s*(?:[:：].*)?$";
-    const DEFAULT_META_REGEX = DEFAULT_META_VOLUME_REGEX;
+    // 这几条正则同时被 web 的 TXT 编辑器（/toolbox/text-editor）的设置面板
+    // 使用，统一放在 $lib/tocRegexPresets，避免两边各抄一份后漂移。
     const LEGACY_VOLUME_REGEX =
         "^\\s*第[零〇一二两三四五六七八九十百千万0-9]+\\s*[卷部].*";
     const LEGACY_CHAPTER_REGEX =
         "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+).*";
-    const DEFAULT_VOLUME_REGEX =
-        "^\\s*(?:第\\s*[零〇一二两三四五六七八九十百千万0-9]+\\s*卷|卷\\s*[零〇一二两三四五六七八九十百千万0-9]+)(?:\\s+|[:：、.．\\-—]+)\\S+.*";
-    const DEFAULT_CHAPTER_REGEX =
-        "^\\s*(?:第\\s*[一二两三四五六七八九十零〇百千万0-9]+\\s*(?:[章节]|回(?:[^合]|$))|Chapter\\s*\\d+|终章(?:\\s+|[:：、.．\\-—])\\S+|(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*";
 
     const DEFAULT_SETTINGS = {
         customRegexRules: [
@@ -342,44 +343,7 @@
 只返回 JSON，不要 Markdown。格式：
 {"decisions":[{"original":"建议里的 original","approved":true,"reason":"少于20字"}]}`;
 
-    const REGEX_PRESETS = [
-        { label: "自定义", value: "" },
-        {
-            label: "^\\s*第[一二三..]+章.*$",
-            value: "^\\s*第[一二三四五六七八九十零〇百千两]+章.*$",
-        },
-        { label: "第X卷 标题 / 卷X 标题", value: DEFAULT_VOLUME_REGEX },
-        {
-            label: "终章 标题",
-            value: "^\\s*终章(?:\\s+|[:：、.．\\-—])\\S+.*$",
-        },
-        {
-            label: "番外 / 后日谈",
-            value: "^\\s*(?:(?:新增\\s*)?(?:番外|后日谈)(?:\\s+|[:：、.．\\-—])\\S+|【\\s*(?:番外|后日谈)\\s*】\\s*\\S+).*$",
-        },
-        {
-            label: "^\\s*第[一二三..]+回.*$",
-            value: "^\\s*第[一二三四五六七八九十零〇百千两]+回.*$",
-        },
-        {
-            label: "^\\s*第[一二三..]+节.*$",
-            value: "^\\s*第[一二三四五六七八九十零〇百千两]+节.*$",
-        },
-        { label: "^\\s*第\\d+章.*$", value: "^\\s*第\\d+章.*$" },
-        {
-            label: "内容简介 / 本书相关 / 完本感言",
-            value: DEFAULT_META_VOLUME_REGEX,
-        },
-        {
-            label: "简介 / 前言 / 楔子 / 后记 / 尾声",
-            value: DEFAULT_META_BODY_REGEX,
-        },
-        {
-            label: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$",
-            value: "^\\s*序列\\s*\\d+(?:\\s|[:：、.-]|$).*$",
-        },
-        { label: "^\\s*\\d+\\s*$", value: "^\\s*\\d+\\s*$" },
-    ];
+    /* 预设表移到 $lib/tocRegexPresets，与 web 的 TXT 编辑器共用一份 */
 
     function normalizeAiProofingConfig(
         config: Partial<AiProofingConfig> | undefined,
@@ -581,16 +545,9 @@
         return [{ level, pattern }];
     }
 
-    function buildTitlePrefixRegex(prefix: string) {
-        const escaped = escapeRegExp(prefix.trim());
-        return `^\\s*(?:(?:新增\\s*)?${escaped}(?:\\s+|[:：、.．\\-—])\\S+.*|【\\s*${escaped}\\s*】\\s*\\S+.*)$`;
-    }
-
     // 目录正则 tab 的规则操作统一走拷贝赋值（新数组 + 变更项新对象），
     // 避免原地 splice/push/字段改写穿过 runes prop 后因引用相等不触发更新。
-    const TOC_PRESET_PATTERNS = REGEX_PRESETS.filter(
-        (preset) => preset.value,
-    ).map((preset) => preset.value);
+    // buildTitlePrefixRegex / TOC_PRESET_PATTERNS 见 $lib/tocRegexPresets。
 
     function addTocPrefixRule(level: number, prefix: string) {
         appSettings.customRegexRules = [

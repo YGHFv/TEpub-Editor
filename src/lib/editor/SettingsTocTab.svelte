@@ -256,9 +256,16 @@
         z-index: 1;
     }
     .rule-btn {
-        width: 32px;
-        height: 32px;
+        /* 删除用的 `－` 只有 1 个字宽，32px 见方的图标按钮正好；
+           但「＋ 前缀」是带文字的按钮，写死 32px 会让文字（约 45px）
+           溢出到圆角框外面，看着像按钮没画全。这里放开宽度：图标按钮
+           由内容撑到 32px，文字按钮按自身宽度撑开 */
         min-width: 32px;
+        height: 32px;
+        padding: 0 8px;
+        box-sizing: border-box;
+        flex: 0 0 auto;
+        white-space: nowrap;
         border: 1px solid var(--color-border-strong);
         border-radius: var(--radius-xs);
         background: var(--color-surface);
