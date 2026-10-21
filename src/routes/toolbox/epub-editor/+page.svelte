@@ -26,7 +26,11 @@
     } from "$lib/epubEditor/previewSync";
     import { measureEpubContentHeight } from "$lib/epubEditor/contentHeight";
     import { hasUnsavedEpubChanges } from "$lib/unsavedChanges";
-    import { paperBackground, paperTextColor } from "$lib/epubPaperTheme";
+    import {
+        applyPaperTheme,
+        paperBackground,
+        paperTextColor,
+    } from "$lib/epubPaperTheme";
     import { loadAppSettings, type GlobalAppSettings } from "$lib/appSettings";
     import {
         EPUB_FIND_HISTORY_KEY,
@@ -349,7 +353,25 @@
         schedulePreviewMeasure();
         watchPreviewContent();
         bindPreviewClickHandler();
+        // 深色主题下书自己的深色文字会消失在深色纸上。安装版在
+        // PreviewPane 里调 applyPaperTheme 处理，web 版此前没接这一步。
+        applyPreviewPaperTheme();
     }
+
+    function applyPreviewPaperTheme() {
+        try {
+            applyPaperTheme(
+                previewIframeEl?.contentDocument,
+                appSettings.uiTheme === "dark",
+            );
+        } catch {
+            // 跨源或文档已销毁：预览本身还能看，不值得让整页报错
+        }
+    }
+
+    // 主题切换时 srcdoc 会重建，但设置变化不一定走重建（比如只在
+    // 另一窗口改），这里补一次，和安装版的 $effect 对齐
+    $: if (appSettings.uiTheme) applyPreviewPaperTheme();
 
     $: dirty = editorText !== savedEditorText;
     $: hasUnsavedChanges = hasUnsavedEpubChanges(
@@ -3628,17 +3650,19 @@
     .mobile-frame {
         display: flex;
         flex-direction: column;
-        /* 手机框保持手机尺寸：高撑满预览列但最多 700（320 宽的设计高度），
-           章节再长也不往下长，正文在框内滚动。写 height:auto 时框会随
-           正文一路拉长，长章节下"手机"成了一条没有底边的长纸带 */
-        height: 100%;
-        max-height: 700px;
+        /* 手机框是固定尺寸 320×700（20:9 设计值），不随窗口伸缩：
+           写 height:100% 时预览列一矮框就跟着缩，同一本书在不同窗口下
+           大小不一致；章节再长也不往下长，正文在框内滚动。
+           max-height:100% 只在窗口真的装不下 700 时兜底。 */
+        height: 700px;
+        max-height: 100%;
         overflow-y: auto;
         overflow-x: hidden;
         overscroll-behavior: contain;
         border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
         background: var(--color-surface);
-        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+        box-shadow: var(--shadow-md);
     }
 
     /* 阅读模式是宽页阅读，不是手机：取消高度上限，交回 .preview-body 滚动 */
@@ -3669,6 +3693,9 @@
            inline 的实测高度要能撑开，这里必须禁止收缩 */
         flex-shrink: 0;
         border: 0;
+        /* 与安装版一致：iframe 自己也要圆角，只给外框圆角时书页四个角
+           仍会露出直角（外框滚动时尤其明显） */
+        border-radius: var(--radius-lg);
         box-sizing: border-box;
         background: var(--color-surface);
     }
