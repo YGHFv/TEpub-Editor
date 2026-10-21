@@ -216,7 +216,11 @@
     }
 
     .mini-action.danger {
-        border-color: color-mix(in srgb, var(--color-danger-soft) 88%, var(--color-danger));
+        border-color: color-mix(
+            in srgb,
+            var(--color-danger-soft) 88%,
+            var(--color-danger)
+        );
         color: var(--color-danger);
     }
 
@@ -396,7 +400,11 @@
         min-width: 38px;
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
-        background: linear-gradient(180deg, var(--color-surface), var(--color-surface-soft));
+        background: linear-gradient(
+            180deg,
+            var(--color-surface),
+            var(--color-surface-soft)
+        );
         color: var(--color-text-soft);
         box-shadow: var(--shadow-xs);
         cursor: pointer;

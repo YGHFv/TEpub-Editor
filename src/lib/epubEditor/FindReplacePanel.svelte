@@ -300,7 +300,11 @@
         padding: 4px 8px;
         border: 1px solid var(--color-border-strong);
         border-radius: var(--radius-xs);
-        background: linear-gradient(to bottom, var(--color-surface), var(--color-border));
+        background: linear-gradient(
+            to bottom,
+            var(--color-surface),
+            var(--color-border)
+        );
         cursor: pointer;
         font-size: 12px;
         display: flex;
@@ -314,7 +318,11 @@
     }
 
     .fr-btn:hover {
-        background: linear-gradient(to bottom, var(--color-surface-soft), var(--color-border));
+        background: linear-gradient(
+            to bottom,
+            var(--color-surface-soft),
+            var(--color-border)
+        );
         border-color: var(--color-muted);
     }
 
@@ -323,7 +331,11 @@
     }
 
     .fr-danger {
-        background: linear-gradient(to bottom, var(--color-warning-soft), #ffddcc);
+        background: linear-gradient(
+            to bottom,
+            var(--color-warning-soft),
+            #ffddcc
+        );
         border-color: var(--color-warning);
     }
 
@@ -432,14 +444,22 @@
         border-left: none;
         border-top-right-radius: 4px;
         border-bottom-right-radius: 4px;
-        background: linear-gradient(to bottom, var(--color-surface), var(--color-border));
+        background: linear-gradient(
+            to bottom,
+            var(--color-surface),
+            var(--color-border)
+        );
         cursor: pointer;
         font-size: 10px;
         color: var(--color-muted);
     }
 
     .fr-dropdown-btn:hover {
-        background: linear-gradient(to bottom, var(--color-surface-soft), var(--color-border));
+        background: linear-gradient(
+            to bottom,
+            var(--color-surface-soft),
+            var(--color-border)
+        );
     }
 
     .fr-history-dropdown {
@@ -503,7 +523,8 @@
         background: var(--color-surface);
         border-top: 1px solid var(--color-border-strong);
         padding: 9px 12px;
-        box-shadow: 0 -8px 20px color-mix(in srgb, var(--color-border) 42%, transparent);
+        box-shadow: 0 -8px 20px
+            color-mix(in srgb, var(--color-border) 42%, transparent);
         backdrop-filter: none;
     }
 

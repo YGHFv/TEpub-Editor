@@ -762,10 +762,9 @@
     .repo-form,
     .repo-actions {
         display: grid;
-        grid-template-columns: minmax(90px, 0.8fr) minmax(170px, 1.5fr) minmax(
-                80px,
-                0.6fr
-            ) auto;
+        grid-template-columns:
+            minmax(90px, 0.8fr) minmax(170px, 1.5fr) minmax(80px, 0.6fr)
+            auto;
         gap: 8px;
         align-items: center;
     }
@@ -1086,7 +1085,11 @@
     }
 
     ::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, var(--color-border-strong), var(--color-border));
+        background: linear-gradient(
+            180deg,
+            var(--color-border-strong),
+            var(--color-border)
+        );
         border-radius: 999px;
     }
 </style>

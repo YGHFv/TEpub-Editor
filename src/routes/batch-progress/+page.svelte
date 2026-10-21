@@ -1237,14 +1237,30 @@
     }
 
     .cancel-btn {
-        border-color: color-mix(in srgb, var(--color-danger) 28%, var(--color-border));
-        background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+        border-color: color-mix(
+            in srgb,
+            var(--color-danger) 28%,
+            var(--color-border)
+        );
+        background: color-mix(
+            in srgb,
+            var(--color-danger) 10%,
+            var(--color-surface)
+        );
         color: var(--color-danger);
     }
 
     .retry-btn {
-        border-color: color-mix(in srgb, var(--color-warning) 32%, var(--color-border));
-        background: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface));
+        border-color: color-mix(
+            in srgb,
+            var(--color-warning) 32%,
+            var(--color-border)
+        );
+        background: color-mix(
+            in srgb,
+            var(--color-warning) 12%,
+            var(--color-surface)
+        );
         color: var(--color-warning);
     }
 
@@ -1450,8 +1466,16 @@
     }
 
     .completion-summary span.error {
-        border-color: color-mix(in srgb, var(--color-danger) 26%, var(--color-border));
-        background: color-mix(in srgb, var(--color-danger) 10%, var(--color-canvas));
+        border-color: color-mix(
+            in srgb,
+            var(--color-danger) 26%,
+            var(--color-border)
+        );
+        background: color-mix(
+            in srgb,
+            var(--color-danger) 10%,
+            var(--color-canvas)
+        );
         color: var(--color-danger);
     }
 

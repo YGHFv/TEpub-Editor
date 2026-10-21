@@ -2659,7 +2659,8 @@
         border-radius: var(--radius-lg);
         overflow: hidden;
         background: var(--color-surface);
-        box-shadow: var(--shadow-sm),
+        box-shadow:
+            var(--shadow-sm),
             inset 0 0 0 1px rgba(214, 219, 228, 0.7);
     }
 

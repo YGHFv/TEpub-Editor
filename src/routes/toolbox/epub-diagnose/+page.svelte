@@ -416,7 +416,8 @@
     }
     .floating-error {
         padding: 10px 14px;
-        border: 1px solid color-mix(in srgb, var(--color-danger) 28%, transparent);
+        border: 1px solid
+            color-mix(in srgb, var(--color-danger) 28%, transparent);
         border-radius: var(--radius-sm);
         background: var(--color-danger-soft);
         color: var(--color-danger);

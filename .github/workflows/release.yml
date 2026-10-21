@@ -1,28 +1,77 @@
 name: Release
+
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
 
+# 同一个 commit 的发版只允许一条流水线。两个触发同时打向同一版代码，会往
+# 同一个 draft release 里并发上传，资产名互相覆盖。
+#
+# group 用 github.sha 而不是 github.ref：推标签时 ref 是 refs/tags/v1.2.1，
+# workflow_dispatch 时是 refs/heads/main —— 组名不同，「标签推完再从 main
+# 手动触发一遍」正好漏网，而这恰恰是注释里说要防的那种并发。两者的 sha
+# 通常是同一个 commit，用 sha 分组建就能把它们串起来。
+#
+# 不用固定的 group: release：并发组只剩「一个在跑 + 一个排队」两个名额，
+# 连续推两个标签时后一个会被第三个触发顶掉，等于静默丢掉一次发版。
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  # 下面四个都是本工作流自己的参数，刻意不用 ANDROID_PLATFORM / ANDROID_NDK_VERSION
+  # 这类通用名字 —— runner 镜像和 NDK 构建脚本里已经有同名的约定变量，
+  # 撞上会改掉别人的行为。
+  #
+  # Android 只发 arm64。模拟器 / x86 设备用 debug 构建即可，不进正式包。
+  ANDROID_BUILD_ARCH: aarch64
+  # 固定 NDK：tauri CLI 会自己扫 $ANDROID_HOME/ndk 并取**字典序最后一个**，
+  # 不读外部传入的 NDK_HOME（tauri-cli 2.9.6 src/mobile/android/mod.rs:354）。
+  # 镜像里同时装了 27 / 29 / 30，不把其它版本挪走的话实际用的是 30，
+  # 这个 pin 就成了摆设。
+  ANDROID_NDK_PIN: 29.0.14206865
+  ANDROID_SDK_PLATFORM: android-36
+  ANDROID_SDK_BUILD_TOOLS: 36.0.0
+
+# 未配置代码签名：macOS 的 APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY /
+# APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID 与 Windows 证书都还没有，
+# 因此产物是未签名、未公证的 —— macOS 15+ 首次打开需要右键「打开」，
+# Windows 会弹 SmartScreen。配上证书后，把对应变量加到 release 腿的
+# tauri-action env 里即可，流水线其余部分不用改。
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # 质量门：前端类型检查 + 单测，再验证「生产模式」的 Rust 构建路径
+  # ---------------------------------------------------------------------------
   test:
     runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
+      # pnpm 必须先于 setup-node：setup-node 的 cache: pnpm 要 shell out
+      # `pnpm store path`，pnpm 还没装时缓存会静默失效。
       - uses: pnpm/action-setup@v4
         name: Install pnpm
         with:
           run_install: false
 
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - name: install dependencies (ubuntu only)
         run: |
@@ -31,6 +80,39 @@ jobs:
 
       - name: install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      # 版本号有三份手写副本（package.json / Cargo.toml / tauri.conf.json），
+      # 外加触发用的标签。任何一处漂移都会让 Android 把 APK 传到不存在的
+      # 标签上 —— 而那时桌面端已经跑完、APK 也已经编译完了。
+      # 所以放在最早一个 job 的最前面。
+      - name: verify version consistency
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
+          const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8")).version;
+          const cargo = fs.readFileSync("src-tauri/Cargo.toml", "utf8");
+          const match = cargo.match(/^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m);
+          const crate = match && match[1];
+          const refType = process.env.GITHUB_REF_TYPE;
+          const refName = process.env.GITHUB_REF_NAME;
+
+          const problems = [];
+          if (!crate) problems.push("src-tauri/Cargo.toml 里找不到 [package] version");
+          if (crate && pkg !== crate) problems.push(`package.json ${pkg} != Cargo.toml ${crate}`);
+          if (pkg !== conf) problems.push(`package.json ${pkg} != tauri.conf.json ${conf}`);
+          if (refType === "tag" && refName !== `v${conf}`) {
+            problems.push(`触发标签 ${refName} != v${conf}（tauri.conf.json）`);
+          }
+          if (problems.length > 0) {
+            for (const p of problems) console.error(`::error::${p}`);
+            console.error("请把 package.json / src-tauri/Cargo.toml（含 Cargo.lock）/ tauri.conf.json 改成同一个版本");
+            process.exit(1);
+          }
+          console.log(`version ${conf}，trigger ${refType} ${refName ?? ""}`);
+          NODE
 
       - name: run svelte-check
         run: pnpm check
@@ -38,39 +120,136 @@ jobs:
       - name: run frontend tests
         run: pnpm test
 
-      - name: run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      # 这一步是之前完全缺失的。`cargo test` 不带 custom-protocol，于是
+      # tauri-codegen 走 dev 分支，直接跳过 frontendDist 的存在性检查 ——
+      # 也就是说「pnpm build 能不能产出可嵌入的 build/」这条路径，
+      # 以前只在打标签之后才第一次被执行，坏了要浪费整条发版链路。
+      #
+      # 用 check 而不是再暴露一个新的 cargo 子命令：它就是
+      # `tauri build` 走的那条 codegen 分支（实测缺 build/ 时报
+      # "frontendDist ... doesn't exist"）。
+      - name: build frontend (tauri mode)
+        run: pnpm build
 
-  release:
+      - name: verify production asset embedding
+        run: cargo check --manifest-path src-tauri/Cargo.toml --features tauri/custom-protocol --locked
+
+      # 注意：这两步的 feature 集合不同（test 不带 custom-protocol），
+      # 所以是两份独立的编译产物，别指望彼此复用。rust-cache 缓存的是
+      # registry 与依赖 crate，能省掉大头。
+      - name: run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+  # ---------------------------------------------------------------------------
+  # 建 draft release。桌面端和 Android 都只依赖这一个 job。
+  #
+  # 以前 android 挂 needs: release（一个 3 平台的矩阵），任何一条桌面腿失败
+  # （macOS 签名、Linux webkit、Windows WiX）都会连带丢掉 APK，而 APK 和
+  # 桌面构建毫无关系。
+  # ---------------------------------------------------------------------------
+  create-release:
     needs: test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ensure draft release exists
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 标签名以 tauri.conf.json 为准（test job 已校验它和 package.json、
+          # Cargo.toml 一致）。手动触发时标签还不存在，用 --target 建在当前
+          # commit 上；标签已存在时 --target 会被忽略。
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG="v${VERSION}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --title "TEpub-Editor $TAG" \
+              --notes "Automated build release. Download installers from Assets."
+          fi
+          ID=$(gh release view "$TAG" --json databaseId --jq .databaseId)
+          echo "release_id=$ID" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release $TAG (id=$ID)" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 桌面端：macOS 通用包 + Linux x64/arm64 + Windows x64/arm64
+  # ---------------------------------------------------------------------------
+  release:
+    name: build (${{ matrix.label }})
+    needs: [test, create-release]
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
+        include:
+          # macos-15 是 arm64 机器。配合 --target universal-apple-darwin 同时出
+          # 两种架构：此前只装了 x86_64 target 却从不传 --target，
+          # x86_64 那份构建白跑，产物也只有 arm64 —— Intel Mac 拿到的是
+          # 只能靠 Rosetta 跑的包。
+          #
+          # 另一个可选做法是拆成 macos-15 + macos-15-intel 两条腿各出一个
+          # dmg。这里选通用包：只跑一条腿，用户也只需要认一个文件。
+          - platform: macos-15
+            label: macOS universal
+            args: --target universal-apple-darwin
+          - platform: ubuntu-22.04
+            label: Linux x64
+            args: ""
+          - platform: ubuntu-22.04-arm
+            label: Linux arm64
+            args: ""
+          - platform: windows-latest
+            label: Windows x64
+            args: ""
+          # Windows arm64 直接在 arm64 runner 上原生编译：ring / image / zip
+          # 这些都是 C 或带 SIMD 的 crate，交叉编译配 linker 比原生构建更容易
+          # 出错。NSIS / WiX 是 x86 程序，靠 Windows 11 ARM 的 x86 模拟运行。
+          - platform: windows-11-arm
+            label: Windows arm64
+            args: ""
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
-      - name: setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - uses: pnpm/action-setup@v4
         name: Install pnpm
         with:
           run_install: false
 
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          # Those targets are only used on macos runners so it's in an `if` to slightly speed up windows and linux builds.
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          # 两个 Apple target 只有 macOS 腿需要，其它平台留空以免多下一个
+          # target。Windows arm64 跑在 arm64 runner 上，aarch64-pc-windows-msvc
+          # 就是宿主工具链，不用额外添加。
+          targets: ${{ startsWith(matrix.platform, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -78,34 +257,43 @@ jobs:
       - name: install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # releaseId 指向 create-release 建好的 draft：
+      # - 不再让 5 条腿各自 getOrCreateRelease 同一个标签（并发创建会 422）；
+      # - 标签名只由 create-release 一处决定，不需要每条腿都从版本号推。
+      # uploadUpdaterJson 关掉：本项目没有接入 tauri-plugin-updater，
+      # latest.json 用不上，而多条腿并发写同一个 latest.json 只会互相冲突。
       - name: build tauri
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # the action automatically replaces __VERSION__ with the app version
-          releaseName: "TEpub-Editor v__VERSION__"
-          releaseBody: "Automated build release. Download installers from Assets."
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: ${{ matrix.args }}
+          uploadUpdaterJson: false
 
+  # ---------------------------------------------------------------------------
+  # Android：与桌面矩阵解耦，只等 test + create-release
+  # ---------------------------------------------------------------------------
   android:
-    needs: release
+    name: build (Android arm64)
+    needs: [test, create-release]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
     permissions:
       contents: write
-    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - uses: pnpm/action-setup@v4
         name: Install pnpm
         with:
           run_install: false
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
 
       - name: setup Java
         uses: actions/setup-java@v4
@@ -113,19 +301,84 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: install Android SDK packages
-        run: |
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
-
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # 不再用 android-actions/setup-android：GitHub 的 ubuntu 镜像本身就带
+      # SDK / cmdline-tools / 多个 NDK，那个 action 只是把已有的东西再下一遍，
+      # 而且它跑在同一个 job 里、还消费 ANDROID_KEYSTORE_*。改成
+      # 「缺什么补什么 + 校验」，少一个第三方依赖。
+      - name: ensure Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK" ]; then
+            echo "::error::找不到 Android SDK（ANDROID_HOME=$SDK）"
+            exit 1
+          fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+          if command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER=$(command -v sdkmanager)
+          else
+            SDKMANAGER=$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort | tail -1)
+          fi
+          if [ -z "${SDKMANAGER:-}" ]; then
+            echo "::error::sdkmanager 不可用，无法校验 Android 工具链"
+            exit 1
+          fi
+
+          # 先接受许可，否则缺包时 sdkmanager 会卡在交互提示上。
+          yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses >/dev/null 2>&1 || true
+
+          # 镜像已经装了这些包，这轮几乎是空操作；镜像换了版本也不会挂。
+          for pkg in "platform-tools" \
+                     "platforms;${ANDROID_SDK_PLATFORM}" \
+                     "build-tools;${ANDROID_SDK_BUILD_TOOLS}" \
+                     "ndk;${ANDROID_NDK_PIN}"; do
+            echo "installing $pkg"
+            # stdin 接 /dev/null：包已装好时 sdkmanager 偶尔会问「是否重装」，
+            # 无 TTY 的 runner 上会一直挂着。用 `yes |` 不行 —— 装了 pipefail
+            # 之后 yes 被 SIGPIPE 杀掉会让整条管道判失败。
+            "$SDKMANAGER" --sdk_root="$SDK" "$pkg" </dev/null >/dev/null
+          done
+
+          NDK="$SDK/ndk/$ANDROID_NDK_PIN"
+          if [ ! -d "$NDK" ]; then
+            echo "::error::NDK $ANDROID_NDK_PIN 未安装"
+            exit 1
+          fi
+
+          # 让 tauri CLI 的「取字典序最后一个」落到固定的版本上。
+          # 其它版本要全部移走 —— 尤其是比 pin 更新的 30.x：它字典序更大，
+          # 留着的话 CLI 会选它，pin 就白写了。
+          # 删不掉时退回 sudo（镜像里的 NDK 目录通常归 root）。
+          for dir in "$SDK"/ndk/*; do
+            [ -d "$dir" ] || continue
+            [ "$dir" = "$NDK" ] && continue
+            echo "moving away NDK $(basename "$dir") so the CLI picks $ANDROID_NDK_PIN"
+            rm -rf "$dir" 2>/dev/null || sudo rm -rf "$dir"
+          done
+
+          # 镜像预置的 ANDROID_NDK / ANDROID_NDK_HOME / ANDROID_NDK_ROOT 都还
+          # 指着已经被删掉的 27.3，留着会让别的工具（ndk-build、CMake 预设）
+          # 拿到不存在的路径。真正被 tauri CLI 读取的是 NDK_HOME
+          # （cargo-mobile2 0.21.1 src/android/ndk.rs:179），四个名字一起覆盖。
+          {
+            echo "NDK_HOME=$NDK"
+            echo "ANDROID_NDK_HOME=$NDK"
+            echo "ANDROID_NDK_ROOT=$NDK"
+            echo "ANDROID_NDK=$NDK"
+          } >> "$GITHUB_ENV"
+          echo "NDK $ANDROID_NDK_PIN（已移除其它版本）" >> "$GITHUB_STEP_SUMMARY"
 
       - name: install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -133,13 +386,28 @@ jobs:
       - name: initialize Android project
         run: pnpm tauri android init --ci --skip-targets-install
 
+      # tauri android init 只渲染模板，不会生成图标，模板里是 Tauri 默认
+      # logo；而 gen/android 不在版本库里。少了这一步，发出去的 APK 图标
+      # 是别人的。
       - name: sync Android launcher icons
         shell: bash
         run: |
           cp -R src-tauri/icons/android/. src-tauri/gen/android/app/src/main/res/
 
+      # 放在 init 之后：wrapper 的 gradle-wrapper.properties 由 init 生成，
+      # 前面的步骤拿不到它做 hash。
+      - name: cache gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
       - name: build Android release APK
-        run: pnpm tauri android build --target aarch64 --apk true --aab false
+        run: pnpm tauri android build --target ${{ env.ANDROID_BUILD_ARCH }} --apk true --aab false
 
       - name: sign Android APK
         shell: bash
@@ -156,8 +424,12 @@ jobs:
             KS_PASS="$ANDROID_KEYSTORE_PASSWORD"
             KEY_ALIAS="$ANDROID_KEY_ALIAS"
             KEY_PASS="${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
+            SIGNING="正式 keystore"
           else
-            echo "::warning::ANDROID_KEYSTORE_BASE64 secret 未配置，使用临时生成的 debug keystore 签名。每次发版签名都不同，用户无法覆盖安装升级。请把正式 keystore 以 base64 存入 ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD。"
+            MESSAGE="ANDROID_KEYSTORE_BASE64 secret 未配置，使用临时生成的 debug keystore 签名。每次发版签名都不同，用户无法覆盖安装升级。请把正式 keystore 以 base64 存入 ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD。"
+            echo "::warning::$MESSAGE"
+            echo "### :warning: APK 使用临时 debug 签名" >> "$GITHUB_STEP_SUMMARY"
+            echo "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
             KEYSTORE="$RUNNER_TEMP/android-debug.keystore"
             keytool -genkeypair \
               -keystore "$KEYSTORE" \
@@ -171,12 +443,21 @@ jobs:
             KS_PASS="android"
             KEY_ALIAS="androiddebugkey"
             KEY_PASS="android"
+            SIGNING="debug keystore（临时）"
           fi
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/${ANDROID_SDK_BUILD_TOOLS}"
           RELEASE_DIR="src-tauri/gen/android/app/build/outputs/apk/universal/release"
           UNSIGNED="$RELEASE_DIR/app-universal-release-unsigned.apk"
           ALIGNED="$RELEASE_DIR/app-universal-release-aligned.apk"
           SIGNED="$RELEASE_DIR/TEpub-Editor-android-arm64-release-signed.apk"
+
+          if [ ! -f "$UNSIGNED" ]; then
+            echo "::error::找不到未签名 APK：$UNSIGNED"
+            ls -R "$RELEASE_DIR" || true
+            exit 1
+          fi
+
           "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
           "$BUILD_TOOLS/apksigner" sign \
             --ks "$KEYSTORE" \
@@ -186,24 +467,33 @@ jobs:
             --out "$SIGNED" \
             "$ALIGNED"
           "$BUILD_TOOLS/apksigner" verify --verbose "$SIGNED"
+          echo "APK 签名：$SIGNING" >> "$GITHUB_STEP_SUMMARY"
 
       - name: upload Android APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: TEpub-Editor-android-arm64-release-signed
           path: src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk
+          if-no-files-found: error
 
-      - name: read app version
-        shell: bash
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
-
+      # 标签来自 create-release（源头是 tauri.conf.json），不再在这里读
+      # package.json —— 两个来源正是之前 APK 传错标签的根因。
+      # 加一次重试：draft 刚建好时 GitHub 偶发 404。
       - name: attach Android APK to release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.create-release.outputs.tag }}
         run: |
-          gh release upload "v${APP_VERSION}" \
-            src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk \
-            --clobber
+          set -euo pipefail
+          APK="src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk"
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "$TAG" "$APK" --clobber; then
+              echo "attached $APK to $TAG"
+              exit 0
+            fi
+            echo "attach attempt $attempt failed, retrying in 10s"
+            sleep 10
+          done
+          echo "::error::APK 上传到 $TAG 失败"
+          exit 1

@@ -246,7 +246,10 @@
         background: var(--web-tool-surface-translucent);
         color: var(--web-tool-text);
         cursor: pointer;
-        transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+        transition:
+            border-color var(--transition-fast),
+            box-shadow var(--transition-fast),
+            background var(--transition-fast);
     }
     .tool-import-drop:hover:not(:disabled),
     .tool-import-drop.drag-active {

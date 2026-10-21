@@ -4478,10 +4478,9 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         .desktop-page .web-style-grid {
             height: 100%;
             min-height: 0;
-            grid-template-columns: minmax(280px, 0.7fr) minmax(
-                    300px,
-                    0.82fr
-                ) max-content;
+            grid-template-columns:
+                minmax(280px, 0.7fr) minmax(300px, 0.82fr)
+                max-content;
             grid-template-rows: auto auto minmax(0, 1fr);
             align-items: start;
         }

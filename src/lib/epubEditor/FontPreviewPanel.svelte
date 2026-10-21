@@ -239,7 +239,11 @@
     }
 
     ::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, var(--color-border-strong), var(--color-border));
+        background: linear-gradient(
+            180deg,
+            var(--color-border-strong),
+            var(--color-border)
+        );
         border-radius: 999px;
     }
 </style>
