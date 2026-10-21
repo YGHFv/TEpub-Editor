@@ -13,6 +13,7 @@
         type PreviewClickPayload,
         type RevealMode,
     } from "./previewSync";
+    import { measureEpubContentHeight } from "./contentHeight";
     import { applyPaperTheme } from "$lib/epubPaperTheme";
 
     let {
@@ -74,15 +75,7 @@
         const frame = previewIframe;
         const innerBody = frame?.contentDocument?.body;
         if (!innerBody) return;
-        // scrollHeight 不含 body 自己的外边距。书的 CSS 常给 body 上下留 8px，
-        // 漏掉这 16px，iframe 就比内容矮一截，正文能滚、章节末尾被裁掉
-        const bodyStyle = getComputedStyle(innerBody);
-        const verticalMargin =
-            (parseFloat(bodyStyle.marginTop) || 0) +
-            (parseFloat(bodyStyle.marginBottom) || 0);
-        const contentHeight =
-            Math.max(innerBody.scrollHeight || 0, innerBody.offsetHeight || 0) +
-            verticalMargin;
+        const contentHeight = measureEpubContentHeight(innerBody);
         if (contentHeight <= 0) return;
         // 短章节也铺满手机屏，避免书页下面露出底色
         const shell = frame.parentElement;
@@ -91,7 +84,9 @@
         if (shell && shell.clientHeight <= 0) return;
         // clientHeight 本身就是"去掉边框、含内边距"的高度，不用再扣边框
         const availableHeight = shell ? Math.floor(shell.clientHeight) : 0;
-        previewFrameHeight = Math.max(contentHeight, availableHeight);
+        const next = Math.max(contentHeight, availableHeight);
+        // 值没变就别写：$state 赋值虽然不会重排，但省掉一次无谓的调度
+        if (next !== previewFrameHeight) previewFrameHeight = next;
     }
 
     // 图片解码、字体回流都会改变高度，分几个时间点补测

@@ -148,14 +148,6 @@
     const activeOnly = onlyWhenActive();
 
     onMount(() => {
-        // 终极杀手锏：拦截无论在何时发生的异步算绘崩溃！
-        const handleGlobalError = (event: ErrorEvent) => {
-            console.error("Global captured error:", event.error);
-            initError =
-                "运行时崩溃：\\n" + (event.error?.stack || event.message);
-        };
-        window.addEventListener("error", handleGlobalError);
-
         const blockNativeSearch = (e: KeyboardEvent) => {
             // 保活：隐藏的编辑器页面也挂着这条监听，不能让它在别的标签里
             // 抢走 Ctrl+F
@@ -338,7 +330,6 @@
 
         return () => {
             window.removeEventListener("keydown", blockNativeSearch, true);
-            window.removeEventListener("error", handleGlobalError);
             resizeObserver?.disconnect();
             if (cleanupSearchListener) cleanupSearchListener();
             view?.destroy();
@@ -352,6 +343,23 @@
             doc: initialDoc,
             extensions: [
                 ...(cspNonce ? [EditorView.cspNonce.of(cspNonce)] : []),
+                // CodeMirror 自己的异常出口：它捕获插件、测量、更新循环里
+                // 抛出的错误后交到这里。比挂 window 的 error 精准得多 ——
+                // 保活模式下同窗口还有别的页面（比如 EPUB 预览的重排提示、
+                // 图片加载失败），window 上收到的错误没法分辨是谁的，
+                // 一律判崩溃就会把好好的编辑器整块换成红屏
+                EditorView.exceptionSink.of((exception: unknown) => {
+                    console.error("CodeMirror exception:", exception);
+                    // 只认第一条：崩溃若出现在每帧都会跑的路径上（更新监听、
+                    // 滚动处理），后面的异常会成百上千次地来，逐条写状态只会
+                    // 反复触发重渲染。第一条已经足够定位问题。
+                    if (initError) return;
+                    const detail =
+                        exception instanceof Error
+                            ? exception.stack || exception.message
+                            : String(exception);
+                    initError = "运行时崩溃：\n" + detail;
+                }),
                 basicSetup,
                 wrapCompartment.of(wordWrap ? EditorView.lineWrapping : []),
                 whiteSpaceCompartment.of(

@@ -24,6 +24,7 @@
         describePreviewClick,
         revealTextInPreview,
     } from "$lib/epubEditor/previewSync";
+    import { measureEpubContentHeight } from "$lib/epubEditor/contentHeight";
     import { hasUnsavedEpubChanges } from "$lib/unsavedChanges";
     import { paperBackground, paperTextColor } from "$lib/epubPaperTheme";
     import { loadAppSettings, type GlobalAppSettings } from "$lib/appSettings";
@@ -184,17 +185,10 @@
         }
         const innerBody = innerDoc?.body;
         if (!innerBody) return;
-        // 用 body 的 scrollHeight —— 它是内容真实高度；
-        // documentElement.scrollHeight 的下限是 iframe 视口，量不出「内容更短」。
-        // 但 scrollHeight 不含 body 自身外边距，书的 CSS 常给 body 上下留 8px，
-        // 漏掉这 16px 会让 iframe 比内容矮一截，章节末尾被裁、正文还能内部滚
-        const bodyStyle = getComputedStyle(innerBody);
-        const verticalMargin =
-            (parseFloat(bodyStyle.marginTop) || 0) +
-            (parseFloat(bodyStyle.marginBottom) || 0);
-        const contentHeight =
-            Math.max(innerBody.scrollHeight || 0, innerBody.offsetHeight || 0) +
-            verticalMargin;
+        // 内容高度的量法见 $lib/epubEditor/contentHeight：
+        // `html, body { height: 100% }` 的书会让 scrollHeight 随 iframe 一起长，
+        // 直接拿来设高度会变成自持回路（iframe→body→量得更高→iframe）
+        const contentHeight = measureEpubContentHeight(innerBody);
         if (contentHeight <= 0) return;
         // 短章节（封面这类）也要占满一屏，否则框里下面会空出一块底色；
         // 长章节则用实测内容高度，让框自己滚动。
