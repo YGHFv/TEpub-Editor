@@ -1549,21 +1549,31 @@
             style.textContent = rewriteCssUrls(css, htmlPath, urlByPath);
         }
         const style = htmlDoc.createElement("style");
-        const bodyMaxWidth = readerMode ? "980px" : "820px";
-        const bodyPadding = readerMode ? "42px 56px 64px" : "28px 34px";
-        const bodyFontSize = readerMode
-            ? `${readerPreviewFontSize}px`
-            : "inherit";
+        // 阅读模式的字号调节要生效，只能由外层注入；普通预览保持书的原样
+        const readerFontRule = readerMode
+            ? `body { font-size: ${readerPreviewFontSize}px; }`
+            : "";
         // 底色在生成 srcdoc 时按当前主题写死：交给运行时的 applyPaperTheme
         // 去改已经晚了，iframe 会先按浅色画一帧（切页面时整屏闪白）
         const dark = appSettings.uiTheme === "dark";
         const paperBg = paperBackground(dark);
         const paperText = paperTextColor(dark);
+        // 浅色模式下不注入任何底色：安装版 PreviewPane 只注滚动条和深色纸色，
+        // 书页透出 iframe 自身的 --color-surface（纯白）。这里多铺一层米色纸
+        // 就会让两边看起来一个是米白一个是纯白。
+        const paperRule = dark ? `body { background: ${paperBg}; }` : "";
         style.textContent = `
-      html, body { margin: 0; padding: 0; background: ${paperBg}; color: ${paperText}; }
+      /* 这里只放"不这样做就会坏"的规则，排版一律交给书自己：
+         安装版除了滚动条什么都不注入，web 端多一条 margin/padding 重置
+         或 img 宽度上限，同一本书两边的换行位置和图片尺寸就会不一样。 */
+      /* 深色纸色只铺 body，html 必须保持透明 —— html 一旦有不透明底色，
+         body 的背景就不再向画布传播，整页背景图（如 body.Fullscreen1
+         的 1080x2347 底图）会被裁进只有几十像素高的 body 盒子里，
+         预览只剩顶部一条。 */
       html { overflow-x: hidden; }
-      body { box-sizing: border-box; max-width: ${bodyMaxWidth}; margin: 0 auto; padding: ${bodyPadding}; font-size: ${bodyFontSize}; line-height: 1.8; overflow-x: hidden; }
-      img, svg, video { max-width: 100%; height: auto; }
+      body { overflow-x: hidden; }
+      ${paperRule}
+      ${readerFontRule}
       /* 滚动统一交给外层 .preview-body。iframe 在过渡高度上会短暂出现内部
          滚动条，它把正文宽度挤窄 ~15px、文字重排后内容反而更高，
          量出的高度永远追不上，那条滚动条就会「闪出来不消失」。 */

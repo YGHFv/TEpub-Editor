@@ -64,20 +64,21 @@ export function applyPaperTheme(
 
   const body = doc.body;
   const bodyStyle = body ? doc.defaultView?.getComputedStyle(body) : null;
-  const htmlStyle = doc.defaultView?.getComputedStyle(doc.documentElement);
-  const bodyBg = bodyStyle ? luminance(bodyStyle.backgroundColor) : null;
-  const htmlBg = htmlStyle ? luminance(htmlStyle.backgroundColor) : null;
   const textLum = bodyStyle ? luminance(bodyStyle.color) : null;
-  // 书没设背景（透明）或本来就是深底，就别改；浅底才刷成夜间纸色
+  // 书没设背景（透明）或本来就是深底，就别改；浅底才刷成夜间纸色。
+  // 判断只看 body：body 没写背景时它会把「透明」传播给画布，此时才需要补。
+  const bodyBg = bodyStyle ? luminance(bodyStyle.backgroundColor) : null;
   const overrideBodyBg = bodyBg === null || bodyBg > 0.62;
-  const overrideHtmlBg = htmlBg === null || htmlBg > 0.62;
   // 文字够亮就不动，深色文字才换成夜间前景色
   const overrideText = textLum !== null && textLum < 0.42;
 
+  // 只给 body 上色，绝不给 html 设背景：html 一旦有不透明底色，body 的
+  // 背景就不再向画布传播，整页背景图会被裁进 body 盒子，预览只剩一条。
   const rules = [
     `html { color-scheme: dark; }`,
-    overrideHtmlBg ? `html { background: ${PAPER_DARK_BG} !important; }` : "",
-    overrideBodyBg ? `body { background: ${PAPER_DARK_BG} !important; }` : "",
+    overrideBodyBg
+      ? `body { background-color: ${PAPER_DARK_BG} !important; }`
+      : "",
     overrideText ? `body { color: ${PAPER_DARK_TEXT} !important; }` : "",
   ].filter(Boolean);
 
