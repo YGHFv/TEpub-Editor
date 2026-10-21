@@ -123,6 +123,26 @@
   --web-tool-radius-sm: var(--radius-xs);
   --web-tool-radius-md: var(--radius-md);
   --web-tool-control-height: var(--control-height);
+
+  /* ——— 标题行底色 ———
+     标题行要和它下面那一页的底色连成一片，不能固定成 --color-surface：
+     页面底色是 --color-canvas（#eef4f8），标题行却用 --color-surface（#fff），
+     两者在浅色主题下肉眼就能看出分界，深色主题同理。
+
+     默认取 canvas（工具箱/书库/诊断这类页面的底色）。个别页面底色不同，
+     由下面 .app-frame:has(...) 那组规则按「当前激活页面」覆盖。
+
+     注意这些变量挂在 .app-frame 上而不是 :root —— 覆盖规则也写在同一层，
+     靠 .app-frame:has(...) 判定当前是哪一页。
+
+     前景色也一起变量化：阅读器的 dark 预设会把标题行底色变成 #191e26，
+     但全局主题可能还是浅色，这时 --color-text(#172434) 压在深底上
+     对比度只有 2.48:1，文字基本看不见。 */
+  --titlebar-bg: var(--color-canvas);
+  --titlebar-fg: var(--color-text);
+  --titlebar-fg-soft: var(--color-text-soft);
+  --titlebar-muted: var(--color-muted);
+  --titlebar-accent: var(--color-accent-deep);
 }
 
 /* ================= Base ================= */
@@ -149,6 +169,89 @@ body {
   height: 100vh;
   height: 100dvh;
   min-height: 0;
+}
+
+/* 阅读器有自己的色板（--rd-bg：paper 米色 / eye 绿色 / sepia / snow / dark，
+   data-theme 还可能是 custom）。--rd-bg 定义在 .rd-app 自身上，.app-frame
+   是它的祖先，读不到子元素的自定义属性 —— 所以这里不能用 var(--rd-bg)，
+   必须按 data-theme 各写一份，和 reader 页面里的取值保持一致。 */
+.app-frame:has(.ka-view:not([data-ka-hidden="true"]) .rd-app),
+.app-frame:has(.app-frame-body > .rd-app) {
+  --titlebar-bg: #e9e3d3;
+}
+
+.app-frame:has(.ka-view:not([data-ka-hidden="true"]) .rd-app[data-theme="eye"]),
+.app-frame:has(.app-frame-body > .rd-app[data-theme="eye"]) {
+  --titlebar-bg: #cce8cf;
+}
+
+.app-frame:has(
+  .ka-view:not([data-ka-hidden="true"]) .rd-app[data-theme="sepia"]
+),
+.app-frame:has(.app-frame-body > .rd-app[data-theme="sepia"]) {
+  --titlebar-bg: #f4ecd8;
+}
+
+.app-frame:has(
+  .ka-view:not([data-ka-hidden="true"]) .rd-app[data-theme="snow"]
+),
+.app-frame:has(.app-frame-body > .rd-app[data-theme="snow"]) {
+  --titlebar-bg: #ffffff;
+}
+
+/* 阅读器的 dark 预设：底色变深，标题行文字必须跟着翻成浅色，
+   否则浅色全局主题下 --color-text 压在 #191e26 上对比度只有 2.48:1。 */
+.app-frame:has(
+  .ka-view:not([data-ka-hidden="true"]) .rd-app[data-theme="dark"]
+),
+.app-frame:has(.app-frame-body > .rd-app[data-theme="dark"]) {
+  --titlebar-bg: #191e26;
+  --titlebar-fg: #e8edf3;
+  --titlebar-fg-soft: #b6c2cf;
+  --titlebar-muted: #8b98a6;
+  --titlebar-accent: #7fb8dd;
+}
+
+/* 自定义背景图：reader 把 --rd-bg 也一起改了，取不到就只能退回 canvas */
+.app-frame:has(
+  .ka-view:not([data-ka-hidden="true"]) .rd-app[data-theme="custom"]
+),
+.app-frame:has(.app-frame-body > .rd-app[data-theme="custom"]) {
+  --titlebar-bg: var(--color-canvas);
+}
+
+/* 编辑器根容器是半透明的 rgba(246,250,253,.68)，直接拿来当标题行底色会
+   露出下面的东西。先合成到 canvas 上，得到等效的不透明色。 */
+.app-frame:has(.ka-view:not([data-ka-hidden="true"]) .app-container) {
+  --titlebar-bg: color-mix(
+    in srgb,
+    var(--color-surface-soft) 68%,
+    var(--color-canvas)
+  );
+}
+
+.app-frame:has(.app-frame-body > .app-container) {
+  --titlebar-bg: color-mix(
+    in srgb,
+    var(--color-surface-soft) 68%,
+    var(--color-canvas)
+  );
+}
+
+/* 这几个页面根容器不设背景，露出的是 body 的 --gradient-app 渐变。
+   标题行取渐变里同一段的近似色，保证上下连贯。 */
+.app-frame:has(
+  .ka-view:not([data-ka-hidden="true"])
+    :is(.advanced-page, .process-page, .font-page)
+),
+.app-frame:has(
+  .app-frame-body > :is(.advanced-page, .process-page, .font-page)
+) {
+  --titlebar-bg: color-mix(
+    in srgb,
+    var(--color-surface) 96%,
+    var(--color-canvas)
+  );
 }
 
 .app-frame-body {
@@ -225,15 +328,26 @@ body {
   min-height: 0 !important;
 }
 
-/* 原本用 position:fixed;inset:0 铺满视口的页面：改成锚在 app-frame-body
-   里，否则它们会盖到标签栏上面（fixed 不受祖先 overflow 裁剪影响）。
-   保活视图里的页面同理，锚到 .ka-view —— 否则一个隐藏的阅读器会用 fixed
-   盖住整个窗口，而且不会随父级 visibility:hidden 一起消失之外的裁剪。 */
-.app-frame-body :where(.web-epub-page, .rd-app),
-.ka-view :where(.web-epub-page, .rd-app) {
+/* 原本用 position:fixed;inset:0 铺满**视口**的页面根容器：改成锚在
+   app-frame-body 里，否则它们会盖到标签栏上面（fixed 不受祖先 overflow
+   裁剪影响）。保活视图里的页面同理，锚到 .ka-view —— 否则一个隐藏的阅读器
+   会用 fixed 盖住整个窗口，parent 的 visibility:hidden 也拦不住它的绘制。
+
+   .mobile-editor 是手机端文件的整屏编辑器（mobile/edit 里 editingFile 一有值
+   就出现）。它原先是 fixed;inset:0;z-index:20，顶部 40px 正好落在 z-index:70
+   的 .title-bar 底下，于是打开文件后第一行永远被标签栏压住 —— 这就是「二级
+   页面切换后最上面一行被挡」的来源。它只在有编辑文件时才挂载，所以偶发。
+
+   注意只收页面级根容器，不收 .modal-overlay / .confirm-sheet-backdrop 这类
+   遮罩：它们铺满整个窗口（连同标签栏一起压暗）是有意为之。 */
+.app-frame-body :where(.web-epub-page, .rd-app, .mobile-editor),
+.ka-view :where(.web-epub-page, .rd-app, .mobile-editor) {
   position: absolute !important;
   inset: 0 !important;
   height: auto !important;
+  /* 这几个根容器还写死了 min-height:100vh/100dvh，不清掉的话绝对定位后
+     仍会比容器高 40px，底部多出一条滚动条 */
+  min-height: 0 !important;
 }
 
 /* 靠页面自身滚动的工具页（工具箱/书库以外这些）在 flex 盒里允许撑高 */

@@ -226,7 +226,10 @@
         padding: 0 0 0 12px;
         box-sizing: border-box;
         border-bottom: 1px solid var(--color-border);
-        background: var(--color-surface);
+        /* 跟随当前页面的底色，见 app.css 里 .app-frame 上的 --titlebar-bg。
+           不能写死 --color-surface：页面是 canvas(#eef4f8)，标题行是
+           surface(#fff)，浅色下那条分界线肉眼可见 */
+        background: var(--titlebar-bg, var(--color-canvas));
         /* 页面多为 fixed 满屏布局，标题行要压在上面 */
         position: relative;
         z-index: 70;
@@ -246,7 +249,7 @@
         align-items: center;
         gap: 8px;
         flex: 0 0 auto;
-        color: var(--color-text);
+        color: var(--titlebar-fg);
         font-size: 13px;
         font-weight: 700;
         letter-spacing: 0.2px;
@@ -303,13 +306,17 @@
             border-color var(--transition-fast);
     }
 
+    /* hover / active 都不能用固定的 --color-hover / --color-accent-soft：
+       标题行底色现在跟着页面走，而 --color-hover(#eef6fb) 与 canvas
+       (#eef4f8) 只差几个色阶，浅色主题下 hover 等于没反馈（实测对比度 1.01）。
+       改成「在当前底色上叠一层文字色」—— 底色是什么都能看清。 */
     .title-tab:hover {
-        background: var(--color-hover);
+        background: color-mix(in srgb, var(--titlebar-fg) 8%, transparent);
     }
 
     .title-tab.active {
         border-color: var(--color-accent);
-        background: var(--color-accent-soft);
+        background: color-mix(in srgb, var(--color-accent) 14%, transparent);
     }
 
     .title-tab-main {
@@ -317,7 +324,7 @@
         padding: 0 10px;
         border: 0;
         background: transparent;
-        color: var(--color-text-soft);
+        color: var(--titlebar-fg-soft);
         font: inherit;
         font-size: 13px;
         font-weight: 600;
@@ -329,7 +336,7 @@
     }
 
     .title-tab.active .title-tab-main {
-        color: var(--color-accent-deep);
+        color: var(--titlebar-accent);
     }
 
     .title-tab-close {
@@ -338,7 +345,7 @@
         padding: 0;
         border: 0;
         background: transparent;
-        color: var(--color-muted);
+        color: var(--titlebar-muted);
         font-size: 15px;
         line-height: 1;
         cursor: pointer;
@@ -364,7 +371,7 @@
         padding: 0;
         border: 0;
         background: transparent;
-        color: var(--color-text-soft);
+        color: var(--titlebar-fg-soft);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -381,8 +388,8 @@
     }
 
     .window-btn:hover {
-        background: var(--color-hover);
-        color: var(--color-text);
+        background: color-mix(in srgb, var(--titlebar-fg) 9%, transparent);
+        color: var(--titlebar-fg);
     }
 
     .window-btn.close:hover {
