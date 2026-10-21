@@ -427,27 +427,19 @@
     }
 
     /**
-     * web 端打开工具页。
+     * web 端打开工具页：一律在当前标签内跳转。
      *
-     * 「打开工具时隐藏工具箱主页」在桌面上说的是"工具一开，工具箱就让位"。
-     * web 里它的等价物只有两种：
-     *   勾选   → 当前页跳转，工具箱被工具页替换（= 让位，原有行为）
-     *   取消   → 工具箱留下，工具在新标签页里打开
-     * 所以取消勾选才会开新标签 —— 勾选时开新标签的话工具箱并没有"消失"，
-     * 语义就反了。
+     * 「打开工具时隐藏工具箱主页」表达的是"工具一开，工具箱就让位"。
+     * 桌面靠隐藏窗口实现；web 端没有窗口，但应用自带顶部标签栏 ——
+     * 跳过去之后工具箱仍然是第一个标签，用户随时点得回来，语义已经满足。
+     * 再额外开一个浏览器标签页是多余的：既没有"让位"，还会让每点一次
+     * 工具就多出一个标签，用户反而要多关一堆页面。
      */
     function openWebTool(url: string) {
         // "#" 表示该工具在 web 端没有对应页面（webToolRoute 的兜底值）：
-        // 既不能跳也不能开新标签，新标签会停在空白页、跳到 "#" 会把地址栏弄脏
+        // 跳过去会停在空白页、把地址栏弄脏
         if (!url || url === "#") return;
-        if (appSettings.closeToolboxOnToolOpen !== false) {
-            void goto(url);
-            return;
-        }
-        const absolute = new URL(url, window.location.href).href;
-        const opened = window.open(absolute, "_blank", "noopener");
-        // 弹窗被拦截时退化成当前页跳转，至少不让点击变成"没反应"
-        if (!opened) void goto(url);
+        void goto(url);
     }
 
     async function pickFile(tool: Tool) {
@@ -1428,17 +1420,13 @@
                          标签，工具箱一直是第一个标签，没有"隐藏主页"这回事。
                          关掉多窗口时整行不渲染，省得留一个点了没反应的开关。
                          这里不改写 closeToolboxOnToolOpen 的存值 —— 重新打开
-                         多窗口时用户上次的选择应该还在；web 端它也仍有语义
-                         （决定工具开新标签还是原地跳，见 openWebTool）。 -->
-                    {#if appSettings.secondaryWindows || platform.isWeb}
+                         多窗口时用户上次的选择应该还在。
+                         web 端也不渲染：它没有独立窗口，工具页永远在当前标签
+                         内跳转，顶部标签栏已经保证工具箱一直可回（见 openWebTool）。 -->
+                    {#if appSettings.secondaryWindows}
                         <label class="set-row toggle-row">
                             <span class="set-label"
-                                >打开工具时隐藏工具箱主页
-                                {#if platform.isWeb && !appSettings.secondaryWindows}
-                                    <small
-                                        >取消后工具在新标签页打开，工具箱留在原标签</small
-                                    >
-                                {/if}</span
+                                >打开工具时隐藏工具箱主页</span
                             >
                             <input
                                 type="checkbox"

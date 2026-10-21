@@ -907,7 +907,12 @@
             editorText = await readWebEpubText(doc, file.path);
             savedEditorText = editorText;
             if (file.kind === "xhtml") {
-                previewHtml = "";
+                /* 不在这里清空 previewHtml：清空会让 .mobile-frame 整块卸载，
+                   预览区先被空态（直角虚线框）顶上约 400ms，等新章节构建完
+                   才变回圆角框 —— 观感上就是"先闪一下直角"。
+                   安装版是保留上一章画面直到新内容就绪（见
+                   routes/epub-editor/+page.svelte 里 previewContent 的处理），
+                   这里与它对齐：refreshPreviewFor 拿到新 html 后一次性替换。 */
                 rightTab = "preview";
                 void refreshPreviewFor(file, editorText);
             } else {
@@ -2845,7 +2850,11 @@
     }
 
     .workspace {
-        height: 100vh;
+        /* 必须是 100% 而不是 100vh：.web-epub-page 由 app.css 改成
+           position:absolute;inset:0;height:auto，它只占 app-frame-body 的
+           高度（窗口减掉 41px 标签栏）。写 100vh 会比父容器高 41px，
+           预览列跟着被撑长，同一本书 web 版的预览框就比安装版高一截。 */
+        height: 100%;
         min-height: 0;
         display: grid;
         grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(
@@ -3650,12 +3659,13 @@
     .mobile-frame {
         display: flex;
         flex-direction: column;
-        /* 手机框是固定尺寸 320×700（20:9 设计值），不随窗口伸缩：
-           写 height:100% 时预览列一矮框就跟着缩，同一本书在不同窗口下
-           大小不一致；章节再长也不往下长，正文在框内滚动。
-           max-height:100% 只在窗口真的装不下 700 时兜底。 */
-        height: 700px;
-        max-height: 100%;
+        /* 高度撑满预览列但封顶 700（320 宽对应的 20:9 设计高度），
+           与安装版 PreviewPane 的 height:100% + max-height:700px 完全一致。
+           不能写死 700px：安装版窗口默认 1200x740，预览列只有 ~585，
+           写死 700 会让 web 版在矮窗口下比安装版高出一截，
+           同一本书两边看到的页面大小不同。 */
+        height: 100%;
+        max-height: 700px;
         overflow-y: auto;
         overflow-x: hidden;
         overscroll-behavior: contain;
@@ -3678,6 +3688,7 @@
     /* 书页外框跟着纸色走：iframe 底色已经是深色了，
        外框还留浅色会在书页四周镶一圈白边 */
     .preview-body.dark-paper .mobile-frame,
+    .preview-body.dark-paper .preview-empty,
     .preview-body.dark-paper .chapter-preview {
         background: var(--color-canvas, #191e26);
     }
@@ -3704,6 +3715,9 @@
         display: grid;
         place-items: center;
         border: 1px dashed var(--color-border);
+        /* 和 .mobile-frame 同一套圆角/底色：空态与有内容态尺寸外形一致，
+           换章节时哪怕真的走了一次空态，也不会闪出一个直角白框 */
+        border-radius: var(--radius-lg);
         background: var(--color-surface);
         color: var(--color-muted);
         font-size: 13px;
@@ -3826,15 +3840,18 @@
         height: 100dvh;
     }
 
+    /* 这里同样不能写 100dvh：父容器 .web-epub-page 由 app.css 压成
+       absolute;inset:0;height:auto，比整个视口矮一条标签栏。写视口单位
+       会让内容比容器高出一截，底部被标签栏吃掉。 */
     :global(:root[data-tepub-client="web-mobile"]) .import-shell {
-        height: 100dvh;
+        height: 100%;
         grid-template-rows: minmax(0, 1fr);
         background: var(--color-canvas);
         overflow: auto;
     }
 
     :global(:root[data-tepub-client="web-mobile"]) .workspace {
-        height: 100dvh;
+        height: 100%;
         grid-template-columns: 1fr;
         grid-template-rows: minmax(180px, 24dvh) minmax(360px, 1fr) minmax(
                 320px,
