@@ -3,6 +3,7 @@
     import { goto } from "$app/navigation";
     import { buildMobileRoute, cacheBrowserFileStable } from "$lib/mobileFlow";
     import { platform } from "$lib/platform";
+    import { APP_VERSION } from "$lib/appVersion";
 
     interface MobileModule {
         title: string;
@@ -17,7 +18,9 @@
 
     type MobileTab = "home" | "config" | "about";
 
-    const appVersion = "0.6.1";
+    // 版本号来自 package.json（构建期注入，见 $lib/appVersion）。
+    // 原先这里写死 "0.6.1"，之后每次升版都没人改，界面一直报着旧号。
+    const appVersion = APP_VERSION;
     const appIconUrl = new URL(
         "../../../src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png",
         import.meta.url,

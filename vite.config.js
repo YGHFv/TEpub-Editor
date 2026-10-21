@@ -1,5 +1,13 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
+
+// 以 package.json 为唯一真源注入版本号（与 Cargo.toml / tauri.conf.json 由
+// release.yml 的版本一致性门禁保持一致）。用 import attributes 读 json 会
+// 依赖 Node 版本特性，这里直接读文件更省事。
+const version = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+).version;
 
 // Vite configuration runs in Node.js.
 const host = process.env.TAURI_DEV_HOST;
@@ -80,6 +88,9 @@ export default defineConfig(async ({ mode }) => {
     },
     define: {
       __TEPUB_TARGET__: JSON.stringify(isWebMode ? "web" : "tauri"),
+      // 版本号从 package.json 注入，不要在各页面里手写：此前「关于」页写死
+      // 0.6.1，之后每次升版都漏改，界面显示的版本和实际发的包对不上。
+      __TEPUB_VERSION__: JSON.stringify(version),
     },
     test: {
       // Node by default; DOM-dependent suites opt in via `// @vitest-environment happy-dom`.

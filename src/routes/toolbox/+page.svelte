@@ -439,6 +439,13 @@
         // "#" 表示该工具在 web 端没有对应页面（webToolRoute 的兜底值）：
         // 跳过去会停在空白页、把地址栏弄脏
         if (!url || url === "#") return;
+        // webToolRoute 对外链工具（如 send-to-kindle）返回的是 https 地址，
+        // 目前它们另有分支处理、走不到这里；但 goto 只认应用内路径，
+        // 万一以后新增工具直接复用这条通道，不能把外链喂给它
+        if (/^https?:\/\//.test(url)) {
+            void platform.openExternal(url);
+            return;
+        }
         void goto(url);
     }
 

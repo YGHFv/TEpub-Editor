@@ -3886,3 +3886,77 @@ Caveats:
   通过；`tauri dev` 桌面端实测标签切换 2~17 毫秒、单次导航 1 条 history entry、
   首帧无浅色闪帧、`prepare_epub_for_open` 冷/热分别为 411 / 5 毫秒。
 - 发布版本升至 `1.2.1`。
+
+### 2026-10-22 v1.2.2 Web 编辑器预览保真、加密书打开与工具箱交互
+
+本轮集中在 Web 版与安装版的一致性：同一个 EPUB 章节在两个版本里应当看到同样的排版、
+同样的预览框尺寸，加密与文件名混淆的书也应当能直接打开。
+
+Web 版封面与加密/混淆书：
+
+- 新增 `resolveEpubCover`，按 EPUB3 `properties=cover-image` → EPUB2 `meta name=cover` →
+  guide 包装页首图 → 文件名评分 → 最大图片逐级回退，不再退化成 `files[0]`。
+- 预览改写补上 `xlink:href`（必须走 `getAttributeNS` / `setAttributeNS`）、`srcset`、
+  `<object data>`、行内 `style` 与 `<style>` 里的 `url()`，SVG 包图封面不再裂图。
+- 新增 `webEpubNormalize`：按 EOCD → 中央目录 → 本地头结构清除伪加密位（不按
+  `PK\x03\x04` 扫字节，避免误伤 deflate 负载），依次尝试 XOR 密钥 `0xFF` / `0xA5` /
+  `0x5A` 与首字节派生键；`loadWebEpub` 与 `processWebEpub` 都会先修容器。
+- 文件名混淆按 manifest id 反推可读名，逐条对齐 Rust 的 `build_name_from_id`
+  （含 `~slim` 保护与 Rust `Path` 语义），并改写文本内引用。
+- 顶部标签新增页面自报的 `setTabDetail` 通道（支持多行），文件树、编辑器文件标签、
+  当前文件标题都补上完整路径悬停提示。
+
+Web 版预览保真：
+
+- 不再向 `srcdoc` 注入安装版没有的排版规则（margin/padding 重置、`line-height`、
+  `img` 宽度上限）。其中给 `html` 设不透明底色最致命：`body` 背景不再向画布传播，
+  `body.Fullscreen1` 这类整页背景图（1080×2347）被裁进 53px 高的 body 盒子，
+  预览只剩顶部一条。现在只保留「不这样做就会坏」的规则，深色纸色只铺 `body`，
+  `html` 始终透明；`applyPaperTheme` 改用 `background-color`，不覆盖书自带的背景图。
+- 补上 `border-radius: var(--radius-lg)`（外框与 iframe 都要，只给外框时四角仍露直角），
+  阴影换成 `--shadow-md`；深色主题下调用与安装版同一个 `applyPaperTheme`，
+  书自带的深色文字不再留在深色纸上。
+- 高度不再多出 41px：`.workspace` 原写 `100vh`，但 `.web-epub-page` 被 `app.css`
+  压成 `position:absolute; inset:0; height:auto`（只有窗口减掉标签栏那么高），
+  于是整块比父容器高一条标签栏，预览框跟着被撑长。改回 `100%` 后同一视口下
+  web 630px、安装版 629px；`web-mobile` 的 `100dvh` 同样改掉。
+- 换章节不再先闪直角：清空 `previewHtml` 会让 `.mobile-frame` 整块卸载约 400ms，
+  预览区被直角虚线空态顶上。改为保留上一章画面直到新内容就绪（与安装版一致），
+  空态也补上同样的圆角与深色纸底。
+
+阅读与编辑器：
+
+- 预览高度测量新增 `lib/epubEditor/contentHeight.ts`：识别「body 被 CSS 撑满视口」的书，
+  改量最靠下的子元素底边，与 iframe 高度解耦。此前这类书会形成
+  `ResizeObserver loop completed with undelivered notifications` 自持回路
+  （实测 330 次回调 → 0）。
+- TXT 编辑器不再因别的组件报错而整块变红：`Editor` 改用 CodeMirror 自己的
+  `EditorView.exceptionSink`，只报本编辑器的异常。保活模式下同窗口挂着 EPUB 编辑器，
+  那条 ResizeObserver 提示曾把正常的 TXT 编辑器杀掉。
+- 手机框固定为设计值 320 宽（web 从 340 收到 320），长章节在框内滚动而不再把「手机」
+  拉成长纸带；高度测量改读手机框自身，不再「框高→可用高→iframe 高→框高」自持。
+- 标题栏底色改为跟随当前页面（`--titlebar-bg` 由 `.app-frame:has()` 按激活页覆盖），
+  保活下用 `:not([data-ka-hidden="true"])` 排除隐藏视图；hover/active 改为在当前底色
+  上叠文字色（原固定色与 canvas 对比度仅 1.01）。手机端 `.mobile-editor` 补进
+  fixed→absolute 列表，打开文件后第一行不再被标签栏压住。
+- 工具箱移除「目录正则」页签（该设置已迁到 TXT 编辑器自己的设置面板，同一份数据
+  不再有两个入口）；web 端工具改为在当前标签内跳转 —— 应用自带顶部标签栏，
+  工具箱始终是第一个标签，额外开浏览器标签只会让用户多点一次就多一个待关闭页面。
+  相应地在 web 端不再渲染「打开工具时隐藏工具箱主页」。
+- 复选框兜底样式不再给 16px 开关套 `min-height:34px` 与边框，点击也不再亮一圈焦点环。
+
+版本号收口：
+
+- 移动端「关于」页原先把版本写死在页面里（`const appVersion = "0.6.1"`），
+  此后每次升版都没人改，界面报的号比实际发的包落后好几个版本。新增
+  `$lib/appVersion`，由 `vite.config.js` 在构建期从 `package.json` 注入
+  `__TEPUB_VERSION__`（与 `__TEPUB_TARGET__` 同一套 `define` 通道），
+  web 与桌面两侧一致；注入值缺失时回退 `dev`。
+
+验证：`svelte-check` 0 错误 0 警告、181 项前端测试、`prettier --check` 与 `pnpm build`
+通过；CI 的版本一致性门禁在本地复现通过（package.json / Cargo.toml / Cargo.lock /
+tauri.conf.json 均为 `1.2.2`）；headless Edge + CDP 实测 web 预览框 320×630 与安装版
+629px 一致、换章全程保持 18px 圆角（无直角帧）、深色下正文色 `rgb(226,232,240)`、
+点击工具不再新增浏览器标签、加密与 XOR 混淆书均可打开。
+
+- 发布版本升至 `1.2.2`，推送 `v1.2.2` 标签触发 GitHub Actions 多平台构建。
