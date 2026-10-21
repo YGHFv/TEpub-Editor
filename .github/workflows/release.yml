@@ -172,6 +172,10 @@ jobs:
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           TAG="v${VERSION}"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
+            # 注意：标签不存在时 --target 会真的把 v<version> 建在 $GITHUB_SHA 上
+            # （建标签的是 REST 的 target_commitish，不是 gh）。手动触发时这正是
+            # 我们想要的；但如果这次构建随后失败，远端会留下一个指向错误 commit
+            # 的标签，删掉重打即可。
             gh release create "$TAG" \
               --draft \
               --target "$GITHUB_SHA" \
@@ -179,6 +183,18 @@ jobs:
               --notes "Automated build release. Download installers from Assets."
           fi
           ID=$(gh release view "$TAG" --json databaseId --jq .databaseId)
+          if [ -z "$ID" ]; then
+            echo "::error::无法解析 $TAG 的 release id"
+            exit 1
+          fi
+          # 重跑同一版本时，如果 draft 已经被手动发布，tauri-action 会按资产名
+          # 先删后传、gh --clobber 同理 —— 那等于悄悄改写已发布的产物
+          # （仓库开了 immutable releases 的话则是硬失败）。直接拒绝。
+          IS_DRAFT=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+          if [ "$IS_DRAFT" != "true" ]; then
+            echo "::error::$TAG 已经是发布状态，拒绝覆盖；请先 bump 版本号"
+            exit 1
+          fi
           echo "release_id=$ID" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "release $TAG (id=$ID)" >> "$GITHUB_STEP_SUMMARY"
@@ -221,7 +237,10 @@ jobs:
             label: Windows arm64
             args: ""
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 60
+    # macOS 的 universal 腿要连编两个 Apple target 再合成 dmg，Windows arm64
+    # 腿的 WiX / NSIS 跑在 x86 模拟上，都比普通单架构腿慢。60 分钟对它们
+    # 偏紧，超时又算腿失败、只留下一份残缺的 draft。
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -252,10 +271,30 @@ jobs:
         if: startsWith(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          # xdg-utils 是给 arm64 腿的：tauri-plugin-opener 是直接依赖，
+          # tauri-cli 因此把 appimage.bundle_xdg_open 置为 true
+          # （tauri-cli 2.9.6 src/interface/rust.rs:902-918），打包时 bundler
+          # 会 fs::copy("/usr/bin/xdg-open")，失败即整条腿中断。
+          # ubuntu-22.04 镜像靠 google-chrome 的依赖装上 xdg-utils，而
+          # ubuntu-22.04-arm 镜像只装 firefox，没有这个包
+          # （tauri-apps/tauri-action#1319 同款故障）。x64 腿加上也无害。
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
 
       - name: install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      # tauri-action 只在 artifacts.length === 0 时硬失败；releaseId 为空串时
+      # 它 Number('') === 0 走 else 分支，只打一行日志就 exit 0 —— 五条桌面腿
+      # 全绿、draft 里一个产物都没有。所以在开跑前先断言一次。
+      - name: assert release id
+        shell: bash
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::create-release 没有输出 release_id（tauri-action 会静默跳过全部上传）"
+            exit 1
+          fi
 
       # releaseId 指向 create-release 建好的 draft：
       # - 不再让 5 条腿各自 getOrCreateRelease 同一个标签（并发创建会 422）；
@@ -283,6 +322,17 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
+      # 90 分钟的构建 + 签名之后再发现没有 tag，代价太大。先断言。
+      - name: assert release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::create-release 没有输出 tag"
+            exit 1
+          fi
 
       - uses: pnpm/action-setup@v4
         name: Install pnpm
@@ -329,7 +379,11 @@ jobs:
           if command -v sdkmanager >/dev/null 2>&1; then
             SDKMANAGER=$(command -v sdkmanager)
           else
-            SDKMANAGER=$(find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort | tail -1)
+            # `|| true` 是必需的：cmdline-tools 目录不存在时 find 返回 1，
+            # 开了 pipefail 之后整条管道判失败，赋值语句直接让 set -e 杀掉
+            # 这一步 —— 下面那条友好的「sdkmanager 不可用」就永远走不到。
+            # 而 sdkmanager 并不在 runner 的 PATH 上，这个分支才是常态。
+            SDKMANAGER=$( { find "$SDK/cmdline-tools" -name sdkmanager -type f 2>/dev/null || true; } | sort | tail -1)
           fi
           if [ -z "${SDKMANAGER:-}" ]; then
             echo "::error::sdkmanager 不可用，无法校验 Android 工具链"
@@ -371,11 +425,14 @@ jobs:
           # 镜像预置的 ANDROID_NDK / ANDROID_NDK_HOME / ANDROID_NDK_ROOT 都还
           # 指着已经被删掉的 27.3，留着会让别的工具（ndk-build、CMake 预设）
           # 拿到不存在的路径。真正被 tauri CLI 读取的是 NDK_HOME
-          # （cargo-mobile2 0.21.1 src/android/ndk.rs:179），四个名字一起覆盖。
+          # （cargo-mobile2 0.21.1 src/android/ndk.rs:179）。
+          # ANDROID_NDK_LATEST_HOME 也一并覆盖 —— 它原本指向刚被删掉的 30.x，
+          # 不覆盖就等于在环境里留了一个悬空路径。
           {
             echo "NDK_HOME=$NDK"
             echo "ANDROID_NDK_HOME=$NDK"
             echo "ANDROID_NDK_ROOT=$NDK"
+            echo "ANDROID_NDK_LATEST_HOME=$NDK"
             echo "ANDROID_NDK=$NDK"
           } >> "$GITHUB_ENV"
           echo "NDK $ANDROID_NDK_PIN（已移除其它版本）" >> "$GITHUB_STEP_SUMMARY"
@@ -419,8 +476,15 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            # secret 若是在 Windows 上生成的，换行是 CRLF，GNU base64 -d 会
+            # 直接 "invalid input" 失败。先剥掉所有换行再解码（-w0 的输入
+            # 和 LF 换行的输入都照样解得出）。
             KEYSTORE="$RUNNER_TEMP/android-release.keystore"
-            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\r\n' | base64 -d > "$KEYSTORE"
+            if [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ] || [ -z "${ANDROID_KEY_ALIAS:-}" ]; then
+              echo "::error::已配置 ANDROID_KEYSTORE_BASE64，但 ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS 为空"
+              exit 1
+            fi
             KS_PASS="$ANDROID_KEYSTORE_PASSWORD"
             KEY_ALIAS="$ANDROID_KEY_ALIAS"
             KEY_PASS="${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
@@ -457,6 +521,15 @@ jobs:
             ls -R "$RELEASE_DIR" || true
             exit 1
           fi
+          # build-tools 版本对不上时，直接调 zipalign 只会得到一句
+          # "No such file or directory"，看不出是工具链缺了。
+          for tool in zipalign apksigner; do
+            if [ ! -x "$BUILD_TOOLS/$tool" ]; then
+              echo "::error::缺少 $BUILD_TOOLS/$tool（ANDROID_SDK_BUILD_TOOLS=${ANDROID_SDK_BUILD_TOOLS}）"
+              ls "$BUILD_TOOLS" || true
+              exit 1
+            fi
+          done
 
           "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
           "$BUILD_TOOLS/apksigner" sign \
@@ -487,6 +560,16 @@ jobs:
         run: |
           set -euo pipefail
           APK="src-tauri/gen/android/app/build/outputs/apk/universal/release/TEpub-Editor-android-arm64-release-signed.apk"
+          # 先断言再重试：否则 tag 为空或文件缺失时，要白白重试五次
+          # （每次 sleep 10s）才看到一句看不出原因的报错。
+          if [ -z "$TAG" ]; then
+            echo "::error::create-release 没有输出 tag"
+            exit 1
+          fi
+          if [ ! -f "$APK" ]; then
+            echo "::error::找不到 APK：$APK"
+            exit 1
+          fi
           for attempt in 1 2 3 4 5; do
             if gh release upload "$TAG" "$APK" --clobber; then
               echo "attached $APK to $TAG"
