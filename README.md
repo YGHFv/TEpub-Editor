@@ -3,8 +3,9 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-blue)
 ![Version](https://img.shields.io/badge/Version-1.4.0-orange)
 ![Stack](https://img.shields.io/badge/Stack-Tauri%202%20%2B%20Svelte%205%20%2B%20Rust-00a7d0)
+![Languages](https://img.shields.io/badge/Languages-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%20%7C%20%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87%20%7C%20English-green)
 
-TEpub Editor 是一个围绕 TXT 与 EPUB 的工作台，把书库管理、长文本编辑、EPUB 制作、EPUB 内部编辑、阅读和一批 EPUB 处理工具放在同一个应用里，同时提供桌面客户端和浏览器 Web 版。
+TEpub Editor 是一个围绕 TXT 与 EPUB 的工作台，把书库管理、长文本编辑、EPUB 制作、EPUB 内部编辑、阅读和一批 EPUB 处理工具放在同一个应用里，同时提供桌面客户端和浏览器 Web 版。界面支持简体中文、繁体中文与 English。
 
 ## 功能
 
@@ -52,6 +53,13 @@ TEpub Editor 是一个围绕 TXT 与 EPUB 的工作台，把书库管理、长�
 - 主题、背景、字体设置
 - 目录导航、书签、进度保存
 
+## 多语言界面
+
+- 支持简体中文、繁体中文和 English，简体中文为源语言
+- 首次启动默认跟随设备或浏览器语言，也可在工具箱或手机端设置中手动切换
+- 语言偏好会持久保存，并在桌面多窗口、Web 版与移动端之间同步生效
+- 繁体中文界面由 OpenCC 自动转换，覆盖所有主要页面、工具、设置与运行时提示
+
 ## 技术栈
 
 - **前端**：Svelte 5 + SvelteKit + Vite
@@ -59,6 +67,7 @@ TEpub Editor 是一个围绕 TXT 与 EPUB 的工作台，把书库管理、长�
 - **后端**：Rust
 - **编辑器**：CodeMirror 6
 - **简繁转换**：opencc-js
+- **界面国际化**：Svelte 5 运行时翻译 + OpenCC
 
 ## 下载与安装
 
