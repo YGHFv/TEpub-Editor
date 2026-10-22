@@ -1,7 +1,15 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
     import { base } from "$app/paths";
-    import { onMount, tick } from "svelte";
+    import { onDestroy, onMount, tick } from "svelte";
+    import { viewUrl } from "$lib/keepAlive/viewState";
+    import { get } from "svelte/store";
+    import { clientLayout, phoneDevice } from "$lib/clientProfile";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
+    import { tabIdFor } from "$lib/secondaryTabs";
     import {
         DEFAULT_TOC_REGEX_RULES,
         loadAppSettings,
@@ -214,6 +222,33 @@
     let aiProofRows: AiProofRow[] = [];
     let aiProofBaseContent = "";
 
+    /**
+     * 手机形态：三栏（目录 / 编辑 / 工具）叠成一格，底部页签切换。
+     *
+     * 为什么不给手机写第二套 DOM：整页 3400 行，目录扫描、查找替换、校对、
+     * 重排全绑在现有节点上，复制一份等于以后每个 bug 都要修两遍。这里只在
+     * 手机下加页签与动作条，桌面渲染出的节点一个不变。
+     */
+    let phoneLayout = false;
+    $: phoneLayout = $clientLayout === "phone";
+    let phonePane: "toc" | "editor" | "tools" = "editor";
+
+    function selectPhonePane(pane: "toc" | "editor" | "tools") {
+        phonePane = pane;
+    }
+
+    /** 手机上的「查找」：切到工具栏并展开查找替换，然后把光标放进输入框。
+     *  不这么做的话，输入框在 visibility:hidden 的栏里，focus() 之后光标
+     *  不出现，用户以为按钮没反应。 */
+    function openPhoneFind() {
+        selectPhonePane("tools");
+        searchPanelOpen = true;
+        setTimeout(
+            () => document.getElementById("txt-find-input")?.focus(),
+            60,
+        );
+    }
+
     $: if (currentMatchIndex >= matches.length)
         currentMatchIndex = matches.length - 1;
     $: visibleTocItems = tocItems.filter(
@@ -245,27 +280,58 @@
         event.returnValue = "";
     }
 
+    /**
+     * 本页在标签登记表里的 id。
+     *
+     * 用 viewUrl() 而不是全局 page.url：保活视图里全局地址会随别的标签跳转
+     * 而变，拿它算出来的 id 和宿主登记的那个对不上，guard 就永远命不中。
+     */
+    const ownTabId = tabIdFor(
+        viewUrl().pathname,
+        viewUrl().search,
+    );
+
     onMount(() => {
-        const draft = localStorage.getItem(DRAFT_KEY);
-        if (draft) {
+        // 旧版本在真机上会自动恢复上一次的 TXT 草稿。手机用户从首页重新进入
+        // 工具时应得到全新会话，而不是突然接着编辑上次的文件；这里只清理旧版
+        // 遗留键，不再读取或写入草稿。未保存改动仍由 dirtyGuard 在本次进程内保护。
+        if (get(phoneDevice)) {
             try {
-                const parsed = JSON.parse(draft);
-                if (typeof parsed?.content === "string") {
-                    resetEditorContent(parsed.content);
-                    fileName =
-                        typeof parsed.fileName === "string" &&
-                        parsed.fileName.trim()
-                            ? parsed.fileName
-                            : fileName;
-                    tocLineOffsets = new Map();
-                    markSearchDirty();
-                    updateTextStats(true);
-                    status = "已恢复本地草稿";
-                }
-            } catch {
                 localStorage.removeItem(DRAFT_KEY);
+            } catch {
+                // localStorage 不可用时无需处理，页面本身仍可正常使用
+            }
+        } else {
+            // 桌面版保留原有草稿恢复逻辑，手机专属缓存策略不能外溢。
+            const draft = localStorage.getItem(DRAFT_KEY);
+            if (draft) {
+                try {
+                    const parsed = JSON.parse(draft);
+                    if (typeof parsed?.content === "string") {
+                        resetEditorContent(parsed.content);
+                        fileName =
+                            typeof parsed.fileName === "string" &&
+                            parsed.fileName.trim()
+                                ? parsed.fileName
+                                : fileName;
+                        tocLineOffsets = new Map();
+                        markSearchDirty();
+                        updateTextStats(true);
+                        status = "已恢复本地草稿";
+                    }
+                } catch {
+                    localStorage.removeItem(DRAFT_KEY);
+                }
             }
         }
+
+        // 手机外壳会为省内存裁掉最久没访问的保活页。带未保存内容时必须否决，
+        // 否则用户切去工具箱再回来，刚打的几千字已经没了。
+        registerKeepAliveGuard(ownTabId, () => hasUnsavedChanges);
+    });
+
+    onDestroy(() => {
+        unregisterKeepAliveGuard(ownTabId);
     });
 
     function normalizeRules(
@@ -1664,7 +1730,48 @@
             />
         </div>
     {:else}
-        <main class="workspace">
+        <main
+            class="workspace"
+            class:phone-stack={phoneLayout}
+            data-pane={phonePane}
+        >
+            {#if phoneLayout}
+                <!-- 手机上三栏同时在屏幕上，每栏只分到 1/3 高：目录列表七八行、
+                     编辑区十行、工具栏几个折叠块，谁都干不了活 —— 就是用户说的
+                     "单纯拉伸"。收成一屏一栏，用这条页签切换。
+                     桌面不渲染这个节点，三栏同时可见，布局完全不变。 -->
+                <div class="phone-pane-bar" role="tablist" aria-label="编辑区切换">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={phonePane === "toc"}
+                        class:active={phonePane === "toc"}
+                        on:click={() => selectPhonePane("toc")}
+                        >目录</button
+                    >
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={phonePane === "editor"}
+                        class:active={phonePane === "editor"}
+                        on:click={() => selectPhonePane("editor")}
+                        >编辑</button
+                    >
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={phonePane === "tools"}
+                        class:active={phonePane === "tools"}
+                        on:click={() => selectPhonePane("tools")}
+                        >工具</button
+                    >
+                </div>
+                <!-- status 以前只在脚本里赋值、从来没渲染过，手机上也没地方看
+                     「已替换 12 处」这类结果，顺手补一条一行高的状态线 -->
+                <div class="phone-status" role="status" aria-live="polite">
+                    <span title={status}>{status}</span>
+                </div>
+            {/if}
             <aside class="toc-sidebar">
                 <div class="toc-head">
                     <div class="toc-title-row">
@@ -1778,6 +1885,21 @@
                         onChange={handleEditorChange}
                     />
                 </div>
+                {#if phoneLayout}
+                    <!-- 三个常用动作留在编辑栏底部：导出/制作原来只在「工具」栏
+                         最顶上，改两行字想导出得先切栏再滚回去 -->
+                    <div class="phone-actionbar">
+                        <button type="button" on:click={openPhoneFind}
+                            >查找</button
+                        >
+                        <button type="button" on:click={downloadText}
+                            >导出 TXT</button
+                        >
+                        <button type="button" on:click={prepareEpubHandoff}
+                            >制作 EPUB</button
+                        >
+                    </div>
+                {/if}
             </section>
 
             <aside class="side-panel">
@@ -1956,6 +2078,7 @@
                     {#if searchPanelOpen}
                         <div class="section-body">
                             <input
+                                id="txt-find-input"
                                 bind:value={searchQuery}
                                 placeholder="查找"
                                 on:input={markSearchDirty}
@@ -2979,6 +3102,17 @@
         font-size: 13px;
     }
 
+    /* 「区分大小写」这类勾选行桌面 22px 高，手机上点不中。
+       整行抬到触控尺寸，勾选框本体也放大一档。 */
+    :global(:root[data-tepub-layout="phone"]) .check-row {
+        min-height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .check-row input {
+        width: 20px;
+        height: 20px;
+    }
+
     .check-row input {
         width: 16px;
         height: 16px;
@@ -3349,51 +3483,314 @@
         }
     }
 
-    :global(:root[data-tepub-client="web-mobile"] body) {
-        overflow: hidden;
+    /* 这里原来有一条 :global(:root[data-tepub-layout="phone"] body) { overflow: hidden }。
+       页面样式一旦加载就永远留在文档里，而手机外壳的滚动容器是 .ka-view
+       （body 本来就没有溢出），这条规则只是把 body 锁死，并且和图片工具页
+       里同样写法、值却相反（auto）的那条互相覆盖 —— 谁后加载谁说了算。
+       外壳的滚动 / 橡皮筋控制统一由 app.css 与 .ka-view 负责，页面不碰。 */
+
+    /* 高度全部从父级拿：手机外壳里 .text-editor-page 被 app.css 压成
+       position:absolute;inset:0;height:auto，比整个视口矮一条底部导航。
+       写 100dvh 会让内容高出容器一截，底部动作条被导航栏吃掉。 */
+    :global(:root[data-tepub-layout="phone"]) .text-editor-page {
+        height: 100%;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .text-editor-page {
-        height: 100dvh;
-    }
-
-    :global(:root[data-tepub-client="web-mobile"]) .import-shell {
-        height: 100dvh;
+    :global(:root[data-tepub-layout="phone"]) .import-shell {
+        height: 100%;
         grid-template-rows: minmax(0, 1fr);
         background: var(--color-canvas);
         overflow: auto;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .workspace {
-        grid-template-columns: 1fr;
-        grid-template-rows: minmax(128px, 22dvh) minmax(360px, 1fr) minmax(
-                300px,
-                36dvh
-            );
-        gap: 10px;
-        padding: max(10px, env(safe-area-inset-top)) 10px
-            max(10px, env(safe-area-inset-bottom));
-        overflow: auto;
+    /* ——— 手机：三栏叠成一格 ———
+
+       以前是"三行各给一个视口比例"：目录 22dvh、编辑 1fr、工具 36dvh，
+       整页还能上下滚。390×844 的屏上编辑区只剩二三百 px（不到 10 行），
+       想在「工具」里改个正则还得在三个矮窗之间滚来滚去。
+
+       现在：三栏 grid-area 全等于 3/1，同一时刻只有一栏 visible。
+       行为 1 = 页签，行 2 = 状态线，行 3 = 当前栏。 */
+    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 0;
+        padding: 0;
+        overflow: hidden;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .toc-sidebar,
-    :global(:root[data-tepub-client="web-mobile"]) .editor-shell,
-    :global(:root[data-tepub-client="web-mobile"]) .side-panel {
-        height: auto;
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar {
+        grid-row: 1;
+        grid-column: 1;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        height: 44px;
+        padding-top: var(--safe-top);
+        box-sizing: content-box;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button {
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--color-text-soft);
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button.active {
+        color: var(--color-accent-deep);
+        box-shadow: inset 0 -2px 0 var(--color-accent);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-status {
+        grid-row: 2;
+        grid-column: 1;
+        padding: 4px 12px;
+        font-size: 11px;
+        color: var(--color-muted);
+        background: var(--color-surface-soft);
+        border-bottom: 1px solid var(--color-border);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    /* 三栏落在同一格，只由 data-pane 决定谁可见。
+       用 visibility 而不是 display:none：CodeMirror 一旦脱离布局就要重新
+       测量，切回来时滚动位置和光标位置都会跳。 */
+    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .toc-sidebar,
+    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .editor-shell,
+    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .side-panel {
+        grid-area: 3 / 1;
+        height: 100%;
+        min-width: 0;
         min-height: 0;
+        border: 0;
+        border-radius: 0;
+        visibility: hidden;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .editor-toolbar {
-        align-items: stretch;
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack[data-pane="toc"]
+        > .toc-sidebar,
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack[data-pane="editor"]
+        > .editor-shell,
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack[data-pane="tools"]
+        > .side-panel {
+        visibility: visible;
+    }
+
+    /* 隐藏栏里的后代要一并压住：自带 visibility:visible 的元素（按钮、输入框
+       的系统样式）会盖过继承来的 hidden，叠在同一格时就变成"两栏重叠"。
+       :global(*) 是必须的 —— 栏内节点带的是本组件作用域属性，但这条要
+       连 CodeMirror 生成的 .cm-* 一起管，那些节点没有作用域属性。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="toc"]
+            > .editor-shell
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="toc"]
+            > .side-panel
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="editor"]
+            > .toc-sidebar
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="editor"]
+            > .side-panel
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="tools"]
+            > .toc-sidebar
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="tools"]
+            > .editor-shell
+            *
+    ) {
+        visibility: hidden !important;
+    }
+
+    /* 编辑栏：格子行数会变（动作条按需出现），写死 grid-template-rows 会
+       把 1fr 分错行，改成 flex 列由编辑区吃剩余高度 */
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack
+        > .editor-shell {
+        display: flex;
         flex-direction: column;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .editor-stats {
-        width: 100%;
-        justify-content: flex-start;
+    :global(:root[data-tepub-layout="phone"]) .editor-toolbar {
+        flex: 0 0 auto;
+        min-height: 48px;
+        align-items: center;
+        flex-direction: row;
+        gap: 8px;
+        padding: 6px 10px;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .side-panel {
+    :global(:root[data-tepub-layout="phone"]) .filename-input,
+    :global(:root[data-tepub-layout="phone"]) .filename-import {
+        width: auto;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .editor-stats {
+        width: auto;
+        flex: 0 0 auto;
+        justify-content: flex-end;
+        gap: 8px;
+        font-size: 11px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .editor-code {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    /* 编辑区留白收一点：手机上 22px 的内边距等于每行白扔两个字。
+       .cm-* 是 CodeMirror 运行时生成的节点，本组件的选择器选不中，必须整条
+       包进 :global()；既然出了作用域，就要锚在本页独有的 .text-editor-page 上，
+       否则路由 CSS 会漏到 EPUB 编辑器的代码编辑器上。 */
+    :global(
+        :root[data-tepub-layout="phone"] .text-editor-page .cm-content
+    ) {
+        padding: 10px 12px !important;
+        line-height: 26px;
+    }
+
+    :global(:root[data-tepub-layout="phone"] .text-editor-page .cm-line) {
+        min-height: 26px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-actionbar {
+        flex: 0 0 auto;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 4px;
+        padding: 6px 8px;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-surface);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-actionbar button {
+        height: 40px;
+        min-width: 0;
+        padding: 0 4px;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* 目录栏：行高抬到 44px（桌面 30px 的手指按不准） */
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack
+        > .toc-sidebar {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toc-list {
+        padding: 4px 6px calc(8px + var(--safe-bottom));
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toc-main {
+        min-height: 44px;
+        padding: 6px 8px;
+    }
+
+    /* 不要再加 safe-area-inset-top：手机形态下 .toc-head 在 .phone-pane-bar
+       下面，顶部安全区已经由那条 bar 的 padding-top: var(--safe-top) 消费过。
+       这里再加一次，刘海屏竖屏会在「目录」上方多留一条 44px 的空带。 */
+    :global(:root[data-tepub-layout="phone"]) .toc-head {
+        padding-top: 8px;
+    }
+
+    /* 工具栏：整栏滚动，底部留出安全区，最后一个输入框不会被小白条压住 */
+    :global(:root[data-tepub-layout="phone"]) .side-panel {
         overflow: auto;
+        padding: 0 10px calc(12px + var(--safe-bottom));
+    }
+
+    /* 折叠块在手机上要更好点：标题行高度 44px，展开后的输入框 16px 字号
+       （低于 16px 时 iOS Safari 会自己放大整页） */
+    :global(:root[data-tepub-layout="phone"]) .side-panel .section-toggle {
+        min-height: 44px;
+    }
+
+    :global(:root[data-tepub-layout="phone"] .side-panel .section-body input) {
+        font-size: 16px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .side-panel .section-body button {
+        min-height: 40px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .side-actions button {
+        min-height: 44px;
+    }
+
+    /* ——— 横屏手机：压薄纵向常驻条 ———
+
+       844×390 下 .workspace 只有 337px。页签 44 + 状态线 24 之后，
+       编辑栏里还有工具栏（文件名 + 统计，手机上因为 16px 字号被撑到 61px）
+       和动作条 53px，CodeMirror 只剩 154px —— 不到 8 行。
+       竖屏没这个问题，所以按「矮」收，宽度断点在这里一定命中不了。 */
+    @media (max-height: 500px) {
+        :global(:root[data-tepub-layout="phone"]) .phone-pane-bar,
+        :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button {
+            height: 38px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button {
+            font-size: 13px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-status {
+            padding: 2px 12px;
+            font-size: 10px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .editor-toolbar {
+            min-height: 0;
+            padding: 4px 8px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .editor-toolbar input {
+            height: 36px;
+            /* 全局按 --control-height 给了 min-height: 44px，压过 height */
+            min-height: 0;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-actionbar {
+            padding: 4px 6px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-actionbar button {
+            height: 36px;
+        }
     }
 </style>

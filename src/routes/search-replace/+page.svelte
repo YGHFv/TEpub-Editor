@@ -670,4 +670,109 @@
     .status-bar {
         color: var(--color-muted);
     }
+
+    /* ——— 手机形态 ———
+
+       这个窗口在桌面上是固定在「查找替换」小窗里的两栏：左边表单、右边 118px
+       的按钮列。手机上（390 宽）左栏只剩 200px 左右，中文复选框标签被挤成
+       一个字一行，模式单选组被右边栏压住直接裁断。
+       手机上改成上下两段：表单占满宽度，四个动作按钮铺成 2×2 放在下面。 */
+    :global(:root[data-tepub-layout="phone"]) .search-window {
+        flex-direction: column;
+        /* 高度由 app.css 的 .ka-view > .search-window 规则强制为 100%
+           （!important），这里再写 height/min-height 不会生效，只会误导。
+           phone 下本元素自身是 overflow:auto（横屏块改成 hidden + 让
+           .left-panel 滚动）。 */
+        gap: 10px;
+        padding: 12px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .right-panel {
+        width: auto;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        /* 横屏只剩 337px 高：表单这一段不能被 flex 压缩，
+           压缩会把它自己的内容裁掉（模式单选组被按钮盖住半截）。 */
+        flex: 0 0 auto;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .left-panel {
+        flex: 0 0 auto;
+    }
+
+    /* 中文标签在手机上按词换行，不要一个字一行 */
+    :global(:root[data-tepub-layout="phone"]) .checkbox-row {
+        flex-wrap: wrap;
+        padding-left: 0;
+        gap: 6px 16px;
+    }
+
+    /* 复选框本体 13px、整行只有 19px 高，手指点不中。整行抬到触控高度，
+       点击区域随 label 一起变大（label 本来就包着 input）。 */
+    :global(:root[data-tepub-layout="phone"]) .checkbox,
+    :global(:root[data-tepub-layout="phone"]) .radio {
+        min-height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .checkbox input,
+    :global(:root[data-tepub-layout="phone"]) .radio input {
+        width: 20px;
+        height: 20px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .mode-group {
+        margin-left: 0;
+        padding: 8px 10px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .radios {
+        flex-wrap: wrap;
+        gap: 8px 16px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .status-bar {
+        padding-left: 0;
+        margin-top: 0;
+    }
+
+    /* 横屏手机只有 337px 可用高度（扣掉顶部标签与底部导航）。2×2 的按钮块
+       本身就要 116px，加上表单 233px 就超出视口，四个动作按钮要滚一下才看得全。
+       横屏宽度有 844px，改成一行四个 —— 每个仍有 200px，够点。
+       用 max-height 而不是 max-width：竖屏手机宽度不够这样排。
+
+       判据必须是「矮 + 宽」，不能只用 orientation。app.html 设了
+       interactive-widget=resizes-content：竖屏弹软键盘会把布局视口压到 500
+       以下，此时高度 < 宽度，orientation 也跟着翻成 landscape（实测 375×367
+       命中，搜索框被压成 22px）。真横屏最窄也有 568px 宽，键盘态的竖屏手机
+       只有 320–430px，min-width: 480px 才能把两者分开。
+
+       光是排成一行还不够：表单 388px 本身就超过 337px 的视口，一行四个按钮
+       仍然落在滚动区外面（实测只剩顶部 16px 可见，按钮中心正好压在底部导航
+       上）。所以改成「表单自己滚、动作条固定在下方」：外层不再滚，按钮条
+       永远完整可见，也不会像吸底那样盖住表单最后一行（.status-bar 是查找/
+       替换唯一的完成反馈，被不透明按钮条压住等于没有反馈）。 */
+    @media (max-height: 500px) and (min-width: 480px) {
+        :global(:root[data-tepub-layout="phone"]) .search-window {
+            overflow: hidden;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .left-panel {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+        }
+
+        /* 结果文案吸在表单可视区底部，滚动表单时也看得见 */
+        :global(:root[data-tepub-layout="phone"]) .status-bar {
+            position: sticky;
+            bottom: 0;
+            padding: 4px 0;
+            background: var(--color-surface-raised);
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .right-panel {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+    }
 </style>

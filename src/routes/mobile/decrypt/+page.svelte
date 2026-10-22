@@ -149,8 +149,8 @@
     .page {
         min-height: 100vh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 14px
-            max(44px, env(safe-area-inset-bottom));
+        padding: max(10px, var(--safe-top)) 14px
+            max(44px, var(--safe-bottom));
         background: var(--color-canvas);
         color: var(--color-text);
     }
@@ -179,6 +179,17 @@
         color: inherit;
         text-decoration: none;
         padding: 0;
+    }
+
+    /* 返回箭头只有 34px 宽，手指按偏一格就落到边缘空白。
+       手机形态把返回列和箭头都抬到触控尺寸；桌面保持 38px/34px 原样。 */
+    :global(:root[data-tepub-layout="phone"]) .topbar {
+        grid-template-columns: var(--tap-target) minmax(0, 1fr);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .topbar a {
+        width: var(--tap-target);
+        height: var(--tap-target);
     }
 
     .topbar a svg {
@@ -224,6 +235,12 @@
 
     button:disabled {
         opacity: 0.6;
+    }
+
+    /* 「重新选择 EPUB」是这一页唯一的主操作，桌面写的 36px 在手机上点不中。
+       手机形态抬到触控尺寸；桌面（没有 data-tepub-layout="phone"）保持 36px。 */
+    :global(:root[data-tepub-layout="phone"]) button {
+        min-height: var(--tap-target);
     }
 
     p,

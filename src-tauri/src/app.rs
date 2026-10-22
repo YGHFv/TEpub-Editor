@@ -2,9 +2,11 @@ use chardetng::EncodingDetector;
 use serde::Serialize;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Mutex;
+use tauri::Manager;
 
 use crate::fs_utils::{app_data_root, is_portable};
 use crate::library::library_pointer_path;
@@ -442,20 +444,35 @@ pub(crate) struct AppModeInfo {
     portable_marker_path: String,
     /// 当前应用数据根目录（绿色版=<exe>/data，安装版=app_data_dir），UI 展示用
     app_data_dir: String,
+    /// 是否手机端（Android/iOS）。手机上没有系统文件夹选择器 ——
+    /// Tauri mobile 的 folder picker 未实现，前端必须给出一个可用目录，
+    /// 否则首次启动弹窗会变成死路。
+    is_mobile: bool,
 }
 
 #[tauri::command]
 pub fn get_app_mode_info(app: tauri::AppHandle) -> Result<AppModeInfo, String> {
     let portable = is_portable();
+    let is_mobile = cfg!(any(target_os = "android", target_os = "ios"));
 
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(|d| d.to_path_buf()));
 
+    let data_root = app_data_root(&app)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // 手机端没有文件夹选择器，这里必须给一个开箱可用的建议目录：
+    // 应用私有数据目录下的 library/（无需任何存储权限，卸载即清理）。
     let suggested = if portable {
         exe_dir
             .as_ref()
             .map(|d| d.join("EPUB").to_string_lossy().to_string())
+            .unwrap_or_default()
+    } else if is_mobile {
+        app_data_root(&app)
+            .map(|p| p.join("library").to_string_lossy().to_string())
             .unwrap_or_default()
     } else {
         String::new()
@@ -464,10 +481,6 @@ pub fn get_app_mode_info(app: tauri::AppHandle) -> Result<AppModeInfo, String> {
     let marker = exe_dir
         .as_ref()
         .map(|d| d.join("portable.txt").to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    let data_root = app_data_root(&app)
-        .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
     // 是否已配置：library.pointer 存在 且其指向的目录还存在
@@ -489,5 +502,135 @@ pub fn get_app_mode_info(app: tauri::AppHandle) -> Result<AppModeInfo, String> {
         is_library_configured: configured,
         portable_marker_path: marker,
         app_data_dir: data_root,
+        is_mobile,
+    })
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LibraryDirectoryEntry {
+    name: String,
+    path: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LibraryDirectoryShortcut {
+    label: String,
+    path: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LibraryDirectoryListing {
+    current: String,
+    parent: Option<String>,
+    shortcuts: Vec<LibraryDirectoryShortcut>,
+    entries: Vec<LibraryDirectoryEntry>,
+}
+
+/// 手机端没有可用的系统文件夹选择器。SAF 返回的是 content:// URI，而现有
+/// 书库、EPUB 处理和 filesystem API 都按真实路径工作，不能直接混用。
+/// 这里给前端一个只读的目录浏览器：列出当前应用实际可访问的目录，用户选中
+/// 后仍然得到普通文件系统路径。桌面端有系统选择器，不会走这条命令。
+#[tauri::command]
+pub fn list_library_directories(
+    app: tauri::AppHandle,
+    path: Option<String>,
+) -> Result<LibraryDirectoryListing, String> {
+    let data_root = app_data_root(&app).ok();
+    let mut shortcuts = Vec::new();
+    let mut seen_shortcuts = HashSet::new();
+    let mut push_shortcut = |label: &str, candidate: Option<PathBuf>| {
+        let Some(candidate) = candidate else {
+            return;
+        };
+        if !candidate.is_dir() {
+            return;
+        }
+        let value = candidate.to_string_lossy().to_string();
+        if seen_shortcuts.insert(value.clone()) {
+            shortcuts.push(LibraryDirectoryShortcut {
+                label: label.to_string(),
+                path: value,
+            });
+        }
+    };
+
+    push_shortcut("应用数据", data_root.clone());
+    push_shortcut("应用书库", data_root.as_ref().map(|root| root.join("library")));
+    push_shortcut("下载", app.path().download_dir().ok());
+    push_shortcut("文档", app.path().document_dir().ok());
+    push_shortcut("主目录", app.path().home_dir().ok());
+    // Tauri 的 Android path 解析有时拿不到共享目录；这两个是 Android 常规
+    // 主存储位置，存在就必须作为入口露出，否则用户只能手填路径。
+    for (label, raw) in [
+        ("内部存储", "/storage/emulated/0"),
+        ("下载", "/storage/emulated/0/Download"),
+        ("文档", "/storage/emulated/0/Documents"),
+    ] {
+        push_shortcut(label, Some(PathBuf::from(raw)));
+    }
+
+    // 首次启动时 <app_data>/library 通常还不存在。默认入口必须从实际
+    // 存在的目录里挑，否则用户刚点「选择目录」就会收到"目录不存在"。
+    let fallback = data_root
+        .as_ref()
+        .map(|root| root.join("library"))
+        .into_iter()
+        .chain(data_root.clone())
+        .chain(shortcuts.first().map(|item| PathBuf::from(&item.path)))
+        .find(|candidate| candidate.is_dir());
+
+    let requested = path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or(fallback)
+        .ok_or_else(|| "没有可浏览的目录".to_string())?;
+
+    if !requested.exists() {
+        return Err(format!("目录不存在: {}", requested.to_string_lossy()));
+    }
+    if !requested.is_dir() {
+        return Err(format!("不是目录: {}", requested.to_string_lossy()));
+    }
+
+    let mut entries = Vec::new();
+    let reader = fs::read_dir(&requested)
+        .map_err(|error| format!("无法读取目录 {}: {}", requested.to_string_lossy(), error))?;
+    for item in reader {
+        let Ok(item) = item else {
+            continue;
+        };
+        let entry_path = item.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+        let name = item.file_name().to_string_lossy().to_string();
+        if name.is_empty() || name.starts_with('.') {
+            continue;
+        }
+        entries.push(LibraryDirectoryEntry {
+            name,
+            path: entry_path.to_string_lossy().to_string(),
+        });
+    }
+    entries.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    Ok(LibraryDirectoryListing {
+        current: requested.to_string_lossy().to_string(),
+        parent: requested
+            .parent()
+            .filter(|parent| *parent != Path::new(""))
+            .map(|parent| parent.to_string_lossy().to_string()),
+        shortcuts,
+        entries,
     })
 }

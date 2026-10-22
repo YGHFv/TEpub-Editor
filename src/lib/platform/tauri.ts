@@ -1,5 +1,9 @@
 import type { PlatformAdapter, PlatformWindowHandle } from "./types";
-import { THEME_CANVAS_COLORS, loadAppSettings } from "$lib/appSettings";
+import {
+  THEME_CANVAS_COLORS,
+  loadAppSettings,
+  resolveUiTheme,
+} from "$lib/appSettings";
 import { detectWindowChrome } from "$lib/windowChrome";
 
 function wrapTauriWindow(win: any): PlatformWindowHandle {
@@ -227,7 +231,7 @@ export function createTauriPlatform(): PlatformAdapter {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       // 新窗口的底色/原生标题栏按当前主题建：不传 theme 的话 WebView2 会先画
       // 一帧白底再等前端切主题，二级页面打开时整屏闪白
-      const theme = loadAppSettings().uiTheme;
+      const theme = resolveUiTheme(loadAppSettings().uiTheme);
       // 与主窗口一致：Windows 去掉系统标题栏，由页面画一条能放标签的标题行。
       // macOS 用 Overlay 保留红黄绿按钮（页面给它们留了左侧安全区）；
       // Linux 保留系统标题栏，否则窗口既不能缩放也没法最大化（详见 windowChrome.ts）

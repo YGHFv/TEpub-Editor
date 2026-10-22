@@ -1,8 +1,14 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onDestroy, onMount } from "svelte";
     import { afterNavigate, goto } from "$app/navigation";
     import { invoke } from "@tauri-apps/api/core";
     import { message } from "@tauri-apps/plugin-dialog";
+    import { tabIdFor } from "$lib/secondaryTabs";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
+    import { viewUrl } from "$lib/keepAlive/viewState";
     import {
         buildMobileRoute,
         cacheBrowserFileStable,
@@ -291,8 +297,8 @@
         }
     }
 
-    function queryLoadKey() {
-        const params = new URLSearchParams(window.location.search);
+    function queryLoadKey(search: string = window.location.search) {
+        const params = new URLSearchParams(search);
         const path = params.get("path")?.trim() ?? "";
         const name = params.get("name")?.trim() ?? "";
         const refresh = params.get("refresh")?.trim() ?? "";
@@ -303,20 +309,41 @@
         };
     }
 
-    async function syncFromQuery(force = false) {
-        const next = queryLoadKey();
+    async function syncFromQuery(force = false, search?: string) {
+        const next = queryLoadKey(search);
         if (!next.path) return;
         if (!force && next.key === lastQueryLoadKey) return;
         lastQueryLoadKey = next.key;
         await loadMetadata(next.path, next.name);
     }
 
+    const ownTabId = tabIdFor(viewUrl().pathname, viewUrl().search);
+
     onMount(() => {
+        // 改了一半的元数据只在这份内存态里（没有草稿）。手机外壳裁保活页时
+        // 必须问一句，否则切去别处再回来，标题/简介/标签全回到磁盘上的旧值。
+        registerKeepAliveGuard(ownTabId, () => dirty);
         void syncFromQuery();
     });
 
-    afterNavigate(() => {
-        void syncFromQuery();
+    onDestroy(() => unregisterKeepAliveGuard(ownTabId));
+
+    /**
+     * 只认「导航目标属于本视图」的那一次。
+     *
+     * afterNavigate 的回调是全局集合：保活下本页一直挂着，别的标签（比如
+     * /mobile/make）导航也会把它叫醒。以前这里读 window.location.search，
+     * 拿到的就是别人的查询串 —— 会把一个 TXT 缓存路径当 EPUB 去解析，
+     * 报错之后 metadata 已经丢了，用户切回来是一片空白。
+     *
+     * 用 to.url 而不是 viewUrl()：本页自己的 refresh=… 是「重新读一遍书」
+     * 的触发信号，必须能看到；viewUrl() 是创建视图时的常量，永远看不到它。
+     */
+    afterNavigate(({ to }) => {
+        if (!to?.url) return;
+        const targetId = tabIdFor(to.url.pathname, to.url.search);
+        if (targetId !== ownTabId) return;
+        void syncFromQuery(false, to.url.search);
     });
 </script>
 
@@ -473,8 +500,8 @@
     .page {
         min-height: 100vh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 14px
-            max(44px, env(safe-area-inset-bottom));
+        padding: max(10px, var(--safe-top)) 14px
+            max(44px, var(--safe-bottom));
         background: var(--color-canvas);
         color: var(--color-text);
     }
@@ -503,6 +530,17 @@
         color: inherit;
         text-decoration: none;
         padding: 0;
+    }
+
+    /* 返回箭头只有 34px 宽，手指按偏一格就落到边缘空白。
+       手机形态把返回列和箭头都抬到触控尺寸；桌面保持 38px/34px 原样。 */
+    :global(:root[data-tepub-layout="phone"]) .topbar {
+        grid-template-columns: var(--tap-target) minmax(0, 1fr);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .topbar a {
+        width: var(--tap-target);
+        height: var(--tap-target);
     }
 
     .topbar a svg {
@@ -634,6 +672,13 @@
         color: var(--color-surface);
         font-weight: 900;
         font-size: 13px;
+    }
+
+    /* 这一页在手机上就是「选择 EPUB → 改几栏 → 保存」，
+       按钮是唯一通路，36px 的桌面密度必须抬到触控尺寸。
+       桌面没有 data-tepub-layout="phone"，仍按 36px 排。 */
+    :global(:root[data-tepub-layout="phone"]) button {
+        min-height: var(--tap-target);
     }
 
     button.secondary {

@@ -1800,4 +1800,90 @@
             justify-self: start;
         }
     }
+
+    /* ——— 手机形态（不看宽度） ———
+
+       上面那条 @media (max-width: 820px) 只覆盖竖屏：横屏手机宽 844px
+       命中不了，页根 .batch-app 仍是 height:100vh + overflow:hidden，
+       两栏 grid 又只有 337-53=284px 可用 —— 工作区被压成 182px，
+       「输出与执行」里一半的字段和整块日志被 overflow:hidden 直接裁掉，
+       没有任何滚动入口。
+
+       手机上改成整页自然高度 + 页面级滚动，grid 行高只跟内容走。
+       桌面（宽窗、Tauri 窗口）不命中，行为完全不变。 */
+    :global(:root[data-tepub-layout="phone"]) .batch-app {
+        height: auto;
+        min-height: 100%;
+        grid-template-rows: max-content max-content;
+        overflow: auto;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .batch-app .workspace {
+        grid-template-columns: 1fr;
+        grid-auto-rows: max-content;
+        overflow: visible;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .batch-app .left-column {
+        grid-template-rows: max-content max-content;
+        overflow: visible;
+    }
+
+    /* 队列与日志本身是被设计成"固定高度、内部滚动"的面板；
+       外层已经没有高度可分了，给它们各自留一屏可观的高度。 */
+    :global(:root[data-tepub-layout="phone"]) .batch-app .queue-panel {
+        min-height: 320px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .batch-app .log-panel {
+        min-height: 220px;
+    }
+
+    /* 队列/日志列表本身写着 height:100%。外层 .panel 现在是 max-content 高度
+       （见上面两条），百分比高度失去参照，退回内容高度 —— 面板的
+       min-height 撑起来了，列表却只有一行高，剩下的空白不属于任何滚动区。
+       改成用面板高度减掉面板头部：列表自己滚动，面板不留死白。
+
+       但不能就这么放开：列表一旦按内容撑开，200 个文件就是 200×64px，
+       队列面板实测 2187px —— 日志被顶到一屏之外，批量跑的时候等于看不见。
+       手机上给列表一个上限，滚动仍然收在列表内部。
+
+       横屏只有 390px 高，纯 45vh 会把列表压到 175px（比一行文件多不了多少），
+       所以用 clamp 兜一个下限 220px —— 整页本来就在滚，多出来的高度
+       只是让用户多滑一屏，比"只能看见一行"强。 */
+    :global(:root[data-tepub-layout="phone"]) .batch-app .queue-list,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .log-list {
+        height: auto;
+        max-height: clamp(220px, 45vh, 480px);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .batch-app .queue-panel,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .log-panel {
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* 面板里的按钮（筛选页签、导出日志、重新扫描…）在桌面写了 30px，
+       手指点不中。手机上统一抬到触控尺寸；这是纯 phones 规则，
+       桌面窗口的密度不变。 */
+    :global(:root[data-tepub-layout="phone"]) .batch-app .compact-btn,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .segmented button,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .icon-text-btn,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .primary-btn,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .strong-btn,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .ghost-btn,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .start-btn,
+    /* 搜索框也是可点的：页面自己写了 min-height: 30px，特异性(0,2,0)
+       高过 app.css 里零特异性的 :where(input)，所以它没被全局的
+       --control-height 抬起来（实测 31px），和旁边 44px 的筛选页签
+       并排时明显矮一截。 */
+    :global(:root[data-tepub-layout="phone"]) .batch-app .queue-search {
+        min-height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .batch-app .queue-list,
+    :global(:root[data-tepub-layout="phone"]) .batch-app .log-list {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
 </style>

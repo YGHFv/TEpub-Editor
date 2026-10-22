@@ -1,7 +1,13 @@
 <script lang="ts">
     import { onMount, onDestroy, tick } from "svelte";
+    import { cleanErrorMessage } from "$lib/toast";
+    import { isPhoneLayout } from "$lib/clientProfile";
     import { platform, type PlatformUnlisten } from "$lib/platform";
-    import { loadAppSettings } from "$lib/appSettings";
+    import {
+        loadAppSettings,
+        resolveUiTheme,
+        THEME_RESOLVED_EVENT,
+    } from "$lib/appSettings";
     import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
     import {
         bookTextCache,
@@ -121,7 +127,7 @@
     /** 应用主题是深色且用户没指定过阅读主题 → 用暗夜纸色 */
     function applyAppThemeDefault() {
         if (themePresetExplicit) return false;
-        const nextDark = loadAppSettings().uiTheme === "dark";
+        const nextDark = resolveUiTheme(loadAppSettings().uiTheme) === "dark";
         const nextPreset: ThemePreset = nextDark ? "dark" : "paper";
         if (themePreset === nextPreset) return false;
         themePreset = nextPreset;
@@ -1304,7 +1310,11 @@
             }
         } catch (e: any) {
             console.error(e);
-            errorMsg = String(e);
+            // 手机形态才剥掉「Error: 」前缀（和 toastError 同一口径）；
+            // 桌面阅读器的报错文案保持原样，不做本轮之外的改动。
+            errorMsg = isPhoneLayout()
+                ? cleanErrorMessage(String(e))
+                : String(e);
             loading = false;
         }
     }
@@ -3086,6 +3096,7 @@
             if (applyAppThemeDefault()) persistSettings();
         };
         window.addEventListener("tepub-settings-updated", onAppThemeChanged);
+        window.addEventListener(THEME_RESOLVED_EVENT, onAppThemeChanged);
         window.addEventListener("storage", onAppThemeChanged);
         const stopActivation = keepAliveView?.onActivationChange((active) => {
             if (active) {
@@ -3112,6 +3123,10 @@
             stopActivation?.();
             window.removeEventListener(
                 "tepub-settings-updated",
+                onAppThemeChanged,
+            );
+            window.removeEventListener(
+                THEME_RESOLVED_EVENT,
                 onAppThemeChanged,
             );
             window.removeEventListener("storage", onAppThemeChanged);
@@ -4594,5 +4609,94 @@
     }
     .rd-switch input:checked + .rd-switch-slider::before {
         transform: translateX(18px);
+    }
+
+    /* ================================================================
+     手机
+     ================================================================
+     阅读器的分页/滚动本身是量 frameEl 的真实尺寸算的（applyBasicLayout），
+     所以尺寸自适应不用改一行 JS：frame 一变窄，单列、行宽、每页高度都跟着
+     重算。这里只补三件 CSS 解决不了就会出错的事：
+
+     1. 安卓 edge-to-edge / iPhone 刘海：阅读器上面没有页头，章节名就在状态栏
+        底下，必须补安全区；
+     2. 底部工具栏的 5 个页签：桌面 10px 内边距 + 12px 字，总高约 44px 刚好
+        压线，手机上再压一行就点不准了；
+     3. 面板最大高度：50vh 在横屏手机上只有 190px，排版面板有七八行设置，
+        必须让它自己能滚。
+     ================================================================ */
+
+    :global(:root[data-tepub-layout="phone"]) .rd-corner {
+        /* 顶部两个角要压在状态栏下面，底部两个角在手机外壳里已经由底部导航
+           让开了位置，不需要再加 safe-bottom（加了会双重留白） */
+        font-size: 11px;
+        padding: 4px 10px;
+        max-width: 60%;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .rd-corner-tl,
+    :global(:root[data-tepub-layout="phone"]) .rd-corner-tr {
+        top: calc(6px + var(--safe-top, 0px));
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .rd-tabs button {
+        min-height: 52px;
+        padding: 6px 0;
+        font-size: 11px;
+    }
+
+    /* 激活下划线原来靠 margin-top:36px 硬顶，行高一变就会飘到文字中间 */
+    :global(:root[data-tepub-layout="phone"]) .rd-tabs button.active::after {
+        margin-top: 0;
+        bottom: 4px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .rd-tabs button {
+        position: relative;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .rd-panel {
+        max-height: 52vh;
+        overflow: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* 设置行里的 ± 按钮：桌面 28px 左右，手指按不准相邻的那个 */
+    :global(:root[data-tepub-layout="phone"]) .rd-panel button,
+    :global(:root[data-tepub-layout="phone"]) .rd-segctrl button {
+        min-height: 40px;
+        min-width: 40px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .rd-set-label {
+        min-width: 44px;
+    }
+
+    /* 目录/书签行：手机上要整行点得中，不能被两行小字挤成 30px。
+       .toc-row 由 ReaderTocNode.svelte 渲染，带的是那个组件的作用域属性，
+       所以整条包进 :global() 并锚在 .rd-toc-list 上。 */
+    :global(
+        :root[data-tepub-layout="phone"] .rd-toc-list .toc-row
+    ),
+    :global(:root[data-tepub-layout="phone"]) .rd-bookmark-main {
+        min-height: 44px;
+    }
+
+    /* 脚注弹层：手机上一屏就那么高，24px 边距 + 88vh 会把关闭按钮顶出屏幕 */
+    :global(:root[data-tepub-layout="phone"]) .rd-footnote-backdrop {
+        padding: calc(12px + var(--safe-top, 0px)) 12px
+            calc(12px + var(--safe-bottom, 0px));
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .rd-footnote-popup {
+        max-height: calc(100% - 8px);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .rd-footnote-close {
+        width: var(--tap-target);
+        height: var(--tap-target);
+        line-height: var(--tap-target);
+        font-size: 24px;
     }
 </style>

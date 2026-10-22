@@ -6,8 +6,15 @@
         type AiProviderConfig,
         type GlobalAppSettings,
     } from "$lib/appSettings";
+    import { clientLayout, phoneDevice } from "$lib/clientProfile";
     import { IMAGE_TOOLS_AI_CONFIG_KEY as CONFIG_KEY } from "$lib/storageKeys";
-    import { isInHiddenView } from "$lib/keepAlive/viewState";
+    import { resolveImageCompareFlow } from "$lib/imageCompareLayout";
+    import { isInHiddenView, viewUrl } from "$lib/keepAlive/viewState";
+    import { tabIdFor } from "$lib/secondaryTabs";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
 
     type AiTarget = "duokan" | "standard" | "banner";
     type ToolMode = "cover" | "header" | "ai";
@@ -114,6 +121,70 @@
     let showGuides = true;
     let guideColor = "#1478ff";
 
+    /**
+     * 三个工作区各自「有东西、但还没导出」。
+     *
+     * 以前保活守卫直接看 coverImage / generated 这类对象是否非空 ——
+     * 它们在保存成功之后也不会清空，于是一旦选过图，这一页就永久否决
+     * 手机端的裁剪，3 条上限等于不存在，整张原图的 Uint8Array 常驻内存。
+     * 反过来，只导入头图样图时守卫里又漏了 headerSampleImage，页面被裁掉、
+     * 刚规范化好的样图直接没了。
+     *
+     * 现在改成显式记账：载入 / 生成 / 改参数 = 脏，保存成功 = 干净，
+     * 清空按钮 = 干净。
+     */
+    let dirtyCover = false;
+    let dirtyHeader = false;
+    let dirtyAi = false;
+    $: hasUnsavedOutput = dirtyCover || dirtyHeader || dirtyAi;
+
+    function markDirty(kind: "cover" | "header" | "ai") {
+        if (kind === "cover") dirtyCover = true;
+        else if (kind === "header") dirtyHeader = true;
+        else dirtyAi = true;
+    }
+
+    function markSaved(kind: "cover" | "header" | "ai") {
+        if (kind === "cover") dirtyCover = false;
+        else if (kind === "header") dirtyHeader = false;
+        else dirtyAi = false;
+    }
+
+    /**
+     * 保存之后再拖滑杆，产物又和导出那张不一样了 —— 也算未保存。
+     *
+     * 只在「手里已经有图」时才记脏：否则一进页面这些 $: 会先跑一遍默认值，
+     * 让一页什么都没做的工具变成不可淘汰。保存本身不改这些参数，
+     * 所以这段不会在 markSaved 之后立刻把标记翻回来。
+     */
+    $: if (coverImage) {
+        void [
+            localWidth,
+            localHeight,
+            radius,
+            foregroundSize,
+            offsetX,
+            offsetY,
+            blur,
+            bgMode,
+            solidColor,
+            shadow,
+            shadowBlur,
+            shadowSpread,
+            shadowColor,
+            outputFormat,
+            outputQuality,
+            guideColor,
+        ];
+        // 经函数赋值：直接写 dirtyCover = true 会被 lint 当成无用赋值
+        markDirty("cover");
+    }
+
+    $: if (headerSourceImage || headerSampleImage) {
+        void [headerScale, headerOffsetX, headerOffsetY];
+        markDirty("header");
+    }
+
     let title = "";
     let author = "";
     let appSettings: GlobalAppSettings = loadAppSettings();
@@ -128,6 +199,12 @@
     let generatedUrl = "";
     let generatedTarget: AiTarget = "duokan";
     let activeMode: ToolMode = "cover";
+    let phoneLayout = false;
+    let phoneChrome = false;
+    $: phoneLayout = $clientLayout === "phone";
+    // 只有带手机外壳的页面才有根布局标题行；窄窗口桌面 Web 虽然也走
+    // phone 布局，但没有那条标题行，不能把页内标题一起藏掉。
+    $: phoneChrome = $phoneDevice && phoneLayout;
     let previewMode: PreviewMode = "compare";
     let customSelectOpen: "format" | "provider" | null = null;
     let status = "";
@@ -165,11 +242,21 @@
               ? "banner"
               : "duokan";
     $: previewIsBanner = previewTarget === "banner";
-    $: canComparePreview = activeMode !== "header" && !previewIsBanner;
-    $: if (!canComparePreview && previewMode === "compare") {
-        previewMode = "reference";
-    }
-    $: showComparePreview = previewMode === "compare" && !previewIsBanner;
+    $: showComparePreview = previewMode === "compare";
+    $: compareOutputSize =
+        activeMode === "cover"
+            ? { width: localWidth, height: localHeight }
+            : activeMode === "header"
+              ? {
+                    width: headerSampleImage?.width || 2048,
+                    height: headerSampleImage?.height || 1024,
+                }
+              : parseImageSize(aiSize);
+    $: compareFlow = resolveImageCompareFlow(
+        compareOutputSize.width,
+        compareOutputSize.height,
+    );
+    $: compareUsesRows = compareFlow === "rows";
     $: activeReferenceImage =
         activeMode === "cover"
             ? coverImage
@@ -233,14 +320,7 @@
 
     function setMode(mode: ToolMode) {
         activeMode = mode;
-        if (mode === "header") {
-            previewMode = "reference";
-        } else if (
-            mode === "cover" ||
-            (mode === "ai" && aiTarget !== "banner")
-        ) {
-            previewMode = "compare";
-        }
+        previewMode = "compare";
         tick().then(() => {
             drawLocalPreview();
             drawHeaderPreview();
@@ -326,6 +406,18 @@
         return (
             AI_TARGETS.find((item) => item.id === target)?.size || "1400x2400"
         );
+    }
+
+    function parseImageSize(value: string) {
+        const match = value.trim().match(/^(\d+)\s*[x×]\s*(\d+)$/i);
+        if (match) {
+            return { width: Number(match[1]), height: Number(match[2]) };
+        }
+        const fallback = defaultSize(aiTarget).split("x");
+        return {
+            width: Number(fallback[0]) || 1200,
+            height: Number(fallback[1]) || 1600,
+        };
     }
 
     function targetLabel(target: AiTarget) {
@@ -459,6 +551,13 @@
             aiReferenceMime = mime;
             clearGeneratedImage();
         }
+        markDirty(
+            purpose === "cover"
+                ? "cover"
+                : purpose === "headerSource"
+                  ? "header"
+                  : "ai",
+        );
         status =
             purpose === "headerSource"
                 ? `已载入处理图片 ${file.name}`
@@ -488,6 +587,7 @@
             normalizedObjectUrl = "";
             headerSampleImage = normalized.image;
             headerSampleName = file.name;
+            markDirty("header");
             status = `已载入头图样图 ${file.name}，长边已规范为 ${HEADER_SAMPLE_LONG_EDGE}px（${normalized.width}x${normalized.height}）`;
             resetHeaderTransform();
             await tick();
@@ -708,6 +808,7 @@
         coverName = "";
         coverMime = "";
         coverObjectUrl = "";
+        markSaved("cover");
         status = "已清空封面处理参考图";
     }
 
@@ -723,6 +824,7 @@
         headerScale = 1;
         headerOffsetX = 0;
         headerOffsetY = 0;
+        markSaved("header");
         status = "已清空头图样图和处理图片";
     }
 
@@ -730,6 +832,7 @@
         if (generatedUrl) URL.revokeObjectURL(generatedUrl);
         generated = null;
         generatedUrl = "";
+        dirtyAi = false;
     }
 
     function resetAiSettings() {
@@ -748,6 +851,7 @@
         aiReferenceMime = "";
         aiReferenceObjectUrl = "";
         clearGeneratedImage();
+        markSaved("ai");
         status = "已清空 AI 参考图";
     }
 
@@ -894,16 +998,18 @@
         bytes: Uint8Array,
         defaultName: string,
         extension: string,
-    ) {
+    ): Promise<boolean> {
         const selected = await platform.saveDialog({
             defaultPath: defaultName,
             filters: [
                 { name: extension.toUpperCase(), extensions: [extension] },
             ],
         });
-        if (!selected) return;
+        // 用户取消：产物还在手里，页面依然算「有未保存的东西」
+        if (!selected) return false;
         await platform.writeFile(selected, bytes);
         status = `已保存 ${selected}`;
+        return true;
     }
 
     async function saveLocalCover() {
@@ -915,11 +1021,12 @@
             outputFormat === "png" ? undefined : outputQuality / 100;
         const bytes = await canvasToBytes(canvas, mime, quality ?? 0.92);
         const stem = (title || coverName || "cover").replace(/\.[^.]+$/, "");
-        await saveBytes(
+        const saved = await saveBytes(
             bytes,
             `${stem}~duokan-${localWidth}x${localHeight}.${ext}`,
             ext,
         );
+        if (saved) markSaved("cover");
     }
 
     async function saveHeaderImage() {
@@ -931,18 +1038,19 @@
             /\.[^.]+$/,
             "",
         );
-        await saveBytes(
+        const saved = await saveBytes(
             bytes,
             `${stem}~header-${headerSampleImage.width}x${headerSampleImage.height}.png`,
             "png",
         );
+        if (saved) markSaved("header");
     }
 
     function setAiTarget(next: AiTarget) {
         const oldDefault = defaultPrompt(aiTarget);
         aiTarget = next;
         aiSize = defaultSize(next);
-        previewMode = next === "banner" ? "reference" : "compare";
+        previewMode = "compare";
         if (!aiPrompt.trim() || aiPrompt === oldDefault) {
             aiPrompt = defaultPrompt(next);
         }
@@ -1280,6 +1388,7 @@
             }
             generated = result;
             generatedTarget = aiTarget;
+            markDirty("ai");
             setGeneratedUrl(new Uint8Array(result.bytes), result.mime);
             status = `生成完成：${result.size || "auto"}`;
         } catch (err) {
@@ -1295,11 +1404,12 @@
 
     async function saveGenerated() {
         if (!generated) return;
-        await saveBytes(
+        const saved = await saveBytes(
             new Uint8Array(generated.bytes),
             generated.fileName || `ai-${aiTarget}.${generated.extension}`,
             generated.extension,
         );
+        if (saved) markSaved("ai");
     }
 
     async function saveCurrent() {
@@ -1327,7 +1437,16 @@
         }
     }
 
+    /**
+     * 选过图（封面 / 头图 / AI 参考图）还没导出，就是有实物在内存里：
+     * Uint8Array、ImageBitmap 级的整张原图、生成结果，以及一堆滑杆状态。
+     * 手机外壳裁保活页时不能把这页静默卸载 —— 没有草稿，重来一遍要重新选图、
+     * 重新调参。
+     */
+    const ownTabId = tabIdFor(viewUrl().pathname, viewUrl().search);
+
     onMount(() => {
+        registerKeepAliveGuard(ownTabId, () => hasUnsavedOutput);
         appSettings = loadAppSettings();
         imageProviderId =
             appSettings.aiProviders.find(
@@ -1351,6 +1470,7 @@
     });
 
     onDestroy(() => {
+        unregisterKeepAliveGuard(ownTabId);
         if (coverObjectUrl) URL.revokeObjectURL(coverObjectUrl);
         if (headerSourceObjectUrl) URL.revokeObjectURL(headerSourceObjectUrl);
         if (headerSampleObjectUrl) URL.revokeObjectURL(headerSampleObjectUrl);
@@ -1364,25 +1484,49 @@
     on:click={() => (customSelectOpen = null)}
 />
 
+{#snippet phoneModeTabs()}
+    <div class="segmented mode-tabs phone-mode-tabs">
+        <button
+            type="button"
+            class:active={activeMode === "cover"}
+            on:click={() => setMode("cover")}>封面处理</button
+        >
+        <button
+            type="button"
+            class:active={activeMode === "header"}
+            on:click={() => setMode("header")}>头图制作</button
+        >
+        <button
+            type="button"
+            class:active={activeMode === "ai"}
+            on:click={() => setMode("ai")}>AI 生成</button
+        >
+    </div>
+{/snippet}
+
 <main class="image-tool-app">
+    <!-- 真机手机已有根布局标题行，三种模式放在最上面。 -->
+    {#if phoneChrome}
+        {@render phoneModeTabs()}
+    {/if}
+
     <header class="tool-head">
-        <div>
-            <h1>封面与横幅</h1>
-            <p>{status || "选择封面图后开始处理"}</p>
-        </div>
+        {#if !phoneChrome}
+            <div>
+                <h1>封面与横幅</h1>
+                <p>{status || "选择封面图后开始处理"}</p>
+            </div>
+        {/if}
         <div class="tool-head-actions">
             <div class="preview-toggle" aria-label="预览模式">
                 <button
                     type="button"
-                    class:active={previewMode === "compare" &&
-                        canComparePreview}
-                    disabled={!canComparePreview}
+                    class:active={previewMode === "compare"}
                     on:click={() => setPreviewMode("compare")}>对比</button
                 >
                 <button
                     type="button"
-                    class:active={previewMode === "reference" ||
-                        !canComparePreview}
+                    class:active={previewMode === "reference"}
                     on:click={() => setPreviewMode("reference")}>预览</button
                 >
             </div>
@@ -1394,6 +1538,11 @@
             >
         </div>
     </header>
+
+    <!-- 窄窗口 Web 没有根布局标题行：先保留原标题/说明，再放三列模式行。 -->
+    {#if phoneLayout && !phoneChrome}
+        {@render phoneModeTabs()}
+    {/if}
 
     <section class="workspace">
         <div class="preview-pane">
@@ -1421,37 +1570,69 @@
                         </button>
                     {/if}
 
-                    <div
-                        class="header-work-preview header-preview"
-                        on:pointerdown={onHeaderPointerDown}
-                        on:pointermove={onHeaderPointerMove}
-                        on:pointerup={onHeaderPointerEnd}
-                        on:pointercancel={onHeaderPointerEnd}
-                        on:wheel={onHeaderWheel}
-                    >
-                        {#if headerSourceImage && headerSampleImage}
-                            <canvas
-                                bind:this={headerCanvas}
-                                class="header-canvas"
-                                aria-label="头图制作预览"
-                            ></canvas>
-                        {:else}
-                            <button
-                                class="dropzone inline-dropzone"
-                                type="button"
-                                on:click={chooseActiveReference}
-                            >
-                                <span class="drop-copy">
-                                    <b
-                                        >{!headerSampleImage
-                                            ? "选择头图样图"
-                                            : "选择处理图片"}</b
-                                    >
-                                    <small>JPG / PNG / WebP</small>
-                                </span>
-                            </button>
-                        {/if}
-                    </div>
+                    {#if previewMode === "compare" && headerSourceImage}
+                        <div
+                            class="split-preview"
+                            class:compare-flow-rows={compareUsesRows}
+                        >
+                            <div class="preview-column">
+                                <div class="source-frame">
+                                    <img
+                                        src={headerSourceObjectUrl}
+                                        alt="头图原图"
+                                    />
+                                </div>
+                            </div>
+                            <div class="preview-column">
+                                <div class="result-frame">
+                                    {#if headerSourceImage && headerSampleImage}
+                                        <canvas
+                                            bind:this={headerCanvas}
+                                            class="header-canvas"
+                                            aria-label="头图制作对比结果"
+                                        ></canvas>
+                                    {:else}
+                                        <div class="preview-placeholder">
+                                            <b>头图制作</b>
+                                            <small>选择样图后显示结果</small>
+                                        </div>
+                                    {/if}
+                                </div>
+                            </div>
+                        </div>
+                    {:else}
+                        <div
+                            class="header-work-preview header-preview"
+                            on:pointerdown={onHeaderPointerDown}
+                            on:pointermove={onHeaderPointerMove}
+                            on:pointerup={onHeaderPointerEnd}
+                            on:pointercancel={onHeaderPointerEnd}
+                            on:wheel={onHeaderWheel}
+                        >
+                            {#if headerSourceImage && headerSampleImage}
+                                <canvas
+                                    bind:this={headerCanvas}
+                                    class="header-canvas"
+                                    aria-label="头图制作预览"
+                                ></canvas>
+                            {:else}
+                                <button
+                                    class="dropzone inline-dropzone"
+                                    type="button"
+                                    on:click={chooseActiveReference}
+                                >
+                                    <span class="drop-copy">
+                                        <b
+                                            >{!headerSampleImage
+                                                ? "选择头图样图"
+                                                : "选择处理图片"}</b
+                                        >
+                                        <small>JPG / PNG / WebP</small>
+                                    </span>
+                                </button>
+                            {/if}
+                        </div>
+                    {/if}
                 {:else if activeReferenceImage}
                     {#if previewMode === "reference"}
                         <button
@@ -1465,19 +1646,11 @@
                         </button>
                     {/if}
 
-                    {#if previewIsBanner}
-                        <div class="banner-preview">
-                            {#if activeMode === "ai" && currentGeneratedReady && generatedUrl}
-                                <img src={generatedUrl} alt="AI 生成结果" />
-                            {:else}
-                                <div class="preview-placeholder">
-                                    <b>{previewOutputTitle}</b>
-                                    <small>生成后显示横幅</small>
-                                </div>
-                            {/if}
-                        </div>
-                    {:else if showComparePreview}
-                        <div class="split-preview">
+                    {#if showComparePreview}
+                        <div
+                            class="split-preview"
+                            class:compare-flow-rows={compareUsesRows}
+                        >
                             <div class="preview-column">
                                 <div class="source-frame">
                                     <img
@@ -1511,6 +1684,17 @@
                                     {/if}
                                 </div>
                             </div>
+                        </div>
+                    {:else if previewIsBanner}
+                        <div class="banner-preview">
+                            {#if activeMode === "ai" && currentGeneratedReady && generatedUrl}
+                                <img src={generatedUrl} alt="AI 生成结果" />
+                            {:else}
+                                <div class="preview-placeholder">
+                                    <b>{previewOutputTitle}</b>
+                                    <small>生成后显示横幅</small>
+                                </div>
+                            {/if}
                         </div>
                     {:else}
                         <div class="single-preview">
@@ -1586,23 +1770,25 @@
 
         <div class="control-pane">
             <section class="panel unified-panel">
-                <div class="segmented mode-tabs">
-                    <button
-                        type="button"
-                        class:active={activeMode === "cover"}
-                        on:click={() => setMode("cover")}>封面处理</button
-                    >
-                    <button
-                        type="button"
-                        class:active={activeMode === "header"}
-                        on:click={() => setMode("header")}>头图制作</button
-                    >
-                    <button
-                        type="button"
-                        class:active={activeMode === "ai"}
-                        on:click={() => setMode("ai")}>AI 生成</button
-                    >
-                </div>
+                {#if !phoneLayout}
+                    <div class="segmented mode-tabs">
+                        <button
+                            type="button"
+                            class:active={activeMode === "cover"}
+                            on:click={() => setMode("cover")}>封面处理</button
+                        >
+                        <button
+                            type="button"
+                            class:active={activeMode === "header"}
+                            on:click={() => setMode("header")}>头图制作</button
+                        >
+                        <button
+                            type="button"
+                            class:active={activeMode === "ai"}
+                            on:click={() => setMode("ai")}>AI 生成</button
+                        >
+                    </div>
+                {/if}
 
                 {#if activeMode === "cover"}
                     <div class="mode-section">
@@ -2284,6 +2470,19 @@
         box-sizing: border-box;
     }
 
+    .split-preview.compare-flow-rows {
+        width: min(100%, 760px);
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+    }
+
+    /* 窄屏会把普通对比框固定为 320px；上下对比时两行只有一半高度，
+       再保留 320px 会让两张图叠进对方一行。这里让框严格跟随网格行高。 */
+    .split-preview.compare-flow-rows .source-frame,
+    .split-preview.compare-flow-rows .result-frame {
+        height: 100%;
+    }
+
     .single-preview {
         width: min(100%, 760px);
         height: 100%;
@@ -2870,9 +3069,12 @@
         }
 
         .split-preview {
-            grid-template-columns: 1fr;
             padding-right: 0;
             overflow: auto;
+        }
+
+        .split-preview.compare-flow-rows {
+            grid-template-columns: minmax(0, 1fr);
         }
 
         .reference-thumb {
@@ -2887,58 +3089,87 @@
         }
     }
 
-    :global(:root[data-tepub-client="web-mobile"] body) {
-        overflow: auto;
-    }
+    /* 这里原来有一条 :global(:root[data-tepub-layout="phone"] body) { overflow: auto }。
+       它是为「整页跟着 body 滚」写的，但手机外壳里滚动发生在 .ka-view，
+       body 本身没有溢出；页面被保活卸载后这条规则也仍留在文档里。
+       现在滚动统一由外壳负责，页面不再改 body。 */
 
-    :global(:root[data-tepub-client="web-mobile"]) .image-tool-app {
+    :global(:root[data-tepub-layout="phone"]) .image-tool-app {
         min-height: 100dvh;
         height: auto;
-        padding: max(12px, env(safe-area-inset-top)) 12px
-            max(12px, env(safe-area-inset-bottom));
+        /* 用 token 而不是裸 env()：安卓 WebView 的 env(safe-area-inset-*)
+           恒为 0，--safe-top 里带着 --safe-top-min 的 24px 兜底。裸 env()
+           特异性相同但注入更晚，会把兜底整个绕过去，状态栏压住第一行。 */
+        padding: max(12px, var(--safe-top)) 12px
+            max(12px, var(--safe-bottom));
         overflow: visible;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .tool-head {
+    :global(:root[data-tepub-layout="phone"]) .tool-head {
         flex-direction: column;
         gap: 10px;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .tool-head-actions {
+    :global(:root[data-tepub-layout="phone"]) .tool-head-actions {
         width: 100%;
         justify-content: space-between;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .workspace {
+    :global(:root[data-tepub-layout="phone"]) .mode-tabs.phone-mode-tabs {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-bottom: 0;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-mode-tabs button {
+        min-height: var(--tap-target);
+        padding: 8px 6px;
+        white-space: nowrap;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .workspace {
         grid-template-columns: 1fr;
         overflow: visible;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .preview-pane {
+    :global(:root[data-tepub-layout="phone"]) .preview-pane {
         min-height: min(460px, 58dvh);
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .control-pane,
-    :global(:root[data-tepub-client="web-mobile"]) .unified-panel {
+    :global(:root[data-tepub-layout="phone"]) .control-pane,
+    :global(:root[data-tepub-layout="phone"]) .unified-panel {
         height: auto;
         overflow: visible;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .split-preview,
-    :global(:root[data-tepub-client="web-mobile"]) .form-grid.two,
-    :global(:root[data-tepub-client="web-mobile"]) .form-grid.ai-config,
-    :global(:root[data-tepub-client="web-mobile"]) .segmented.ai-targets,
-    :global(:root[data-tepub-client="web-mobile"]) .mode-tabs {
+    :global(:root[data-tepub-layout="phone"]) .form-grid.two,
+    :global(:root[data-tepub-layout="phone"]) .form-grid.ai-config,
+    :global(:root[data-tepub-layout="phone"]) .segmented.ai-targets,
+    :global(:root[data-tepub-layout="phone"]) .mode-tabs {
         grid-template-columns: 1fr;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .split-preview {
+    :global(:root[data-tepub-layout="phone"]) .split-preview {
         padding-right: 0;
         overflow: auto;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: minmax(0, 1fr);
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .source-frame,
-    :global(:root[data-tepub-client="web-mobile"]) .result-frame {
+    :global(:root[data-tepub-layout="phone"]) .split-preview.compare-flow-rows {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+    }
+
+    :global(:root[data-tepub-layout="phone"])
+        .split-preview:not(.compare-flow-rows)
+        .source-frame,
+    :global(:root[data-tepub-layout="phone"])
+        .split-preview:not(.compare-flow-rows)
+        .result-frame {
+        height: 320px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .single-preview .result-frame {
         height: 320px;
     }
 </style>

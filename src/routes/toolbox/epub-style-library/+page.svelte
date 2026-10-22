@@ -1,7 +1,13 @@
 <script lang="ts">
     import { onDestroy, onMount } from "svelte";
+    import { get } from "svelte/store";
     import CustomSelect from "$lib/CustomSelect.svelte";
-    import { loadAppSettings } from "$lib/appSettings";
+    import {
+        loadAppSettings,
+        resolveUiTheme,
+        THEME_RESOLVED_EVENT,
+    } from "$lib/appSettings";
+    import { phoneDevice } from "$lib/clientProfile";
     import { PAPER_DARK_BG, PAPER_DARK_TEXT } from "$lib/epubPaperTheme";
     import {
         EPUB_HEADER_STYLES,
@@ -16,6 +22,12 @@
         type EpubTitleLayout,
     } from "$lib/epubStyleLibrary";
     import { EPUB_STYLE_LIBRARY_KEY as STORAGE_KEY } from "$lib/storageKeys";
+    import { tabIdFor } from "$lib/secondaryTabs";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
+    import { viewUrl } from "$lib/keepAlive/viewState";
 
     type ViewMode = EpubStyleKind | "interface";
     type PanelMode = "browse" | "create";
@@ -72,6 +84,9 @@
     let panelMode: PanelMode = "browse";
     let selectedStyleId = EPUB_HEADER_STYLES[0]?.id || "";
     let savedStyles: EpubStyleModule[] = [];
+
+    /** 本页在保活标签表里的 id（用本视图自己的地址，见 lib/keepAlive/viewState） */
+    const ownTabId = tabIdFor(viewUrl().pathname, viewUrl().search);
     let copyMessage = "";
     /** 每次主题变更自增，用来驱动 isDarkTheme 重新求值 */
     let themeRevision = 0;
@@ -220,39 +235,73 @@
     );
 
     onMount(() => {
+        // 正在编辑的样式只存在内存里，没有草稿：
+        //   - 头图样板是一整张 dataURL 图 + 规范化后的尺寸，重新导入要重选文件
+        //   - 新建面板里的 CSS/HTML 输入框，切走就回到默认值
+        //
+        // 判据只看「还在新建面板里」。以前还加了 `Boolean(headerDraft)` ——
+        // 而 headerDraft 在保存成功、点「浏览」之后都不会清空，于是页面一旦
+        // 导入过样板就永久否决裁剪，手机 3 条上限名存实亡。
+        // 离开新建面板就等于放弃编辑，这一点由 setMode / 「浏览」按钮保证。
+        registerKeepAliveGuard(ownTabId, () => panelMode === "create");
         savedStyles = loadSavedStyles();
-        // 主题只看 app 设置（不跟系统 prefers-color-scheme 走）。
-        // 同窗口改动发自定义事件，跨窗口改 localStorage 只有 storage 事件会到
+        // 设置本身变化走 settings 事件；「跟随系统」时偏好字符串不变，
+        // 但实际深浅色变了，由 applyTheme 再发 resolved 事件。
         const syncTheme = () => {
             themeRevision += 1;
         };
         window.addEventListener("tepub-settings-updated", syncTheme);
+        window.addEventListener(THEME_RESOLVED_EVENT, syncTheme);
         window.addEventListener("storage", syncTheme);
         disposeThemeListeners = () => {
             window.removeEventListener("tepub-settings-updated", syncTheme);
+            window.removeEventListener(THEME_RESOLVED_EVENT, syncTheme);
             window.removeEventListener("storage", syncTheme);
         };
     });
 
     onDestroy(() => {
+        unregisterKeepAliveGuard(ownTabId);
         disposeThemeListeners?.();
         disposeThemeListeners = null;
     });
 
     /**
-     * 只认 app 设置里的 uiTheme；dataset.theme 是 applyTheme 用同一份设置写下的，
-     * 作为兜底一起看。故意不读 prefers-color-scheme：系统深色不该改动书页配色。
+     * 先按 uiTheme 解析「跟随系统」，dataset.theme 是同一个解析结果的兜底。
      * SSR 首帧按浅色。
      */
     function resolveDarkTheme() {
         if (typeof document === "undefined") return false;
-        if (loadAppSettings().uiTheme === "dark") return true;
+        if (resolveUiTheme(loadAppSettings().uiTheme) === "dark") return true;
         return document.documentElement.dataset.theme === "dark";
     }
 
+    /**
+     * 样板是整张 dataURL，真机（手机/平板）上保活页面会被裁掉、留着纯占内存，
+     * 所以切分类/点「浏览」时丢掉它。判据必须是「真机」而不是「手机布局」：
+     * 电脑浏览器被拖窄到 ≤760px 也走手机布局，但那是台电脑，不该把用户
+     * 刚导入、还没保存的样板静默清掉（要重新选文件 + 重新生成）。
+     */
+    function dropsDraftOnPhone() {
+        return get(phoneDevice);
+    }
+
     function setMode(mode: ViewMode) {
+        // 点当前已高亮的页签不是「换分类」：真机上手滑点一下自己所在的页签，
+        // 样板会被静默丢掉。但也不能什么都不做 —— 桌面同样的点击是「回到
+        // 样式清单」，两边语义要一致。所以只回清单，不动 headerDraft。
+        if (dropsDraftOnPhone() && mode === viewMode) {
+            if (panelMode === "create") panelMode = "browse";
+            return;
+        }
         viewMode = mode;
         panelMode = "browse";
+        // 成功文案要跟样板一起清 —— 否则下次进新建面板时文件行写着「未导入」，
+        // 下面还挂着一句「已按长边 1080px 生成遮罩预览」。
+        if (dropsDraftOnPhone()) {
+            headerDraft = null;
+            headerMessage = "";
+        }
         if (mode === "header")
             selectedStyleId =
                 headerStyles[0]?.id || EPUB_HEADER_STYLES[0]?.id || "";
@@ -273,6 +322,15 @@
         viewMode = kind;
         panelMode = "create";
         copyMessage = "";
+        // 上一次保存留下的「已保存到样式库。」会一直挂到下次进新建面板。
+        // 真机上样板此时已经被释放，文件行写着「未导入」，两句话自相矛盾；
+        // 标题样式那边则是把上一轮的成功文案带进这一轮正在编辑的 CSS 上方。
+        // 只在真机清：桌面保留了样板，这条文案与保留的样板是一致的，属于
+        // HEAD 既有行为（本文件其它清理点也都按 dropsDraftOnPhone() 门控）。
+        if (dropsDraftOnPhone()) {
+            if (kind === "header") headerMessage = "";
+            if (kind === "title") titleMessage = "";
+        }
         if (
             kind === "header" &&
             !titleStyles.some((style) => style.id === headerTitleStyleId)
@@ -983,6 +1041,10 @@
         persistSavedStyles(nextStyles);
         selectedStyleId = style.id;
         panelMode = "browse";
+        // 样板已经进样式库了，内存里这份 dataURL 没有用了 —— 但只在真机上释放。
+        // 桌面以前保存后再点「新增」还能看到刚导入的样板与尺寸，是既有行为；
+        // 无条件清空会让桌面看到「未导入」+「已保存到样式库。」的矛盾组合。
+        if (dropsDraftOnPhone()) headerDraft = null;
         headerMessage = "已保存到样式库。";
     }
 
@@ -1102,7 +1164,7 @@
     <title>EPUB 样式库 - TEpub Editor</title>
 </svelte:head>
 
-<div class="style-library-page">
+<div class="style-library-page" class:is-creating={panelMode === "create"}>
     <main class="library-workspace">
         <aside class="style-sidebar">
             <div class="mode-tabs" aria-label="样式分类">
@@ -1155,7 +1217,18 @@
                     <button
                         type="button"
                         class:active={panelMode === "browse"}
-                        on:click={() => (panelMode = "browse")}>浏览</button
+                        on:click={() => {
+                            // 放弃新建 = 头图样板也不再需要，一并清掉：
+                            // 它是整张 dataURL，留着纯占内存，而且会让
+                            // 「保存」在下次进入时空有一个旧样板可存。
+                            // 只在真机做 —— 桌面（含被拖窄的窗口）上
+                            // 「浏览一下列表再回来」不该把已经导入的样板弄丢。
+                            if (dropsDraftOnPhone()) {
+                                headerDraft = null;
+                                headerMessage = "";
+                            }
+                            panelMode = "browse";
+                        }}>浏览</button
                     >
                     <button
                         type="button"
@@ -2078,8 +2151,143 @@
         }
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .style-library-page {
-        min-height: 100dvh;
-        height: 100dvh;
+    /* 手机外壳已由 app.css 把根容器压成填满剩余区域（绝对定位 + height:auto）。
+       这里写 100dvh 会让内容比容器高一条底部导航，底部按钮被导航栏压住。 */
+    :global(:root[data-tepub-layout="phone"]) .style-library-page {
+        min-height: 0;
+        height: 100%;
+    }
+
+    /* 窄屏媒体查询只到 860px，横屏手机（844px 有幸命中，但更宽的平板不命中）
+       另说 —— 手机形态单列布局由上面的 max-width 分支给出，这里只补两项
+       与宽度无关的：触摸命中区和安全区。 */
+
+    /* 但「更宽的平板」不只是平板：iPhone 16 Pro Max 横屏 932×430、iPad 分屏
+       都是 phone 形态却过不了 860px，于是拿到的是桌面两栏 + overflow:hidden。
+       .library-workspace 实测 1401px 内容压进 377px，底部导航之上没有滚动入口，
+       样式列表和预览下半截直接不可达。
+       把窄屏那套单列规则按形态再挂一遍，与宽度无关。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .style-library-page
+            .library-workspace
+    ) {
+        grid-template-columns: 1fr;
+        overflow: auto;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .style-library-page
+            .style-sidebar
+    ),
+    :global(
+        :root[data-tepub-layout="phone"] .style-library-page .preview-pane
+    ) {
+        overflow: visible;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"] .style-library-page .preview-grid
+    ),
+    :global(
+        :root[data-tepub-layout="phone"] .style-library-page .create-grid
+    ) {
+        grid-template-columns: 1fr;
+        overflow: visible;
+    }
+
+    /* 不再在这里写 button 的 min-height：mobile.css 对工具页有一条广播规则
+       （带两个 :not()，特异性 (0,5,1)），任何页面级的 40/44 都打不赢它。
+       触控高度统一由那条广播（var(--tap-target)）决定。 */
+
+    :global(:root[data-tepub-layout="phone"] .style-library-page input) {
+        min-height: 40px;
+        font-size: 16px;
+    }
+
+    /* 横屏时整页只剩 337px 高。.library-workspace 在窄屏分支里改成单列 +
+       overflow:auto，但行高仍由 grid 自动分配 —— 两行各分到 168px，而
+       里面的侧栏和预览各自有上千像素高，超出的部分被 .live-preview 的
+       overflow:hidden 直接裁掉：预览框露出 48px、下面什么都没有。
+       让行高只跟内容走，滚动交给 .library-workspace 自己的 overflow:auto。
+       竖屏 844 高时同样修掉「预览框底部一条被切」的观感。 */
+    :global(
+        :root[data-tepub-layout="phone"] .style-library-page .library-workspace
+    ) {
+        grid-auto-rows: max-content;
+    }
+
+    /* 分类页签在手机上改成一行横滑。
+       桌面是 2 列网格（5 个分类正好 3 行），竖屏忍一忍还行；横屏 390px 高
+       时这 3 行吃掉 169px，等于还没看到样式列表就先没了 43% 的屏幕。
+       改成 flex 后高度固定一行（按钮是 --control-height = 44px），
+       宽出来的部分横向滚，和代码符号栏同一套做法。
+
+       但竖屏 390 宽时 5 个页签一共 486px，第 5 个「接口」整个落在屏幕外，
+       横向滚动条被 --hide-scrollbars 之外的真机上也不显眼 —— 用户会以为
+       样式分类只有 4 个。竖屏有富余高度，直接折行；横屏那 390px 高度折行
+       反而多吃 44px，仍然保持一行横滑（见下面 max-height 块）。 */
+    :global(:root[data-tepub-layout="phone"] .style-library-page .mode-tabs) {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 12px;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+    }
+
+    /* 判据必须是「矮 + 宽」，不能用 orientation。
+       app.html 设了 interactive-widget=resizes-content：竖屏弹软键盘会把布局
+       视口压到 500 以下，此时高度 < 宽度，orientation 也跟着翻成 landscape
+       （实测 375×367 命中，搜索框被压成 22px）。真横屏最窄也有 568px 宽，
+       键盘态的竖屏手机只有 320–430px，min-width: 480px 才能把两者分开。 */
+    @media (max-height: 500px) and (min-width: 480px) {
+        :global(
+            :root[data-tepub-layout="phone"] .style-library-page .mode-tabs
+        ) {
+            flex-wrap: nowrap;
+        }
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"] .style-library-page .mode-tabs button
+    ) {
+        flex: 0 0 auto;
+        /* 桌面那条 :last-child { grid-column: 1 / -1 } 在 flex 下不生效，
+           但显式写回 auto，免得以后有人改回 grid 时又冒出整行按钮 */
+        grid-column: auto;
+        padding: 0 14px;
+        white-space: nowrap;
+    }
+
+    /* 手机上进「新增」后，下面那份样式清单就成了噪音：
+       它夹在「分类 → 浏览/新增」和新建表单之间，390×844 上要滚过
+       十几条样式卡片才看得到输入框（实测滚动高度 1907px，表单在 1200px 之后）。
+       新建态直接把清单收掉 —— 桌面两栏并排，清单和表单互不遮挡，保持原样。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .style-library-page.is-creating
+            .style-list
+    ) {
+        display: none;
+    }
+
+    /* 新建面板在手机上只有一个「确认保存」，它原先挤在标题行右侧，
+       被挤成 4 个字竖排。抬成一整行按钮，拇指够得着。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .style-library-page .preview-head
+    ) {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .style-library-page .preview-head > button
+    ) {
+        flex: 1 1 100%;
+        min-height: var(--tap-target);
     }
 </style>

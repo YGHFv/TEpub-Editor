@@ -19,6 +19,7 @@
         type FindQuery,
     } from "$lib/findReplace";
     import TocNode from "$lib/TocNode.svelte";
+    import MobileSheet from "$lib/mobile/MobileSheet.svelte";
     import ToolImportPage from "$lib/ToolImportPage.svelte";
     import {
         describePreviewClick,
@@ -31,7 +32,12 @@
         paperBackground,
         paperTextColor,
     } from "$lib/epubPaperTheme";
-    import { loadAppSettings, type GlobalAppSettings } from "$lib/appSettings";
+    import {
+        loadAppSettings,
+        resolveUiTheme,
+        THEME_RESOLVED_EVENT,
+        type GlobalAppSettings,
+    } from "$lib/appSettings";
     import {
         EPUB_FIND_HISTORY_KEY,
         EPUB_REPLACE_HISTORY_KEY,
@@ -54,7 +60,13 @@
         type WebEpubNavItem,
     } from "$lib/webEpub";
     import { resolveEpubCover } from "$lib/epubEditor/cover";
+    import { downloadBrowserBlob } from "$lib/webFileWorkflow";
     import { setTabDetail, tabIdFor } from "$lib/secondaryTabs";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
+    import { clientLayout, isMobileUserAgent } from "$lib/clientProfile";
 
     type WebFileTreeNode = {
         name: string;
@@ -152,12 +164,119 @@
     let previewBuildId = 0;
     // 预览滚动条开关（设置 → 通用），默认关闭
     let appSettings: GlobalAppSettings = loadAppSettings();
+    let resolvedTheme = resolveUiTheme(appSettings.uiTheme);
     let previewFrameHeight = 0;
     let previewIframeEl: HTMLIFrameElement | null = null;
     let previewBodyEl: HTMLDivElement | null = null;
     let readerPreviewFontSize = 18;
     let readerTocCollapsed = false;
     const readerMode = ownUrl.searchParams.get("mode") === "reader";
+
+    /**
+     * 手机形态：三栏叠成一格，靠底部页签切换。
+     *
+     * 为什么不给手机写第二套 DOM：整页 3900 行，业务逻辑（查找替换、预览同步、
+     * 资源增删）全绑在现有节点上。复制一份等于以后每个 bug 都要修两遍。
+     * 这里只在**手机**下加页签、加动作条，桌面渲染出的节点一个不变。
+     */
+    let phoneLayout = false;
+    $: phoneLayout = $clientLayout === "phone";
+
+    /** 手机上当前显示哪一栏。桌面忽略这个值 */
+    let mobilePane: "tree" | "editor" | "preview" = "tree";
+    /** 手机文件树筛选（桌面不渲染输入框，值恒为空串，不影响 fileTree） */
+    let phoneTreeFilter = "";
+    /** 手机上的查找条默认收起：它一展开就吃掉半屏，编辑区没法用 */
+    let phoneFindOpen = false;
+    let phoneMoreOpen = false;
+    let phoneGotoOpen = false;
+    let phoneGotoValue = "";
+    /** 真机触摸：软键盘要关掉自动大写/纠错，代码里那些属性全是负作用 */
+    let touchInput = false;
+    $: touchInput = phoneLayout && isMobileUserAgent();
+    let phoneLine = 1;
+
+    /**
+     * 切到编辑栏并刷新状态栏里的行号。
+     *
+     * 必须等一帧再读行号：切换前编辑器所在的那一栏是 visibility:hidden，
+     * CodeMirror 的测量在这种状态下拿到的是旧值（有些浏览器直接返回 0），
+     * 立刻读会把「行 1」写进动作条，切过去之后又不刷新。
+     */
+    function showEditorPane() {
+        mobilePane = "editor";
+        void tick().then(syncPhoneLine);
+    }
+
+    /** 切走编辑栏时把焦点收掉：隐藏的 CodeMirror 不该继续吃键盘输入 */
+    function leaveEditorPane() {
+        if (mobilePane !== "editor") return;
+        const view = epubCodeEditorComponent?.getView();
+        view?.contentDOM.blur();
+    }
+
+    function selectPane(pane: "tree" | "editor" | "preview") {
+        leaveEditorPane();
+        mobilePane = pane;
+        if (pane === "editor") void tick().then(syncPhoneLine);
+    }
+
+    function syncPhoneLine() {
+        phoneLine = epubCodeEditorComponent?.currentLine() || 1;
+    }
+
+    function handlePhoneGoto() {
+        const line = parseInt(phoneGotoValue, 10);
+        if (Number.isFinite(line) && line > 0) {
+            epubCodeEditorComponent?.gotoLine(line);
+            syncPhoneLine();
+        }
+        phoneGotoOpen = false;
+        phoneGotoValue = "";
+    }
+
+    function handlePhoneSymbol(text: string) {
+        epubCodeEditorComponent?.insertText(text);
+    }
+
+    function togglePhoneWrap() {
+        epubCodeEditorComponent?.toggleLineWrap();
+    }
+
+    function adjustPhoneFont(delta: number) {
+        const current = epubCodeEditorComponent?.getFontSize() ?? 14;
+        epubCodeEditorComponent?.setFontSize(current + delta);
+    }
+
+    const PHONE_SYMBOLS = [
+        "    ",
+        ":",
+        "=",
+        "{",
+        "}",
+        "[",
+        "]",
+        "(",
+        ")",
+        "<",
+        ">",
+        '"',
+        "'",
+        "/",
+        "\\",
+        "|",
+        "&",
+        "+",
+        "-",
+        "*",
+        "#",
+        "_",
+    ];
+    /** 空格键显示成「Tab」而不是一片空白，否则那一格看起来像少了按钮 */
+    function phoneSymbolLabel(symbol: string) {
+        return symbol === "    " ? "Tab" : symbol;
+    }
+
     $: headTitle = readerMode
         ? "Web EPUB 阅读器 - TEpub Editor"
         : "Web EPUB 编辑器 - TEpub Editor";
@@ -362,7 +481,7 @@
         try {
             applyPaperTheme(
                 previewIframeEl?.contentDocument,
-                appSettings.uiTheme === "dark",
+                resolveUiTheme(appSettings.uiTheme) === "dark",
             );
         } catch {
             // 跨源或文档已销毁：预览本身还能看，不值得让整页报错
@@ -399,6 +518,49 @@
         ? { path: selectedTreePath }
         : selectedFile || selectedImage;
     $: tocTree = doc ? buildTocTree(doc.navItems) : [];
+
+    /**
+     * 手机文件树筛选。
+     *
+     * 不能只判 `phoneTreeFilter.trim()`：这个输入框渲染在 `{#if phoneLayout}`
+     * 里面，而本页是保活视图 —— 手机上输入 "nav"，再切到桌面视图，输入框
+     * 连同清除按钮一起消失，但状态还在组件里，桌面文件树会被静默过滤成子集，
+     * 用户没有任何入口发现或清除它。所以判定必须同时要求 phoneLayout。
+     */
+    function filterFileTree(
+        nodes: WebFileTreeNode[],
+        needle: string,
+    ): WebFileTreeNode[] {
+        const result: WebFileTreeNode[] = [];
+        for (const node of nodes) {
+            if (node.file_type === "folder") {
+                // 文件夹只要还有命中的子孙就保留，并把子集一起换掉
+                const children = filterFileTree(node.children || [], needle);
+                if (children.length) result.push({ ...node, children });
+                continue;
+            }
+            if (node.path.toLowerCase().includes(needle)) result.push(node);
+        }
+        return result;
+    }
+
+    /** 筛选时把所有存活文件夹都算作展开，否则用户得手动一层层点开找命中项 */
+    function collectFolderPaths(nodes: WebFileTreeNode[], into: Set<string>) {
+        for (const node of nodes) {
+            if (node.file_type !== "folder") continue;
+            into.add(node.path);
+            collectFolderPaths(node.children || [], into);
+        }
+        return into;
+    }
+
+    $: phoneTreeNeedle = phoneLayout ? phoneTreeFilter.trim().toLowerCase() : "";
+    $: visibleFileTree = phoneTreeNeedle
+        ? filterFileTree(fileTree, phoneTreeNeedle)
+        : fileTree;
+    $: visibleExpandedFolders = phoneTreeNeedle
+        ? collectFolderPaths(visibleFileTree, new Set<string>())
+        : expandedFolders;
 
     function fileByPath(path: string | undefined) {
         if (!doc || !path) return null;
@@ -586,6 +748,9 @@
         if (!file) return;
         selectedTreePath = file.path;
         expandParentFolders(file.path);
+        // 手机上点了文件就该直接看到内容，不该再让用户自己点一下「编辑」页签；
+        // 桌面不动（三栏同时可见，切页签反而是干扰）
+        if (phoneLayout) showEditorPane();
         if (file.kind === "image") {
             await openImage(file);
             return;
@@ -668,6 +833,19 @@
     }
 
     function pickFile() {
+        // 换书会把整个 doc 连同未暂存的修改一起丢掉。桌面有 beforeunload 兜底
+        // 关闭/跳转，但"再选一本书"是页内动作，不会被它拦住 —— 手机上更容易
+        // 误触（「更多」里的第一项就是它），所以只在手机形态确认一次。
+        // 桌面保持原有行为：点「打开文件」直接弹文件选择框。
+        if (phoneLayout && doc && hasUnsavedChanges) {
+            // 判据是 hasUnsavedChanges（含已暂存但尚未导出的 documentDirty），
+            // 文案不能只说「未暂存」：用户先点过「暂存当前文件」再换书时，
+            // 没有任何未暂存内容，被丢掉的恰恰是已暂存的那份。
+            const ok = window.confirm(
+                "当前 EPUB 有未导出的修改（含已暂存内容），换书会丢弃这些改动。是否继续？",
+            );
+            if (!ok) return;
+        }
         fileInput?.click();
     }
 
@@ -756,7 +934,9 @@
         // 自定义事件只在本窗口冒泡，跨窗口改 localStorage 只有 storage 事件会送达
         const syncSettings = () => {
             const next = loadAppSettings();
-            const themeChanged = next.uiTheme !== appSettings.uiTheme;
+            const nextResolvedTheme = resolveUiTheme(next.uiTheme);
+            const themeChanged = nextResolvedTheme !== resolvedTheme;
+            resolvedTheme = nextResolvedTheme;
             appSettings = next;
             // 预览文档的纸色是在生成 srcdoc 时写死的，主题一变必须重算，
             // 否则深色界面里会留着一整页浅色书页
@@ -765,14 +945,22 @@
             }
         };
         window.addEventListener("tepub-settings-updated", syncSettings);
+        window.addEventListener(THEME_RESOLVED_EVENT, syncSettings);
         window.addEventListener("storage", syncSettings);
         restoreSettingsListener = () => {
             window.removeEventListener("tepub-settings-updated", syncSettings);
+            window.removeEventListener(THEME_RESOLVED_EVENT, syncSettings);
             window.removeEventListener("storage", syncSettings);
         };
+
+        // 手机端保活裁剪会为了省内存卸载最久没访问的页面。带着未暂存修改时
+        // 必须否决 —— 否则用户从编辑器逛两页回来，改动已经无声消失。
+        // 桌面版永远不裁（trimTabs 只在手机外壳调用），这条登记对桌面无副作用。
+        registerKeepAliveGuard(ownTabId, () => hasUnsavedChanges);
     });
 
     onDestroy(() => {
+        unregisterKeepAliveGuard(ownTabId);
         revokePreviewUrls();
         revokeImagePreviewUrl();
         revokeCoverPreviewUrl();
@@ -1203,10 +1391,47 @@
         );
     }
 
+    /**
+     * 文件树「更多操作」浮层的尺寸。
+     *
+     * 这里是**外框**尺寸，不是 CSS 里的 width:104px：104 是内容宽，还要加
+     * 左右各 6px 内边距和 1px 边框，实测外框 118px。以前按 104 算最大 left，
+     * 点在屏幕最右边的按钮上时浮层右边缘会超出视口 14px（390 宽下量到
+     * right=396），「删除」两个字被切掉一截。
+     *
+     * 高度随布局变：桌面两项 30px → 78px；手机抬到触控尺寸后是 106px。
+     * 浮层是点出来之后才挂载的，量不到 DOM，只能按 CSS 预算。
+     */
+    const FILE_MENU_WIDTH = 120;
+
+    function fileMenuHeight() {
+        return phoneLayout ? 112 : 88;
+    }
+
     function openFileMenu(node: WebFileTreeNode, event: MouseEvent) {
         if (node.file_type === "folder" || !node.path) return;
         event.stopPropagation();
-        fileMenu = { path: node.path, x: event.clientX, y: event.clientY };
+        // 桌面左栏最宽 340px，点了永远在屏内；手机文件树铺满整屏，
+        // 「更多操作」按钮是行内最后一个元素，点它在 x≈屏宽-27，
+        // 不收敛的话浮层大半落在视口外，重命名/删除点不到。
+        // 桌面保持原位置（左栏最宽 340px、菜单贴着鼠标），只在手机形态收敛。
+        if (!phoneLayout) {
+            fileMenu = { path: node.path, x: event.clientX, y: event.clientY };
+            return;
+        }
+        const maxX = window.innerWidth - FILE_MENU_WIDTH - 8;
+        // 不能按 innerHeight 收敛：底部导航（z-index 60）压在浮层（z-index 30）
+        // 上面，滚到文件树底部时点最后几行的「更多」，「删除」正好落在导航
+        // 底下 —— 看得见却点不中。按可见内容区的底边算。
+        // /mobile 子树没有底部导航，回退到窗口底边。
+        const nav = document.querySelector(".m-nav");
+        const bottom = nav ? nav.getBoundingClientRect().top : window.innerHeight;
+        const maxY = bottom - fileMenuHeight() - 8;
+        fileMenu = {
+            path: node.path,
+            x: Math.max(8, Math.min(event.clientX, maxX)),
+            y: Math.max(8, Math.min(event.clientY, maxY)),
+        };
     }
 
     function closeFileMenu() {
@@ -1342,14 +1567,12 @@
         status = "正在重新打包 EPUB...";
         try {
             const blob = await exportWebEpubBlob(doc);
-            const url = URL.createObjectURL(blob);
-            const anchor = document.createElement("a");
-            anchor.href = url;
-            anchor.download = outputFileName();
-            anchor.click();
-            URL.revokeObjectURL(url);
+            const fileName = outputFileName();
+            // 隐藏锚点 + 延后回收 URL，两件事都在这个共用函数里
+            // （手机 WebView 上同步 revoke 会导致"点了导出没反应"）
+            downloadBrowserBlob(blob, fileName);
             documentDirty = false;
-            status = `已导出 ${anchor.download}`;
+            status = `已导出 ${fileName}`;
         } catch (error) {
             status = `导出失败：${String(error)}`;
         } finally {
@@ -1582,7 +1805,7 @@
             : "";
         // 底色在生成 srcdoc 时按当前主题写死：交给运行时的 applyPaperTheme
         // 去改已经晚了，iframe 会先按浅色画一帧（切页面时整屏闪白）
-        const dark = appSettings.uiTheme === "dark";
+        const dark = resolveUiTheme(appSettings.uiTheme) === "dark";
         const paperBg = paperBackground(dark);
         const paperText = paperTextColor(dark);
         // 浅色模式下不注入任何底色：安装版 PreviewPane 只注滚动条和深色纸色，
@@ -1850,6 +2073,8 @@
             ? await previewPath(path)
             : await openPath(path);
         if (opened) await revealTreePath(path);
+        // 手机上点目录里的章节，期望是"开始读这一章"，不是"跳回文件列表找它"
+        if (opened && phoneLayout) selectPane("preview");
     }
 
     function addToHistory(value: string, history: string[]) {
@@ -2196,7 +2421,48 @@
             class="workspace"
             class:reader-workspace={readerMode}
             class:reader-toc-collapsed={readerMode && readerTocCollapsed}
+            class:phone-stack={phoneLayout}
+            data-pane={mobilePane}
         >
+            {#if phoneLayout}
+                <!-- 手机上三栏同时在屏幕上只能各分到 1/3 高，谁都干不了活。
+                     收成"一次只看一栏"，用这条页签切换。
+                     桌面不渲染这个节点，三个面板同时可见，布局完全不变。 -->
+                <div class="phone-pane-bar" role="tablist" aria-label="编辑区切换">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={mobilePane === "tree"}
+                        class:active={mobilePane === "tree"}
+                        on:click={() => selectPane("tree")}
+                        >{readerMode ? "目录" : "文件"}</button
+                    >
+                    {#if !readerMode}
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={mobilePane === "editor"}
+                            class:active={mobilePane === "editor"}
+                            on:click={showEditorPane}>编辑</button
+                        >
+                    {/if}
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={mobilePane === "preview"}
+                        class:active={mobilePane === "preview"}
+                        on:click={() => selectPane("preview")}
+                        >{readerMode ? "阅读" : "预览"}</button
+                    >
+                </div>
+                <!-- status 一直有值却从来没被渲染过：桌面版里"已导入 xx 个文件"
+                     "已替换 3 处"这类反馈只写进变量，用户看不到。手机没有状态栏
+                     可以瞄，这里给它一条常驻的 aria-live 细线。 -->
+                <div class="phone-status" role="status" aria-live="polite">
+                    <span title={status}>{status}</span>
+                </div>
+            {/if}
+
             <aside class="left-panel">
                 {#if readerMode}
                     <div class="tree-header">
@@ -2244,11 +2510,34 @@
                     </div>
 
                     {#if activeTab === "files"}
+                        {#if phoneLayout}
+                            <!-- 一本书动辄几百个资源，手机上文件树只有一屏高，
+                                 不筛选就只能靠盲滚。桌面用不上（三栏同屏，
+                                 树和编辑器可以对着看），所以只在手机渲染。 -->
+                            <div class="phone-tree-filter">
+                                <input
+                                    type="search"
+                                    bind:value={phoneTreeFilter}
+                                    placeholder="筛选路径 / 文件名"
+                                    autocomplete="off"
+                                    autocapitalize="off"
+                                    spellcheck="false"
+                                    aria-label="筛选文件"
+                                />
+                                {#if phoneTreeFilter.trim()}
+                                    <button
+                                        type="button"
+                                        on:click={() => (phoneTreeFilter = "")}
+                                        aria-label="清空筛选">×</button
+                                    >
+                                {/if}
+                            </div>
+                        {/if}
                         <div class="tree-content">
-                            {#each fileTree as node (node.path)}
+                            {#each visibleFileTree as node (node.path)}
                                 <FileTreeItem
                                     {node}
-                                    {expandedFolders}
+                                    expandedFolders={visibleExpandedFolders}
                                     selectedFile={selectedTreeNode}
                                     {multiSelectedFiles}
                                     {toggleFolder}
@@ -2357,6 +2646,16 @@
                             >
                         </div>
                         <div class="editor-actions">
+                            {#if phoneLayout}
+                                <!-- 手机上「暂存 / 换行 / 字号 / 跳转 / 换书」全收进这里：
+                                     标题行只有一行高，放五颗按钮会挤成麻将牌 -->
+                                <button
+                                    type="button"
+                                    on:click={() => (phoneMoreOpen = true)}
+                                    title="更多操作"
+                                    aria-label="更多操作">…</button
+                                >
+                            {/if}
                             <button
                                 type="button"
                                 class="primary"
@@ -2364,15 +2663,24 @@
                                 disabled={busy}
                                 title="导出 EPUB">导出</button
                             >
-                            <button
-                                type="button"
-                                class="primary"
-                                on:click={stageCurrentFile}
-                                disabled={!selectedFile || !dirty || busy}
-                                >暂存</button
-                            >
+                            {#if !phoneLayout}
+                                <button
+                                    type="button"
+                                    class="primary"
+                                    on:click={stageCurrentFile}
+                                    disabled={!selectedFile || !dirty || busy}
+                                    >暂存</button
+                                >
+                            {/if}
                         </div>
                     </div>
+
+                    {#if phoneLayout && selectedFile && dirty}
+                        <!-- 手机没有「暂存」按钮，但未保存这件事必须一直看得见 -->
+                        <div class="phone-dirty-hint" role="status"
+                            >未暂存 · 点下方「保存」写入书内</div
+                        >
+                    {/if}
 
                     {#if selectedFile}
                         <div class="editor-content">
@@ -2382,9 +2690,20 @@
                                 language={getFileLanguage(selectedFile.kind)}
                                 onChange={handleEditorChange}
                                 onSave={stageCurrentFile}
-                                onClick={handleEditorClick}
+                                onClick={(line) => {
+                                    phoneLine = line;
+                                    handleEditorClick(line);
+                                }}
                                 onSelectionChange={handleEditorSelection}
+                                onCursorLine={(line) => (phoneLine = line)}
+                                touchInput={touchInput}
                                 onOpenSearch={() => {
+                                    // 手机上没有常驻查找栏：先切到编辑栏并展开，
+                                    // 否则焦点落在隐藏容器里的输入框上，光标不出现
+                                    if (phoneLayout) {
+                                        selectPane("editor");
+                                        phoneFindOpen = true;
+                                    }
                                     setTimeout(
                                         () =>
                                             document
@@ -2392,7 +2711,7 @@
                                                     "epub-search-input-fr",
                                                 )
                                                 ?.focus(),
-                                        50,
+                                        phoneLayout ? 120 : 50,
                                     );
                                 }}
                             />
@@ -2414,8 +2733,20 @@
                         </div>
                     {/if}
 
-                    {#if selectedFile && selectedFile.editable}
+                    {#if selectedFile && selectedFile.editable && (!phoneLayout || phoneFindOpen)}
                         <div class="find-replace-panel">
+                            {#if phoneLayout}
+                                <!-- 手机上的查找条是"用完就收"的：它占掉整屏一半，
+                                     编辑区只剩三行。桌面保持常驻，一个节点都没删。 -->
+                                <div class="phone-find-head">
+                                    <span>查找替换</span>
+                                    <button
+                                        type="button"
+                                        on:click={() => (phoneFindOpen = false)}
+                                        aria-label="收起查找">收起</button
+                                    >
+                                </div>
+                            {/if}
                             <div class="fr-row">
                                 <span class="fr-label">查找:</span>
                                 <div class="fr-input-wrapper">
@@ -2605,6 +2936,79 @@
                             </div>
                         </div>
                     {/if}
+
+                    {#if phoneLayout}
+                        <!-- 手机动作条：桌面靠 Ctrl+Z / Ctrl+F / Ctrl+S，手机什么都没有。
+                             这是 ReaMicro 那套编辑器最值得抄的一处 —— 常用动作常驻在
+                             拇指够得着的位置，而不是塞进右上角的菜单里。 -->
+                        <div class="phone-actionbar">
+                            <button
+                                type="button"
+                                on:click={() =>
+                                    epubCodeEditorComponent?.undoEdit()}
+                                disabled={!selectedFile}
+                                title="撤销">撤销</button
+                            >
+                            <button
+                                type="button"
+                                on:click={() =>
+                                    epubCodeEditorComponent?.redoEdit()}
+                                disabled={!selectedFile}
+                                title="重做">重做</button
+                            >
+                            <button
+                                type="button"
+                                class:active={phoneFindOpen}
+                                on:click={() => {
+                                    phoneFindOpen = !phoneFindOpen;
+                                    if (phoneFindOpen) {
+                                        setTimeout(
+                                            () =>
+                                                document
+                                                    .getElementById(
+                                                        "epub-search-input-fr",
+                                                    )
+                                                    ?.focus(),
+                                            120,
+                                        );
+                                    }
+                                }}
+                                disabled={!selectedFile?.editable}
+                                title="查找替换">查找</button
+                            >
+                            <button
+                                type="button"
+                                on:click={() => {
+                                    phoneGotoOpen = true;
+                                    phoneGotoValue = String(phoneLine);
+                                }}
+                                disabled={!selectedFile}
+                                title="跳到行">行 {phoneLine}</button
+                            >
+                            <button
+                                type="button"
+                                class="primary"
+                                on:click={stageCurrentFile}
+                                disabled={!selectedFile || !dirty || busy}
+                                title="暂存到书内">保存</button
+                            >
+                        </div>
+
+                        {#if selectedFile?.editable && !phoneFindOpen}
+                            <!-- 符号栏：软键盘上打 < > / " 要切两层，
+                                 这排键省掉的正是这一步。查找条展开时收起 ——
+                                 两排一起会把编辑区挤没 -->
+                            <div class="phone-symbolbar" role="toolbar" aria-label="符号">
+                                {#each PHONE_SYMBOLS as symbol (symbol)}
+                                    <button
+                                        type="button"
+                                        on:click={() => handlePhoneSymbol(symbol)}
+                                        >{phoneSymbolLabel(symbol)}</button
+                                    >
+                                {/each}
+                            </div>
+                        {/if}
+                    {/if}
                 </section>
             {/if}
 
@@ -2619,16 +3023,20 @@
                                 <span>{previewNavLabel()}</span>
                             </div>
                             <div class="reader-preview-actions">
-                                <button
-                                    type="button"
-                                    class="reader-toc-toggle"
-                                    class:active={!readerTocCollapsed}
-                                    on:click={toggleReaderToc}
-                                    aria-pressed={!readerTocCollapsed}
-                                    title={readerTocCollapsed
-                                        ? "显示目录"
-                                        : "收起目录"}>目录</button
-                                >
+                                {#if !phoneLayout}
+                                    <!-- 手机上切目录由顶部页签负责，这颗按钮要么
+                                         和页签语义重复、要么把另一栏整个隐藏掉 -->
+                                    <button
+                                        type="button"
+                                        class="reader-toc-toggle"
+                                        class:active={!readerTocCollapsed}
+                                        on:click={toggleReaderToc}
+                                        aria-pressed={!readerTocCollapsed}
+                                        title={readerTocCollapsed
+                                            ? "显示目录"
+                                            : "收起目录"}>目录</button
+                                    >
+                                {/if}
                                 <button
                                     type="button"
                                     class="reader-font-btn"
@@ -2675,7 +3083,9 @@
                     <div class="preview-stack">
                         <div
                             class="preview-body"
-                            class:dark-paper={appSettings.uiTheme === "dark"}
+                            class:dark-paper={resolveUiTheme(
+                                appSettings.uiTheme,
+                            ) === "dark"}
                             class:hide-scrollbar={!appSettings.previewScrollbar}
                             class:is-hidden={!readerMode &&
                                 rightTab !== "preview"}
@@ -2737,6 +3147,142 @@
                 </section>
             </aside>
         </main>
+    {/if}
+
+    {#if phoneLayout && phoneMoreOpen}
+        <!-- 手机「更多」：桌面标题行右侧那一排按钮的收容处。
+             复用 MobileSheet 而不是另写一个遮罩，是为了 Esc / 焦点陷阱 /
+             键盘顶起（--ime-height）三件事只有一份实现。 -->
+        <MobileSheet
+            open={phoneMoreOpen}
+            title="更多操作"
+            onclose={() => (phoneMoreOpen = false)}
+        >
+            <div class="phone-more-list">
+                <button
+                    type="button"
+                    class="m-list-row"
+                    on:click={() => {
+                        phoneMoreOpen = false;
+                        pickFile();
+                    }}
+                    disabled={busy}
+                >
+                    <span>换一本书</span>
+                    <span class="phone-more-hint">重新选择 EPUB</span>
+                </button>
+                <button
+                    type="button"
+                    class="m-list-row"
+                    on:click={() => {
+                        phoneMoreOpen = false;
+                        stageCurrentFile();
+                    }}
+                    disabled={!selectedFile || !dirty || busy}
+                >
+                    <span>暂存当前文件</span>
+                    <span class="phone-more-hint">
+                        {dirty ? "有未保存修改" : "没有改动"}
+                    </span>
+                </button>
+                <button
+                    type="button"
+                    class="m-list-row"
+                    on:click={() => {
+                        phoneMoreOpen = false;
+                        exportEpub();
+                    }}
+                    disabled={busy}
+                >
+                    <span>导出 EPUB</span>
+                    <span class="phone-more-hint">生成新文件</span>
+                </button>
+                <button
+                    type="button"
+                    class="m-list-row"
+                    on:click={() => {
+                        phoneMoreOpen = false;
+                        selectPane("tree");
+                        activeTab = "metadata";
+                    }}
+                >
+                    <span>书籍信息</span>
+                    <span class="phone-more-hint">书名 / 作者 / 封面</span>
+                </button>
+                <div class="phone-more-row">
+                    <span>自动换行</span>
+                    <button
+                        type="button"
+                        on:click={togglePhoneWrap}
+                        disabled={!selectedFile}
+                        >切换</button
+                    >
+                </div>
+                <div class="phone-more-row">
+                    <span>字号</span>
+                    <span class="phone-more-inline">
+                        <button
+                            type="button"
+                            on:click={() => adjustPhoneFont(-1)}
+                            disabled={!selectedFile}
+                            aria-label="减小字号">A-</button
+                        >
+                        <button
+                            type="button"
+                            on:click={() => adjustPhoneFont(1)}
+                            disabled={!selectedFile}
+                            aria-label="增大字号">A+</button
+                        >
+                    </span>
+                </div>
+                <button
+                    type="button"
+                    class="m-list-row"
+                    on:click={() => {
+                        phoneMoreOpen = false;
+                        selectPane("editor");
+                        phoneFindOpen = true;
+                    }}
+                    disabled={!selectedFile?.editable}
+                >
+                    <span>查找替换</span>
+                    <span class="phone-more-hint">当前文件 / 全部文件</span>
+                </button>
+            </div>
+        </MobileSheet>
+    {/if}
+
+    {#if phoneLayout && phoneGotoOpen}
+        <MobileSheet
+            open={phoneGotoOpen}
+            title="跳到行"
+            onclose={() => (phoneGotoOpen = false)}
+        >
+            <!-- 动作按钮放在 body 里而不是用 actions snippet：
+                 本文件仍是旧语法（$: / on:click），混进 snippet 容易和
+                 编译模式打架，收益只有一点点边距 -->
+            <div class="phone-goto">
+                <input
+                    type="text"
+                    inputmode="numeric"
+                    bind:value={phoneGotoValue}
+                    on:keydown={(e) => e.key === "Enter" && handlePhoneGoto()}
+                    placeholder="行号"
+                    aria-label="行号"
+                />
+                <span>共 {epubCodeEditorComponent?.getView()?.state.doc.lines ?? 0} 行</span>
+            </div>
+            <div class="phone-goto-actions">
+                <button type="button" on:click={() => (phoneGotoOpen = false)}
+                    >取消</button
+                >
+                <button
+                    type="button"
+                    class="primary"
+                    on:click={handlePhoneGoto}>跳转</button
+                >
+            </div>
+        </MobileSheet>
     {/if}
 
     {#if fileMenu}
@@ -3773,6 +4319,15 @@
         border-radius: var(--radius-xs);
         background: var(--color-surface);
         box-shadow: var(--shadow-pop);
+        /* 外框 = 104 内容 + 12 内边距 + 2 边框。box-sizing 在桌面按 content-box，
+           手机若被全局重置成 border-box，同一串数字会算出两种宽度，
+           定位预算（FILE_MENU_WIDTH）就会对不上。这里写死，两边一致。 */
+        box-sizing: content-box;
+    }
+
+    /* 手机：两项按钮抬到触控尺寸。桌面的 30px 密度不动。 */
+    :global(:root[data-tepub-layout="phone"]) .file-menu-popover button {
+        min-height: var(--tap-target);
     }
 
     .file-menu-popover button {
@@ -3782,6 +4337,13 @@
         text-align: left;
     }
 
+    /* ⚠ 这一段只服务「桌面壳被拖窄」，不是手机布局。
+       手机（data-tepub-layout="phone"）走下面那套 phone-stack 规则，特异性
+       与顺序都在这段之后，逐条覆盖掉了这里的 220/320/360 三行。
+       它真正命中的唯一场景是 Tauri 桌面窗口被拖到 ≤760px：那时 layout 仍
+       是 desktop（宽度信号只在 web 下参与判定），三列挤在 700px 里没法用，
+       退化成三行叠放比三列各 230px 好。所以别删 —— 也别往里加手机样式，
+       横屏手机 844px 不会命中这段，加了等于静默失效。 */
     @media (max-width: 760px) {
         /* 窄屏下标题和两个按钮挤不进 50px，改为自动高度纵向排布 */
         .editor-head {
@@ -3836,91 +4398,658 @@
         }
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .web-epub-page {
-        height: 100dvh;
-    }
+    /* 本页根容器在手机上不需要任何覆写：app.css 已经把
+       .app-frame-body 里的 .web-epub-page 强制成 position:absolute;inset:0;
+       height:auto（带 !important，任何页面级 height 都压不过它）。
+       这里以前写的是 height:100dvh —— 一条永远不会生效、还会误导人以为
+       手机上是按视口铺的，删掉。 */
 
     /* 这里同样不能写 100dvh：父容器 .web-epub-page 由 app.css 压成
        absolute;inset:0;height:auto，比整个视口矮一条标签栏。写视口单位
        会让内容比容器高出一截，底部被标签栏吃掉。 */
-    :global(:root[data-tepub-client="web-mobile"]) .import-shell {
+    :global(:root[data-tepub-layout="phone"]) .import-shell {
         height: 100%;
         grid-template-rows: minmax(0, 1fr);
         background: var(--color-canvas);
         overflow: auto;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .workspace {
+    /* ——— 手机：三栏叠成一格 ———
+
+       以前这里是"三行各给一个 dvh"：文件树 24dvh、编辑区 1fr、预览 38dvh。
+       390×844 的屏上每栏只剩两三百 px，编辑区显示不到 10 行，勾选个文件还得
+       在三个矮窗里上下滚 —— 就是用户说的"单纯拉伸"。
+
+       现在改成：三栏 grid-area 全等于 1/1，同一时刻只有一栏 visible。
+       用 visibility 而不是 display:none，是因为 CodeMirror 一旦脱离布局就会
+       重新测量，切回来时滚动位置和光标位置都会跳；visibility:hidden 保留
+       布局，切换只是重绘（下面 .phone-stack 的规则负责这件事）。 */
+    :global(:root[data-tepub-layout="phone"]) .workspace {
         height: 100%;
-        grid-template-columns: 1fr;
-        grid-template-rows: minmax(180px, 24dvh) minmax(360px, 1fr) minmax(
-                320px,
-                38dvh
-            );
-        overflow: auto;
+        grid-template-columns: minmax(0, 1fr);
+        /* 行 1 = 页签，行 2 = 状态线，行 3 = 当前栏 */
+        grid-template-rows: auto auto minmax(0, 1fr);
+        overflow: hidden;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .workspace.reader-workspace {
-        grid-template-rows: minmax(220px, 34dvh) minmax(420px, 1fr);
-    }
-
-    :global(:root[data-tepub-client="web-mobile"])
-        .workspace.reader-workspace.reader-toc-collapsed {
-        grid-template-rows: minmax(420px, 1fr);
-    }
-
-    :global(:root[data-tepub-client="web-mobile"]) .left-panel,
-    :global(:root[data-tepub-client="web-mobile"]) .editor-panel,
-    :global(:root[data-tepub-client="web-mobile"]) .right-panel {
-        border: 0;
+    :global(:root[data-tepub-layout="phone"]) .phone-status {
+        grid-row: 2;
+        grid-column: 1;
+        padding: 4px 12px;
+        font-size: 11px;
+        color: var(--color-muted);
+        background: var(--color-surface-soft);
         border-bottom: 1px solid var(--color-border);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .editor-head {
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar {
+        grid-row: 1;
+        grid-column: 1;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        height: 44px;
+        padding-top: var(--safe-top);
+        box-sizing: content-box;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--color-muted);
+        font-weight: 700;
+        font-size: 14px;
+        height: 44px;
+        padding: 0;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button.active {
+        background: var(--color-surface);
+        color: var(--color-accent);
+        box-shadow: inset 0 -2px 0 var(--color-accent);
+    }
+
+    /* 三栏全部落在同一格，只由 data-pane 决定谁可见 */
+    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .left-panel,
+    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .editor-panel,
+    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .right-panel {
+        grid-area: 3 / 1;
+        min-width: 0;
+        min-height: 0;
+        border: 0;
+        visibility: hidden;
+    }
+
+    /* 阅读模式没有 editor-panel（{#if !readerMode}），两栏同样叠一层 */
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack.reader-workspace {
+        grid-template-rows: auto auto minmax(0, 1fr);
+    }
+
+    /* 阅读模式下「目录」是页签，不是折叠开关 —— 页签已经把两栏分开了，
+       再叠一层 reader-toc-collapsed 的 display:none 会让点「目录」变成空白。
+       这条要压过页面里原有的 .reader-workspace.reader-toc-collapsed .left-panel
+       （两条选择器特异性相同，靠顺序取胜，所以必须写在这里而不是上面）。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack.reader-workspace.reader-toc-collapsed
+            > .left-panel
+    ) {
+        display: flex;
+    }
+
+    /* 阅读模式的栏头：手机上一行放不下标题 + 字号 + 上/下一章，
+       让按钮换行，标题独占一行 */
+    :global(:root[data-tepub-layout="phone"]) .reader-preview-header {
         height: auto;
-        min-height: 50px;
-        align-items: stretch;
+        min-height: 52px;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 6px;
+        padding: 8px 12px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .reader-preview-actions {
+        justify-content: flex-start;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        gap: 6px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .reader-preview-actions button {
+        flex: 0 0 auto;
+        height: 38px;
+    }
+
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack[data-pane="tree"]
+        > .left-panel,
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack[data-pane="editor"]
+        > .editor-panel,
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack[data-pane="preview"]
+        > .right-panel {
+        visibility: visible;
+    }
+
+    /* 隐藏栏里的后代要一并压住：某些元素自带 visibility:visible（内联或组件
+       样式），会盖过继承来的 hidden 单独画出来 —— 叠成一格时那就是"两栏重叠"。
+       与下面 .preview-stack > .is-hidden :global(*) 是同一个手法。
+       :global(*) 是必须的：FileTreeItem / TocNode 的节点带的是它们自己的
+       作用域属性，本组件的选择器选不中。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="tree"]
+            > .editor-panel
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="tree"]
+            > .right-panel
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="editor"]
+            > .left-panel
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="editor"]
+            > .right-panel
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="preview"]
+            > .left-panel
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .workspace.phone-stack[data-pane="preview"]
+            > .editor-panel
+            *
+    ) {
+        visibility: hidden !important;
+    }
+
+    /* 左栏同理：文件树筛选框只在手机出现，多出来的这一行会让写死的
+       grid-template-rows 把 1fr 分错行（筛选框吃掉整屏，树本身塌成一行）。 */
+    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .left-panel {
+        display: flex;
         flex-direction: column;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .editor-actions {
-        width: 100%;
-        flex-wrap: wrap;
+    :global(:root[data-tepub-layout="phone"]) .left-panel > .tabs,
+    :global(:root[data-tepub-layout="phone"]) .left-panel > .tree-header,
+    :global(:root[data-tepub-layout="phone"])
+        .left-panel
+        > .phone-tree-filter {
+        flex: 0 0 auto;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .editor-actions button {
+    :global(:root[data-tepub-layout="phone"]) .left-panel > .tree-content,
+    :global(:root[data-tepub-layout="phone"]) .left-panel > .toc-container,
+    :global(:root[data-tepub-layout="phone"]) .left-panel > .metadata-form {
         flex: 1 1 auto;
+        min-height: 0;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .metadata-form {
+    /* 编辑栏在手机上的子节点数量是可变的（未暂存提示、查找条、动作条、
+       符号栏都按需出现），写死的 grid-template-rows 会把 1fr 分错行 ——
+       比如没有未暂存提示时，1fr 落到查找条上，编辑区被压成 0 高。
+       改用 flex 列：除编辑区外全部 0 0 auto，由编辑区吃掉剩余高度。 */
+    :global(:root[data-tepub-layout="phone"]) .editor-panel {
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* 编辑区与图片预览共用同一格：没选中文本文件时展示的是 .editor-image-preview
+       或 .editor-empty，它们同样要吃掉剩余高度，否则动作条会被顶到屏幕中间 */
+    :global(:root[data-tepub-layout="phone"]) .editor-content,
+    :global(:root[data-tepub-layout="phone"]) .editor-image-preview,
+    :global(:root[data-tepub-layout="phone"]) .editor-empty {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    /* 页面里的 .editor-panel 是 grid-template-rows: auto 1fr auto，
+       转成 flex 后原来落在第二行的编辑区不再是"1fr"，上面这条补上；
+       但 find-replace-panel 在 DOM 里位于编辑区之后、动作条之前，
+       顺序保持不变即可 —— flex 不重排 DOM 顺序。 */
+
+    :global(:root[data-tepub-layout="phone"]) .editor-head,
+    :global(:root[data-tepub-layout="phone"]) .find-replace-panel {
+        flex: 0 0 auto;
+    }
+
+    /* 查找条展开时最多占四成高度，否则编辑区只剩两三行 */
+    :global(:root[data-tepub-layout="phone"]) .find-replace-panel {
+        max-height: 42%;
+        overflow: auto;
+        padding-bottom: 8px;
+    }
+
+    /* 上面那条 overflow:auto 是有代价的：滚动容器上方溢出的内容拿 scrollTop
+       永远滚不到。查找条里正好有两处**向上**弹出的浮层 —— 查找/替换历史
+       （bottom:100%）和「范围」下拉（bottom: calc(100% + 4px)）—— 于是手机上
+       点 ▾ 只会露一条 30px 的缝，历史条目点不中。手机上统一改成向下弹：
+       输入框就在面板顶部，下面的空间归滚动区管，滚一下就能点到。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .web-epub-page
+            .find-replace-panel
+            .fr-history-dropdown
+    ) {
+        top: 100%;
+        bottom: auto;
+        margin-top: 2px;
+        margin-bottom: 0;
+        max-height: 40vh;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .web-epub-page
+            .find-replace-panel
+            .fr-custom-select
+            .custom-select-menu
+    ) {
+        top: calc(100% + 4px);
+        bottom: auto;
+    }
+
+    /* 标题行维持一行：手机上再把标题和按钮拆成两行，等于白吃 50px 屏高 */
+    :global(:root[data-tepub-layout="phone"]) .editor-head {
+        height: 48px;
+        min-height: 48px;
+        flex-direction: row;
+        align-items: center;
+        padding: 0 8px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .editor-actions {
+        width: auto;
+        flex-wrap: nowrap;
+        gap: 4px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .editor-actions button {
+        flex: 0 0 auto;
+        height: 34px;
+        min-width: 48px;
+    }
+
+    /* 手机上「未暂存」必须常显：暂存按钮被收进「更多」，没有这条提示，
+       用户会以为改动已经写进书里 */
+    :global(:root[data-tepub-layout="phone"]) .phone-dirty-hint {
+        flex: 0 0 auto;
+        padding: 5px 12px;
+        font-size: 11px;
+        color: var(--color-warning, #a06412);
+        background: color-mix(in srgb, var(--color-warning, #a06412) 12%, transparent);
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    /* ——— 手机动作条 + 符号栏 ———
+       动作条固定在编辑栏底部（不是 fixed，是全屏布局里的一格）：
+       fixed 会盖住手机底部导航，也会在键盘升起时错位。 */
+    :global(:root[data-tepub-layout="phone"]) .phone-actionbar {
+        flex: 0 0 auto;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 4px;
+        padding: 6px 8px;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-surface);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-actionbar button {
+        /* 竖屏有富余高度，五个按钮（撤销/重做/查找/跳到行/保存）都用满
+           触控尺寸；横屏那 337px 实在挤，另由 max-height:500px 块压到 36px。 */
+        height: var(--tap-target);
+        min-width: 0;
+        padding: 0 4px;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-actionbar button.active {
+        border-color: var(--color-accent);
+        background: var(--color-accent-soft);
+        color: var(--color-accent-deep);
+    }
+
+    /* 符号栏横向滚动：22 个键在 390px 上放不下，硬折行会吃掉两行编辑区 */
+    :global(:root[data-tepub-layout="phone"]) .phone-symbolbar {
+        flex: 0 0 auto;
+        display: flex;
+        gap: 2px;
+        padding: 4px;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        border-top: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
+        -webkit-overflow-scrolling: touch;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-symbolbar button {
+        flex: 0 0 auto;
+        min-width: 40px;
+        height: 36px;
+        padding: 0 8px;
+        font-family: var(--font-code);
+        font-size: 14px;
+        background: transparent;
+        border-color: transparent;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-symbolbar button:active {
+        background: var(--color-accent-soft);
+        border-color: var(--color-accent);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-find-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding-bottom: 6px;
+        font-weight: 700;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-find-head button {
+        height: 32px;
+        font-size: 12px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-more-list {
+        display: flex;
+        flex-direction: column;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-more-list > .m-list-row {
+        justify-content: space-between;
+        border-bottom: 1px solid var(--color-border);
+        font-size: 15px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-more-hint {
+        font-size: 12px;
+        color: var(--color-muted);
+        flex: 0 0 auto;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-more-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 52px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--color-border);
+        font-size: 15px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-more-inline {
+        display: flex;
+        gap: 8px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-more-inline button {
+        /* 抽屉里的字号 A- / A+ 是主要操作，38px 高对拇指太小 */
+        min-width: 56px;
+        height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-goto {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        font-size: 13px;
+        color: var(--color-muted);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-goto input {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 44px;
+        font-size: 16px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-goto-actions {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 8px;
+        padding: 0 16px 12px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-goto-actions button {
+        height: 44px;
+    }
+
+    /* 文件树/目录行：桌面 30px 高、行内还有 24px 的小按钮，手指按不准。
+       这里把整行抬到 44px，并把「更多操作」按钮也撑到 40px 命中区。
+
+       ⚠ 整条选择器必须包在 :global() 里，不能只包 :root —— Svelte 会给
+       非 global 部分补上本组件的作用域属性，而 .tree-node / .node-content
+       是 FileTreeItem.svelte、TocNode.svelte 渲染的，带的是它们自己的作用域
+       属性。写成 `:global(...) .tree-content .tree-node` 会静默失效（编译期
+       只报一句 unused selector，运行时表现为"手机上点不中文件"）。
+
+       ⚠ 但也不能只写 .tree-content / .toc-list：这两个类名别处也在用
+       （epubEditor/FileTreePanel、editor/ChapterSidebar、text-editor、
+       mobile/make），包进 :global() 之后就是全应用的裸类名选择器，路由
+       CSS 一旦加载就一直留在文档里，会把别的页面的列表行也撑成 44px。
+       所以统一锚在本页独有的 .web-epub-page 上。 */
+    :global(:root[data-tepub-layout="phone"] .web-epub-page .tree-content) {
+        padding: 4px 6px calc(8px + var(--safe-bottom));
+        /* 横屏手机（844×390）下 .tree-content 只有 163px 高，grid 的自动行
+           会被压成等高（50px 一层），而文件夹的 .children 比它高得多 ——
+           OEBPS / Text / META-INF 三层于是互相叠着画，文件名的字直接压在一
+           起（竖屏 844 高时内容比容器高，行高反而是内容撑开的，所以只在
+           横屏复现）。grid-auto-rows: max-content 让行高只跟内容走，
+           超出的部分交给已有的 overflow:auto 滚动。桌面不受影响。 */
+        grid-auto-rows: max-content;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-tree-filter {
+        position: relative;
+        display: flex;
+        align-items: center;
+        padding: 8px 8px 4px;
+        background: var(--color-surface);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-tree-filter input {
+        width: 100%;
+        height: 44px;
+        /* 16px 以下是 iOS Safari 自动放大的触发线，代码里那些 13px 不能照搬 */
+        font-size: 16px;
+        padding: 0 40px 0 12px;
+        box-sizing: border-box;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface-raised);
+        color: var(--color-text);
+        -webkit-appearance: none;
+        appearance: none;
+    }
+
+    /* 原生 search 的清除按钮在安卓上长得和桌面不一致，统一由一个按钮负责 */
+    :global(:root[data-tepub-layout="phone"]) .phone-tree-filter input::-webkit-search-cancel-button {
+        display: none;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-tree-filter button {
+        position: absolute;
+        right: 10px;
+        width: 34px;
+        height: 34px;
+        min-width: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--color-muted);
+        font-size: 18px;
+        line-height: 1;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"] .web-epub-page .tree-content .tree-node
+    ) {
+        min-height: 44px;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"] .web-epub-page .tree-content .node-label
+    ),
+    :global(
+        :root[data-tepub-layout="phone"] .web-epub-page .tree-content .file-node
+    ) {
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"] .web-epub-page .tree-content .file-node
+    ) {
+        padding-left: 12px;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .web-epub-page
+            .tree-content
+            .node-action
+    ) {
+        /* 44 是 --tap-target；行本身 44 高，按钮撑满行高就够了，
+           不要用 38 —— 手指在「更多操作 / 添加文件」上按偏一格就点到行选择。 */
+        width: var(--tap-target);
+        height: var(--tap-target);
+    }
+
+    /* 目录树（TocNode）同理：层级更深，行高要够 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .web-epub-page
+            .toc-list
+            .toc-node
+            .node-content
+    ) {
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+
+    :global(:root[data-tepub-layout="phone"] .web-epub-page .toc-list) {
+        padding-bottom: calc(8px + var(--safe-bottom));
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .metadata-form {
         grid-template-columns: 1fr;
+        padding-bottom: calc(16px + var(--safe-bottom));
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .metadata-top {
+    :global(:root[data-tepub-layout="phone"]) .metadata-top {
         grid-template-columns: minmax(0, 1fr) 86px;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .metadata-cover {
+    :global(:root[data-tepub-layout="phone"]) .metadata-cover {
         width: 86px;
         height: 116px;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .find-replace-panel {
-        overflow: auto;
-    }
-
-    :global(:root[data-tepub-client="web-mobile"]) .fr-row {
+    :global(:root[data-tepub-layout="phone"]) .fr-row {
         flex-wrap: wrap;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .fr-label {
+    :global(:root[data-tepub-layout="phone"]) .fr-label {
         flex-basis: 100%;
         text-align: left;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .fr-actions,
-    :global(:root[data-tepub-client="web-mobile"]) .fr-find-actions {
+    :global(:root[data-tepub-layout="phone"]) .fr-actions,
+    :global(:root[data-tepub-layout="phone"]) .fr-find-actions {
         width: auto;
         flex: 1 1 160px;
+    }
+
+    /* ——— 横屏手机：把纵向装饰压薄 ———
+
+       横屏（844×390）时可用高度只有 269px，而手机上常驻的横向条一共六条：
+       页签 44 + 状态线 23 + 栏头 50 + 筛选框 56 + 动作条 51 + 符号栏 45
+       = 269px —— 编辑区精确地被挤成 0，实测只剩 125px（不到 6 行代码）。
+       竖屏（844）没有这个问题，所以只在「矮」的时候收，而不是按宽度判断。
+
+       用 max-height 而不是 max-width：横屏手机宽 844px，任何宽度断点都
+       命中不了；而这条规则的用意本来就是「高度不够」。桌面窗口再矮也带
+       data-tepub-layout="desktop"，不会命中。 */
+    @media (max-height: 500px) {
+        :global(:root[data-tepub-layout="phone"]) .phone-pane-bar {
+            height: 38px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button {
+            height: 38px;
+            font-size: 13px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-status {
+            padding: 2px 12px;
+            font-size: 10px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .left-panel > .tabs,
+        :global(:root[data-tepub-layout="phone"]) .left-panel > .tabs button {
+            height: 40px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-tree-filter {
+            padding: 4px 8px 2px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-tree-filter input {
+            height: 38px;
+            /* 全局 :where(...) 那条按 --control-height 给了 min-height: 44px，
+               min-height 会压过 height，不显式放开就白写 */
+            min-height: 0;
+            font-size: 15px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .editor-head {
+            height: 40px;
+            min-height: 40px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-actionbar {
+            padding: 4px 6px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-actionbar button {
+            height: 36px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-symbolbar {
+            padding: 2px;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .phone-symbolbar button {
+            height: 32px;
+            min-width: 36px;
+        }
     }
 </style>

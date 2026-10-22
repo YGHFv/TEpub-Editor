@@ -6,6 +6,12 @@
     import CustomSelect from "$lib/CustomSelect.svelte";
     import { isWebMobileClient } from "$lib/clientProfile";
     import { platform } from "$lib/platform";
+    import { closeTab, tabIdFor } from "$lib/secondaryTabs";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
+    import { viewUrl } from "$lib/keepAlive/viewState";
     import {
         cacheBrowserFileStable,
         exportEpubPath,
@@ -2609,12 +2615,26 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
         return `${base}${path.startsWith("/") ? path : `/${path}`}`;
     }
 
+    /**
+     * 本页在标签登记表里的 id。
+     *
+     * 注意本页同时挂在 /mobile/make 和 /toolbox/make-epub 两个地址下：
+     * 用 viewUrl() 取"这个实例自己的地址"，两种入口各自登记，互不干扰。
+     */
+    const ownTabId = tabIdFor(viewUrl().pathname, viewUrl().search);
+
     onMount(() => {
         const toolboxMakePath = withBasePath("/toolbox/make-epub");
+        // 浏览器里 /mobile/make 只是个跳板：立刻整页跳到 toolbox 版。
+        // 必须在登记守卫之前 return —— 登记的是这条地址的 id，重载后模块
+        // 重建，这条守卫永远命不中；而且 layout 已经把 /mobile/make 写进
+        // sessionStorage，重载后「更多」里会留一条点开又跳走、还占着
+        // PHONE_MAX_TABS 名额的重复项。这里顺手把它摘掉。
         if (
             platform.isWeb &&
             window.location.pathname === withBasePath("/mobile/make")
         ) {
+            closeTab(ownTabId);
             const params = new URLSearchParams(window.location.search);
             params.delete("view");
             const suffix = params.toString();
@@ -2623,6 +2643,10 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
             );
             return;
         }
+        // 手机外壳按 PHONE_MAX_TABS 裁保活页。本页的排版结果、封面/头图、
+        // 目录规则全在内存里，没有草稿——被静默卸载就是整本书的制作白做。
+        // hasUnsavedMakeChanges 的定义是「选了源文件但还没导出」。
+        registerKeepAliveGuard(ownTabId, () => hasUnsavedMakeChanges);
         const params = new URLSearchParams(window.location.search);
         const isToolboxMakeRoute = window.location.pathname === toolboxMakePath;
         const webMobileClient = isWebMobileClient();
@@ -2658,6 +2682,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     });
 
     onDestroy(() => {
+        unregisterKeepAliveGuard(ownTabId);
         const assetUrls = new Set(
             [
                 coverAsset?.objectUrl,
@@ -3479,8 +3504,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .page {
         min-height: 100vh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 14px
-            max(44px, env(safe-area-inset-bottom));
+        padding: max(10px, var(--safe-top)) 14px
+            max(44px, var(--safe-bottom));
         background: var(--color-canvas);
         color: var(--color-text);
     }
@@ -4122,8 +4147,8 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     }
 
     .chapter-sheet {
-        top: max(18px, env(safe-area-inset-top));
-        bottom: max(18px, env(safe-area-inset-bottom));
+        top: max(18px, var(--safe-top));
+        bottom: max(18px, var(--safe-bottom));
         transform: none;
         grid-template-rows: auto minmax(0, 1fr) auto;
         max-width: 640px;

@@ -121,7 +121,11 @@
 
     function handleFileChange(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
-        void importFiles(Array.from(input.files || []));
+        const files = Array.from(input.files || []);
+        // 取消对话框同样会触发 change，files 为空。把它当成"选错文件"会让
+        // 页面上莫名其妙多出一条「请选择扩展名为 .epub 的文件」红字。
+        if (!files.length) return;
+        void importFiles(files);
     }
 
     function handleImportFiles(event: CustomEvent<File[]>) {

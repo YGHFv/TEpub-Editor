@@ -1,0 +1,910 @@
+/* =========================================================
+   手机层基础类（手机外壳 + 手机页面共用）
+
+   为什么单独一个文件：手机外壳和各手机页面要共用同一套骨架类，塞进 app.css
+   会和桌面原子类混在一起，改一处得先重新理解全局。
+
+   桌面为什么完全不受影响：本文件每一条规则都以
+   :root[data-tepub-layout="phone"] 开头。桌面（Tauri 窗口、宽度 >760 的浏览器）
+   的 <html> 上没有这个属性，选择器不匹配，一条都不会命中；@keyframes 只被
+   这些带前缀的规则引用，同样不会外溢到桌面。
+
+   为什么不用 @media (max-width: …)：横屏手机宽 844px，宽度断点会让整块失效。
+   形态判定唯一真源是 src/lib/clientProfile.ts，CSS 只认 data-tepub-layout。
+
+   引入方式：本文件不会被 app.css 自动带入，由手机入口 import "./mobile.css"。
+   即便在桌面被加载，也只是多解析几 KB 文本，不会产生任何样式。
+   ========================================================= */
+
+/* ——— a. 外壳滚动 ———
+   手机整页滚动交给 .app-frame-body 自己，滚到底时不把整页橡皮筋传给
+   body（否则会露出后面那层背景，看着像页面在抖）。 */
+:root[data-tepub-layout="phone"] .app-frame-body {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ——— a2. 横屏左右安全区 ———
+   手机横屏（844×390 / 932×430）时，刘海和屏幕圆角在**左右**两侧，
+   env(safe-area-inset-left/right) 会给出 40-50px。整个应用里没有任何
+   地方消费过这两个值：拿 844×390 的 iPhone 横屏算，正文最左和最右各有
+   44px 压在挖孔与圆角下面，第一个字和行尾的按钮都被切掉。
+   在最外层收一次即可（内部各页都是从这里继承宽度），
+   box-sizing: border-box 保证 padding 不会把 app-frame 撑出视口。
+   竖屏时两个值是 0，等于没加。桌面不命中属性选择器。 */
+:root[data-tepub-layout="phone"] .app-frame {
+  box-sizing: border-box;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* ——— a3. 系统栏全局沉浸层 ———
+   Android 从 targetSdk 35 起强制 edge-to-edge，WebView 会一直画到状态栏和
+   手势条下面。透明系统栏本身是对的，但页面滚动内容也会从状态栏下面透出来。
+   这里由应用在最外层画两条与当前页面标题行同色的固定遮罩：
+   - 系统栏仍然透明，视觉上与页面连成一片；
+   - 滚动文本不会穿过状态栏；
+   - 底部手势条下面也始终是当前页面底色，不再露出一条系统白条。
+   层级放在普通页面/浮层之上、MobileSheet 和 Toast 之下。 */
+:root[data-tepub-layout="phone"] .app-frame::before,
+:root[data-tepub-layout="phone"] .app-frame::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 180;
+  pointer-events: none;
+  background: var(--titlebar-bg, var(--color-canvas));
+}
+
+:root[data-tepub-layout="phone"] .app-frame::before {
+  top: 0;
+  height: var(--safe-top);
+}
+
+:root[data-tepub-layout="phone"] .app-frame::after {
+  bottom: 0;
+  height: var(--safe-bottom);
+}
+
+/* ——— b. 页面骨架 ——— */
+/* 一屏一列：header / body / actionbar，高度都从父级拿，任何一段都不许把
+   整页撑出滚动条，所以每一段都显式写 min-height: 0。 */
+:root[data-tepub-layout="phone"] .m-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-canvas);
+}
+
+:root[data-tepub-layout="phone"] .m-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--m-header-h);
+  padding: 0 8px;
+  /* 刘海屏下状态栏会压在页头上，安全区补在 padding 上而不是抬高整块 */
+  padding-top: var(--safe-top);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-canvas);
+  /* 页头要盖住下面滚动的内容，但不该盖住底部抽屉（190/200） */
+  position: relative;
+  z-index: 30;
+}
+
+:root[data-tepub-layout="phone"] .m-header-title {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 二级页面统一顶部返回行。它由根布局渲染，页面本身不再各自画一套 topbar：
+   返回始终在同一个位置，也不会和全局底部导航抢触摸区。 */
+:root[data-tepub-layout="phone"] .m-page-header {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: var(--tap-target) minmax(0, 1fr) var(--tap-target);
+  align-items: center;
+  min-height: calc(var(--m-header-h) + var(--safe-top));
+  padding: var(--safe-top) 8px 0;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--titlebar-bg, var(--color-canvas));
+  color: var(--titlebar-fg, var(--color-text));
+  position: relative;
+  z-index: 30;
+}
+
+:root[data-tepub-layout="phone"] .m-page-back {
+  width: var(--tap-target);
+  height: var(--tap-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+}
+
+:root[data-tepub-layout="phone"] .m-page-back:active {
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+:root[data-tepub-layout="phone"] .m-page-back svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+:root[data-tepub-layout="phone"] .m-page-heading {
+  min-width: 0;
+  text-align: center;
+}
+
+:root[data-tepub-layout="phone"] .m-page-title,
+:root[data-tepub-layout="phone"] .m-page-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-tepub-layout="phone"] .m-page-title {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+:root[data-tepub-layout="phone"] .m-page-subtitle {
+  margin-top: 1px;
+  color: var(--titlebar-muted, var(--color-muted));
+  font-size: 11px;
+}
+
+/* 外壳已经有顶部返回行时，页内自己画的状态栏安全区不再重复加一遍。 */
+:root[data-tepub-phone-secondary] .app-frame-body {
+  --safe-top: 0px;
+}
+
+/* 只隐藏页面级历史 topbar；编辑器的工具条、阅读器控制层都不叫这个名字。 */
+:root[data-tepub-phone-secondary] .app-frame-body .topbar {
+  display: none !important;
+}
+
+:root[data-tepub-layout="phone"] .m-header-sub {
+  font-size: 11px;
+  color: var(--color-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-tepub-layout="phone"] .m-header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+/* 44×44 是触摸最小命中区，图标本身只有 20px，靠内边距撑开 */
+:root[data-tepub-layout="phone"] .m-icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  border-radius: var(--radius-xs);
+  padding: 0;
+}
+
+:root[data-tepub-layout="phone"] .m-icon-btn:active {
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+:root[data-tepub-layout="phone"] .m-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+:root[data-tepub-layout="phone"] .m-actionbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  /* 底部安全区补在 padding 里，按钮不会被小白条压住 */
+  padding: 4px 8px calc(4px + var(--safe-bottom));
+  border-top: 1px solid var(--color-border);
+  background: var(--color-canvas);
+}
+
+/* 列表行做成按钮：整行可点，52px 高保证拇指命中；用 button 而不是 div
+   是为了自带键盘可达性与 role */
+:root[data-tepub-layout="phone"] .m-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 16px;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  /* 全站没有统一重置 box-sizing：width:100% 再加上左右各 16px 内边距，
+     行宽会变成容器的 100% + 32px。抽屉内容区因此横向溢出 32px
+     （scrollWidth 422 / clientWidth 390），右侧的版本号被切掉一截，
+     一行长按还能把抽屉左右拖动。 */
+  box-sizing: border-box;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+:root[data-tepub-layout="phone"] .m-list-row:active {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+/* ——— c. 底部导航 ———
+   槽位数不定（浏览器里没有书库），用 grid 自动等分，不用写死百分比 */
+:root[data-tepub-layout="phone"] .m-nav {
+  flex: 0 0 auto;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border-top: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-canvas) 92%, transparent);
+  padding-bottom: var(--safe-bottom);
+  z-index: 60;
+}
+
+/* 抽屉是模态层，打开期间底栏必须让位。
+   书架页的抽屉由保活视图内部渲染，固定定位的抽屉会受祖先 stacking context
+   限制；只把抽屉 z-index 抬到 2101 仍会被外层底栏盖住，底部操作按钮因此
+   被导航栏压掉一截。用 visibility 而不是 display:none：保留底栏占位，
+   避免抽屉打开时背后的页面高度突然变化并触发重排。 */
+:root[data-tepub-layout="phone"].m-sheet-open .m-nav {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+:root[data-tepub-layout="phone"] .m-nav-item {
+  min-height: var(--m-nav-h);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.1;
+  padding: 6px 4px;
+}
+
+:root[data-tepub-layout="phone"] .m-nav-item.is-active {
+  color: var(--color-accent-deep);
+  font-weight: 600;
+}
+
+:root[data-tepub-layout="phone"] .m-nav-item:active {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+}
+
+/* ——— d. 底部抽屉（配 MobileSheet.svelte） ———
+   遮罩是独立的兄弟节点而不是抽屉的父级：抽屉的点击事件不需要冒泡判断，
+   也不会因为点在抽屉空白处被误当成「点遮罩关闭」。 */
+/* 抽屉打开期间锁住背后的滚动容器。
+   手机外壳里 body 不滚 —— 滚的是 .app-frame-body 与保活视图 .ka-view，
+   所以 MobileSheet.svelte 除了设 body.overflow，还在 <html> 上加这个类。 */
+:root[data-tepub-layout="phone"].m-sheet-open .app-frame-body,
+:root[data-tepub-layout="phone"].m-sheet-open .ka-view {
+  overflow: hidden;
+}
+
+:root[data-tepub-layout="phone"] .m-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet-backdrop);
+  background: rgba(11, 20, 30, 0.34);
+  border: 0;
+  padding: 0;
+}
+
+:root[data-tepub-layout="phone"] .m-sheet-backdrop.above-overlays {
+  z-index: var(--z-sheet-above-overlays-backdrop);
+}
+
+:root[data-tepub-layout="phone"] .m-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  /* 键盘升起时 position:fixed 仍然贴布局视口底边，抽屉会被键盘盖住一半，
+     底部的「确定/关闭」直接点不到。--ime-height 由 visualViewport 写入
+     （src/lib/mobile/viewport.ts），没有键盘时它是 0，行为与原来一致。 */
+  bottom: var(--ime-height, 0px);
+  z-index: var(--z-sheet);
+  display: flex;
+  flex-direction: column;
+  /* 用 dvh 而不是 vh：移动浏览器地址栏收起/展开时 vh 不会跟着变，
+       85vh 的抽屉会突然比可视区还高；再减掉键盘那一截 */
+  max-height: calc(85dvh - var(--ime-height, 0px));
+  min-height: 0;
+  background: var(--color-surface);
+  border-radius: 20px 20px 0 0;
+  box-shadow: var(--shadow-pop);
+  padding-bottom: var(--safe-bottom);
+  animation: m-sheet-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-tepub-layout="phone"] .m-sheet.above-overlays {
+  z-index: var(--z-sheet-above-overlays);
+}
+
+:root[data-tepub-layout="phone"] .m-sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  margin: 8px auto 4px;
+  background: var(--color-border-strong);
+  flex: 0 0 auto;
+}
+
+:root[data-tepub-layout="phone"] .m-sheet-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px 8px;
+  min-height: 44px;
+}
+
+:root[data-tepub-layout="phone"] .m-sheet-title {
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-tepub-layout="phone"] .m-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0 8px;
+}
+
+:root[data-tepub-layout="phone"] .m-sheet-foot {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  /* .m-sheet 外层已经让出了 safe-bottom；这里只留操作区自身的间距，
+     否则同时有 actions 时会双倍留白。 */
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ——— e. 抽屉入场 ———
+   只做位移不做透明度：遮罩已经把背景压暗，抽屉再从下方推上来就够了，
+   淡入会让两层动画叠在一起显得发灰。 */
+@keyframes m-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* 前庭功能敏感的用户：位移最容易引发不适，直接出现即可 */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-tepub-layout="phone"] .m-sheet {
+    animation: none;
+  }
+}
+
+/* ——— f. 触屏常显提示 ———
+   桌面靠 hover 才显示的提示（例如长按/悬停说明），触屏根本没有 hover，
+   必须常显，否则这行字等于不存在。 */
+@media (hover: none) {
+  :root[data-tepub-layout="phone"] .m-hover-hint {
+    opacity: 1 !important;
+  }
+}
+
+/* ——— g. 工具页公共手机修正 ———
+
+   这一组页面（EPUB 处理 / 字体 / 结构重构 / 诊断 / 样式库 / 图片工具）
+   本来就是「单列内容 + max-width 卡住宽度」的形态，各自写了
+   @media (max-width: 700~760px) 的窄屏分支，所以 390px 下大体能重排。
+
+   它们缺的是三件与宽度无关的事，写在各页里会重复五遍：
+
+   1. 安全区。手机外壳没有页头，内容从 y=0 开始，第一张卡会压在状态栏
+      底下；页面底部也会被底部导航压住。
+   2. 触摸命中区。这些页大量用 36px 按钮和 28px 段控件，手指按不准。
+   3. 输入框 16px。低于 16px 时 iOS Safari 会在聚焦瞬间把整页放大，
+      而放大状态不会自己退回去，用户会以为页面坏了。
+
+   横屏手机（844px）不会命中各页的 max-width 媒体查询，但这一组是宽度
+   无关的，所以横竖屏都生效。 */
+/* 补在根容器上而不是内容块上：这几个页面有的把内容包在 <main class="content">
+   里，有的根节点本身就是 <main>，逐个挑选择器迟早漏一个。 */
+:root[data-tepub-layout="phone"]
+  :is(
+    .process-page,
+    .font-page,
+    .advanced-page,
+    .diagnose-page,
+    .style-library-page,
+    .image-tool-app
+  ) {
+  padding-top: var(--safe-top);
+  /* 底部导航是正常流里的最后一格，但页面内部自己滚到底时最后一行按钮
+     仍会贴着边缘 —— 补一截，不至于摸到导航栏 */
+  padding-bottom: var(--safe-bottom);
+  box-sizing: border-box;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(
+    .process-page,
+    .font-page,
+    .advanced-page,
+    .diagnose-page,
+    .style-library-page,
+    .image-tool-app
+  )
+  button:not(.m-nav-item):not(.m-icon-btn) {
+  /* 用 token 而不是字面量 40px：页内规则写 44 时会被这条（两个 :not()
+     各计一个类）按特异性压回 40，出现「写了不生效」的死声明。 */
+  min-height: var(--tap-target);
+}
+
+:root[data-tepub-layout="phone"]
+  :is(
+    .process-page,
+    .font-page,
+    .advanced-page,
+    .diagnose-page,
+    .style-library-page,
+    .image-tool-app
+  )
+  :is(input:not([type="checkbox"]):not([type="radio"]), select) {
+  min-height: 40px;
+  font-size: 16px;
+}
+
+/* 批量处理与在线图片下载不在上面那条 :is(...) 名单里（它们的根类名不同），
+   但同样从 y=0 开始画 —— 安卓状态栏会压住第一张卡片。它们各自写死了
+   上内边距，所以用 max() 取较大值：既保留原有留白，也保证 --safe-top
+   那 24px 兜底能顶住。
+
+   注意这里必须跟着页面自己的断点走。这两个页面在窄屏下会把上内边距
+   调小（batch-app 20→16、download-workspace 24→12），而本条选择器带
+   :root[data-…] 前缀，特异性高于页面里的裸类名媒体查询 —— 只写一条
+   基础值的话，竖屏反而被抬回桌面留白（12px 变 24px）。 */
+:root[data-tepub-layout="phone"] .batch-app {
+  padding-top: max(20px, var(--safe-top));
+}
+
+@media (max-width: 820px) {
+  :root[data-tepub-layout="phone"] .batch-app {
+    padding-top: max(16px, var(--safe-top));
+  }
+}
+
+:root[data-tepub-layout="phone"] .download-workspace {
+  padding-top: max(24px, var(--safe-top));
+}
+
+@media (max-width: 650px) {
+  :root[data-tepub-layout="phone"] .download-workspace {
+    padding-top: max(12px, var(--safe-top));
+  }
+}
+
+/* ——— f. 桌面弹窗按手机屏宽收缩 ———
+   书库的设置/首次启动弹窗在桌面上是 min-width:460–520px 的居中面板，
+   手机只有 390–410px 宽：面板被两侧裁掉，左边标题开头看不见，
+   右边「确定」按钮有一半点不到（真机实测按钮中心在 x=414，屏宽 406）。
+   这里不逐个页面改，统一按视口宽度收窄；外层 overlay 顺便让出状态栏
+   和手势条，面板高度受 overlay 限制，内部还是原来的滚动容器。 */
+:root[data-tepub-layout="phone"] .settings-overlay {
+    box-sizing: border-box;
+    /* 二级页正文把 --safe-top 归零，设置弹窗却是 fixed 到整个视口，
+       必须用没有被页面内容覆盖的原生安全区，否则面板顶进状态栏。 */
+    padding: calc(var(--safe-top-native) + 8px) 10px
+        calc(var(--safe-bottom) + 8px);
+    align-items: center;
+}
+
+:root[data-tepub-layout="phone"] .settings-panel {
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
+    max-width: 560px;
+    max-height: 100%;
+}
+
+/* 弹窗正文里的「标签 + 控件 + 按钮」行本来就不换行，面板一收窄就会
+   把按钮挤出右边。手机上允许换行，按钮独占一行且不低于触控尺寸。 */
+:root[data-tepub-layout="phone"] .settings-panel .set-row {
+    flex-wrap: wrap;
+}
+
+/* 拖放区在触屏上没有意义（拿不起文件，也没有拖放），但它是这些页面
+   最主要的「选择文件」入口，保留；只是把说明文字抬到能看清的大小。 */
+:root[data-tepub-layout="phone"]
+  :is(
+    .process-page,
+    .font-page,
+    .advanced-page,
+    .diagnose-page,
+    .style-library-page,
+    .image-tool-app
+  )
+  :is(.drop-zone, .upload-zone) {
+  min-height: 180px;
+}
+
+/* ——— h. 工具页视觉统一 ———
+   这批页面有相同的“说明卡 / 选项条 / 大拖放区 / 三列说明 / 结果列表”
+   结构，但各自维护了一套 max-width 断点。竖屏 390px 大体能落到各自的
+   窄屏分支，横屏 844px 却会退回桌面样式，于是同一个工具在不同方向、
+   不同入口下会出现几套字号、间距和卡片排布。
+
+   这里按手机形态而不是屏宽统一一次。所有选择器仍以
+   [data-tepub-layout="phone"] 开头，桌面端不会命中。 */
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  .content {
+  width: calc(100% - 24px);
+  margin: 12px auto max(16px, calc(var(--safe-bottom) + 16px));
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  .content
+  > * {
+  min-width: 0;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.intro-card, .intro) {
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.tool-mark, .font-mark, .mark) {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  font-size: 10px;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.intro-card, .intro)
+  h2 {
+  margin: 2px 0 5px;
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.intro-card, .intro)
+  p {
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.intro-card small, .kicker) {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.output-note, .privacy) {
+  grid-column: 1 / -1;
+  padding: 10px 0 0;
+  border-left: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+/* 选项条统一改成上下排；横屏也不再把说明和控件硬塞在一行。 */
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.format-panel, .txt-assist, .options, .watermark-options) {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.format-panel, .txt-assist, .options, .watermark-options)
+  > * {
+  min-width: 0;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  .segments {
+  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  .segments
+  button {
+  flex: 1 1 0;
+  min-height: var(--tap-target);
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  .txt-controls {
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  .txt-controls
+  .custom-select {
+  width: auto;
+  flex: 1 1 150px;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.image-options, .selection) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.features, .notes) {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.features, .notes)
+  article {
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 2px 10px;
+  padding: 12px 14px;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.features, .notes)
+  strong {
+  font-size: 13px;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.features, .notes)
+  :is(span, p) {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.drop-zone, .dropzone) {
+  width: 100%;
+  min-height: 190px;
+  box-sizing: border-box;
+  padding: 16px;
+  text-align: center;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.drop-zone, .dropzone)
+  strong {
+  font-size: 16px;
+}
+
+:root[data-tepub-layout="phone"]
+  :is(.process-page, .font-page, .advanced-page)
+  :is(.drop-zone, .dropzone)
+  > span:not(.upload-icon):not(.drop-icon):not(.choose):not(.spinner) {
+  max-width: 30ch;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+:root[data-tepub-layout="phone"] .process-page .result-list article {
+  grid-template-columns: 32px minmax(0, 1fr);
+}
+
+:root[data-tepub-layout="phone"] .process-page .result-list article > button {
+  grid-column: 2;
+  justify-self: start;
+}
+
+:root[data-tepub-layout="phone"] .font-page .status-card {
+  grid-template-columns: 40px minmax(0, 1fr);
+  padding: 14px;
+}
+
+:root[data-tepub-layout="phone"] .font-page .status-card .download {
+  grid-column: 2;
+  justify-self: start;
+}
+
+:root[data-tepub-layout="phone"] .font-page .txt-callout {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+:root[data-tepub-layout="phone"] .advanced-page .run,
+:root[data-tepub-layout="phone"] .advanced-page .outputs button {
+  width: 100%;
+}
+
+:root[data-tepub-layout="phone"] .advanced-page .chapters > div > span {
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+:root[data-tepub-layout="phone"] .advanced-page .chapters small {
+  grid-column: 2;
+}
+
+:root[data-tepub-layout="phone"] .advanced-page .outputs article {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+/* 诊断页原先把整页锁在 100vh，窄屏断点只覆盖竖屏。横屏手机宽 844px
+   时文件栏和报告栏仍是桌面双列，正文被锁在视口里滚不完整。 */
+:root[data-tepub-layout="phone"] .diagnose-page {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .result-workspace {
+  display: block;
+  height: auto;
+  overflow: visible;
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .file-sidebar {
+  display: block;
+  border-right: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .file-list {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  overflow-x: auto;
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .file-list button,
+:root[data-tepub-layout="phone"] .diagnose-page .pending-file {
+  min-width: 210px;
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .report-panel {
+  display: grid;
+  min-height: 0;
+  padding: 16px 12px max(16px, calc(var(--safe-bottom) + 16px));
+  overflow: visible;
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .report-head {
+  display: grid;
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .result-badge {
+  justify-self: start;
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .issue-toolbar {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+:root[data-tepub-layout="phone"] .diagnose-page .issue-list {
+  overflow: visible;
+}
+
+/* 在线图片下载与其它工具共用同一套手机密度；原来它只写到 max-width:
+   650px，横屏手机仍走桌面侧栏。 */
+:root[data-tepub-layout="phone"] .download-workspace {
+  width: calc(100% - 24px);
+  padding-bottom: max(18px, calc(var(--safe-bottom) + 18px));
+}
+
+:root[data-tepub-layout="phone"] .download-workspace .workspace-head {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+:root[data-tepub-layout="phone"] .download-workspace .workspace-head p {
+  white-space: normal;
+}
+
+:root[data-tepub-layout="phone"] .download-workspace .header-actions {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+:root[data-tepub-layout="phone"] .download-workspace .header-download {
+  width: 100%;
+  min-width: 0;
+}
+
+:root[data-tepub-layout="phone"] .download-workspace .content-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+:root[data-tepub-layout="phone"] .download-workspace .metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+:root[data-tepub-layout="phone"] .download-workspace .style-panel {
+  display: block;
+}
+
+:root[data-tepub-layout="phone"] .download-workspace iframe {
+  width: calc(100% - 30px);
+  min-height: 240px;
+  height: 240px;
+}
+
+@media (max-height: 500px) and (min-width: 480px) {
+  :root[data-tepub-layout="phone"] .download-workspace .metrics,
+  :root[data-tepub-layout="phone"] .diagnose-page .metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

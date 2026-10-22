@@ -10,6 +10,7 @@
         type WebEpubFontAction,
         type WebEpubFontProcessResult,
     } from "$lib/webEpubFontProcess";
+    import { triggerBrowserDownload } from "$lib/webFileWorkflow";
 
     let epubInput: HTMLInputElement | null = null;
     let txtInput: HTMLInputElement | null = null;
@@ -118,10 +119,7 @@
 
     function download() {
         if (!result) return;
-        const anchor = document.createElement("a");
-        anchor.href = result.url;
-        anchor.download = result.outputName;
-        anchor.click();
+        triggerBrowserDownload(result.url, result.outputName);
     }
 
     onDestroy(clearResult);

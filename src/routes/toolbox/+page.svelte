@@ -3,8 +3,8 @@
     import { goto } from "$app/navigation";
     import { base } from "$app/paths";
     import {
+        clientLayout,
         getWebClientViewOverride,
-        isMobileUserAgent,
         setWebClientViewOverride,
     } from "$lib/clientProfile";
     import { platform, type PlatformWindowHandle } from "$lib/platform";
@@ -113,6 +113,7 @@
     const TOOLBOX_WINDOW_WIDTH = 1200;
     const TOOLBOX_WINDOW_HEIGHT = 740;
     const THEME_OPTIONS = [
+        { value: "system", label: "跟随系统" },
         { value: "light", label: "浅色" },
         { value: "dark", label: "深色" },
     ];
@@ -344,7 +345,11 @@
 
     let activeToolGroup: ToolGroupFilter = "all";
     let toolSearch = "";
+    // 只认共享的布局判定，别在这里再猜一遍 UA/宽度：
+    // 页面里“按手机布局”与 CSS 的 [data-tepub-layout="phone"] 必须同源，
+    // 否则会出现“按手机逻辑渲染、却拿到桌面样式”的半吊子状态。
     let isMobileClient = false;
+    $: isMobileClient = $clientLayout === "phone";
     $: normalizedToolSearch = toolSearch.trim().toLocaleLowerCase("zh-CN");
     $: visibleToolGroups = toolGroups
         .map((group) => ({
@@ -964,7 +969,12 @@
     function setUiTheme(value: string) {
         const normalized =
             value === "modern" || value === "classic" ? "light" : value;
-        if (normalized !== "light" && normalized !== "dark") return;
+        if (
+            normalized !== "light" &&
+            normalized !== "dark" &&
+            normalized !== "system"
+        )
+            return;
         appSettings.uiTheme = normalized as typeof appSettings.uiTheme;
         saveGlobalSettings();
     }
@@ -1160,13 +1170,6 @@
     }
 
     onMount(() => {
-        const updateMobileClient = () => {
-            isMobileClient =
-                isMobileUserAgent() ||
-                window.matchMedia?.("(max-width: 760px)")?.matches ||
-                window.matchMedia?.("(pointer: coarse)")?.matches;
-        };
-        updateMobileClient();
         loadGlobalSettingsWithLegacy();
         refreshWebClientViewState();
         const onSettingsUpdated = () => {
@@ -1174,15 +1177,11 @@
             appSettings = loadAppSettings();
         };
         window.addEventListener("tepub-settings-updated", onSettingsUpdated);
-        window.addEventListener("resize", updateMobileClient);
-        window.addEventListener("orientationchange", updateMobileClient);
         return () => {
             window.removeEventListener(
                 "tepub-settings-updated",
                 onSettingsUpdated,
             );
-            window.removeEventListener("resize", updateMobileClient);
-            window.removeEventListener("orientationchange", updateMobileClient);
         };
     });
 </script>
@@ -2286,39 +2285,6 @@
         text-decoration: underline;
     }
 
-    :global(:root[data-tepub-client="web-mobile"]) .toolbox-app {
-        min-height: 100dvh;
-        height: auto;
-        overflow: visible;
-    }
-
-    :global(:root[data-tepub-client="web-mobile"]) .toolbox-content {
-        width: calc(100% - 20px);
-        flex: 0 0 auto;
-        min-height: auto;
-        padding: max(52px, calc(env(safe-area-inset-top) + 18px)) 0
-            max(18px, env(safe-area-inset-bottom));
-        overflow: visible;
-    }
-
-    :global(:root[data-tepub-client="web-mobile"]) .tool-directory {
-        grid-template-columns: 1fr;
-    }
-
-    :global(:root[data-tepub-client="web-mobile"]) .tool-main {
-        min-height: 70px;
-    }
-
-    :global(:root[data-tepub-client="web-mobile"]) .toolbox-commandbar {
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 8px;
-    }
-
-    :global(:root[data-tepub-client="web-mobile"]) .toolbox-filter-tabs {
-        grid-column: 1 / -1;
-        grid-row: 1;
-    }
-
     @media (max-width: 980px) {
         .tool-directory {
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2430,6 +2396,187 @@
             grid-column: auto;
             grid-row: auto;
         }
+    }
+
+    /* ——— 设置面板的手机形态 ———
+       不能留在上面的 @media (max-width: 640px) 里：横屏手机宽 844px，
+       整块不匹配，会掉回桌面 grid（min-height 480px 比视口还高，关闭按钮
+       直接跑到屏幕外）。这里按形态属性重写一遍，与宽度解耦。 */
+    :global(:root[data-tepub-layout="phone"]) .toolbox-settings-overlay {
+        padding: calc(var(--safe-top-native) + 12px) 12px
+            calc(var(--safe-bottom) + 12px);
+        /* 必须盖过底部导航（.m-nav 的 z-index 是 60）：
+           否则设置面板开着还能点底部导航切页，再叠一层抽屉 */
+        z-index: var(--z-sheet-backdrop);
+    }
+
+    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel) {
+        display: flex;
+        flex-direction: column;
+        width: min(100%, 520px);
+        min-width: 0;
+        min-height: 0;
+        max-height: min(90dvh, 720px);
+    }
+
+    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel .settings-shell-tabs) {
+        flex-direction: row;
+        /* 面板是 column flex：页签条可收缩，横屏 844×390 里会被压到 35px，
+           而按钮是 44px —— 整排文字底部被横切。固定为内容高度不收缩。 */
+        flex: 0 0 auto;
+        grid-column: auto;
+        grid-row: auto;
+        overflow-x: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+        padding: 6px 12px;
+    }
+
+    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel .settings-shell-tabs .tab-btn) {
+        width: auto;
+        white-space: nowrap;
+        min-height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel .settings-shell-body) {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        grid-column: auto;
+        grid-row: auto;
+    }
+
+    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel .settings-shell-footer) {
+        flex: 0 0 auto;
+        grid-column: auto;
+        grid-row: auto;
+    }
+
+    /* ——— 手机布局 ———
+       挂 data-tepub-layout 而不是 data-tepub-client：安卓壳里后者永远是
+       "tauri"，下面这些规则在 App 里从来没生效过。
+       放在两个 max-width 媒体查询之后，窄窗口桌面的那两段保持原样。 */
+    :global(:root[data-tepub-layout="phone"]) .toolbox-app {
+        min-height: 100dvh;
+        height: auto;
+        overflow: visible;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbox-content {
+        width: calc(100% - 20px);
+        flex: 0 0 auto;
+        min-height: auto;
+        /* 标题条/标签条已在正常流里，52px 是当年固定头部的遗留，手机上白占一截。
+           但状态栏那一截还得让：手机外壳不再渲染标签条，没有人替这里补安全区了，
+           所以 --safe-top 由这一行自己消费（安卓壳里它有 24px 兜底，见 app.css）。 */
+        padding: calc(8px + var(--safe-top)) 0
+            max(16px, calc(var(--safe-bottom) + 16px));
+        overflow: visible;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .tool-directory {
+        grid-template-columns: 1fr;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .tool-main {
+        min-height: 72px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .tool-title {
+        font-size: 14px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .tool-detail {
+        font-size: 12px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbox-commandbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        /* 吸顶条的 top 必须自己让出状态栏：手机外壳不渲染标签条，
+           .app-frame-body 的顶边就是视口顶边，滚起来以后 top:0 会贴在
+           Android 状态栏 / iPhone 刘海底下（content 的 padding 已经滚走了）。 */
+        top: var(--safe-top);
+        /* 低端安卓 WebView 不支持 backdrop-filter，92% 半透明底会让滚动内容
+           透上来糊成一片，所以先给不透明底，支持模糊时才换回半透明。 */
+        background: var(--color-canvas);
+        backdrop-filter: none;
+    }
+
+    @supports (backdrop-filter: blur(1px)) {
+        :global(:root[data-tepub-layout="phone"]) .toolbox-commandbar {
+            background: color-mix(
+                in srgb,
+                var(--color-canvas) 92%,
+                transparent
+            );
+            backdrop-filter: blur(12px);
+        }
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbox-filter-tabs {
+        grid-column: 1 / -1;
+        grid-row: 1;
+    }
+
+    /* 横屏（844×390）把三条挤回一行。
+       竖屏 390 宽时分类页签必须独占一行（五个页签 430px），但横屏有 844：
+       页签 430 + 搜索 300 + 两个图标 96 正好放得下。放过它就得占 116px，
+       而整屏只有 390px 高、底部导航 52px —— 工具列表只剩 220px，
+       一屏一个半条目。改一行后 44px，列表多出一屏半。
+       只对矮屏生效，竖屏和桌面都不命中。 */
+    /* 判据必须是「矮 + 宽」，不能用 orientation。
+       app.html 设了 interactive-widget=resizes-content：竖屏弹软键盘会把布局
+       视口压到 500 以下，此时高度 < 宽度，orientation 也跟着翻成 landscape
+       （实测 375×367 命中，搜索框被压成 22px）。真横屏最窄也有 568px 宽，
+       键盘态的竖屏手机只有 320–430px，min-width: 480px 才能把两者分开。 */
+    @media (max-height: 500px) and (min-width: 480px) {
+        :global(:root[data-tepub-layout="phone"]) .toolbox-commandbar {
+            grid-template-columns: auto minmax(120px, 1fr) auto;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .toolbox-filter-tabs {
+            grid-column: 1;
+            grid-row: 1;
+            min-width: 0;
+            overflow-x: auto;
+        }
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbox-filter-tabs button {
+        min-height: var(--tap-target);
+        padding: 0 12px;
+        font-size: 13px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbox-search {
+        min-height: var(--tap-target);
+    }
+
+    /* 低于 16px 时 iOS 聚焦会整页放大，且退不回去 */
+    :global(:root[data-tepub-layout="phone"]) .toolbox-search input {
+        font-size: 16px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbox-home-actions {
+        min-height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbox-home-actions button {
+        min-width: var(--tap-target);
+        min-height: var(--tap-target);
+    }
+
+    /* 设置面板里的按钮/输入框同样是给手指用的 */
+    :global(:root[data-tepub-layout="phone"]) .toolbox-settings-btn,
+    :global(:root[data-tepub-layout="phone"]) .toolbox-mini-btn,
+    :global(:root[data-tepub-layout="phone"]) .api-kind-switch button {
+        min-height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbox-settings-btn {
+        width: var(--tap-target);
+        height: var(--tap-target);
     }
 
     .toolbox-app.desktop-view,

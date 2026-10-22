@@ -6,7 +6,8 @@ build/
 
 # Rust / Tauri Artifacts
 src-tauri/target/
-src-tauri/gen/
+/src-tauri/gen/*
+!/src-tauri/gen/android/
 
 # Android Local Files
 local.properties

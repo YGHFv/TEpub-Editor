@@ -1,6 +1,12 @@
 <script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onDestroy, onMount, tick } from "svelte";
     import { goto } from "$app/navigation";
+    import { tabIdFor } from "$lib/secondaryTabs";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
+    import { viewUrl } from "$lib/keepAlive/viewState";
     import { invoke } from "@tauri-apps/api/core";
     import { message } from "@tauri-apps/plugin-dialog";
     import {
@@ -1368,11 +1374,26 @@
         }
     }
 
+    /**
+     * 本页在标签登记表里的 id。用 viewUrl() 而不是全局 page.url：保活视图里
+     * 全局地址会随别的标签跳转而变，算出来的 id 和宿主登记的对不上，
+     * guard 就永远命不中。
+     */
+    const ownTabId = tabIdFor(viewUrl().pathname, viewUrl().search);
+
     onMount(() => {
         const selection = readMobileSelection(window.location.search);
         if (selection.path) {
             void loadEpub(selection.path, selection.name);
         }
+
+        // 手机外壳会为省内存裁掉最久没访问的保活页（见 lib/keepAlive/dirtyGuard）。
+        // 这一页的未保存内容只活在前端的 editingContent 里：真被卸载就没了，
+        // 而且没有任何草稿可恢复。
+        registerKeepAliveGuard(
+            ownTabId,
+            () => Boolean(editingFile && editorDirty),
+        );
 
         const handlePopState = () => {
             if (restoringFileLayer || !editingFile || hasFileLayerState())
@@ -1404,6 +1425,8 @@
             clearThumbnailUrls();
         };
     });
+
+    onDestroy(() => unregisterKeepAliveGuard(ownTabId));
 </script>
 
 <svelte:head>
@@ -1889,8 +1912,8 @@
         height: 100dvh;
         min-height: 100dvh;
         box-sizing: border-box;
-        padding: max(10px, env(safe-area-inset-top)) 0
-            max(44px, env(safe-area-inset-bottom));
+        padding: max(10px, var(--safe-top)) 0
+            max(44px, var(--safe-bottom));
         overflow-y: auto;
         background: var(--color-canvas);
         color: var(--color-text);
@@ -1928,6 +1951,17 @@
         background: transparent;
         color: inherit;
         padding: 0;
+    }
+
+    /* 返回箭头只有 34px 宽，手指按偏一格就落到边缘空白。
+       手机形态把返回列和箭头都抬到触控尺寸；桌面保持 38px/34px 原样。 */
+    :global(:root[data-tepub-layout="phone"]) .topbar {
+        grid-template-columns: var(--tap-target) minmax(0, 1fr);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .topbar .back-button {
+        width: var(--tap-target);
+        height: var(--tap-target);
     }
 
     .topbar .back-button svg {
@@ -1995,7 +2029,7 @@
     .replace-panel {
         display: grid;
         gap: 7px;
-        margin: 8px 12px max(12px, calc(env(safe-area-inset-bottom) + 6px));
+        margin: 8px 12px max(12px, calc(var(--safe-bottom) + 6px));
         border: 0;
         border-radius: var(--radius-lg);
         background: var(--color-surface);
@@ -2540,7 +2574,7 @@
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 10px;
         align-items: center;
-        padding: max(10px, env(safe-area-inset-top)) 12px 8px;
+        padding: max(10px, var(--safe-top)) 12px 8px;
         background: transparent;
         position: sticky;
         top: 0;
@@ -2683,5 +2717,40 @@
             max-width: 760px;
             margin: 0 auto;
         }
+    }
+
+    /* ——— 手机形态：命中区 ———
+       这一页的按钮都是按桌面的紧凑密度写的：选书 36、分组头 38、
+       折叠箭头 26、分组图标 24、「更多」30、确认弹层 38。
+       手机上这些是文件树的唯一操作入口 —— 点不准就会误选到整行、
+       展开分组，或者把文件在编辑器里打开。「更多」尤其危险：它和
+       整行的「打开」只差 4px 间距，按偏就变成了打开文件。
+
+       桌面窗口的 <html> 上没有 data-tepub-layout="phone"，全部不命中，
+       紧凑密度原样保留。 */
+    :global(:root[data-tepub-layout="phone"]) .empty button,
+    :global(:root[data-tepub-layout="phone"]) .group-head,
+    :global(:root[data-tepub-layout="phone"]) .confirm-sheet-actions button,
+    :global(:root[data-tepub-layout="phone"]) .action-sheet-actions button {
+        min-height: var(--tap-target);
+    }
+
+    /* 折叠箭头本身在 .group-head 里，抬高它会把整行撑到 44 以上；
+       这里只保证它自己也是 44 高、且不再压缩。 */
+    :global(:root[data-tepub-layout="phone"]) .group-title,
+    :global(:root[data-tepub-layout="phone"]) .group-icon,
+    :global(:root[data-tepub-layout="phone"]) .file-more {
+        min-height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .group-icon,
+    :global(:root[data-tepub-layout="phone"]) .file-more {
+        width: var(--tap-target);
+        height: var(--tap-target);
+    }
+
+    /* 文件行的右列是「更多」的网格轨道，写死 34px 会把 44px 的按钮压回去。 */
+    :global(:root[data-tepub-layout="phone"]) .file-row {
+        grid-template-columns: minmax(0, 1fr) var(--tap-target);
     }
 </style>

@@ -14,6 +14,7 @@
         type WebEpubAdvancedResult,
         type WebEpubChapterTarget,
     } from "$lib/webEpubAdvanced";
+    import { triggerBrowserDownload } from "$lib/webFileWorkflow";
 
     type AdvancedToolConfig = {
         title: string;
@@ -287,9 +288,13 @@
     }
 
     function handleFileChange(event: Event) {
-        void setFiles(
-            Array.from((event.currentTarget as HTMLInputElement).files || []),
+        const files = Array.from(
+            (event.currentTarget as HTMLInputElement).files || [],
         );
+        // 取消对话框也会派发 change。空列表若照常交给 setFiles，
+        // 会清掉已经选好的文件并挂上「请选择 EPUB 文件」—— 用户明明什么都没做。
+        if (!files.length) return;
+        void setFiles(files);
         if (fileInput) fileInput.value = "";
     }
 
@@ -333,10 +338,7 @@
     }
 
     function download(item: { name: string; url: string }) {
-        const anchor = document.createElement("a");
-        anchor.href = item.url;
-        anchor.download = item.name;
-        anchor.click();
+        triggerBrowserDownload(item.url, item.name);
     }
 
     async function downloadAll() {

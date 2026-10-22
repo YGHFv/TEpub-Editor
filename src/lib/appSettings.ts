@@ -4,7 +4,8 @@ import {
   writeScopedSettingsRaw,
 } from "$lib/webAccount";
 
-export type UiTheme = "light" | "dark";
+export type UiTheme = "light" | "dark" | "system";
+export type EffectiveTheme = "light" | "dark";
 export type AiProviderKind = "text" | "image";
 
 export interface TocRegexRule {
@@ -100,7 +101,7 @@ export const DEFAULT_TOC_REGEX_RULES: TocRegexRule[] = [
 ];
 
 export const DEFAULT_APP_SETTINGS: GlobalAppSettings = {
-  uiTheme: "light",
+  uiTheme: "system",
   assocEpubRead: false,
   assocEpubEdit: false,
   assocTxtMakeEpub: false,
@@ -220,7 +221,7 @@ export function providerToProofingConfig(
 }
 
 function isUiTheme(value: unknown): value is UiTheme {
-  return value === "light" || value === "dark";
+  return value === "light" || value === "dark" || value === "system";
 }
 
 function migrateUiTheme(value: unknown): UiTheme | null {
@@ -383,25 +384,115 @@ export function usesMultiWindow() {
   return loadAppSettings().secondaryWindows === true;
 }
 
-/** 各主题下的窗口/画布底色，供 <meta theme-color> 与原生标题栏同步使用 */
-export const THEME_CANVAS_COLORS: Record<UiTheme, string> = {
+/** 各实际主题下的窗口/画布底色，供 <meta theme-color> 与原生标题栏同步使用 */
+export const THEME_CANVAS_COLORS: Record<EffectiveTheme, string> = {
   light: "#eef4f8",
   dark: "#191e26",
 };
 
-export function applyTheme(theme: UiTheme) {
+const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
+export const THEME_RESOLVED_EVENT = "tepub-theme-resolved";
+let activeThemePreference: UiTheme = "system";
+let systemThemeMedia: MediaQueryList | null = null;
+let systemThemeListenerInstalled = false;
+
+/** 系统是否处于深色。非浏览器环境按浅色处理。 */
+export function systemPrefersDark(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(SYSTEM_DARK_QUERY).matches
+  );
+}
+
+/** 把「跟随系统」解析成真正用于渲染的 light/dark。 */
+export function resolveUiTheme(
+  theme: UiTheme | string | null | undefined,
+): EffectiveTheme {
+  const normalized = migrateUiTheme(theme) ?? "system";
+  if (normalized === "dark") return "dark";
+  if (normalized === "system") return systemPrefersDark() ? "dark" : "light";
+  return "light";
+}
+
+function applyResolvedTheme() {
   if (typeof document === "undefined") return;
-  const normalized = migrateUiTheme(theme) ?? "light";
-  document.documentElement.setAttribute("data-theme", normalized);
+  const resolved = resolveUiTheme(activeThemePreference);
+  const changed = document.documentElement.dataset.theme !== resolved;
+  document.documentElement.setAttribute("data-theme", resolved);
+  document.documentElement.dataset.themePreference = activeThemePreference;
   // color-scheme 让原生控件（滚动条、下拉、表单）一起跟着切，
   // 否则深色皮肤下 WebView 仍按浅色画默认控件
-  document.documentElement.style.colorScheme = normalized;
+  document.documentElement.style.colorScheme = resolved;
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", THEME_CANVAS_COLORS[normalized]);
+  if (meta) meta.setAttribute("content", THEME_CANVAS_COLORS[resolved]);
   // app.html 的内联脚本在首帧前就设过内联底色；这里接管后要撤掉，
   // 否则以后切回浅色时那层内联深色还压在上面（内联样式优先级高于 app.css）
   document.documentElement.style.removeProperty("background");
-  void syncNativeWindowTheme(normalized);
+  syncAndroidSystemBars(resolved === "dark");
+  void syncNativeWindowTheme(resolved);
+  if (changed) {
+    window.dispatchEvent(
+      new CustomEvent(THEME_RESOLVED_EVENT, { detail: resolved }),
+    );
+  }
+}
+
+function ensureSystemThemeListener() {
+  if (
+    systemThemeListenerInstalled ||
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function"
+  )
+    return;
+  systemThemeMedia = window.matchMedia(SYSTEM_DARK_QUERY);
+  const onChange = () => {
+    if (activeThemePreference === "system") applyResolvedTheme();
+  };
+  systemThemeMedia.addEventListener?.("change", onChange);
+  // 旧版 WebView 只有 addListener
+  if (!systemThemeMedia.addEventListener) {
+    systemThemeMedia.addListener?.(onChange);
+  }
+  systemThemeListenerInstalled = true;
+}
+
+export function applyTheme(theme: UiTheme) {
+  activeThemePreference = migrateUiTheme(theme) ?? "system";
+  ensureSystemThemeListener();
+  applyResolvedTheme();
+}
+
+/**
+ * Android WebView 的系统栏是原生绘制的，CSS 的 data-theme 管不到图标颜色。
+ * MainActivity 通过 addJavascriptInterface 暴露这个很小的桥；非 Android
+ * 环境没有对象时直接跳过。首次调用可能早于 WebView 注入，稍后再补一次。
+ */
+function syncAndroidSystemBars(dark: boolean) {
+  if (typeof window === "undefined") return;
+  const bridge = (window as Window & {
+    TepubAndroid?: { setDarkMode?: (value: boolean) => void };
+  }).TepubAndroid;
+  if (typeof bridge?.setDarkMode === "function") {
+    try {
+      bridge.setDarkMode(dark);
+      return;
+    } catch {
+      // 原生侧异常不应影响主题切换
+    }
+  }
+  window.setTimeout(() => {
+    const retry = (window as Window & {
+      TepubAndroid?: { setDarkMode?: (value: boolean) => void };
+    }).TepubAndroid;
+    try {
+      // 定时器触发时重新解析当前偏好。连续快速切换主题时，较早排下的
+      // 重试不能拿着旧值把刚刚生效的系统栏图标颜色覆盖回去。
+      retry?.setDarkMode?.(resolveUiTheme(activeThemePreference) === "dark");
+    } catch {
+      // Ignore: web builds never expose the bridge.
+    }
+  }, 250);
 }
 
 /**
@@ -409,7 +500,7 @@ export function applyTheme(theme: UiTheme) {
  * 切到深色时要显式告诉 WebView2/AppKit，否则顶部标题行永远是浅色
  * （截图里深色界面顶着一整条白条就是这个原因）。
  */
-async function syncNativeWindowTheme(theme: UiTheme) {
+async function syncNativeWindowTheme(theme: EffectiveTheme) {
   try {
     // 动态 import：web 构建里不该把 tauri 模块带进来
     const { isTauriRuntime } = await import("$lib/webAccount");

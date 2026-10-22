@@ -3,7 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover：让 env(safe-area-inset-*) 真的有值（安卓无边框全屏、
+         iPhone 刘海都需要它，否则安全区恒为 0）。
+         interactive-widget=resizes-content：软键盘弹出时缩布局视口而不是盖住它 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <!-- 浏览器/WebView 的界面条跟着主题走（web 端顶栏、移动端状态栏） -->
     <meta name="theme-color" content="#eef4f8" />
     <script>
@@ -44,29 +50,121 @@
           } else {
             raw = parse(localStorage.getItem("app-settings"));
           }
-          var theme = raw && raw.uiTheme;
-          if (theme === "dark") {
-            document.documentElement.dataset.theme = "dark";
-            document.documentElement.style.colorScheme = "dark";
+          var preference =
+            raw && raw.uiTheme === "light"
+              ? "light"
+              : raw && raw.uiTheme === "dark"
+                ? "dark"
+                : "system";
+          var systemDark = !!(
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+          );
+          var effectiveTheme =
+            preference === "dark" ||
+            (preference === "system" && systemDark)
+              ? "dark"
+              : "light";
+          document.documentElement.dataset.themePreference = preference;
+          document.documentElement.dataset.theme = effectiveTheme;
+          document.documentElement.style.colorScheme = effectiveTheme;
+          var themeMeta = document.querySelector('meta[name="theme-color"]');
+          if (themeMeta) {
+            themeMeta.setAttribute(
+              "content",
+              effectiveTheme === "dark" ? "#191e26" : "#eef4f8",
+            );
+          }
+          if (effectiveTheme === "dark") {
             // 内联背景色兜住样式表到达前的那一帧，颜色同 --color-canvas
             document.documentElement.style.background = "#191e26";
-            var themeMeta = document.querySelector('meta[name="theme-color"]');
-            if (themeMeta) themeMeta.setAttribute("content", "#191e26");
           }
-          if (!isWeb) return;
+          // ---- 手机 / 桌面形态，必须在本帧就落到 <html> 上，
+          // 否则手机用户会先看到一帧桌面布局再跳成手机布局。
+          // 规则与 src/lib/clientProfile.ts 的 resolveClientLayout() 一一对应
+          // （内联脚本无法 import，改动必须两处同步）：
+          //   显式覆盖 > 移动 UA > 视口 ≤ 760（仅 web） > 桌面
+          // 宽度只在 web 下参与：桌面 Tauri 的小窗（查找替换 560×360、
+          // EPUB 元数据 540×620）也很窄，但它们不是手机。
           var queryView = new URLSearchParams(location.search).get("view");
-          // 该 key 与 src/lib/storageKeys.ts 的 WEB_VIEW_OVERRIDE_KEY 同值：
-          // 内联脚本无法 import，改动必须两处同步。
+          // 该 key 与 src/lib/storageKeys.ts 的 WEB_VIEW_OVERRIDE_KEY 同值。
           var storedView = localStorage.getItem("tepub-web-view-mode");
           var view =
             queryView === "desktop" || queryView === "mobile"
               ? queryView
               : storedView;
+          var mobileUA =
+            /Android|webOS|iPhone|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(
+              navigator.userAgent || "",
+            ) ||
+            (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+          var narrowWeb = isWeb && window.innerWidth <= 760;
+          var layout =
+            view === "mobile"
+              ? "phone"
+              : view === "desktop"
+                ? "desktop"
+                : mobileUA || narrowWeb
+                  ? "phone"
+                  : "desktop";
+          var root = document.documentElement;
+          root.dataset.tepubLayout = layout;
+          root.dataset.tepubRuntime = isWeb ? "web" : "tauri";
+          // 安卓 edge-to-edge 的 env(safe-area-inset-*) 只覆盖刘海，状态栏和
+          // 手势条高度要从原生 WindowInsets 拿。这里先落 24px 兜底，随后
+          // 同步读取桥接值；旋转后窗口 resize 会再读一次。
+          function applyNativeSafeArea() {
+            try {
+              var bridge = window.TepubAndroid;
+              if (
+                !bridge ||
+                typeof bridge.getSafeAreaInsets !== "function"
+              ) {
+                return false;
+              }
+              var rawInsets = bridge.getSafeAreaInsets();
+              var insets =
+                typeof rawInsets === "string"
+                  ? JSON.parse(rawInsets)
+                  : rawInsets;
+              if (!insets || typeof insets !== "object") return false;
+              var values = [
+                ["--safe-top-min", insets.top],
+                ["--safe-bottom-min", insets.bottom],
+                ["--safe-left-min", insets.left],
+                ["--safe-right-min", insets.right],
+              ];
+              for (var i = 0; i < values.length; i += 1) {
+                var number = Number(values[i][1]);
+                if (Number.isFinite(number) && number >= 0) {
+                  root.style.setProperty(
+                    values[i][0],
+                    Math.round(number * 100) / 100 + "px",
+                  );
+                }
+              }
+              return true;
+            } catch (error) {
+              return false;
+            }
+          }
+          if (!isWeb && mobileUA) {
+            root.style.setProperty("--safe-top-min", "24px");
+            applyNativeSafeArea();
+            window.addEventListener("resize", applyNativeSafeArea);
+            window.setTimeout(applyNativeSafeArea, 120);
+            window.setTimeout(applyNativeSafeArea, 600);
+          }
+          // 原生侧拿到最终 WindowInsets 后会调用这个全局函数。
+          window.__tepubApplyNativeSafeArea = applyNativeSafeArea;
+          if (!isWeb) return;
+          // 旧钩子，值域不变（见 clientProfile.ts 的说明）
+          root.dataset.tepubClient =
+            layout === "phone" ? "web-mobile" : "web-desktop";
           if (view === "desktop") {
             document
               .querySelector('meta[name="viewport"]')
               .setAttribute("content", "width=1200, initial-scale=1");
-            document.documentElement.dataset.tepubClient = "web-desktop";
           }
         } catch (error) {
           // Keep the default responsive viewport if browser storage is unavailable.

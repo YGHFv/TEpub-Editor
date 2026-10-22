@@ -192,6 +192,7 @@ pub fn run() {
             ai::list_ai_proofing_logs,
             ai::read_ai_proofing_log,
             app::get_app_mode_info,
+            app::list_library_directories,
             // ===== Library Phase 2 =====
             library::add_book_to_library,
             library::remove_book_from_library,

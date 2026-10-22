@@ -77,7 +77,11 @@
 
     function handleFileChange(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
-        void diagnoseFiles(Array.from(input.files || []));
+        const files = Array.from(input.files || []);
+        // 取消选择时浏览器也会派发 change，files 为空。那不是"选错了文件"，
+        // 不该把已有的诊断结果替换成一条红字失败。
+        if (!files.length) return;
+        void diagnoseFiles(files);
     }
 
     function handleImportFiles(event: CustomEvent<File[]>) {

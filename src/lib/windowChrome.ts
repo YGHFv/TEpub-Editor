@@ -6,6 +6,8 @@
  * - mac-overlay：macOS 用 titleBarStyle: "Overlay"，红黄绿按钮仍由系统绘制并
  *   浮在页面左上角，所以只要留出左侧安全区，不能自己再画一套按钮
  */
+import { isMobileUserAgent } from "./deviceProfile";
+
 export type WindowChromeMode = "none" | "custom" | "mac-overlay";
 
 function isTauriRuntime() {
@@ -28,10 +30,21 @@ function isLinux() {
   return /Linux/i.test(nav.userAgent || "") && !/Android/i.test(nav.userAgent);
 }
 
+/**
+ * Android / iOS 的 Tauri 壳：只有一个全屏 Activity，没有可以最小化、
+ * 最大化、关闭的窗口框。以前这里落到 "custom"，于是在手机上画出三个
+ * 完全无效的桌面窗口按钮，还占掉 40px 高度，并被状态栏压住。
+ */
+export function isMobileRuntime() {
+  return isMobileUserAgent();
+}
+
 export function detectWindowChrome(): WindowChromeMode {
   // 不依赖 $app/environment：这个函数在 +layout 顶层和 onMount 里都会调用，
   // 服务端渲染时 window 不存在，直接判 typeof 更省事
   if (typeof window === "undefined" || !isTauriRuntime()) return "none";
+  // 手机壳没有窗口框（见上）
+  if (isMobileRuntime()) return "none";
   if (isMacOS()) return "mac-overlay";
   // Linux：tao 在无边框窗口上没法拖动边缘缩放（Windows 靠 WM_NCHITTEST 才行），
   // 关掉系统边框会让窗口既不能改大小也没法最大化。所以 Linux 保留系统标题栏，

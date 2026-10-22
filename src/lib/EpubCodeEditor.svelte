@@ -3,7 +3,7 @@
     import { EditorView, basicSetup } from "codemirror";
     import { EditorState, Compartment } from "@codemirror/state";
     import { keymap, drawSelection } from "@codemirror/view";
-    import { indentWithTab } from "@codemirror/commands";
+    import { indentWithTab, undo, redo } from "@codemirror/commands";
     import { search } from "@codemirror/search";
     import { html } from "@codemirror/lang-html";
     import { css } from "@codemirror/lang-css";
@@ -18,7 +18,21 @@
     export let onScroll: (event: Event) => void = () => {};
     export let onClick: (line: number) => void = () => {};
     export let onSelectionChange: (text: string) => void = () => {};
+    /**
+     * 光标所在行（1 起）变化时回调：打字、方向键、输入法都会触发。
+     * 手机动作条上的「行 N」靠它实时刷新 —— 只在点击/切栏时同步的话，
+     * 打了几十行之后按钮还写着进来时的行号。
+     */
+    export let onCursorLine: (line: number) => void = () => {};
     export let onOpenSearch: () => void = () => {};
+    /**
+     * 触摸输入模式：关掉移动端键盘的自动大写 / 自动纠错 / 拼写波浪线。
+     *
+     * 手机打 XHTML 时这三个默认全开 会把 <div class="x"> 变成 <Div class="x">
+     * 并给每个标签画红波浪线 —— 代码编辑器里它们全是负作用。
+     * 桌面不传 = 不写这些属性，行为与原来完全一致。
+     */
+    export let touchInput = false;
 
     let editorElement: HTMLElement;
     let view: EditorView;
@@ -154,18 +168,37 @@
     }
     let fontSize = 14;
     const themeCompartment = new Compartment();
+    /** 自动换行开关。触摸屏上横向滚动很难用，手机默认开、可手动关 */
+    let lineWrapping = true;
+    const wrapCompartment = new Compartment();
+    /** 触摸输入属性（autocapitalize 等），按 touchInput 切换 */
+    const inputCompartment = new Compartment();
 
     // 内部状态跟踪
     let lastKnownDoc = "";
 
     // 监听外部 doc 变化 - 使用 setState 重置状态以清除撤销历史
-    $: if (view && doc !== lastKnownDoc) {
+    function applyExternalDoc() {
+        if (!view || view.composing || doc === lastKnownDoc) return;
         const stateDoc = view.state.doc;
         if (doc.length !== stateDoc.length || doc !== stateDoc.toString()) {
             // 完全重置编辑器状态，清除撤销历史
             lastKnownDoc = doc;
             view.setState(createEditorState(doc));
         }
+    }
+
+    // 拼字期间不能 setState，否则会打断拼音/五笔候选。此时先记住外部 doc
+    // 已经变了，等 composition 结束再补同步。只在 $: 里判 view.composing
+    // 不够：它会跳过，但 composing 结束不是 Svelte 响应式状态，doc 又没再
+    // 变时不会重跑，最后编辑区会一直停在旧文件上。
+    $: if (view && doc !== lastKnownDoc) applyExternalDoc();
+
+    let wasComposing = false;
+    function syncAfterComposition() {
+        queueMicrotask(() => {
+            if (view && !view.composing) applyExternalDoc();
+        });
     }
 
     let blockNativeSearch: (e: KeyboardEvent) => void;
@@ -218,6 +251,25 @@
         }
     }
 
+    /**
+     * 触摸输入相关的 DOM 属性。
+     *
+     * CodeMirror 把 contenteditable 建在 .cm-content 上，属性必须写到那个
+     * 节点上，写在宿主 div 上不生效 —— 所以走一个 EditorView 扩展。
+     * touchInput 为 false 时返回空数组，桌面拿到的 extension 列表与以前一致。
+     */
+    function touchInputExtensions(enabled: boolean) {
+        if (!enabled) return [];
+        return [
+            EditorView.contentAttributes.of({
+                autocapitalize: "off",
+                autocorrect: "off",
+                autocomplete: "off",
+                spellcheck: "false",
+            }),
+        ];
+    }
+
     function createEditorState(initialDoc: string) {
         const cspNonce = getCodeMirrorCspNonce();
 
@@ -227,7 +279,8 @@
                 ...(cspNonce ? [EditorView.cspNonce.of(cspNonce)] : []),
                 basicSetup,
                 drawSelection(),
-                EditorView.lineWrapping,
+                wrapCompartment.of(lineWrapping ? EditorView.lineWrapping : []),
+                inputCompartment.of(touchInputExtensions(touchInput)),
                 search({ top: false }),
                 keymap.of([
                     indentWithTab,
@@ -252,6 +305,7 @@
                             onClick(line.number);
                         }
                     },
+                    compositionend: syncAfterComposition,
                 }),
                 EditorView.theme({
                     "&": {
@@ -303,8 +357,19 @@
                     }),
                 ),
                 EditorView.updateListener.of((update) => {
+                    // CM 自己维护 composing（DOM event 或失焦取消都会复位）。
+                    // 有些 WebView 不派发可用的 compositionend，用 update 的
+                    // false 跳变作为第二条补偿路径。
+                    if (wasComposing && !update.view.composing) {
+                        syncAfterComposition();
+                    }
+                    wasComposing = update.view.composing;
                     if (update.docChanged) {
                         onChange(update.state.doc.toString());
+                    }
+                    if (update.docChanged || update.selectionSet) {
+                        const head = update.state.selection.main.head;
+                        onCursorLine(update.state.doc.lineAt(head).number);
                     }
                     if (update.selectionSet) {
                         // 防止程序设置选区时触发循环同步
@@ -354,6 +419,98 @@
             selection: { anchor: 0, head: view.state.doc.length },
         });
         view.focus();
+    }
+
+    // ——— 手机动作条用的命令式接口 ———
+    //
+    // 手机上按不到 Ctrl+Z / Ctrl+F，只能给按钮。全部包成函数而不是让页面去
+    // 摸 getView() 的内部结构，是因为 view 可能是 undefined（还没 onMount），
+    // 而且 CM 的 dispatch 失败在手机上会表现为"点了没反应"，很难排查。
+
+    export function undoEdit() {
+        if (!view) return;
+        undo(view);
+        view.focus();
+    }
+
+    export function redoEdit() {
+        if (!view) return;
+        redo(view);
+        view.focus();
+    }
+
+    /**
+     * touchInput 是 prop，可能在建 state 之后才变 —— 桌面 web 窗口被拖过
+     * 760px 断点时 phoneLayout 翻面。只在 createEditorState 里读一次的话，
+     * compartment 永远停在旧值，软键盘照样自动大写、把 <div> 变成 <Div>。
+     */
+    $: if (view) {
+        view.dispatch({
+            effects: inputCompartment.reconfigure(
+                touchInputExtensions(touchInput),
+            ),
+        });
+    }
+
+    export function toggleLineWrap() {
+        lineWrapping = !lineWrapping;
+        view?.dispatch({
+            effects: wrapCompartment.reconfigure(
+                lineWrapping ? EditorView.lineWrapping : [],
+            ),
+        });
+        return lineWrapping;
+    }
+
+    export function isLineWrapped() {
+        return lineWrapping;
+    }
+
+    /** 把光标移到指定行（1 起）并滚到视野中央 */
+    export function gotoLine(lineNumber: number) {
+        if (!view) return;
+        const total = view.state.doc.lines;
+        const line = Math.max(1, Math.min(Math.floor(lineNumber) || 1, total));
+        const info = view.state.doc.line(line);
+        view.dispatch({
+            selection: { anchor: info.from },
+            effects: EditorView.scrollIntoView(info.from, { y: "center" }),
+        });
+        view.focus();
+    }
+
+    /** 当前光标所在行号（1 起），没挂载时返回 0 */
+    export function currentLine() {
+        if (!view) return 0;
+        const head = view.state.selection.main.head;
+        return view.state.doc.lineAt(head).number;
+    }
+
+    /** 在当前光标处插入文本；符号栏用它把标签/引号打进去 */
+    export function insertText(text: string) {
+        if (!view || !text) return;
+        const { from, to } = view.state.selection.main;
+        view.dispatch({
+            changes: { from, to, insert: text },
+            // 插入后把光标放到插入内容之后，连续点符号才能接着打
+            selection: { anchor: from + text.length },
+        });
+        view.focus();
+    }
+
+    export function setFontSize(size: number) {
+        const next = Math.max(12, Math.min(Math.round(size), 24));
+        if (next === fontSize) return;
+        updateFontSize(next - fontSize);
+    }
+
+    export function getFontSize() {
+        return fontSize;
+    }
+
+    /** 中文输入法正在拼字（转发 CM 自己的状态，见 $: doc 同步处的说明） */
+    export function isComposing() {
+        return view?.composing ?? false;
     }
 
     // 获取 CodeMirror view 实例供外部使用

@@ -100,6 +100,52 @@
     color-mix(in srgb, var(--color-accent) 18%, transparent);
   --control-height: 34px;
 
+  /* ——— 手机层（只有 [data-tepub-layout="phone"] 下的样式该用这些） ———
+     桌面端不要引用，否则两套节奏会混在一起。
+     检测规则见 src/lib/clientProfile.ts；唯一断点 760px 只在那里用一次。 */
+  /* --safe-top-min 是安卓壳的兜底：edge-to-edge 的 Android WebView 里
+     env(safe-area-inset-top) 通常只反映刘海裁切，拿不到状态栏高度。
+     原生壳会在 <html> 上把它设成 24px（见 clientProfile.ts 的
+     applySafeAreaFallback），浏览器里它是 0，等价于只用 env()。 */
+  /* 二级页会把页面内容的 --safe-top 归零（根布局已有统一返回行），
+     但固定覆盖层仍必须让开真实状态栏，所以保留一个不会被内容层覆盖的别名。 */
+  --safe-top-native: max(
+    env(safe-area-inset-top, 0px),
+    var(--safe-top-min, 0px)
+  );
+  --safe-top: var(--safe-top-native);
+  --safe-bottom: max(
+    env(safe-area-inset-bottom, 0px),
+    var(--safe-bottom-min, 0px)
+  );
+  --safe-left: max(
+    env(safe-area-inset-left, 0px),
+    var(--safe-left-min, 0px)
+  );
+  --safe-right: max(
+    env(safe-area-inset-right, 0px),
+    var(--safe-right-min, 0px)
+  );
+  --tap-target: 44px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --m-header-h: 56px;
+  --m-nav-h: 52px;
+  /* 软键盘占用的高度，由 visualViewport 写入（见 src/lib/mobile/viewport.ts） */
+  --ime-height: 0px;
+  --z-sheet-backdrop: 190;
+  --z-sheet: 200;
+  --z-sheet-above-overlays-backdrop: 2100;
+  --z-sheet-above-overlays: 2101;
+
   /* ——— 兼容：旧 --web-tool-* 全部别名到 --color-*（不再双轨） ——— */
   --web-tool-canvas: var(--color-canvas);
   --web-tool-surface: var(--color-surface);
@@ -384,6 +430,37 @@ body {
   overflow: visible;
   overscroll-behavior: none;
   touch-action: auto;
+}
+
+/* =========================================================
+   手机形态（web 手机浏览器 + Android/iOS 壳，两者同一个钩子）
+   —— 新写的手机样式一律挂这里，不要再用 data-tepub-client="web-mobile"
+      （安卓壳拿不到那个值，那些块在 App 里全是死代码）
+   ========================================================= */
+:root[data-tepub-layout="phone"] {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* 手机上 34px 的控件实在点不中（iOS 指南 44px） */
+  --control-height: 44px;
+}
+
+:root[data-tepub-layout="phone"] body {
+  min-width: 0;
+  overflow: visible;
+  overscroll-behavior-y: auto;
+  touch-action: manipulation;
+}
+
+/* iOS 聚焦 16px 以下的输入框会整页放大，之后再也缩不回去 */
+:root[data-tepub-layout="phone"] input:not([type="checkbox"]):not(
+    [type="radio"]
+  ):not([type="range"]):not([type="color"]),
+:root[data-tepub-layout="phone"] textarea,
+:root[data-tepub-layout="phone"] select {
+  font-size: max(16px, var(--text-md));
 }
 
 button,
@@ -851,49 +928,64 @@ textarea:disabled {
   grid-row: 3;
 }
 
-@media (max-width: 760px) {
-  .settings-shell-footer {
-    justify-content: stretch;
-  }
+/* 设置面板的手机形态。
+   原来写的是 @media (max-width: 760px)：横屏手机 844×390 宽度超过 760，
+   整块失效，四栏并排直接挤死。改挂 data-tepub-layout，与宽度解耦。 */
+:root[data-tepub-layout="phone"] .settings-shell-footer {
+  justify-content: stretch;
+}
 
-  .settings-shell-action {
-    width: 100%;
-  }
+:root[data-tepub-layout="phone"] .settings-shell-action {
+  width: 100%;
+}
 
-  .settings-shell.library-settings-panel,
-  .settings-shell.editor-settings-modal {
-    display: flex;
-    min-width: 0;
-    width: min(96vw, 520px);
-    min-height: 0;
-    height: auto;
-    max-height: min(90vh, 720px);
-  }
+:root[data-tepub-layout="phone"] .settings-shell.library-settings-panel,
+:root[data-tepub-layout="phone"] .settings-shell.editor-settings-modal {
+  display: flex;
+  /* 以前只有 display:flex，没写方向 ⇒ 手机上是「header|tabs|body|footer」四栏并排 */
+  flex-direction: column;
+  min-width: 0;
+  width: min(96vw, 520px);
+  min-height: 0;
+  height: auto;
+  max-height: min(90vh, 720px);
+}
 
-  .settings-shell.library-settings-panel .settings-shell-tabs,
-  .settings-shell.editor-settings-modal .settings-shell-tabs {
-    flex-direction: row;
-    grid-column: auto;
-    grid-row: auto;
-    overflow-x: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-border);
-    padding: 10px 14px;
-  }
+:root[data-tepub-layout="phone"] .settings-shell.library-settings-panel .settings-shell-tabs,
+:root[data-tepub-layout="phone"] .settings-shell.editor-settings-modal .settings-shell-tabs {
+  flex-direction: row;
+  /* 面板是 column flex：页签条作为可收缩的 flex 项，在横屏（844×390）里
+     会被压到 35px，而里面的页签按钮是 40px，整排文字底部被横切。
+     overflow-x:auto 又让它的 min-height:auto 归零，不会自己撑住。
+     固定成「按内容高度、不参与收缩」，溢出的高度全部交给 body 滚动。 */
+  flex: 0 0 auto;
+  grid-column: auto;
+  grid-row: auto;
+  overflow-x: auto;
+  border-right: 0;
+  border-bottom: 1px solid var(--color-border);
+  padding: 10px 14px;
+}
 
-  .settings-shell.library-settings-panel .settings-shell-tabs .tab-btn,
-  .settings-shell.editor-settings-modal .settings-shell-tabs .tab-btn {
-    width: auto;
-    white-space: nowrap;
-  }
+:root[data-tepub-layout="phone"] .settings-shell.library-settings-panel .settings-shell-tabs .tab-btn,
+:root[data-tepub-layout="phone"] .settings-shell.editor-settings-modal .settings-shell-tabs .tab-btn {
+  width: auto;
+  white-space: nowrap;
+}
 
-  .settings-shell.library-settings-panel .settings-shell-body,
-  .settings-shell.library-settings-panel .settings-shell-footer,
-  .settings-shell.editor-settings-modal .settings-shell-body,
-  .settings-shell.editor-settings-modal .settings-shell-footer {
-    grid-column: auto;
-    grid-row: auto;
-  }
+:root[data-tepub-layout="phone"] .settings-shell.library-settings-panel .settings-shell-body,
+:root[data-tepub-layout="phone"] .settings-shell.library-settings-panel .settings-shell-footer,
+:root[data-tepub-layout="phone"] .settings-shell.editor-settings-modal .settings-shell-body,
+:root[data-tepub-layout="phone"] .settings-shell.editor-settings-modal .settings-shell-footer {
+  grid-column: auto;
+  grid-row: auto;
+}
+
+/* 页脚（取消/保存）同样不能被压扁：横屏本来就矮，按钮被裁掉一半等于
+   关不掉面板。和页签条一样固定高度，压缩只发生在 body 上。 */
+:root[data-tepub-layout="phone"] .settings-shell.library-settings-panel .settings-shell-footer,
+:root[data-tepub-layout="phone"] .settings-shell.editor-settings-modal .settings-shell-footer {
+  flex: 0 0 auto;
 }
 
 .settings-shell .settings-section {
@@ -1676,4 +1768,16 @@ textarea:disabled {
 .image-tool-app a {
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* =========================================================
+   手机覆盖层（放在文件最后）
+
+   为什么必须单独放最后：深色主题块（[data-theme="dark"]，约 1334 行起）
+   把 --control-height 又声明了一次，与本文件的手机块**同优先级**，
+   后出现的胜出 —— 于是"手机 + 深色"会悄悄退回 34px 控件，白天看着正常、
+   夜里点不中。这里在文件末尾把手机侧的取值重新钉一遍。
+   ========================================================= */
+:root[data-theme="dark"][data-tepub-layout="phone"] {
+  --control-height: 44px;
 }

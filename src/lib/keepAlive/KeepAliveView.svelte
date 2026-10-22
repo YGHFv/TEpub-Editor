@@ -86,8 +86,38 @@
        切回来不需要重新测量。display:none 会让宽度瞬间变 0，各页的
        ResizeObserver 连环重排 —— 那才是「像重新加载」的来源 */
     .ka-view[data-ka-hidden="true"] {
-        visibility: hidden;
+        visibility: hidden !important;
+        opacity: 0 !important;
         pointer-events: none;
+        /* 只有隐藏页需要独立层叠上下文。激活页不能 isolation/z-index：那会把
+           页面里的设置弹窗、抽屉统一关在 z-index:1 里，外层手机底栏（z-index:60）
+           反而压在所有页内模态层上面，出现“弹窗底部被底栏挡一截、底栏还能点”。 */
+        isolation: isolate;
+        /* visibility 对少数自行声明 visibility:visible 的浮层不可靠，且固定定位
+           的后代可能跳出普通裁剪。paint containment 会在这一层建立独立绘制
+           边界，把隐藏页里的遮罩、动画和固定浮层一起裁掉，但元素本身仍保持
+           inset:0 的真实尺寸，不会触发各页 ResizeObserver 把宽度算成 0。 */
+        contain: layout paint style;
+        z-index: 0;
+    }
+
+    .ka-view:not([data-ka-hidden="true"]) {
+        z-index: auto;
+        isolation: auto;
+    }
+
+    .ka-view[data-ka-hidden="true"] :global(*) {
+        animation: none !important;
+        transition: none !important;
+    }
+
+    /* visibility:hidden 挡不住 backdrop-filter：隐藏视图里的弹窗（书库首次
+       启动的目录选择框就是）依然会把自己的模糊层合成到当前页面上 ——
+       真机实测切到工具箱后整页发灰、左上角还残留一块模糊的按钮。
+       隐藏时只关掉后代的后备滤镜，布局和滚动位置都不受影响。 */
+    .ka-view[data-ka-hidden="true"] :global(*) {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
     }
 
     .ka-view-loading {

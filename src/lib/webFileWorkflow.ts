@@ -66,11 +66,29 @@ export class ObjectUrlRegistry {
   }
 }
 
-export function downloadBrowserBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
+/**
+ * 用一次隐藏的 <a download> 触发浏览器下载。
+ *
+ * 两个移动端细节，桌面浏览器都能容忍缺失，所以以前一直是"桌面能用就行"：
+ * 1. 锚点必须挂进 DOM 再点 —— 游离节点上的 click() 在部分 WebView 里被忽略；
+ * 2. 调用方不能紧接着回收 URL —— 移动端下载是异步接管的，URL 提前失效就是
+ *    "点了导出没反应"。
+ *
+ * revoke 由调用方决定（blob URL 的所有权在调用方），这里只负责触发。
+ */
+export function triggerBrowserDownload(url: string, fileName: string) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
-  queueMicrotask(() => URL.revokeObjectURL(url));
+  anchor.remove();
+}
+
+/** blob → 立即下载；URL 延后 30 秒回收，理由见 triggerBrowserDownload */
+export function downloadBrowserBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  triggerBrowserDownload(url, fileName);
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

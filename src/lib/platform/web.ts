@@ -4,6 +4,7 @@ import {
   type PlatformWindowHandle,
 } from "./types";
 import { getWebAccountSession } from "$lib/webAccount";
+import { describeCommandFailure } from "./webErrors";
 
 function getWebApiBaseUrl(): string {
   const env = import.meta.env.PUBLIC_TEPUB_API_BASE;
@@ -31,18 +32,34 @@ async function requestJson<T>(
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    let message = detail;
-    try {
-      const parsed = JSON.parse(detail);
-      message = parsed?.error || parsed?.message || detail;
-    } catch {
-      // Keep the raw response text when it is not JSON.
-    }
-    throw new Error(message || `Request failed with ${response.status}`);
+    throw new Error(
+      describeCommandFailure(
+        path.replace(/^\/commands\//, ""),
+        response.status,
+        detail,
+      ),
+    );
   }
 
   if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+
+  // 成功分支也必须防一手：把不存在的 /api/* 用 200 重写回 index.html 的
+  // 静态托管（Cloudflare Pages 的 SPA 回退、Netlify `/* /index.html 200`、
+  // nginx `try_files … /index.html`）会给出 2xx + 整页 HTML。直接
+  // response.json() 会抛 `Unexpected token '<', "<!doctype html>…"`，
+  // 页面把这句话原样拼进 toast，用户看到的是一条浏览器解析错误。
+  const body = await response.text();
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new Error(
+      describeCommandFailure(
+        path.replace(/^\/commands\//, ""),
+        response.status,
+        body,
+      ),
+    );
+  }
 }
 
 function createBrowserWindowHandle(
@@ -161,7 +178,9 @@ export function createWebPlatform(): PlatformAdapter {
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      // 推迟释放：移动端 WebView 里下载是异步接管的，同步 revoke 之后
+      // 文件还没开始读，URL 就已经失效（表现为"点了保存没反应"）。
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
     },
 
     async revealPath() {

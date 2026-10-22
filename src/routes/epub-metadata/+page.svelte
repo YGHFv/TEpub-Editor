@@ -1,9 +1,10 @@
 ﻿<script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { listen, emit } from "@tauri-apps/api/event";
     import { getCurrentWindow } from "@tauri-apps/api/window";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import { isPhoneLayout } from "$lib/clientProfile";
 
     let activeTab = "meta";
 
@@ -199,8 +200,15 @@
         };
     });
 
-    function addCustom() {
+    async function addCustom() {
         customMetadata = [...customMetadata, { key: "", value: "" }];
+        // 横屏 844×390 的可用高度只有 168px：新增行正好落在底部导航上沿之外，
+        // 点「+」屏幕上没有任何变化（滚动区能滚，但没有任何提示）。手机形态
+        // 把新行滚进视野；桌面窗口内容本来就装得下，不做任何滚动。
+        if (!isPhoneLayout()) return;
+        await tick();
+        const rows = document.querySelectorAll(".custom-row");
+        rows[rows.length - 1]?.scrollIntoView({ block: "nearest" });
     }
 
     function removeCustom(index: number) {
@@ -1091,5 +1099,60 @@
             var(--color-border)
         );
         border-radius: 999px;
+    }
+
+    /* 28px 的圆形「+」在桌面上刚好，手指点不中。手机形态抬到触控尺寸。 */
+    :global(:root[data-tepub-layout="phone"]) .add-btn {
+        width: var(--tap-target);
+        height: var(--tap-target);
+        font-size: 1.5rem;
+    }
+
+    /* 同一行里的删除「×」只有 22×19（字号 1.2rem + 左右 4px padding），
+       比旁边的「+」小一半，点偏就落进值输入框里。资源行用的是同一个类。
+       行高由 44px 的输入框撑着，抬到 44 不会把行撑高。 */
+    :global(:root[data-tepub-layout="phone"]) .remove-btn {
+        width: var(--tap-target);
+        height: var(--tap-target);
+        min-width: var(--tap-target);
+        min-height: var(--tap-target);
+        padding: 0;
+        display: grid;
+        place-items: center;
+    }
+
+    /* 这三个都停在桌面密度上：页签 37px、底部两个动作按钮 37px。
+       页签是「元数据 / 文件」的切换入口，取消/保存是唯一出口，
+       点偏一个像素就落到旁边，手机上必须抬到触控高度。
+       桌面窗口不命中这条属性选择器，37px 的紧凑密度保持不变。 */
+    :global(:root[data-tepub-layout="phone"]) .tab-btn,
+    :global(:root[data-tepub-layout="phone"]) .btn-cancel,
+    :global(:root[data-tepub-layout="phone"]) .btn-save {
+        min-height: var(--tap-target);
+    }
+
+    /* 手机上「自定义元数据」这一段会被压成 0 高。
+       .custom-section 是 flex:1 + min-height:0，而 .custom-list 自己
+       overflow-y:auto 又让它的自动最小尺寸归零 —— 横屏 844×390（可用高度
+       168px）里整段算出来是 0：点「+」新增一行，输入框和「×」落在底栏
+       后面，被裁得一个像素都看不见，界面上等于「按了没反应」。竖屏弹键盘
+       把视口压到 ~514 时同样只剩 15px。
+       改成按内容高度排、只留 .tab-content 一个滚动容器。桌面不命中。 */
+    :global(:root[data-tepub-layout="phone"]) .tab-content {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .custom-section,
+    :global(:root[data-tepub-layout="phone"]) .custom-list {
+        flex: 0 0 auto;
+        min-height: 0;
+        overflow: visible;
+    }
+
+    /* 空列表也留一行的高度，免得「+」按下去看不出任何变化 */
+    :global(:root[data-tepub-layout="phone"]) .custom-list {
+        min-height: 58px;
     }
 </style>

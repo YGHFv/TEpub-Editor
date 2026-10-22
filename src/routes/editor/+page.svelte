@@ -1,8 +1,16 @@
 ﻿<script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onDestroy, onMount, tick } from "svelte";
     import { base } from "$app/paths";
     import { goto } from "$app/navigation";
-    import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
+    import {
+        closeCurrentTab,
+        tabIdFor,
+        usesMultiWindow,
+    } from "$lib/secondaryTabs";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
     import { platform } from "$lib/platform";
     import {
         isInHiddenView,
@@ -16,6 +24,8 @@
     // 保活视图里页面常驻，window.location 会随别的标签跳转而变；
     // 本页的查询串在实例内固定（视图按 路径+查询串 区分）
     const ownUrl = viewUrl();
+    // 本页在标签登记表里的 id（用 viewUrl，理由同 ownUrl）
+    const ownTabId = tabIdFor(ownUrl.pathname, ownUrl.search);
     // 文本读写不走 fs 插件，统一使用自定义后端命令（platform.invoke 的
     // read_text_file / save_text_file）。
     import Editor from "$lib/Editor.svelte";
@@ -52,8 +62,10 @@
     import Toast from "$lib/Toast.svelte";
     import { toastError } from "$lib/toast";
     import {
+        applyTheme as applyGlobalTheme,
         loadAppSettings as loadGlobalAppSettings,
         saveAppSettings as saveGlobalAppSettings,
+        type UiTheme,
     } from "$lib/appSettings";
     import {
         DEFAULT_VOLUME_REGEX,
@@ -92,6 +104,8 @@
         aiProofingCacheKey,
         manualTitleOverridesKey,
     } from "$lib/storageKeys";
+    // 移动端判定与 CSS 用同一个真源：宽度断点漏掉横屏手机（844px）
+    import { isPhoneLayout } from "$lib/clientProfile";
 
     // --- [1. 完整的接口定义] ---
     interface RawChapter {
@@ -269,7 +283,7 @@
         defaultEpubStyles: { "main.css": "", "font.css": "" },
         selectedStyleTemplateId: "builtin",
         subsetFonts: false,
-        uiTheme: "light" as "light" | "dark",
+        uiTheme: "system" as UiTheme,
         wordWrap: true,
         showWhitespace: false,
         showLineBreaks: false,
@@ -697,7 +711,10 @@
     let userCollapsedVolumeKeys = new Set<string>();
     let editorComponent: Editor;
 
-    let showSidebar = true; // State
+    // 手机形态下侧栏是覆盖层（见下面 phone 的 CSS），一进来就展开等于
+    // 一屏只有目录、看不见正文。首帧就按同一个真源定成收起；
+    // onMount 里的宽度判断仍然保留，覆盖 `?view=desktop` 之类的边界。
+    let showSidebar = !isPhoneLayout(); // State
     // [Removed duplicate declarations]
     let isLoading = false;
     let isLoadingFile = false;
@@ -3925,6 +3942,14 @@
         window.removeEventListener("mouseup", stopDrag);
     }
 
+    /**
+     * 手机外壳会为省内存裁掉最久没访问的保活页。TXT 编辑器带着未保存的
+     * 正文（isModified）时不许被裁 —— 裁掉等于用户逛两页回来，敲的字没了。
+     * 桌面标签由用户手动关，这条登记在那儿没有副作用。
+     */
+    onMount(() => registerKeepAliveGuard(ownTabId, () => isModified));
+    onDestroy(() => unregisterKeepAliveGuard(ownTabId));
+
     onMount(() => {
         console.log("App mounting...");
         window.addEventListener("error", (e) => {
@@ -3988,7 +4013,11 @@
             }
 
             // 2. 移动端检测
-            if (window.innerWidth < 768) {
+            //
+            // 只看宽度会漏掉横屏手机（844 > 768）：CSS 那边已经按
+            // data-tepub-layout="phone" 把侧栏改成浮层，这里不跟着关，
+            // 页面一进来侧栏就盖住整个编辑区，看起来像「编辑器坏了」。
+            if (window.innerWidth < 768 || isPhoneLayout()) {
                 isMobile = true;
                 showSidebar = false;
             }
@@ -4088,9 +4117,10 @@
             }
             if (
                 appSettings.uiTheme !== "light" &&
-                appSettings.uiTheme !== "dark"
+                appSettings.uiTheme !== "dark" &&
+                appSettings.uiTheme !== "system"
             )
-                (appSettings as any).uiTheme = "light";
+                (appSettings as any).uiTheme = "system";
             applyTheme((appSettings as any).uiTheme);
 
             // 目录查找通过 onTocSearch 回调处理（见 Editor 组件绑定）
@@ -5812,18 +5842,11 @@
     function applyTheme(theme: string) {
         const normalized =
             theme === "modern" || theme === "classic" ? "light" : theme;
-        const t = normalized === "dark" ? "dark" : "light";
-        document.documentElement.setAttribute("data-theme", t);
-        const meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) {
-            // 与 $lib/appSettings 的 THEME_CANVAS_COLORS 保持一致：
-            // 深色画布统一是 #191e26，不是更早的纯黑 #14181d
-            const colors: Record<string, string> = {
-                light: "#eef4f8",
-                dark: "#191e26",
-            };
-            meta.setAttribute("content", colors[t] || "#eef4f8");
-        }
+        applyGlobalTheme(
+            normalized === "dark" || normalized === "light"
+                ? normalized
+                : "system",
+        );
     }
 
     function closeAllPanels() {
@@ -5869,15 +5892,9 @@
     }
 </script>
 
-<svelte:head>
-    <!-- theme-color 由 applyTheme() 按深浅色写入具体色值；
-         这里原来写的是 var(--color-surface-soft)，meta 不支持 CSS 变量，
-         浏览器会直接忽略，等于给页面塞了一个无效的重复标签 -->
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
-    />
-</svelte:head>
+<!-- 这里原来塞了第二个 <meta name="viewport">（maximum-scale=1, user-scalable=no）。
+     keep-alive 宿主不会卸载本页，那个 meta 会一直留在 document 里，
+     等于「进过一次 TXT 编辑器就永久禁止双指缩放」。视口统一由 src/app.html 管。 -->
 
 <!-- <ContextMenu /> -->
 <!-- Removed duplicate at top -->
@@ -9021,5 +9038,119 @@
             max-width: 92vw;
             z-index: 80;
         }
+    }
+
+    /* ——— 手机（安卓壳里从书库进来的 TXT 编辑器） ———
+
+       页面里的 isMobile 只在挂载时按 innerWidth < 768 判一次，负责
+       「打开时先收起侧栏」；布局本身全靠下面这些规则。
+
+       两条必须修的：
+       1. .sidebar-mask 只有背景色，没有任何定位 —— 它在 .main-body 这个
+          flex 里是个空 div，宽度 0，点不到。手机上侧栏一开就把 390px 里的
+          280px 吃掉，编辑器只剩一条缝，而且没有任何东西能把它关掉。
+       2. 工具栏 9 个按钮、gap 8px、按钮 38px，总宽 424px > 390px，右边的
+          校对/设置直接被裁掉。 */
+    :global(:root[data-tepub-layout="phone"] .app-container .main-body .sidebar-mask) {
+        position: absolute;
+        inset: 0;
+        z-index: 40;
+        border: 0;
+        padding: 0;
+    }
+
+    /* 侧栏改成覆盖在编辑器之上，而不是把编辑器挤窄。
+       .sidebar 由 ChapterSidebar.svelte 渲染，带的是那个组件的作用域属性，
+       所以整条要包在 :global() 里。 */
+    :global(:root[data-tepub-layout="phone"] .main-body > .sidebar) {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 50;
+        width: min(84vw, 320px);
+        box-shadow: var(--shadow-pop);
+    }
+
+    /* 目录行抬到 44px：桌面是 30px 上下，手指按不准相邻的两行 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .main-body
+            > .sidebar
+            :is(button, .toc-item, .vol-title)
+    ) {
+        min-height: 44px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .app-container {
+        /* 手机外壳已由 app.css 压成填满剩余区域；100vh 会多算一条底部导航 */
+        height: 100%;
+    }
+
+    /* 工具栏：9 个图标按钮在 390px 上放不下。不动 DOM，只把 gap 和最小宽度
+       收到刚好能放下 —— 这类工具条的按钮全是图标，压缩宽度不损可读性，
+       但保留 40px 高度以免点不中。 */
+    :global(:root[data-tepub-layout="phone"] .app-container .toolbar) {
+        height: auto;
+        min-height: 48px;
+        padding: calc(4px + var(--safe-top)) 6px 4px;
+        gap: 4px;
+    }
+
+    :global(:root[data-tepub-layout="phone"] .app-container) :global(.btn-group),
+    :global(:root[data-tepub-layout="phone"] .app-container)
+        :global(.toolbar-tail) {
+        gap: 4px;
+    }
+
+    /* 高度必须和 min-height 成对写：app.css 的原子按钮组
+       （.btn / .btn-secondary / .epub-cancel …）带着
+       `min-height: var(--control-height)`，手机下是 44px，而 min-height
+       优先级高于 height —— 只写 height: 40px 的结果是同一行里 7 个按钮
+       44px、2 个 40px，底边参差；「制作 EPUB」弹窗里「高级选项」比
+       「开始制作」高出 4px，呈台阶状。
+       两边都按触控尺寸 44px 钉死：40px 本来也低于 --tap-target，
+       而整条工具栏只因此高 4px。 */
+    :global(:root[data-tepub-layout="phone"] .app-container) :global(button) {
+        min-width: 36px;
+        height: var(--tap-target);
+        min-height: var(--tap-target);
+    }
+
+    /* 工具栏按钮同时命中全局 button 的 `padding: 0 14px`：内容只有 20px 图标，
+       左右各 14px 把每个按钮撑到 48px，9 个按钮 = 432px + 间距，390px 的屏
+       放不下，右侧三个（查找 / 校对 / 设置）整颗被推出视口。图标按钮不需要
+       横向内边距，宽度交给 min-width 保底。
+       这里只作用于工具栏内部的按钮，正文与其他按钮不受影响。 */
+    :global(:root[data-tepub-layout="phone"] .app-container .toolbar button) {
+        padding: 0;
+        min-width: 34px;
+    }
+
+    /* 320px 级别的窄屏（iPhone SE 一代 / 老安卓）：9×34 + 8×4 + 内边距 = 350，
+       还是多出 30px，右侧「设置」被推出屏幕。这类宽度只在手机上出现，
+       再用一层宽度收窄 —— 桌面 1280px 永远命不中，不会影响电脑版。 */
+    @media (max-width: 360px) {
+        :global(:root[data-tepub-layout="phone"] .app-container .toolbar) {
+            padding-left: 4px;
+            padding-right: 4px;
+            gap: 2px;
+        }
+
+        :global(:root[data-tepub-layout="phone"] .app-container)
+            :global(.btn-group),
+        :global(:root[data-tepub-layout="phone"] .app-container)
+            :global(.toolbar-tail) {
+            gap: 2px;
+        }
+
+        :global(:root[data-tepub-layout="phone"] .app-container .toolbar button) {
+            min-width: 30px;
+        }
+    }
+
+    /* 编辑器正文：手机上左右各 20px 的内边距等于每行白扔四个字 */
+    :global(:root[data-tepub-layout="phone"] .app-container .editor-wrapper) {
+        min-height: 0;
     }
 </style>

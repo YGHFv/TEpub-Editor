@@ -9,6 +9,8 @@
     import Icon from "$lib/icons/Icon.svelte";
     import type { IconName } from "$lib/icons/Icon.svelte";
     import { isInHiddenView } from "$lib/keepAlive/viewState";
+    import { clientLayout } from "$lib/clientProfile";
+    import MobileSheet from "$lib/mobile/MobileSheet.svelte";
     import { appRoutePath } from "$lib/secondaryTabs";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import SettingsShell from "$lib/SettingsShell.svelte";
@@ -204,11 +206,33 @@
         isLibraryConfigured: boolean;
         portableMarkerPath: string;
         appDataDir: string;
+        // 旧版 Rust 没有这个字段，取不到时按桌面处理
+        isMobile?: boolean;
+    }
+    interface LibraryDirectoryEntry {
+        name: string;
+        path: string;
+    }
+    interface LibraryDirectoryShortcut {
+        label: string;
+        path: string;
+    }
+    interface LibraryDirectoryListing {
+        current: string;
+        parent: string | null;
+        shortcuts: LibraryDirectoryShortcut[];
+        entries: LibraryDirectoryEntry[];
     }
     let appMode: AppModeInfo | null = null;
     let firstLaunchOpen = false;
     let firstLaunchInput = "";
     let firstLaunchSaving = false;
+    type DirectoryPickerTarget = "first-launch" | "settings";
+    let directoryPickerOpen = false;
+    let directoryPickerTarget: DirectoryPickerTarget = "first-launch";
+    let directoryPickerLoading = false;
+    let directoryPickerError = "";
+    let directoryPickerListing: LibraryDirectoryListing | null = null;
     let coverCache: Map<string, string> = new Map();
     let contextMenuPos = { x: 0, y: 0 };
     let showContextMenu = false;
@@ -801,12 +825,18 @@
                 isLibraryConfigured: true,
                 portableMarkerPath: "",
                 appDataDir: "",
+                isMobile: false,
             };
         }
         if (!appMode.isLibraryConfigured) {
-            firstLaunchInput = appMode.isPortable
-                ? appMode.suggestedLibraryDir
-                : "";
+            // 手机端没有系统文件夹选择器（Tauri mobile 的 folder picker 未实现），
+            // 让用户去「浏览…」只会得到一句 "not implemented on mobile"，
+            // 书库从此进不去。这里直接预填应用私有目录，用户点「确定」即可。
+            firstLaunchInput = appMode.isMobile
+                ? appMode.suggestedLibraryDir || `${appMode.appDataDir}/library`
+                : appMode.isPortable
+                  ? appMode.suggestedLibraryDir
+                  : "";
             firstLaunchOpen = true;
             isLoading = false; // 解开 loading 让弹窗能显示
             return;
@@ -827,6 +857,46 @@
             console.error("选择目录失败:", e);
             toastError("选择目录失败：" + e);
         }
+    }
+
+    async function openLibraryDirectoryPicker(target: DirectoryPickerTarget) {
+        directoryPickerTarget = target;
+        directoryPickerOpen = true;
+        directoryPickerError = "";
+        const initial =
+            target === "first-launch"
+                ? appMode?.appDataDir || firstLaunchInput
+                : libraryConfig.customWorkDir;
+        await browseLibraryDirectory(initial || null);
+    }
+
+    async function browseLibraryDirectory(path: string | null) {
+        if (directoryPickerLoading) return;
+        directoryPickerLoading = true;
+        directoryPickerError = "";
+        try {
+            directoryPickerListing =
+                await platform.invoke<LibraryDirectoryListing>(
+                    "list_library_directories",
+                    { path },
+                );
+        } catch (error) {
+            directoryPickerError = String(error);
+        } finally {
+            directoryPickerLoading = false;
+        }
+    }
+
+    function chooseLibraryDirectory() {
+        const selected = directoryPickerListing?.current;
+        if (!selected) return;
+        if (directoryPickerTarget === "first-launch") {
+            firstLaunchInput = selected;
+        } else {
+            libraryConfig.customWorkDir = selected;
+            void saveLibraryConfig();
+        }
+        directoryPickerOpen = false;
     }
 
     async function confirmFirstLaunchDir() {
@@ -1748,6 +1818,49 @@
         }
     }
 
+    // ——— 手机形态 ———
+    //
+    // 桌面是「工具栏 + 书架 + 右侧 280px 预览栏」三块并排。手机上 280px 的
+    // 预览栏会占掉 72% 屏宽，书架只剩两三列；而且触屏没有右键，桌面靠
+    // contextmenu 的那套操作入口在手机上等于不存在。
+    //
+    // 所以手机上：书架铺满，详情改成从底部弹出的抽屉（点书就弹），右键菜单
+    // 里那六项操作全部搬进抽屉，做成整行按钮。
+    let phoneLayout = false;
+    $: phoneLayout = $clientLayout === "phone";
+    let phoneBookOpen = false;
+
+    /** 手机上点一本书：直接弹出详情抽屉，而不是「选中后去右边看」 */
+    function handlePhoneBookSelect(book: BookEntry) {
+        selectedBook = book;
+        phoneBookOpen = true;
+    }
+
+    function phoneBookAction(
+        action: "read" | "edit" | "metadata" | "rename" | "remove",
+    ) {
+        const book = selectedBook;
+        if (!book) return;
+        phoneBookOpen = false;
+        switch (action) {
+            case "read":
+                openReader(book);
+                break;
+            case "edit":
+                openBook(book);
+                break;
+            case "metadata":
+                openEditMetadata(book);
+                break;
+            case "rename":
+                openRenameDialog(book);
+                break;
+            case "remove":
+                void removeBook(book);
+                break;
+        }
+    }
+
     function handleSort(col: string) {
         if (sortColumn === col) {
             sortAsc = !sortAsc;
@@ -1938,6 +2051,18 @@
 
     async function onStorageModeChange() {
         const newMode = libraryConfig.storageMode;
+        // 手机上没有文件夹选择器：切到「自定义目录」时不能弹选择器（必然失败
+        // 并回滚），直接沿用当前目录（首次启动已经填好应用私有目录）。
+        if (appMode?.isMobile) {
+            if (newMode === "copy_custom" && !libraryConfig.customWorkDir) {
+                libraryConfig.customWorkDir =
+                    appMode.suggestedLibraryDir ||
+                    `${appMode.appDataDir}/library`;
+            }
+            prevStorageMode = newMode;
+            await saveLibraryConfig();
+            return;
+        }
         // 第一次切到 copy_custom 自动弹文件夹选择器；取消则回滚到之前的模式
         if (newMode === "copy_custom" && prevStorageMode !== "copy_custom") {
             const ok = await pickCustomWorkDir();
@@ -2093,7 +2218,7 @@
     {/if}
 
     <!-- 主体区域 -->
-    <div class="main-body">
+    <div class="main-body" class:phone-body={phoneLayout}>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div class="browser-area" on:click={handleBrowserAreaClick}>
@@ -2120,7 +2245,10 @@
                     {selectedBook}
                     showTitle={shelfSettings.gridShowTitle}
                     showAuthor={shelfSettings.gridShowAuthor}
-                    on:select={(e) => (selectedBook = e.detail)}
+                    on:select={(e) =>
+                        phoneLayout
+                            ? handlePhoneBookSelect(e.detail)
+                            : (selectedBook = e.detail)}
                     on:open={(e) => handleBookOpen(e.detail)}
                     on:context={(e) =>
                         handleContextMenu(e.detail.event, e.detail.book)}
@@ -2138,7 +2266,10 @@
                     onTagClick={toggleTagFilter}
                     showCover={true}
                     {coverCache}
-                    on:select={(e) => (selectedBook = e.detail)}
+                    on:select={(e) =>
+                        phoneLayout
+                            ? handlePhoneBookSelect(e.detail)
+                            : (selectedBook = e.detail)}
                     on:open={(e) => handleBookOpen(e.detail)}
                     on:context={(e) =>
                         handleContextMenu(e.detail.event, e.detail.book)}
@@ -2155,7 +2286,10 @@
                     onSort={handleSort}
                     {activeTagFilters}
                     onTagClick={toggleTagFilter}
-                    on:select={(e) => (selectedBook = e.detail)}
+                    on:select={(e) =>
+                        phoneLayout
+                            ? handlePhoneBookSelect(e.detail)
+                            : (selectedBook = e.detail)}
                     on:open={(e) => handleBookOpen(e.detail)}
                     on:context={(e) =>
                         handleContextMenu(e.detail.event, e.detail.book)}
@@ -2164,8 +2298,9 @@
             {/if}
         </div>
 
-        <!-- 预览面板：仅在选中图书且未设置始终隐藏时显示 -->
-        {#if previewVisible}
+        <!-- 预览面板：仅在选中图书且未设置始终隐藏时显示。
+             手机上不用它（改成底部抽屉），否则 280px 会吃掉 72% 屏宽。 -->
+        {#if previewVisible && !phoneLayout}
             <div class="preview-area">
                 <LibraryPreview
                     book={selectedBook}
@@ -2245,6 +2380,94 @@
         </div>
     {/if}
 
+    <!-- 手机：图书详情 + 操作抽屉。
+         桌面靠右键菜单，触屏没有右键；预览栏在手机上又会挤掉书架，
+         所以把「看详情」和「能做的六件事」一起收进这个抽屉。 -->
+    {#if phoneLayout}
+        <MobileSheet
+            open={phoneBookOpen}
+            title={selectedBook?.title || "图书"}
+            onclose={() => (phoneBookOpen = false)}
+        >
+            {#if selectedBook}
+                <div class="phone-book-summary">
+                    {#if coverCache.get(selectedBook.id)}
+                        <img
+                            src={coverCache.get(selectedBook.id)}
+                            alt={selectedBook.title}
+                        />
+                    {:else}
+                        <div class="phone-book-cover-placeholder">
+                            {selectedBook.title[0] || "?"}
+                        </div>
+                    {/if}
+                    <div class="phone-book-meta">
+                        <strong>{selectedBook.title}</strong>
+                        {#if selectedBook.author}
+                            <span>{selectedBook.author}</span>
+                        {/if}
+                        <span>
+                            {selectedBook.fileType.toUpperCase()} ·
+                            {formatFileSize(selectedBook.fileSize)}
+                        </span>
+                    </div>
+                </div>
+
+                <button
+                    class="m-list-row"
+                    type="button"
+                    on:click={() => phoneBookAction("read")}
+                >
+                    <Icon name="books" size={20} />
+                    <span>阅读</span>
+                </button>
+                <button
+                    class="m-list-row"
+                    type="button"
+                    on:click={() => phoneBookAction("edit")}
+                >
+                    <Icon name="book-open" size={20} />
+                    <span>编辑文件</span>
+                </button>
+                <button
+                    class="m-list-row"
+                    type="button"
+                    on:click={() => phoneBookAction("metadata")}
+                >
+                    <Icon name="settings" size={20} />
+                    <span>编辑元数据</span>
+                </button>
+                <button
+                    class="m-list-row"
+                    type="button"
+                    on:click={() => {
+                        phoneBookOpen = false;
+                        if (selectedBook) void openFileLocation(selectedBook);
+                    }}
+                >
+                    <Icon name="folder-open" size={20} />
+                    <span>打开文件位置</span>
+                </button>
+                <button
+                    class="m-list-row"
+                    type="button"
+                    on:click={() => phoneBookAction("rename")}
+                >
+                    <Icon name="file" size={20} />
+                    <span>重命名本地文件</span>
+                </button>
+                <button
+                    class="m-list-row danger-row"
+                    type="button"
+                    on:click={() => phoneBookAction("remove")}
+                >
+                    <Icon name="trash" size={20} />
+                    <span>从书库移除</span>
+                </button>
+            {/if}
+        </MobileSheet>
+    {/if}
+
     <!-- 设置面板 -->
     {#if showSettings}
         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -2291,10 +2514,20 @@
                                     >{libraryConfig.customWorkDir ||
                                         "未选择"}</span
                                 >
-                                <button
-                                    class="tb-btn"
-                                    on:click={pickCustomWorkDir}>更改</button
-                                >
+                                {#if !appMode?.isMobile}
+                                    <button
+                                        class="tb-btn"
+                                        on:click={pickCustomWorkDir}>更改</button
+                                    >
+                                {:else}
+                                    <button
+                                        class="tb-btn"
+                                        on:click={() =>
+                                            openLibraryDirectoryPicker(
+                                                "settings",
+                                            )}>选择目录</button
+                                    >
+                                {/if}
                             </div>
                         {/if}
                         <label class="set-row toggle-row">
@@ -2461,7 +2694,9 @@
                 </div>
                 <div class="settings-body">
                     <p class="first-launch-hint">
-                        {#if appMode?.isPortable}
+                        {#if appMode?.isMobile}
+                            手机版没有系统文件夹选择器。默认使用应用数据目录（不需要存储权限，卸载应用时一并清除），也可以点「选择目录」改用下载、文档或内部存储中的现有文件夹。
+                        {:else if appMode?.isPortable}
                             检测到 <strong>绿色版</strong
                             >。书库默认存放在程序同级目录的 <code>EPUB</code> 文件夹下，可改成任意路径。
                         {:else}
@@ -2479,18 +2714,34 @@
                                 ? appMode.suggestedLibraryDir
                                 : "点击右侧选择目录..."}
                             disabled={firstLaunchSaving}
+                            readonly={appMode?.isMobile}
                             aria-label="书库目录"
                         />
-                        <button
-                            class="tb-btn"
-                            on:click={browseFirstLaunchDir}
-                            disabled={firstLaunchSaving}>浏览...</button
-                        >
+                        {#if !appMode?.isMobile}
+                            <button
+                                class="tb-btn"
+                                on:click={browseFirstLaunchDir}
+                                disabled={firstLaunchSaving}>浏览...</button
+                            >
+                        {:else}
+                            <button
+                                class="tb-btn"
+                                on:click={() =>
+                                    openLibraryDirectoryPicker("first-launch")}
+                                disabled={firstLaunchSaving}>选择目录</button
+                            >
+                        {/if}
                     </div>
-                    <p class="first-launch-tip">
-                        后续可在「设置」里调整。如果想让安装版变绿色版（数据全部跟随程序），在程序所在目录创建一个
-                        <code>portable.txt</code> 空文件即可。
-                    </p>
+                    {#if appMode?.isMobile}
+                        <p class="first-launch-tip">
+                            建议直接使用应用私有目录。也可以点「选择目录」查看系统允许本应用访问的目录；受 Android 共享存储限制，部分「下载」「文档」或内部存储目录可能无法读取，遇到时请改回应用私有目录。
+                        </p>
+                    {:else}
+                        <p class="first-launch-tip">
+                            后续可在「设置」里调整。如果想让安装版变绿色版（数据全部跟随程序），在程序所在目录创建一个
+                            <code>portable.txt</code> 空文件即可。
+                        </p>
+                    {/if}
                 </div>
                 <div class="meta-edit-actions">
                     <button
@@ -2510,6 +2761,87 @@
             </div>
         </div>
     {/if}
+
+    <MobileSheet
+        open={directoryPickerOpen}
+        title="选择书库目录"
+        aboveOverlays
+        onclose={() => (directoryPickerOpen = false)}
+    >
+        <div class="mobile-directory-picker">
+            {#if directoryPickerListing?.shortcuts.length}
+                <div class="mobile-dir-shortcuts" aria-label="常用位置">
+                    {#each directoryPickerListing.shortcuts as shortcut (shortcut.path)}
+                        <button
+                            type="button"
+                            class:active={directoryPickerListing.current ===
+                                shortcut.path}
+                            on:click={() =>
+                                browseLibraryDirectory(shortcut.path)}
+                        >
+                            {shortcut.label}
+                        </button>
+                    {/each}
+                </div>
+            {/if}
+
+            {#if directoryPickerLoading}
+                <div class="mobile-dir-placeholder">正在读取目录…</div>
+            {:else if directoryPickerError}
+                <div class="mobile-dir-error" role="alert">
+                    {directoryPickerError}
+                </div>
+            {:else if directoryPickerListing}
+                <div class="mobile-dir-current" title={directoryPickerListing.current}>
+                    <span>当前目录</span>
+                    <code>{directoryPickerListing.current}</code>
+                </div>
+
+                <div class="mobile-dir-list">
+                    {#if directoryPickerListing.parent}
+                        <button
+                            class="mobile-dir-row"
+                            type="button"
+                            on:click={() =>
+                                browseLibraryDirectory(
+                                    directoryPickerListing?.parent || null,
+                                )}
+                        >
+                            <Icon name="folder-open" size={19} />
+                            <span>上一级</span>
+                            <Icon name="chevron-right" size={16} />
+                        </button>
+                    {/if}
+                    {#each directoryPickerListing.entries as entry (entry.path)}
+                        <button
+                            class="mobile-dir-row"
+                            type="button"
+                            on:click={() =>
+                                browseLibraryDirectory(entry.path)}
+                        >
+                            <Icon name="folder" size={19} />
+                            <span>{entry.name}</span>
+                            <Icon name="chevron-right" size={16} />
+                        </button>
+                    {/each}
+                    {#if !directoryPickerListing.parent &&
+                        directoryPickerListing.entries.length === 0}
+                        <div class="mobile-dir-placeholder">这里没有子目录</div>
+                    {/if}
+                </div>
+
+                <div class="mobile-dir-actions">
+                    <button
+                        class="tb-btn primary"
+                        type="button"
+                        on:click={chooseLibraryDirectory}
+                    >
+                        使用当前目录
+                    </button>
+                </div>
+            {/if}
+        </div>
+    </MobileSheet>
 
     <!-- 入库时书名-作者重名弹框 -->
     {#if collisionPrompt.open}
@@ -4204,5 +4536,298 @@
         font-size: 12px;
         line-height: 1.5;
         max-width: 780px;
+    }
+
+    /* ——— 手机 ———
+       桌面是「工具栏 + 书架 + 280px 预览栏」。手机上预览栏改成底部抽屉
+       （见 markup 里的 MobileSheet），这里只负责把工具栏和书架收好。 */
+
+    :global(:root[data-tepub-layout="phone"]) .library-app {
+        /* app.css 已经把根容器压成填满剩余区域；100vh 会多算一条底部导航 */
+        height: 100%;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbar {
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: calc(6px + var(--safe-top)) 10px 6px;
+    }
+
+    /* 搜索框独占一行：手机上「添加图书 / 打开文件 / 搜索 / 视图 / 设置」
+       挤在一行里，搜索框只剩 60px 宽，连两个字都打不出来 */
+    :global(:root[data-tepub-layout="phone"]) .toolbar-left {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .search-box {
+        order: 10;
+        flex: 1 1 100%;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .search-box input {
+        width: 100%;
+        /* 与 .tb-btn 一起用触控高度。别只写 height：app.css 的
+           :where(.search-box input){min-height:var(--control-height)} 在手机下
+           是 44px，height:40px 永远打不赢，只会让输入框比同一行的按钮高 4px。 */
+        height: var(--tap-target);
+        /* 16px 以下 iOS Safari 会自动放大整页 */
+        font-size: 16px;
+        box-sizing: border-box;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .toolbar-right {
+        margin-left: auto;
+    }
+
+    /* 触屏没有悬停，按钮实际命中区要比视觉尺寸大。
+       与同一行的搜索框统一到 44px，否则 40/44 混排会有 4px 的高低差。 */
+    :global(:root[data-tepub-layout="phone"]) .tb-btn {
+        min-height: var(--tap-target);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .tb-btn.icon-btn {
+        min-width: 44px;
+        justify-content: center;
+    }
+
+    /* 横屏：搜索框不再独占一行。
+       竖屏那条 flex:1 1 100% 是为了把搜索框顶到第二行（390px 挤不下），
+       但横屏有 844px：一行放得下「添加图书 + 打开文件 + 搜索 + 三个图标」。
+       保持独占一行时工具栏占 149px，而横屏总高只有 390px、底部导航 52px，
+       书架实际只剩 189px —— 一行都摆不满。改回同一行后工具栏 96px。
+       只对矮屏生效，竖屏和桌面（没有 phone 属性）都不命中。 */
+    /* 判据必须是「矮 + 宽」，不能用 orientation。
+       app.html 设了 interactive-widget=resizes-content：竖屏弹软键盘会把布局
+       视口压到 500 以下，此时高度 < 宽度，orientation 也跟着翻成 landscape
+       （实测 375×367 命中，搜索框被压成 22px）。真横屏最窄也有 568px 宽，
+       键盘态的竖屏手机只有 320–430px，min-width: 480px 才能把两者分开。 */
+    @media (max-height: 500px) and (min-width: 480px) {
+        :global(:root[data-tepub-layout="phone"]) .toolbar,
+        :global(:root[data-tepub-layout="phone"]) .toolbar-left {
+            flex-wrap: nowrap;
+        }
+
+        :global(:root[data-tepub-layout="phone"]) .search-box {
+            order: 0;
+            flex: 1 1 120px;
+            min-width: 0;
+        }
+
+        /* 「0 本书」在桌面是普通行内文字，横屏挤成一行时只剩两个字宽，
+           竖排成「0 / 本 / 书」。给它一个不许折行的下限。 */
+        :global(:root[data-tepub-layout="phone"]) .book-count {
+            white-space: nowrap;
+            flex: 0 0 auto;
+        }
+    }
+
+    /* 书架铺满：不再给预览栏留位置 */
+    :global(:root[data-tepub-layout="phone"]) .main-body.phone-body {
+        display: block;
+        overflow: hidden;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .browser-area {
+        height: 100%;
+        padding: 8px 10px calc(12px + var(--safe-bottom));
+        box-sizing: border-box;
+        /* 列表模式的列宽是写死的 px（书名 220 + 作者 110 + …），手机上必然
+           横向溢出。这里让它横向可滚，而不是把列挤成一团糊在一起 */
+        overflow: auto;
+    }
+
+    /* 网格两列：minmax(150px, 1fr) 在 390px 上会挤成两列半，卡片窄到看不清书名 */
+    :global(:root[data-tepub-layout="phone"]) .browser-area :global(.book-grid) {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .browser-area :global(.book-row) {
+        min-height: 52px;
+        font-size: 14px;
+    }
+
+    /* 抽屉里的图书摘要：封面 + 书名作者格式大小 */
+    .phone-book-summary {
+        display: flex;
+        gap: 12px;
+        padding: 4px 16px 12px;
+        align-items: center;
+    }
+
+    .phone-book-summary img,
+    .phone-book-cover-placeholder {
+        width: 64px;
+        height: 86px;
+        border-radius: var(--radius-sm);
+        object-fit: cover;
+        flex: 0 0 auto;
+        box-shadow: var(--shadow-sm);
+    }
+
+    .phone-book-cover-placeholder {
+        display: grid;
+        place-items: center;
+        background: var(--color-accent-soft);
+        color: var(--color-accent-deep);
+        font-size: 26px;
+        font-weight: 700;
+    }
+
+    .phone-book-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .phone-book-meta strong {
+        font-size: 15px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+    }
+
+    .phone-book-meta span {
+        font-size: 12px;
+        color: var(--color-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .danger-row {
+        color: var(--color-danger, #b42318);
+    }
+
+    .mobile-directory-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 0;
+        padding: 0 12px 4px;
+    }
+
+    .mobile-dir-shortcuts {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        padding: 2px 0 4px;
+        scrollbar-width: none;
+    }
+
+    .mobile-dir-shortcuts::-webkit-scrollbar {
+        display: none;
+    }
+
+    .mobile-dir-shortcuts button {
+        flex: 0 0 auto;
+        min-height: var(--tap-target);
+        padding: 0 14px;
+        border: 1px solid var(--color-border);
+        border-radius: 999px;
+        background: var(--color-surface);
+        color: var(--color-text-soft);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .mobile-dir-shortcuts button.active {
+        border-color: var(--color-accent);
+        background: var(--color-accent-soft);
+        color: var(--color-accent-deep);
+    }
+
+    .mobile-dir-current {
+        display: grid;
+        gap: 4px;
+        padding: 10px 12px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-soft);
+    }
+
+    .mobile-dir-current span {
+        color: var(--color-muted);
+        font-size: 11px;
+    }
+
+    .mobile-dir-current code {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--color-text-soft);
+        font: 12px/1.45 var(--font-code);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mobile-dir-list {
+        display: grid;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        background: var(--color-surface);
+    }
+
+    .mobile-dir-row {
+        min-height: 52px;
+        display: grid;
+        grid-template-columns: 24px minmax(0, 1fr) 20px;
+        align-items: center;
+        gap: 10px;
+        padding: 0 13px;
+        border: 0;
+        border-bottom: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text);
+        font: inherit;
+        font-size: 14px;
+        text-align: left;
+    }
+
+    .mobile-dir-row:last-child {
+        border-bottom: 0;
+    }
+
+    .mobile-dir-row:active {
+        background: var(--color-hover);
+    }
+
+    .mobile-dir-row span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mobile-dir-placeholder,
+    .mobile-dir-error {
+        padding: 22px 12px;
+        color: var(--color-muted);
+        font-size: 13px;
+        line-height: 1.5;
+        text-align: center;
+    }
+
+    .mobile-dir-error {
+        color: var(--color-danger);
+    }
+
+    .mobile-dir-actions {
+        position: sticky;
+        bottom: 0;
+        /* MobileSheet 外层已经消费了 safe-bottom，这里不要再加一次。 */
+        padding: 10px 0 6px;
+        background: var(--color-surface);
+    }
+
+    .mobile-dir-actions .tb-btn {
+        width: 100%;
+        min-height: var(--tap-target);
     }
 </style>

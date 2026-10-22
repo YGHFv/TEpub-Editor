@@ -10,6 +10,7 @@
         type WebEpubProcessResult,
         type WebImageFormat,
     } from "$lib/webEpubProcess";
+    import { triggerBrowserDownload } from "$lib/webFileWorkflow";
 
     type ToolConfig = {
         title: string;
@@ -191,9 +192,14 @@
     }
 
     function handleFileChange(event: Event) {
-        void processFiles(
-            Array.from((event.currentTarget as HTMLInputElement).files || []),
+        const files = Array.from(
+            (event.currentTarget as HTMLInputElement).files || [],
         );
+        // 空 change 不是"选错了文件"，是"这次没选"（取消对话框、或同一次
+        // 选择被清空后补发的事件）。以前这里会往结果里塞一条红字失败，
+        // 明明上一批文件已经处理成功，屏幕上却挂着「未选择文件」。
+        if (!files.length) return;
+        void processFiles(files);
     }
 
     function handleDrop(event: DragEvent) {
@@ -204,10 +210,7 @@
     }
 
     function downloadResult(result: ProcessedItem) {
-        const anchor = document.createElement("a");
-        anchor.href = result.url;
-        anchor.download = result.outputName;
-        anchor.click();
+        triggerBrowserDownload(result.url, result.outputName);
     }
 
     async function downloadAll() {

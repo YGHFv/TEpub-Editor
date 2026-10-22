@@ -1,5 +1,11 @@
+// @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ObjectUrlRegistry, validateBrowserFiles } from "./webFileWorkflow";
+import {
+  ObjectUrlRegistry,
+  downloadBrowserBlob,
+  triggerBrowserDownload,
+  validateBrowserFiles,
+} from "./webFileWorkflow";
 
 describe("validateBrowserFiles", () => {
   it("accepts extensions case-insensitively and reports rejected files", () => {
@@ -49,5 +55,79 @@ describe("ObjectUrlRegistry", () => {
     expect(create).toHaveBeenCalledTimes(2);
     expect(revoke.mock.calls).toEqual([["blob:first"], ["blob:second"]]);
     expect(registry.size).toBe(0);
+  });
+});
+
+describe("downloadBrowserBlob", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  /**
+   * 移动端两件事都不能退回：
+   * 1. 锚点必须先挂进 DOM（游离节点上的 click() 在 Android WebView 里被忽略）；
+   * 2. blob URL 不能在点击后立刻回收（下载是异步接管的）。
+   * 桌面浏览器对这两点都宽容，所以很容易被"顺手简化"掉 —— 用测试钉住。
+   */
+  it("attaches the anchor to the DOM before clicking it", () => {
+    const attached: (Node | null)[] = [];
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        attached.push(this.parentNode);
+      });
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    downloadBrowserBlob(new Blob(["a"]), "a.epub");
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(attached[0]).toBe(document.body);
+    // 点击后立刻从 DOM 摘掉，不留下隐藏节点
+    expect(document.body.querySelector("a[download]")).toBeNull();
+  });
+
+  it("revokes the blob url only after the download has had time to start", () => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      () => undefined,
+    );
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:slow");
+    const revoke = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined);
+
+    downloadBrowserBlob(new Blob(["a"]), "a.epub");
+    expect(revoke).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1_000);
+    expect(revoke).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(30_000);
+    expect(revoke).toHaveBeenCalledWith("blob:slow");
+  });
+});
+
+describe("triggerBrowserDownload", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("sets href and download name on an anchor that is in the document", () => {
+    let href = "";
+    let name = "";
+    let inDocument = false;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        href = this.getAttribute("href") || "";
+        name = this.getAttribute("download") || "";
+        inDocument = document.body.contains(this);
+      },
+    );
+
+    triggerBrowserDownload("blob:y", "chapter.xhtml");
+
+    expect(href).toBe("blob:y");
+    expect(name).toBe("chapter.xhtml");
+    expect(inDocument).toBe(true);
   });
 });

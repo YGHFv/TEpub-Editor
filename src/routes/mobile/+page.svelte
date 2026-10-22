@@ -437,12 +437,12 @@
         box-sizing: border-box;
         max-width: 780px;
         margin: 0 auto;
-        padding: max(46px, calc(env(safe-area-inset-top) + 28px)) 18px
-            calc(96px + env(safe-area-inset-bottom));
+        padding: max(46px, calc(var(--safe-top) + 28px)) 18px
+            calc(96px + var(--safe-bottom));
     }
 
     .screen.about-screen {
-        padding-top: max(18px, env(safe-area-inset-top));
+        padding-top: max(18px, var(--safe-top));
     }
 
     .page-head {
@@ -762,7 +762,7 @@
         grid-template-columns: repeat(3, 1fr);
         gap: 6px;
         box-sizing: border-box;
-        padding: 6px 16px max(4px, env(safe-area-inset-bottom));
+        padding: 6px 16px max(4px, var(--safe-bottom));
         border-top: 0;
         background: var(--color-surface-raised);
         box-shadow: none;

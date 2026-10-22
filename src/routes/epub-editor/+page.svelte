@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onDestroy, onMount, tick } from "svelte";
     import { platform, type PlatformUnlisten } from "$lib/platform";
     import { base } from "$app/paths";
     import { goto } from "$app/navigation";
@@ -8,12 +8,24 @@
         onlyWhenActive,
         viewUrl,
     } from "$lib/keepAlive/viewState";
-    import { closeCurrentTab, usesMultiWindow } from "$lib/secondaryTabs";
+    import {
+        closeCurrentTab,
+        tabIdFor,
+        usesMultiWindow,
+    } from "$lib/secondaryTabs";
+    import {
+        registerKeepAliveGuard,
+        unregisterKeepAliveGuard,
+    } from "$lib/keepAlive/dirtyGuard";
 
     // 同窗口保活：别的标签的页面也一直挂着，window 级监听要先判当前视图
     const activeOnly = onlyWhenActive();
     // getContext 只能在初始化时读，先取出本页自己的地址
     const ownUrl = viewUrl();
+    // 本页在标签登记表里的 id。必须用 viewUrl 而不是全局 page.url：
+    // 保活视图里全局地址会随别的标签跳转而变，算出来的 id 和宿主登记的
+    // 那个对不上，下面的 dirty guard 就永远命不中。
+    const ownTabId = tabIdFor(ownUrl.pathname, ownUrl.search);
     import TocNode from "$lib/TocNode.svelte";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import ContextMenu from "$lib/ContextMenu.svelte";
@@ -24,7 +36,14 @@
     import FontPreviewPanel from "$lib/epubEditor/FontPreviewPanel.svelte";
     import Toast from "$lib/Toast.svelte";
     import { toastInfo, toastSuccess, toastError } from "$lib/toast";
-    import { loadAppSettings, type GlobalAppSettings } from "$lib/appSettings";
+    import {
+        loadAppSettings,
+        resolveUiTheme,
+        THEME_RESOLVED_EVENT,
+        type GlobalAppSettings,
+    } from "$lib/appSettings";
+    import { clientLayout } from "$lib/clientProfile";
+    import MobileSheet from "$lib/mobile/MobileSheet.svelte";
     import {
         DEFAULT_FONT_PREVIEW_TEXT,
         type FontGlyphAnalyzeResult,
@@ -81,6 +100,19 @@
             unlistenClose?.();
         };
     });
+
+    /**
+     * 手机外壳会为省内存裁掉最久没访问的保活页。原生 EPUB 编辑器同样
+     * 可能带着未保存的章节/项目改动（modifiedFiles / isProjectDirty），
+     * 所以在标签登记表里挂一个否决权：脏页不许被裁。
+     *
+     * 只在手机路径下有用（桌面标签由用户手动关），但登记本身没有副作用，
+     * 桌面也就一起登记了 —— 少一处分支，少一处以后忘记同步的地方。
+     */
+    onMount(() => {
+        registerKeepAliveGuard(ownTabId, hasUnsavedChanges);
+    });
+    onDestroy(() => unregisterKeepAliveGuard(ownTabId));
 
     interface EpubFileNode {
         name: string;
@@ -2416,6 +2448,9 @@ document.addEventListener("click", function (event) {
         const generation = currentGeneration;
 
         selectedFile = file;
+        // 手机上选完文件直接进编辑栏：三栏叠成一格，停在文件树里等于
+        // 点了一次「什么都没发生」
+        if (phoneLayout) phonePane = "editor";
 
         expandParents(fileTree, file.path);
         expandedFolders = new Set(expandedFolders);
@@ -2782,6 +2817,27 @@ document.addEventListener("click", function (event) {
         label: string;
         src: string;
         children?: TocItem[];
+    }
+
+    /**
+     * 手机形态：三栏（文件树 / 编辑器 / 预览·目录）叠成一格，用底部页签切换。
+     *
+     * 桌面是 260 + 1fr + 320 的三列。390px 的屏上三列各分到 130px 左右，
+     * 连文件名都显示不全；而这三栏是"选中文件 → 编辑 → 看效果"的顺序流程，
+     * 手机上一次只需要看一栏。
+     *
+     * 与 web 版编辑器同一套做法：只加页签，不复制 DOM，业务逻辑一行不动。
+     */
+    let phoneLayout = false;
+    $: phoneLayout = $clientLayout === "phone";
+    let phonePane: "tree" | "editor" | "preview" = "tree";
+
+    function selectPhonePane(pane: "tree" | "editor" | "preview") {
+        // 切走编辑器时收掉焦点：隐藏的 CodeMirror 不该继续吃软键盘输入
+        if (phonePane === "editor" && pane !== "editor") {
+            epubCodeEditorComponent?.getView()?.contentDOM.blur();
+        }
+        phonePane = pane;
     }
 
     let activeTab: "preview" | "toc" = "toc";
@@ -4086,9 +4142,11 @@ document.addEventListener("click", function (event) {
             appSettings = loadAppSettings();
         };
         window.addEventListener("tepub-settings-updated", syncSettings);
+        window.addEventListener(THEME_RESOLVED_EVENT, syncSettings);
         window.addEventListener("storage", syncSettings);
         restoreSettingsListener = () => {
             window.removeEventListener("tepub-settings-updated", syncSettings);
+            window.removeEventListener(THEME_RESOLVED_EVENT, syncSettings);
             window.removeEventListener("storage", syncSettings);
         };
         return () => {
@@ -4208,7 +4266,40 @@ document.addEventListener("click", function (event) {
 {:else if error}
     <div class="error page-error">{error}</div>
 {:else}
-    <div class="epub-editor">
+    <div
+        class="epub-editor"
+        class:phone-stack={phoneLayout}
+        data-pane={phonePane}
+    >
+        {#if phoneLayout}
+            <!-- 手机上三栏同时在屏幕上只能各分到 1/3 宽，文件名都显示不全。
+                 收成"一次只看一栏"，用这条页签切换。
+                 桌面不渲染这个节点，三栏并排，布局完全不变。 -->
+            <div class="phone-pane-bar" role="tablist" aria-label="编辑区切换">
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={phonePane === "tree"}
+                    class:active={phonePane === "tree"}
+                    on:click={() => selectPhonePane("tree")}>文件</button
+                >
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={phonePane === "editor"}
+                    class:active={phonePane === "editor"}
+                    on:click={() => selectPhonePane("editor")}>编辑</button
+                >
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={phonePane === "preview"}
+                    class:active={phonePane === "preview"}
+                    on:click={() => selectPhonePane("preview")}>预览</button
+                >
+            </div>
+        {/if}
+
         <FileTreePanel
             {fileTree}
             {expandedFolders}
@@ -4362,7 +4453,8 @@ document.addEventListener("click", function (event) {
                         hasSelectedFile={!!selectedFile}
                         onPreviewClick={handlePreviewClick}
                         showScrollbar={appSettings.previewScrollbar}
-                        darkPaper={appSettings.uiTheme === "dark"}
+                        darkPaper={resolveUiTheme(appSettings.uiTheme) ===
+                            "dark"}
                     />
                 </div>
                 <div class="preview-slot" class:is-hidden={activeTab !== "toc"}>
@@ -5118,5 +5210,269 @@ document.addEventListener("click", function (event) {
         border-bottom-color: var(--color-accent);
         box-shadow: none;
         color: var(--color-accent-deep);
+    }
+
+    /* ——— 手机 ———
+
+       桌面是 260（文件树）+ 1fr（编辑）+ 320（预览）三列。390px 的屏上
+       每列只剩 130px 左右，文件名要截断三次，编辑区一行代码都看不见。
+
+       这里三栏用 grid-area 叠在同一格，同一时刻只有一栏 visible。
+       用 visibility 而不是 display:none：CodeMirror 与预览 iframe 一旦
+       脱离布局就要重新测量，切回来时滚动位置、光标、预览高度都会跳。 */
+    :global(:root[data-tepub-layout="phone"]) .epub-editor.phone-stack {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+        height: 100%;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar {
+        grid-row: 1;
+        grid-column: 1;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        height: 44px;
+        padding-top: var(--safe-top);
+        box-sizing: content-box;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface-soft);
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button {
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--color-text-soft);
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .phone-pane-bar button.active {
+        color: var(--color-accent-deep);
+        box-shadow: inset 0 -2px 0 var(--color-accent);
+    }
+
+    /* 三栏落在同一格。.file-tree 是 FileTreePanel 渲染的，
+       .editor-pane / .preview-pane 在本组件里，统一用 :global 锚定。 */
+    :global(:root[data-tepub-layout="phone"] .epub-editor.phone-stack > .file-tree),
+    :global(:root[data-tepub-layout="phone"]) .epub-editor.phone-stack > .editor-pane,
+    :global(:root[data-tepub-layout="phone"]) .epub-editor.phone-stack > .preview-pane {
+        grid-row: 2;
+        grid-column: 1;
+        width: auto;
+        min-width: 0;
+        min-height: 0;
+        border: 0;
+        box-shadow: none;
+        visibility: hidden;
+    }
+
+    /* .file-tree 是 FileTreePanel 渲染的，没有本组件的作用域属性，
+       所以这条必须整条包进 :global() —— 只包 :root 的话后半段会被补上
+       本组件的作用域属性，永远匹配不到（编译期只报一句 unused selector）。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack[data-pane="tree"]
+            > .file-tree
+    ),
+    :global(:root[data-tepub-layout="phone"])
+        .epub-editor.phone-stack[data-pane="editor"]
+        > .editor-pane,
+    :global(:root[data-tepub-layout="phone"])
+        .epub-editor.phone-stack[data-pane="preview"]
+        > .preview-pane {
+        visibility: visible;
+    }
+
+    /* 隐藏栏里的后代要一并压住：自带 visibility:visible 的元素会盖过
+       继承来的 hidden，叠成一格时就是"两栏重叠"。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack[data-pane="tree"]
+            > .editor-pane
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack[data-pane="tree"]
+            > .preview-pane
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack[data-pane="editor"]
+            > .file-tree
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack[data-pane="editor"]
+            > .preview-pane
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack[data-pane="preview"]
+            > .file-tree
+            *
+    ),
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack[data-pane="preview"]
+            > .editor-pane
+            *
+    ) {
+        visibility: hidden !important;
+    }
+
+    /* 文件树：行高抬到 44px，否则相邻两行分不清点的是哪个 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack
+            > .file-tree
+            :is(.tree-node, .node-label, .file-node)
+    ) {
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack
+            > .file-tree
+            .tree-content
+    ) {
+        padding-bottom: calc(8px + var(--safe-bottom));
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack
+            > .file-tree
+            .node-action
+    ) {
+        width: 38px;
+        height: 38px;
+    }
+
+    /* 预览栏：桌面固定 320px，手机上撑满，书页按真实屏宽排版 */
+    :global(:root[data-tepub-layout="phone"]) .epub-editor.phone-stack > .preview-pane {
+        display: flex;
+        flex-direction: column;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .preview-pane .preview-header {
+        height: 44px;
+        flex: 0 0 auto;
+    }
+
+    :global(:root[data-tepub-layout="phone"]) .preview-pane .preview-stack {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    /* 目录树同理：行高要够手指点 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor.phone-stack
+            > .preview-pane
+            .toc-list
+            .node-content
+    ) {
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+
+    /* 查找面板与文件标签条都来自子组件（FindReplacePanel / TabsBar），
+       带的是它们自己的作用域属性。本组件里的 `:global(:root…) .editor-pane
+       .find-replace-panel` 只有 :root 一段是全局的，后半段会被补上本组件的
+       作用域属性，永远匹配不到 —— 所以这几条统一整条包进 :global()，
+       并锚在本页独有的 .epub-editor 上，避免漏到别的页面。
+
+       查找面板挂在编辑器下面，手机上会把编辑区压到只剩几行，所以限高自滚。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor
+            .editor-pane
+            .find-replace-panel
+    ) {
+        max-height: 46%;
+        overflow: auto;
+        padding-bottom: 8px;
+    }
+
+    /* 上面那条 overflow:auto 有代价：滚动容器上方溢出的内容拿 scrollTop
+       永远滚不到，而查找历史是 bottom:100% 向上弹的 —— 手机上点 ▾ 只会
+       露出三十来像素，条目点不中。改成向下弹，输入框就在面板顶部，
+       下面归滚动区管。 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor
+            .editor-pane
+            .find-replace-panel
+            .fr-history-dropdown
+    ) {
+        top: 100%;
+        bottom: auto;
+        margin-top: 2px;
+        margin-bottom: 0;
+        max-height: 38vh;
+    }
+
+    /* 查找面板里的输入框：13px 会在 iOS 上触发整页放大，且行高太窄点不准 */
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor
+            .editor-pane
+            .find-replace-panel
+            input:not([type="checkbox"])
+    ) {
+        min-height: 40px;
+        font-size: 16px;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor
+            .editor-pane
+            .find-replace-panel
+            button
+    ) {
+        min-height: 36px;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor
+            .editor-pane
+            .find-replace-panel
+            .fr-actions
+    ) {
+        width: auto;
+        flex-shrink: 0;
+    }
+
+    /* 文件标签条：132px 最小宽度在 390px 上一条只能放两个，
+       收到 96px 后一行能放三个多，再靠横向滚动兜底 */
+    :global(
+        :root[data-tepub-layout="phone"] .epub-editor .editor-pane .tabs-bar
+    ) {
+        min-height: 44px;
+        max-height: 44px;
+        padding: 4px 6px 0;
+    }
+
+    :global(
+        :root[data-tepub-layout="phone"]
+            .epub-editor
+            .editor-pane
+            .tabs-bar
+            .editor-tab
+    ) {
+        min-width: 96px;
     }
 </style>
