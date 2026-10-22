@@ -31,7 +31,7 @@
             {/if}
         </div>
         <div class="font-preview-tip">
-            &#20351;&#29992;&#23884;&#20837;&#23383;&#20307;&#23454;&#26102;&#39044;&#35272;
+            使用嵌入字体实时预览
         </div>
     </div>
     <textarea
@@ -42,19 +42,19 @@
         wrap="off"></textarea>
     <div class="font-stats">
         {#if statsLoading}
-            <div class="font-stats-line">&#20998;&#26512;&#20013;...</div>
+            <div class="font-stats-line">分析中...</div>
         {:else if statsError}
             <div class="font-stats-line font-stats-error">{statsError}</div>
         {:else}
             <div class="font-stats-line">
-                &#24050;&#20351;&#29992;&#23383;&#31526;&#25968;&#65306;{usedCharCount}
+                已使用字符数&#65306;{usedCharCount}
             </div>
             <div class="font-stats-line">
-                &#32570;&#22833;&#23383;&#24418;&#25968;&#65306;{missingGlyphCharCount}
+                缺失字形数&#65306;{missingGlyphCharCount}
             </div>
             {#if missingChars.length > 0}
                 <div class="font-stats-line font-stats-missing-title">
-                    &#32570;&#22833;&#23383;&#31526;&#65288;{missingChars.length}&#65289;&#65306;
+                    缺失字符&#65288;{missingChars.length}&#65289;&#65306;
                 </div>
                 <div class="font-missing-chars">{missingChars.join(" ")}</div>
             {/if}

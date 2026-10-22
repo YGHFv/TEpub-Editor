@@ -1,5 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher, tick } from "svelte";
+    import { t } from "$lib/i18n.svelte";
 
     type CustomSelectOption = {
         value: string;
@@ -22,7 +23,9 @@
     let activeIndex = -1;
 
     $: selectedOption = options.find((option) => option.value === value);
-    $: displayLabel = selectedOption?.label || placeholder;
+    $: displayLabel = selectedOption
+        ? t(selectedOption.label)
+        : t(placeholder);
     $: if (open)
         activeIndex = Math.max(
             0,
@@ -134,7 +137,7 @@
         {disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={ariaLabel || undefined}
+        aria-label={ariaLabel ? t(ariaLabel) : undefined}
         on:click={toggle}
         on:keydown={onTriggerKeydown}
     >
@@ -146,7 +149,7 @@
             class="custom-select-menu"
             role="listbox"
             bind:this={menuElement}
-            aria-label={ariaLabel || undefined}
+            aria-label={ariaLabel ? t(ariaLabel) : undefined}
         >
             {#each options as option, index}
                 <button
@@ -159,12 +162,12 @@
                     on:keydown={(event) => onOptionKeydown(event, index)}
                 >
                     <span class="option-label"
-                        ><span>{option.label}</span
+                        ><span>{t(option.label)}</span
                         >{#if value === option.value}<b aria-hidden="true">✓</b
                             >{/if}</span
                     >
                     {#if option.meta}
-                        <small>{option.meta}</small>
+                        <small>{t(option.meta)}</small>
                     {/if}
                 </button>
             {/each}

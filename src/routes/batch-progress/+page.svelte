@@ -6,6 +6,7 @@
     import { ask, open, save } from "@tauri-apps/plugin-dialog";
     import { writeTextFile } from "@tauri-apps/plugin-fs";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import { formatTimeLocalized, localizeUiData, t } from "$lib/i18n.svelte";
     import { batchTaskKey } from "$lib/storageKeys";
 
     type BatchEvent = {
@@ -157,16 +158,18 @@
     let queueFilter: QueueFilter = "all";
     let queueSearch = "";
 
-    $: currentMeta = TOOL_META[tool] ?? {
-        title: toolTitleParam,
-        detail: "批量执行 EPUB 工具",
-    };
+    $: currentMeta = localizeUiData(
+        TOOL_META[tool] ?? {
+            title: t(toolTitleParam),
+            detail: "批量执行 EPUB 工具",
+        },
+    );
     $: percent = total > 0 ? Math.round((current / total) * 100) : 0;
     $: canStart = inputPaths.length > 0 && !running && !scanning;
     $: outputLabel =
         outputDir ||
         resolvedOutputDir ||
-        "默认：所选文件夹下 TEpub-batch-output";
+        t("默认：所选文件夹下 TEpub-batch-output");
     $: filteredLogs =
         logFilter === "all"
             ? logs
@@ -202,15 +205,15 @@
     function statusLabel(status: QueueStatus) {
         switch (status) {
             case "running":
-                return "处理中";
+                return t("处理中");
             case "done":
-                return "完成";
+                return t("完成");
             case "warning":
-                return "跳过";
+                return t("跳过");
             case "error":
-                return "失败";
+                return t("失败");
             default:
-                return "等待";
+                return t("等待");
         }
     }
 
@@ -219,7 +222,7 @@
         prefix = currentMeta.title,
         level: LogLevel = "info",
     ) {
-        const time = new Date().toLocaleTimeString();
+        const time = formatTimeLocalized();
         logs = [
             { level, text: `[${time}] ${prefix}: ${message}` },
             ...logs,
@@ -291,8 +294,10 @@
         if (added.length === 0) return;
         inputPaths = [...inputPaths, ...added];
         addInputRows(added, message);
-        summary = `已加入 ${inputPaths.length} 个输入源`;
-        logLine(`加入 ${added.length} 个输入源`);
+        summary = t("已加入 {count} 个输入源", {
+            count: inputPaths.length,
+        });
+        logLine(t("加入 {count} 个输入源", { count: added.length }));
         saveTaskConfig();
     }
 
@@ -400,14 +405,14 @@
         done = false;
         total = 0;
         current = 0;
-        summary = "正在扫描目录中的 EPUB 文件";
+        summary = t("正在扫描目录中的 EPUB 文件");
         rows = directories.map((path) => ({
             inputPath: path,
             outputPath: "",
             status: "running",
-            message: "正在扫描目录",
+            message: t("正在扫描目录"),
         }));
-        logLine(`开始扫描 ${directories.length} 个目录`);
+        logLine(t("开始扫描 {count} 个目录", { count: directories.length }));
         try {
             const result = await invoke<BatchScanResult>(
                 "toolbox_scan_batch_inputs",
@@ -424,12 +429,14 @@
             current = 0;
             summary =
                 result.inputPaths.length > 0
-                    ? `扫描到 ${result.inputPaths.length} 个 EPUB 文件`
-                    : "目录中未找到 EPUB 文件";
+                    ? t("扫描到 {count} 个 EPUB 文件", {
+                          count: result.inputPaths.length,
+                      })
+                    : t("目录中未找到 EPUB 文件");
             logLine(summary);
             saveTaskConfig();
         } catch (e: any) {
-            summary = `目录扫描失败: ${e}`;
+            summary = t("目录扫描失败: {error}", { error: e });
             rows = directories.map((path) => ({
                 inputPath: path,
                 outputPath: "",
@@ -444,7 +451,7 @@
 
     async function rescanDirectories() {
         if (sourceDirectories.length === 0 || running || scanning) {
-            summary = "没有可重新扫描的目录";
+            summary = t("没有可重新扫描的目录");
             return;
         }
         await scanInputDirectories(sourceDirectories);
@@ -460,8 +467,8 @@
         if (!selected || Array.isArray(selected)) return;
         outputDir = selected;
         resolvedOutputDir = "";
-        summary = "已选择输出目录";
-        logLine(`输出目录: ${outputDir}`);
+        summary = t("已选择输出目录");
+        logLine(t("输出目录: {path}", { path: outputDir }));
         saveTaskConfig();
     }
 
@@ -469,8 +476,8 @@
         if (running || scanning) return;
         outputDir = "";
         resolvedOutputDir = "";
-        summary = "已恢复默认输出目录";
-        logLine("已恢复默认输出目录");
+        summary = t("已恢复默认输出目录");
+        logLine(t("已恢复默认输出目录"));
         saveTaskConfig();
     }
 
@@ -483,8 +490,8 @@
         current = 0;
         done = false;
         resolvedOutputDir = "";
-        summary = "队列已清空";
-        logLine("队列已清空");
+        summary = t("队列已清空");
+        logLine(t("队列已清空"));
         saveTaskConfig();
     }
 
@@ -497,9 +504,11 @@
         current = Math.min(current, total);
         summary =
             inputPaths.length > 0
-                ? `已加入 ${inputPaths.length} 个输入源`
-                : "队列已清空";
-        logLine(`移除队列项: ${basename(path)}`);
+                ? t("已加入 {count} 个输入源", {
+                      count: inputPaths.length,
+                  })
+                : t("队列已清空");
+        logLine(t("移除队列项: {name}", { name: basename(path) }));
         saveTaskConfig();
     }
 
@@ -508,7 +517,7 @@
         try {
             await invoke("reveal_in_explorer", { path });
         } catch (e: any) {
-            summary = `无法打开位置: ${e}`;
+            summary = t("无法打开位置: {error}", { error: e });
             logLine(summary, currentMeta.title, "error");
         }
     }
@@ -516,7 +525,7 @@
     async function openOutputDir() {
         const path = outputDir || resolvedOutputDir;
         if (!path) {
-            summary = "还没有可打开的输出目录";
+            summary = t("还没有可打开的输出目录");
             return;
         }
         await revealPath(path);
@@ -529,9 +538,9 @@
     async function exportLogs() {
         if (logs.length === 0) return;
         const selected = await save({
-            title: "导出批量处理日志",
-            defaultPath: `${currentMeta.title}-批量日志.txt`,
-            filters: [{ name: "文本文件", extensions: ["txt"] }],
+            title: t("导出批量处理日志"),
+            defaultPath: `${currentMeta.title}-${t("批量日志")}.txt`,
+            filters: [{ name: t("文本文件"), extensions: ["txt"] }],
         });
         if (!selected) return;
         const body = logs
@@ -541,10 +550,10 @@
             .join("\n");
         try {
             await writeTextFile(selected, body);
-            summary = "日志已导出";
-            logLine(`日志已导出: ${selected}`);
+            summary = t("日志已导出");
+            logLine(t("日志已导出: {path}", { path: selected }));
         } catch (e: any) {
-            summary = `日志导出失败: ${e}`;
+            summary = t("日志导出失败: {error}", { error: e });
             logLine(summary, currentMeta.title, "error");
         }
     }
@@ -592,17 +601,17 @@
     async function exportReport() {
         if (rows.length === 0) return;
         const selected = await save({
-            title: "导出批量处理报告",
-            defaultPath: `${currentMeta.title}-批量处理报告.txt`,
-            filters: [{ name: "文本文件", extensions: ["txt"] }],
+            title: t("导出批量处理报告"),
+            defaultPath: `${currentMeta.title}-${t("批量处理报告")}.txt`,
+            filters: [{ name: t("文本文件"), extensions: ["txt"] }],
         });
         if (!selected) return;
         try {
             await writeTextFile(selected, buildBatchReport());
-            summary = "批量处理报告已导出";
-            logLine(`批量处理报告已导出: ${selected}`);
+            summary = t("批量处理报告已导出");
+            logLine(t("批量处理报告已导出: {path}", { path: selected }));
         } catch (e: any) {
-            summary = `报告导出失败: ${e}`;
+            summary = t("报告导出失败: {error}", { error: e });
             logLine(summary, currentMeta.title, "error");
         }
     }
@@ -615,14 +624,16 @@
             inputPath: path,
             outputPath: "",
             status: "waiting",
-            message: "等待重试",
+            message: t("等待重试"),
         }));
         total = rows.length;
         current = 0;
         done = false;
         cancelRequested = false;
         queueFilter = "all";
-        summary = `已准备重试 ${rows.length} 个失败文件`;
+        summary = t("已准备重试 {count} 个失败文件", {
+            count: rows.length,
+        });
         logLine(summary, currentMeta.title, "warning");
         saveTaskConfig();
     }
@@ -630,20 +641,20 @@
     async function cancelBatch() {
         if (!running || cancelRequested) return;
         cancelRequested = true;
-        summary = "正在请求取消，当前文件处理完成后停止";
-        logLine("已请求取消批量任务", currentMeta.title, "warning");
+        summary = t("正在请求取消，当前文件处理完成后停止");
+        logLine(t("已请求取消批量任务"), currentMeta.title, "warning");
         try {
             await invoke("toolbox_cancel_batch", { taskId });
         } catch (e: any) {
             cancelRequested = false;
-            summary = `取消请求失败: ${e}`;
+            summary = t("取消请求失败: {error}", { error: e });
             logLine(summary, currentMeta.title, "error");
         }
     }
 
     async function startBatch() {
         if (!canStart) {
-            summary = "请先加入 EPUB 文件或目录";
+            summary = t("请先加入 EPUB 文件或目录");
             return;
         }
         running = true;
@@ -653,8 +664,8 @@
         current = 0;
         resolvedOutputDir = "";
         rows = [];
-        summary = "正在启动批量任务";
-        logLine("开始执行批量任务");
+        summary = t("正在启动批量任务");
+        logLine(t("开始执行批量任务"));
         saveTaskConfig();
 
         try {
@@ -673,13 +684,13 @@
             total = result.total;
             current = result.total;
             if (result.total === 0) {
-                summary = "未找到 EPUB 文件";
+                summary = t("未找到 EPUB 文件");
             }
         } catch (e: any) {
             running = false;
             cancelRequested = false;
             done = true;
-            summary = `批量任务失败: ${e}`;
+            summary = t("批量任务失败: {error}", { error: e });
             logLine(summary, currentMeta.title, "error");
         }
     }
@@ -696,11 +707,13 @@
             outputMode = config.outputMode ?? "batch_dir";
             conflictMode = config.conflictMode ?? "auto_number";
             if (inputPaths.length > 0) {
-                addInputRows(inputPaths, "等待执行");
-                summary = `已加入 ${inputPaths.length} 个输入源`;
+                addInputRows(inputPaths, t("等待执行"));
+                summary = t("已加入 {count} 个输入源", {
+                    count: inputPaths.length,
+                });
             }
         } else {
-            summary = "未找到批量任务配置，请从工具箱重新打开";
+            summary = t("未找到批量任务配置，请从工具箱重新打开");
         }
 
         let unlisten: UnlistenFn | undefined;
@@ -715,9 +728,9 @@
                 if (!running && !scanning) return;
                 event.preventDefault();
                 const ok = await ask(
-                    "批量任务仍在执行或扫描，确定关闭窗口吗？",
+                    t("批量任务仍在执行或扫描，确定关闭窗口吗？"),
                     {
-                        title: "关闭批量窗口",
+                        title: t("关闭批量窗口"),
                         kind: "warning",
                     },
                 );
@@ -819,8 +832,10 @@
                 <div class="field-row">
                     <div
                         class="field-select"
-                        title={OUTPUT_MODES.find((m) => m.value === outputMode)
-                            ?.hint}
+                        title={t(
+                            OUTPUT_MODES.find((m) => m.value === outputMode)
+                                ?.hint ?? "",
+                        )}
                     >
                         <span>输出位置</span>
                         <CustomSelect
@@ -836,9 +851,10 @@
                     </div>
                     <div
                         class="field-select"
-                        title={CONFLICT_MODES.find(
-                            (m) => m.value === conflictMode,
-                        )?.hint}
+                        title={t(
+                            CONFLICT_MODES.find((m) => m.value === conflictMode)
+                                ?.hint ?? "",
+                        )}
                     >
                         <span>冲突处理</span>
                         <CustomSelect
@@ -857,7 +873,7 @@
                 <div class="tool-run-row">
                     <div class="tool-summary">
                         <strong>{currentMeta.title}</strong>
-                        <span>{summary}</span>
+                        <span>{t(summary)}</span>
                     </div>
                     <button
                         class="start-btn"
@@ -970,7 +986,7 @@
                     {:else}
                         {#each filteredLogs as log}
                             <div class={`log-line level-${log.level}`}>
-                                {log.text}
+                                {t(log.text)}
                             </div>
                         {/each}
                     {/if}
@@ -1059,7 +1075,7 @@
                         <div class={`queue-row status-${row.status}`}>
                             <div class="queue-main">
                                 <strong>{basename(row.inputPath)}</strong>
-                                <span>{row.message}</span>
+                                <span>{t(row.message)}</span>
                                 <small title={row.outputPath || row.inputPath}
                                     >{row.outputPath || row.inputPath}</small
                                 >

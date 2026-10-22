@@ -72,6 +72,7 @@
         type FindQuery,
         type MatchRange,
     } from "$lib/findReplace";
+    import { t } from "$lib/i18n.svelte";
 
     // Setup Close Listener
     onMount(() => {
@@ -187,7 +188,9 @@
     let fileContent = "";
     let previewContent = "";
     let isLoading = true;
-    let loadingMessage = "正在加载 EPUB...";
+    let loadingMessageSource = "正在加载 EPUB...";
+    let loadingMessageParams: Record<string, unknown> = {};
+    $: loadingMessage = t(loadingMessageSource, loadingMessageParams);
     let error = "";
     let unlistenPrepareStage: PlatformUnlisten | undefined;
     let expandedFolders: Set<string> = new Set();
@@ -265,6 +268,22 @@
     let currentFontStatsToken = 0;
     let currentFontFace: FontFace | null = null;
 
+    function setLoadingMessage(
+        source: string,
+        params: Record<string, unknown> = {},
+    ) {
+        loadingMessageSource = source;
+        loadingMessageParams = params;
+    }
+
+    function setSearchMessage(
+        source: string,
+        params: Record<string, unknown> = {},
+    ) {
+        searchMessageSource = source;
+        searchMessageParams = params;
+    }
+
     function isImageFile(name: string) {
         return /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(name);
     }
@@ -296,11 +315,11 @@
 
         toastInfo(
             [
-                "EPUB 打开前需要预处理。",
-                prepared.action || "已自动生成可读的工作副本。",
-                "原文件未被修改，当前查看的是处理后的副本。",
-                "源文件：" + prepared.source_path,
-                "当前文件：" + prepared.processed_path,
+                t("EPUB 打开前需要预处理。"),
+                t(prepared.action || "已自动生成可读的工作副本。"),
+                t("原文件未被修改，当前查看的是处理后的副本。"),
+                t("源文件：{path}", { path: prepared.source_path }),
+                t("当前文件：{path}", { path: prepared.processed_path }),
             ].join("\n"),
         );
     }
@@ -476,7 +495,9 @@
             }),
         );
     }
-    let searchMessage = "";
+    let searchMessageSource = "";
+    let searchMessageParams: Record<string, unknown> = {};
+    $: searchMessage = t(searchMessageSource, searchMessageParams);
     let currentMatchInfo: {
         filePath: string;
         from: number;
@@ -738,7 +759,9 @@
             }
 
             if (analyze.unsupported_reason) {
-                fontStatsError = "统计失败：" + analyze.unsupported_reason;
+                fontStatsError = t("统计失败：{error}", {
+                    error: analyze.unsupported_reason,
+                });
                 return;
             }
 
@@ -750,7 +773,9 @@
             fontMissingGlyphCharCount = missingSummary.missingCount;
             fontMissingChars = missingSummary.missingChars;
         } catch (e) {
-            fontStatsError = "统计失败：" + e;
+            fontStatsError = t("统计失败：{error}", {
+                error: String(e),
+            });
         } finally {
             if (token === currentFontStatsToken) {
                 fontStatsLoading = false;
@@ -771,10 +796,10 @@
             : epubPath || routePath;
 
         isLoading = true;
-        loadingMessage = "正在加载 EPUB...";
+        setLoadingMessage("正在加载 EPUB...");
         fontPreviewText = DEFAULT_FONT_PREVIEW_TEXT;
         if (!requestedPath) {
-            error = "未提供 EPUB 文件路径。";
+            error = t("未提供 EPUB 文件路径。");
             isLoading = false;
             return;
         }
@@ -788,7 +813,7 @@
             previewCache.clear();
             resetFontPreviewState();
             previewSourcePath = "";
-            loadingMessage = "准备 EPUB 文件...";
+            setLoadingMessage("准备 EPUB 文件...");
 
             const prepared = await platform.invoke<EpubPrepareResult>(
                 "prepare_epub_for_open",
@@ -799,11 +824,11 @@
             epubPath = prepared.processed_path || requestedPath;
             sourceEpubPath = prepared.source_path || requestedPath;
 
-            loadingMessage = "正在解压 EPUB 文件树...";
+            setLoadingMessage("正在解压 EPUB 文件树...");
             fileTree = await platform.invoke<EpubFileNode[]>("extract_epub", {
                 epubPath,
             });
-            loadingMessage = "正在整理 EPUB 文件树...";
+            setLoadingMessage("正在整理 EPUB 文件树...");
             showEpubPrepareNotice(prepared);
 
             const ensureStandardFolders = (nodes: EpubFileNode[]) => {
@@ -877,7 +902,9 @@
                 }
             });
         } catch (e) {
-            error = "打开 EPUB 失败：" + e;
+            error = t("打开 EPUB 失败：{error}", {
+                error: String(e),
+            });
             isLoading = false;
         }
     };
@@ -1094,7 +1121,7 @@
                     event.payload.epubPath !== activePath
                 )
                     return;
-                loadingMessage = event.payload.message;
+                setLoadingMessage(event.payload.message);
             })
             .then((fn) => {
                 unlistenPrepareStage = fn;
@@ -1156,7 +1183,7 @@
                             filePaths: [context.path],
                         });
                         const content = res[context.path];
-                        if (!content) throw new Error("读取导出内容失败。");
+                        if (!content) throw new Error(t("读取导出内容失败。"));
                         const savedPath = await platform.saveDialog({
                             defaultPath: context.path.split("/").pop(),
                             filters: [
@@ -1171,10 +1198,14 @@
                                 path: savedPath,
                                 content,
                             });
-                            toastSuccess("文件导出成功。");
+                            toastSuccess(t("文件导出成功。"));
                         }
                     } catch (e) {
-                        toastError("导出文件失败：" + e);
+                        toastError(
+                            t("导出文件失败：{error}", {
+                                error: String(e),
+                            }),
+                        );
                     }
                 } else if (action === "duplicate") {
                     try {
@@ -1186,7 +1217,7 @@
                             filePaths: [oldPath],
                         });
                         const content = res[oldPath];
-                        if (!content) throw new Error("读取文件内容失败");
+                        if (!content) throw new Error(t("读取文件内容失败"));
                         // Simple duplicate naming: foo.xhtml -> foo_copy.xhtml
                         const parts = oldPath.split(".");
                         const ext = parts.pop();
@@ -1203,7 +1234,11 @@
                         await loadEpub();
                         isProjectDirty = true;
                     } catch (e) {
-                        toastError("复制文件失败：" + e);
+                        toastError(
+                            t("复制文件失败：{error}", {
+                                error: String(e),
+                            }),
+                        );
                     }
                 } else if (action === "import-sibling") {
                     try {
@@ -1241,11 +1276,15 @@
                             isProjectDirty = true;
                         }
                     } catch (e) {
-                        toastError("重命名文件失败：" + e);
+                        toastError(
+                            t("重命名文件失败：{error}", {
+                                error: String(e),
+                            }),
+                        );
                     }
                 } else if (action === "new-sibling-html") {
                     const res = await showPromptDialog(
-                        "新文件名",
+                        t("新文件名"),
                         "new_chapter.xhtml",
                     );
                     if (res && res.value) {
@@ -1270,7 +1309,11 @@
                             await loadEpub();
                             isProjectDirty = true;
                         } catch (e) {
-                            toastError("删除文件失败：" + e);
+                            toastError(
+                                t("删除文件失败：{error}", {
+                                    error: String(e),
+                                }),
+                            );
                         } finally {
                             isPromptBusy = false;
                             showPrompt = false;
@@ -1282,7 +1325,7 @@
                     const oldName = oldPath.split("/").pop() || "";
 
                     const res = await showPromptDialog(
-                        "输入新文件名",
+                        t("输入新文件名"),
                         oldName,
                         true,
                     );
@@ -1404,7 +1447,11 @@
                             }
                         } catch (e) {
                             console.error("Rename/Refactor failed", e);
-                            toastError("重命名/重构失败：" + e);
+                            toastError(
+                                t("重命名/重构失败：{error}", {
+                                    error: String(e),
+                                }),
+                            );
                         } finally {
                             isPromptBusy = false;
                             showPrompt = false;
@@ -1416,8 +1463,8 @@
                     }
                 } else if (action === "delete") {
                     const confirmed = await showConfirmDialog(
-                        "确认删除",
-                        "确定删除 " + context.path + " 吗？",
+                        t("确认删除"),
+                        t("确定删除 {path} 吗？", { path: context.path }),
                     );
                     if (confirmed) {
                         // 1. Delete file
@@ -1496,7 +1543,10 @@
                         );
                     }
 
-                    const res = await showPromptDialog("文件名", "new.xhtml");
+                    const res = await showPromptDialog(
+                        t("文件名"),
+                        "new.xhtml",
+                    );
                     console.log("[DEBUG] new-file: res result:", res);
                     if (res && res.value) {
                         const fileName = res.value;
@@ -1533,7 +1583,11 @@
                                 "[DEBUG] new-file: add_epub_file failed:",
                                 e,
                             );
-                            toastError("保存文件失败：" + e);
+                            toastError(
+                                t("保存文件失败：{error}", {
+                                    error: String(e),
+                                }),
+                            );
                         } finally {
                             isPromptBusy = false;
                             showPrompt = false;
@@ -1696,7 +1750,7 @@
                                     expandedFolders = new Set(expandedFolders);
                                 }
                             } else {
-                                toastInfo("该目录项下未找到文件。");
+                                toastInfo(t("该目录项下未找到文件。"));
                             }
                         }
                     }
@@ -1716,14 +1770,14 @@
                     } else if (folderType === "fonts") {
                         filters = [
                             {
-                                name: "字体文件",
+                                name: t("字体文件"),
                                 extensions: ["ttf", "otf", "woff", "woff2"],
                             },
                         ];
                     } else if (folderType === "images") {
                         filters = [
                             {
-                                name: "图片文件",
+                                name: t("图片文件"),
                                 extensions: [
                                     "jpg",
                                     "jpeg",
@@ -1735,7 +1789,9 @@
                             },
                         ];
                     } else {
-                        filters = [{ name: "全部文件", extensions: ["*"] }];
+                        filters = [
+                            { name: t("全部文件"), extensions: ["*"] },
+                        ];
                     }
 
                     const selected = await platform.openDialog({
@@ -1779,7 +1835,9 @@
 
                         if (importedCount > 0) {
                             toastSuccess(
-                                "已导入 " + importedCount + " 个文件。",
+                                t("已导入 {count} 个文件。", {
+                                    count: importedCount,
+                                }),
                             );
                             await loadEpub();
                             if (context.path) {
@@ -1791,7 +1849,9 @@
                 }
             } catch (err) {
                 console.error("Action error:", err);
-                toastError("操作失败：" + err);
+                toastError(
+                    t("操作失败：{error}", { error: String(err) }),
+                );
             }
         };
 
@@ -2362,10 +2422,13 @@ document.addEventListener("click", function (event) {
             isProjectDirty = false;
         } catch (e) {
             console.error("保存失败:", e);
-            await platform.confirm("保存失败：" + e, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.confirm(
+                t("保存失败：{error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             isSaving = false;
         }
@@ -2389,10 +2452,13 @@ document.addEventListener("click", function (event) {
             isProjectDirty = true;
         } catch (e) {
             console.error("保存失败:", e);
-            await platform.confirm("保存失败：" + e, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.confirm(
+                t("保存失败：{error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             isSaving = false;
         }
@@ -2401,7 +2467,7 @@ document.addEventListener("click", function (event) {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
         if (hasUnsavedChanges()) {
             e.preventDefault();
-            e.returnValue = "有未保存的更改，确定离开吗？";
+            e.returnValue = t("有未保存的更改，确定离开吗？");
             return e.returnValue;
         }
     }
@@ -2491,7 +2557,7 @@ document.addEventListener("click", function (event) {
         if (fileContentCache.has(file.path)) {
             fileContent = fileContentCache.get(file.path)!;
         } else {
-            fileContent = "字体预览加载失败。";
+            fileContent = t("字体预览加载失败。");
         }
 
         // UX Optimization: Immediate Switch for HTML files
@@ -2538,7 +2604,7 @@ document.addEventListener("click", function (event) {
                         }
                     } catch (err) {
                         console.error("Failed to load image", err);
-                        fileContent = "图片预览加载失败。";
+                        fileContent = t("图片预览加载失败。");
                     }
                 }
                 fileContent = ""; // Clear editor content
@@ -2664,8 +2730,10 @@ document.addEventListener("click", function (event) {
             }
         } catch (e) {
             if (currentGeneration === generation) {
-                fileContent = "预览源加载失败：" + e;
-                previewContent = "预览源加载失败：" + e;
+                fileContent = t("预览源加载失败：{error}", {
+                    error: String(e),
+                });
+                previewContent = fileContent;
             }
         }
     }
@@ -2774,7 +2842,10 @@ document.addEventListener("click", function (event) {
                 await closeEpubEditorWindow();
             } catch (e) {
                 isSaving = false;
-                await platform.confirm("保存失败：" + e, { kind: "error" });
+                await platform.confirm(
+                    t("保存失败：{error}", { error: String(e) }),
+                    { kind: "error" },
+                );
                 return;
             }
         }
@@ -2937,7 +3008,7 @@ document.addEventListener("click", function (event) {
                 },
             );
             const opfContent = res[opfPath];
-            if (!opfContent) throw new Error("读取 OPF 内容失败。");
+            if (!opfContent) throw new Error(t("读取 OPF 内容失败。"));
 
             const parser = new DOMParser();
             const doc = parser.parseFromString(opfContent, "text/xml");
@@ -3013,7 +3084,9 @@ document.addEventListener("click", function (event) {
             });
         } catch (e) {
             console.error("Failed to update OPF:", e);
-            toastError("更新 OPF 失败：" + e);
+            toastError(
+                t("更新 OPF 失败：{error}", { error: String(e) }),
+            );
         }
     }
 
@@ -3097,7 +3170,7 @@ document.addEventListener("click", function (event) {
         e.preventDefault();
         e.stopPropagation();
         if (!epubPath) {
-            toastError("向 EPUB 添加资源失败。");
+            toastError(t("向 EPUB 添加资源失败。"));
             return;
         }
 
@@ -3165,7 +3238,11 @@ document.addEventListener("click", function (event) {
                 });
             } catch (err) {
                 console.error("Batch file write failed", err);
-                toastError("批量写入文件失败：" + err);
+                toastError(
+                    t("批量写入文件失败：{error}", {
+                        error: String(err),
+                    }),
+                );
                 return;
             }
 
@@ -3664,14 +3741,14 @@ document.addEventListener("click", function (event) {
                 useWrap && wrapAround,
             );
         } catch {
-            searchMessage = "\u641C\u7D22\u6A21\u5F0F\u65E0\u6548\u3002";
+            setSearchMessage("搜索模式无效。");
             return null;
         }
     }
 
     async function findNext() {
         if (!findPattern) {
-            searchMessage = "请输入查找内容";
+            setSearchMessage("请输入查找内容");
             return;
         }
 
@@ -3680,7 +3757,7 @@ document.addEventListener("click", function (event) {
 
         const files = getFilesInScope();
         if (files.length === 0) {
-            searchMessage = "没有可搜索的文件";
+            setSearchMessage("没有可搜索的文件");
             return;
         }
 
@@ -3726,7 +3803,7 @@ document.addEventListener("click", function (event) {
                 from: result.from,
                 to: result.to,
             };
-            searchMessage = `找到匹配`;
+            setSearchMessage("找到匹配");
 
             // 选中匹配内容
             if (epubCodeEditorComponent) {
@@ -3744,7 +3821,7 @@ document.addEventListener("click", function (event) {
 
         // 如果只搜索当前文件，没找到就结束
         if (searchScope === "current" || files.length === 1) {
-            searchMessage = "未找到匹配";
+            setSearchMessage("未找到匹配");
             currentMatchInfo = null;
             return;
         }
@@ -3826,7 +3903,9 @@ document.addEventListener("click", function (event) {
                                 from: actualResult.from,
                                 to: actualResult.to,
                             };
-                            searchMessage = `找到匹配 (${nextFile.name})`;
+                            setSearchMessage("找到匹配 ({name})", {
+                                name: nextFile.name,
+                            });
 
                             view.dispatch({
                                 selection: {
@@ -3844,7 +3923,7 @@ document.addEventListener("click", function (event) {
         }
 
         // 所有文件都搜索完毕，没找到
-        searchMessage = "未找到匹配";
+        setSearchMessage("未找到匹配");
         currentMatchInfo = null;
     }
 
@@ -3859,7 +3938,7 @@ document.addEventListener("click", function (event) {
     // 替换当前选中
     function performReplace() {
         if (!currentMatchInfo || !epubCodeEditorComponent) {
-            searchMessage = "请先查找";
+            setSearchMessage("请先查找");
             return;
         }
 
@@ -3886,7 +3965,7 @@ document.addEventListener("click", function (event) {
             replacement.length - (currentMatchInfo.to - currentMatchInfo.from);
         currentMatchInfo.to = currentMatchInfo.from + replacement.length;
 
-        searchMessage = "已替换";
+        setSearchMessage("已替换");
 
         // 继续查找下一个
         findNext();
@@ -3895,7 +3974,7 @@ document.addEventListener("click", function (event) {
     // 全部替换
     async function performReplaceAll() {
         if (!findPattern) {
-            searchMessage = "请输入查找内容";
+            setSearchMessage("请输入查找内容");
             return;
         }
 
@@ -3930,7 +4009,7 @@ document.addEventListener("click", function (event) {
                 newContent = replaced.content;
                 replacedCount = replaced.count;
             } catch (e) {
-                searchMessage = "正则表达式语法错误";
+                setSearchMessage("正则表达式语法错误");
                 return;
             }
 
@@ -3950,7 +4029,9 @@ document.addEventListener("click", function (event) {
         }
 
         modifiedFiles = new Set(modifiedFiles); // 触发响应式
-        searchMessage = `已替换 ${totalReplaced} 处`;
+        setSearchMessage("已替换 {count} 处", {
+            count: totalReplaced,
+        });
         currentMatchInfo = null;
     }
 
@@ -3959,10 +4040,10 @@ document.addEventListener("click", function (event) {
     async function countMatches() {
         try {
             if (!findPattern) {
-                searchMessage = "请输入查找内容";
+                setSearchMessage("请输入查找内容");
                 return;
             }
-            searchMessage = "计算中...";
+            setSearchMessage("计算中...");
             await tick();
 
             const files = getFilesInScope();
@@ -3983,7 +4064,9 @@ document.addEventListener("click", function (event) {
             let totalCount = 0;
             // Backend
             if (backendFiles.length > 0) {
-                searchMessage = `正在后台搜索 ${backendFiles.length} 个文件...`;
+                setSearchMessage("正在后台搜索 {count} 个文件...", {
+                    count: backendFiles.length,
+                });
                 await tick();
                 try {
                     const count = await platform.invoke("search_in_files", {
@@ -4000,7 +4083,7 @@ document.addEventListener("click", function (event) {
             }
             // Frontend
             if (localFiles.length > 0) {
-                searchMessage = `正在搜索缓存文件...`;
+                setSearchMessage("正在搜索缓存文件...");
                 await tick();
                 let processed = 0;
                 for (const file of localFiles) {
@@ -4030,14 +4113,16 @@ document.addEventListener("click", function (event) {
                             currentFindQuery(),
                         );
                     } catch {
-                        searchMessage = "正则表达式错误";
+                        setSearchMessage("正则表达式错误");
                         return;
                     }
                 }
             }
-            searchMessage = `共 ${totalCount} 处匹配`;
+            setSearchMessage("共 {count} 处匹配", {
+                count: totalCount,
+            });
         } catch (e: any) {
-            searchMessage = "错: " + e.message;
+            setSearchMessage("错误：{error}", { error: e.message });
         }
     }
 
@@ -4045,7 +4130,7 @@ document.addEventListener("click", function (event) {
     function closeFindReplace() {
         showFindReplace = false;
         currentMatchInfo = null;
-        searchMessage = "";
+        setSearchMessage("");
     }
 
     // 保存查找历史到 localStorage
@@ -4195,7 +4280,7 @@ document.addEventListener("click", function (event) {
                             bind:checked={promptCheckValue}
                             disabled={isPromptBusy}
                         />
-                        &#33258;&#21160;&#26356;&#26032;&#20854;&#20182;&#25991;&#20214;&#20013;&#30340;&#38142;&#25509;&#24341;&#29992;
+                        自动更新其他文件中的链接引用
                     </label>
                 </div>
             {/if}
@@ -4206,7 +4291,7 @@ document.addEventListener("click", function (event) {
                     on:click={handlePromptCancel}
                     disabled={isPromptBusy}
                 >
-                    &#21462;&#28040;
+                    取消
                 </button>
                 <button
                     class="prompt-btn confirm"
@@ -4249,13 +4334,13 @@ document.addEventListener("click", function (event) {
                     class="prompt-btn cancel"
                     on:click={handleConfirmCancel}
                 >
-                    &#21462;&#28040;
+                    取消
                 </button>
                 <button
                     class="prompt-btn confirm delete"
                     on:click={handleConfirmConfirm}
                 >
-                    &#21024;&#38500;
+                    删除
                 </button>
             </div>
         </div>
@@ -4333,7 +4418,7 @@ document.addEventListener("click", function (event) {
                             />
                         {:else}
                             <div class="loading loading-inline">
-                                &#21152;&#36733;&#22270;&#29255;&#20013;...
+                                加载图片中...
                             </div>
                         {/if}
                     </div>
@@ -4393,7 +4478,7 @@ document.addEventListener("click", function (event) {
                 {/if}
             {:else}
                 <div class="placeholder">
-                    &#35831;&#20174;&#24038;&#20391;&#36873;&#25321;&#19968;&#20010;&#25991;&#20214;
+                    请从左侧选择一个文件
                 </div>
             {/if}
 
@@ -4428,7 +4513,7 @@ document.addEventListener("click", function (event) {
                         class:active={activeTab === "preview"}
                         on:click={() => (activeTab = "preview")}
                     >
-                        &#39044;&#35272;
+                        预览
                     </button>
                     <button
                         class="tab"
@@ -4437,7 +4522,7 @@ document.addEventListener("click", function (event) {
                             activeTab = "toc";
                         }}
                     >
-                        &#30446;&#24405;
+                        目录
                     </button>
                 </div>
             </div>
@@ -4461,11 +4546,11 @@ document.addEventListener("click", function (event) {
                     <div class="toc-container">
                         {#if isTocLoading}
                             <div class="loading toc-loading">
-                                &#23569;&#22899;&#31048;&#31095;&#20013;&#183;&#183;&#183;&#183;&#183;&#183;
+                                少女祈祷中&#183;&#183;&#183;&#183;&#183;&#183;
                             </div>
                         {:else if tocList.length === 0}
                             <div class="empty">
-                                &#26242;&#26080;&#30446;&#24405;&#25110;&#26410;&#25214;&#21040;
+                                暂无目录或未找到
                                 toc.ncx
                             </div>
                         {:else}
@@ -4493,14 +4578,14 @@ document.addEventListener("click", function (event) {
     <div class="dialog-overlay">
         <div class="dialog">
             <div class="dialog-header">
-                &#26410;&#20445;&#23384;&#30340;&#26356;&#25913;
+                未保存的更改
             </div>
             <div class="dialog-content">
                 {#if closeContext === "tab"}
-                    &#25991;&#20214; "{pendingCloseFile?.name}"
-                    &#26377;&#26410;&#20445;&#23384;&#30340;&#26356;&#25913;&#65292;&#26159;&#21542;&#20445;&#23384;&#65311;
+                    文件 "{pendingCloseFile?.name}"
+                    有未保存的更改&#65292;是否保存&#65311;
                 {:else}
-                    &#24744;&#26377; {modifiedFiles.size} &#20010;&#25991;&#20214;&#21253;&#21547;&#26410;&#20445;&#23384;&#30340;&#26356;&#25913;&#65292;&#26159;&#21542;&#20445;&#23384;&#25152;&#26377;&#24182;&#36864;&#20986;&#65311;
+                    您有 {modifiedFiles.size} 个文件包含未保存的更改&#65292;是否保存所有并退出&#65311;
                 {/if}
             </div>
             <div class="dialog-actions">
@@ -4516,14 +4601,14 @@ document.addEventListener("click", function (event) {
                     on:click={handleDialogDiscard}
                     disabled={isSaving}
                 >
-                    &#19981;&#20445;&#23384;
+                    不保存
                 </button>
                 <button
                     class="btn secondary"
                     on:click={handleDialogCancel}
                     disabled={isSaving}
                 >
-                    &#21462;&#28040;
+                    取消
                 </button>
             </div>
         </div>

@@ -62,6 +62,11 @@
     import Toast from "$lib/Toast.svelte";
     import { toastError } from "$lib/toast";
     import {
+        formatDateTimeLocalized,
+        formatTimeLocalized,
+        t,
+    } from "$lib/i18n.svelte";
+    import {
         applyTheme as applyGlobalTheme,
         loadAppSettings as loadGlobalAppSettings,
         saveAppSettings as saveGlobalAppSettings,
@@ -1771,20 +1776,30 @@
             proofPreviewMessage =
                 proofActiveTab === "toc" && summary.total > 0
                     ? proofTitleScope === "numbers-only"
-                        ? `数字转换预览 ${summary.total} 项，预计修改 ${summary.changed} 项`
-                        : `目录预览 ${summary.total} 项，预计修改 ${summary.changed} 项`
+                        ? t("数字转换预览 {total} 项，预计修改 {changed} 项", {
+                              total: summary.total,
+                              changed: summary.changed,
+                          })
+                        : t("目录预览 {total} 项，预计修改 {changed} 项", {
+                              total: summary.total,
+                              changed: summary.changed,
+                          })
                     : proofTitleScope === "regex" && proofTitleRegex.trim()
-                      ? "没有匹配到可重排标题"
+                      ? t("没有匹配到可重排标题")
                       : proofActiveTab === "builtin"
                         ? builtinRegexMessage
                         : proofActiveTab === "ai"
-                          ? `智能校对 ${aiProofingRows.length} 条建议`
+                          ? t("智能校对 {count} 条建议", {
+                                count: aiProofingRows.length,
+                            })
                           : proofActiveTab === "check"
                             ? proofCheckMessage
-                            : "没有可预览的标题";
+                            : t("没有可预览的标题");
         } catch (e: any) {
             proofPreviewRows = [];
-            proofPreviewMessage = `预览失败: ${e?.message || e}`;
+            proofPreviewMessage = t("预览失败: {error}", {
+                error: e?.message || e,
+            });
         }
     }
 
@@ -1794,7 +1809,14 @@
             !proofCollapsedVolumeKeys.has(row.volumeKey),
     );
 
-    $: proofCheckMessage = `断序 ${sequenceErrors.length} 项，标题 ${titleErrors.length} 项，字数 ${wordCountErrors.length} 项`;
+    $: proofCheckMessage = t(
+        "断序 {sequence} 项，标题 {title} 项，字数 {words} 项",
+        {
+            sequence: sequenceErrors.length,
+            title: titleErrors.length,
+            words: wordCountErrors.length,
+        },
+    );
 
     $: {
         fileContent;
@@ -1809,19 +1831,23 @@
             proofRegexSelectedIds = new Set();
             builtinRegexMessage =
                 proofRegexPreviewRows.length > 0
-                    ? `匹配 ${proofRegexPreviewRows.length} 项，默认全不选`
-                    : "没有匹配项";
+                    ? t("匹配 {count} 项，默认全不选", {
+                          count: proofRegexPreviewRows.length,
+                      })
+                    : t("没有匹配项");
         } catch (e: any) {
             proofRegexPreviewRows = [];
             proofRegexSelectedIds = new Set();
-            builtinRegexMessage = `预览失败: ${e?.message || e}`;
+            builtinRegexMessage = t("预览失败: {error}", {
+                error: e?.message || e,
+            });
         }
     }
 
     async function applyProofResult(result: ProofTransformResult) {
-        proofMessage = result.message;
+        proofMessage = t(result.message);
         if (!fileContent) {
-            proofMessage = "请先打开文本文件";
+            proofMessage = t("请先打开文本文件");
             return;
         }
         if (result.changedCount <= 0 || result.text === fileContent) {
@@ -1865,7 +1891,7 @@
 
     function jumpToProofTitleRow(row: ProofTitlePreviewRow) {
         editorComponent?.scrollToLine(row.line, true);
-        proofMessage = "已定位到原标题位置";
+        proofMessage = t("已定位到原标题位置");
     }
 
     function toggleProofRegexRow(rowId: string, checked: boolean) {
@@ -1888,8 +1914,11 @@
         editorComponent?.scrollToLine(row.lineStart, true);
         proofMessage =
             row.lineEnd !== row.lineStart
-                ? `已定位到匹配范围 ${row.lineStart}-${row.lineEnd} 行`
-                : `已定位到匹配位置`;
+                ? t("已定位到匹配范围 {start}-{end} 行", {
+                      start: row.lineStart,
+                      end: row.lineEnd,
+                  })
+                : t("已定位到匹配位置");
     }
 
     async function applySelectedBuiltinRegex() {
@@ -1911,7 +1940,7 @@
     }
 
     async function runProofFullConvert() {
-        proofMessage = "正在转换繁简，请稍候...";
+        proofMessage = t("正在转换繁简，请稍候...");
         const result = await convertChineseText(
             fileContent,
             proofConvertDirection,
@@ -1993,7 +2022,7 @@
                 aiProofingConfig,
             );
         }
-        aiSettingsMessage = "正在保存...";
+        aiSettingsMessage = t("正在保存...");
         try {
             const currentGlobalSettings = loadGlobalAppSettings(
                 libraryData?.config || {},
@@ -2013,10 +2042,10 @@
                 ],
                 txtAiProofing: txtAiProofingConfig,
             });
-            aiSettingsMessage = "已保存，工具箱设置与 TXT 编辑器设置已同步";
+            aiSettingsMessage = t("已保存，工具箱设置与 TXT 编辑器设置已同步");
         } catch (error) {
             console.error("保存智能校对设置失败:", error);
-            aiSettingsMessage = `保存失败：${error}`;
+            aiSettingsMessage = t("保存失败：{error}", { error });
         }
     }
 
@@ -2088,7 +2117,7 @@
             !provider.baseUrl.trim() ||
             !provider.model.trim()
         ) {
-            aiSettingsMessage = "请填写名称、API 地址和模型。";
+            aiSettingsMessage = t("请填写名称、API 地址和模型。");
             return;
         }
         if (apiEditorMode === "edit") {
@@ -2111,7 +2140,7 @@
         }
         apiEditorOpen = false;
         apiEditorDraft = null;
-        aiSettingsMessage = "API 配置已保存，点击完成后写入设置。";
+        aiSettingsMessage = t("API 配置已保存，点击完成后写入设置。");
     }
 
     async function removeTxtAiProvider(providerId: string) {
@@ -2129,7 +2158,7 @@
         if (wasEditing) {
             cancelTxtAiProviderEditor();
         }
-        aiSettingsMessage = "API 配置已删除，点击完成后写入设置。";
+        aiSettingsMessage = t("API 配置已删除，点击完成后写入设置。");
     }
 
     async function openSettingsHistoryTab() {
@@ -2144,12 +2173,12 @@
     }
 
     async function loadProofLogs(selectFirst = false) {
-        proofLogMessage = "正在读取校对日志...";
+        proofLogMessage = t("正在读取校对日志...");
         try {
             proofLogList = await platform.invoke<ProofLogInfo[]>(
                 "list_ai_proofing_logs",
             );
-            proofLogMessage = proofLogList.length ? "" : "暂无校对日志";
+            proofLogMessage = proofLogList.length ? "" : t("暂无校对日志");
             if (selectFirst && proofLogList.length > 0) {
                 await openProofLog(proofLogList[0]);
             }
@@ -2158,7 +2187,7 @@
             proofLogList = [];
             selectedProofLogPath = "";
             selectedProofLogContent = "";
-            proofLogMessage = `读取校对日志失败：${error}`;
+            proofLogMessage = t("读取校对日志失败：{error}", { error });
         }
     }
 
@@ -2169,7 +2198,7 @@
 
     async function openProofLog(log: ProofLogInfo) {
         selectedProofLogPath = log.path;
-        proofLogMessage = "正在打开日志...";
+        proofLogMessage = t("正在打开日志...");
         try {
             selectedProofLogContent = await platform.invoke<string>(
                 "read_ai_proofing_log",
@@ -2179,7 +2208,7 @@
         } catch (error) {
             console.error("打开校对日志失败:", error);
             selectedProofLogContent = "";
-            proofLogMessage = `打开日志失败：${error}`;
+            proofLogMessage = t("打开日志失败：{error}", { error });
         }
     }
 
@@ -2192,7 +2221,7 @@
         } catch (error) {
             console.error("加载外部字体失败:", error);
             importedFonts = [];
-            fontSettingsMessage = "读取字体目录失败";
+            fontSettingsMessage = t("读取字体目录失败");
         }
     }
 
@@ -2218,7 +2247,7 @@
                     is_builtin: true,
                 },
             ];
-            styleSettingsMessage = "读取样式模板失败";
+            styleSettingsMessage = t("读取样式模板失败");
         }
     }
 
@@ -2299,13 +2328,15 @@
         } catch (e) {
             // web 端无原生文件选择器（openDialog 抛 PlatformUnsupportedError），
             // 桌面端选择器异常也在此兜底提示。
-            fontSettingsMessage = `打开文件选择器失败：${e}`;
+            fontSettingsMessage = t("打开文件选择器失败：{error}", {
+                error: e,
+            });
             return;
         }
         if (!selection) return;
 
         isImportingFont = true;
-        fontSettingsMessage = "正在导入字体...";
+        fontSettingsMessage = t("正在导入字体...");
         try {
             const imported = await platform.invoke<ImportedFontInfo>(
                 "import_library_font",
@@ -2316,10 +2347,12 @@
             await loadImportedFonts();
             syncManagedFontAssets();
             epubMeta = { ...epubMeta };
-            fontSettingsMessage = `已导入字体：${imported.family}`;
+            fontSettingsMessage = t("已导入字体：{name}", {
+                name: imported.family,
+            });
         } catch (error) {
             console.error("导入字体失败:", error);
-            fontSettingsMessage = `导入失败：${error}`;
+            fontSettingsMessage = t("导入失败：{error}", { error });
         } finally {
             isImportingFont = false;
         }
@@ -2327,12 +2360,12 @@
 
     async function renameImportedFont(font: ImportedFontInfo) {
         const nextFamily = window
-            .prompt("输入新的字体显示名", font.family)
+            .prompt(t("输入新的字体显示名"), font.family)
             ?.trim();
         if (!nextFamily || nextFamily === font.family) return;
 
         renamingFontFileName = font.file_name;
-        fontSettingsMessage = "正在重命名字体...";
+        fontSettingsMessage = t("正在重命名字体...");
         try {
             await platform.invoke<ImportedFontInfo>("rename_library_font", {
                 fileName: font.file_name,
@@ -2341,10 +2374,12 @@
             await loadImportedFonts();
             syncManagedFontAssets();
             epubMeta = { ...epubMeta };
-            fontSettingsMessage = `已重命名为：${nextFamily}`;
+            fontSettingsMessage = t("已重命名为：{name}", {
+                name: nextFamily,
+            });
         } catch (error) {
             console.error("重命名字体失败:", error);
-            fontSettingsMessage = `重命名失败：${error}`;
+            fontSettingsMessage = t("重命名失败：{error}", { error });
         } finally {
             renamingFontFileName = "";
         }
@@ -2352,16 +2387,16 @@
 
     async function deleteImportedFont(font: ImportedFontInfo) {
         const confirmed = await platform.ask(
-            `确定删除字体“${font.family}”吗？`,
+            t("确定删除字体“{name}”吗？", { name: font.family }),
             {
-                title: "删除字体",
+                title: t("删除字体"),
                 kind: "warning",
             },
         );
         if (!confirmed) return;
 
         deletingFontFileName = font.file_name;
-        fontSettingsMessage = "正在删除字体...";
+        fontSettingsMessage = t("正在删除字体...");
         try {
             await platform.invoke("delete_library_font", {
                 fileName: font.file_name,
@@ -2369,10 +2404,12 @@
             await loadImportedFonts();
             syncManagedFontAssets();
             epubMeta = { ...epubMeta };
-            fontSettingsMessage = `已删除字体：${font.family}`;
+            fontSettingsMessage = t("已删除字体：{name}", {
+                name: font.family,
+            });
         } catch (error) {
             console.error("删除字体失败:", error);
-            fontSettingsMessage = `删除失败：${error}`;
+            fontSettingsMessage = t("删除失败：{error}", { error });
         } finally {
             deletingFontFileName = "";
         }
@@ -2389,13 +2426,15 @@
         } catch (e) {
             // web 端无原生文件选择器（openDialog 抛 PlatformUnsupportedError），
             // 桌面端选择器异常也在此兜底提示。
-            styleSettingsMessage = `打开文件选择器失败：${e}`;
+            styleSettingsMessage = t("打开文件选择器失败：{error}", {
+                error: e,
+            });
             return;
         }
         if (!selection) return;
 
         isImportingStyleTemplate = true;
-        styleSettingsMessage = "正在导入样式模板...";
+        styleSettingsMessage = t("正在导入样式模板...");
         try {
             const imported = await platform.invoke<StyleTemplateInfo>(
                 "import_style_template",
@@ -2405,10 +2444,12 @@
             );
             await loadStyleTemplates();
             appSettings.selectedStyleTemplateId = imported.id;
-            styleSettingsMessage = `已导入模板：${imported.name}`;
+            styleSettingsMessage = t("已导入模板：{name}", {
+                name: imported.name,
+            });
         } catch (error) {
             console.error("导入样式模板失败:", error);
-            styleSettingsMessage = `导入失败：${error}`;
+            styleSettingsMessage = t("导入失败：{error}", { error });
         } finally {
             isImportingStyleTemplate = false;
         }
@@ -2417,7 +2458,7 @@
     async function saveCurrentStyleTemplate() {
         if (isSavingStyleTemplate) return;
         isSavingStyleTemplate = true;
-        styleSettingsMessage = "正在保存当前模板...";
+        styleSettingsMessage = t("正在保存当前模板...");
         try {
             if (showStyleSourceEditor) {
                 applyResolvedStyleTemplateCss(styleSourceDraft);
@@ -2434,17 +2475,24 @@
             await loadStyleTemplates();
             await applySelectedStyleTemplate(targetId);
             captureStylePanelBaseline();
-            styleSettingsMessage = `已保存到模板：${currentStyleTemplateName}`;
+            const savedTemplate = styleTemplates.find(
+                (template) => template.id === targetId,
+            );
+            styleSettingsMessage = t("已保存到模板：{name}", {
+                name: savedTemplate?.is_builtin
+                    ? t(savedTemplate.name)
+                    : savedTemplate?.name || t(currentStyleTemplateName),
+            });
         } catch (error) {
             console.error("保存样式模板失败:", error);
-            styleSettingsMessage = `保存失败：${error}`;
+            styleSettingsMessage = t("保存失败：{error}", { error });
         } finally {
             isSavingStyleTemplate = false;
         }
     }
 
     async function restoreBuiltinStyleTemplateToDefault() {
-        styleSettingsMessage = "正在恢复内置模板...";
+        styleSettingsMessage = t("正在恢复内置模板...");
         try {
             await platform.invoke("restore_builtin_style_template");
             await loadStyleTemplates();
@@ -2455,10 +2503,10 @@
                 await applySelectedStyleTemplate(STYLE_TEMPLATE_BUILTIN_ID);
                 captureStylePanelBaseline();
             }
-            styleSettingsMessage = "内置模板已恢复默认样式";
+            styleSettingsMessage = t("内置模板已恢复默认样式");
         } catch (error) {
             console.error("恢复内置模板失败:", error);
-            styleSettingsMessage = `恢复失败：${error}`;
+            styleSettingsMessage = t("恢复失败：{error}", { error });
         }
     }
 
@@ -2487,7 +2535,7 @@
     }
 
     async function runProofConvertPreview() {
-        proofMessage = "正在查找可转换内容...";
+        proofMessage = t("正在查找可转换内容...");
         const scriptProfile = getChineseScriptProfile(fileContent);
         proofConvertPreviewRows = await buildChineseConvertPreview(
             fileContent,
@@ -2499,20 +2547,24 @@
             scriptProfile.dominant === "simplified" &&
             proofConvertDirection === "simplified-to-traditional"
         ) {
-            proofMessage =
-                "检测到主体为简体，已跳过简体转繁体查找，避免误扫整本";
+            proofMessage = t(
+                "检测到主体为简体，已跳过简体转繁体查找，避免误扫整本",
+            );
         } else if (
             proofConvertPreviewRows.length === 0 &&
             scriptProfile.dominant === "traditional" &&
             proofConvertDirection === "traditional-to-simplified"
         ) {
-            proofMessage =
-                "检测到主体为繁体，已跳过繁体转简体查找，避免误扫整本";
+            proofMessage = t(
+                "检测到主体为繁体，已跳过繁体转简体查找，避免误扫整本",
+            );
         } else {
             proofMessage =
                 proofConvertPreviewRows.length > 0
-                    ? `找到 ${proofConvertPreviewRows.length} 处可转换内容，默认全不选`
-                    : "没有找到可转换内容";
+                    ? t("找到 {count} 处可转换内容，默认全不选", {
+                          count: proofConvertPreviewRows.length,
+                      })
+                    : t("没有找到可转换内容");
         }
     }
 
@@ -2556,7 +2608,7 @@
 
     function jumpToProofConvertRow(row: ProofConvertPreviewRow) {
         editorComponent?.selectMatch(row.lineStart, row.startChar, row.endChar);
-        proofMessage = "已定位到可转换内容";
+        proofMessage = t("已定位到可转换内容");
     }
 
     function buildLineOffsets(text: string) {
@@ -2592,7 +2644,7 @@
             return [
                 {
                     id: "full-text",
-                    title: "全文",
+                    title: t("全文"),
                     startLine: 1,
                     endLine: lines.length,
                     startOffset: 0,
@@ -2672,7 +2724,7 @@
     }
 
     function appendAiProofingLog(message: string) {
-        const time = new Date().toLocaleTimeString();
+        const time = formatTimeLocalized();
         aiProofingLogs = [...aiProofingLogs, `[${time}] ${message}`];
     }
 
@@ -2755,23 +2807,23 @@
     function getAiProofingRiskReason(row: AiProofingRow) {
         const type = row.type.toLowerCase().replace(/[\s-]+/g, "_");
         if (row.fullChapterRemoval || type === "remove_chapter")
-            return "整章移除风险高";
+            return t("整章移除风险高");
         if (
             (type === "delete" || row.replacement === "") &&
             containsEmojiOrSymbolOnly(row.original)
         )
-            return "疑似表情/特殊符号";
+            return t("疑似表情/特殊符号");
         if (
             (type === "delete" || row.replacement === "") &&
             isBracketedNarrativeText(row.original)
         )
-            return "括号内描述不删除";
+            return t("括号内描述不删除");
         if (changesLeadingIndent(row.original, row.replacement))
-            return "保留段首缩进";
+            return t("保留段首缩进");
         if (isShortNameLikeReplacement(row.original, row.replacement))
-            return "疑似人名/专名";
+            return t("疑似人名/专名");
         if (isStylePreferenceReplacement(row.original, row.replacement))
-            return "疑似风格改写";
+            return t("疑似风格改写");
         return "";
     }
 
@@ -2839,7 +2891,7 @@
                 chapterTitle: chapter.title,
                 original,
                 replacement: "……",
-                reason: "省略号应使用标准完整省略号",
+                reason: t("省略号应使用标准完整省略号"),
                 type: "punctuation",
                 confidence: 1,
                 lineStart: pos.line,
@@ -2872,10 +2924,13 @@
     ) {
         appendAiProofingLog(
             [
-                `建议/${stage}：${chapterTitle}`,
+                t("建议/{stage}：{chapter}", {
+                    stage,
+                    chapter: chapterTitle,
+                }),
                 `${row.type} ${(Number(row.confidence || 0) * 100).toFixed(0)}%`,
-                `${compactAiProofingLogText(row.original)} -> ${compactAiProofingLogText(row.replacement || "删除")}`,
-                row.reason ? `原因：${row.reason}` : "",
+                `${compactAiProofingLogText(row.original)} -> ${compactAiProofingLogText(row.replacement || t("删除"))}`,
+                row.reason ? t("原因：{reason}", { reason: row.reason }) : "",
                 extra,
             ]
                 .filter(Boolean)
@@ -2896,19 +2951,30 @@
         }));
         const header = [
             `TXT: ${filePath}`,
-            `模型: ${aiProofingConfig.model}`,
-            `范围: ${aiProofingScope === "all" ? "全书逐章" : aiProofingScope === "volume" ? "当前卷" : "当前章"}`,
-            `时间: ${new Date().toLocaleString()}`,
-            logPath ? `日志文件: ${logPath}` : "",
+            t("模型: {model}", { model: aiProofingConfig.model }),
+            t("范围: {scope}", {
+                scope:
+                    aiProofingScope === "all"
+                        ? t("全书逐章")
+                        : aiProofingScope === "volume"
+                          ? t("当前卷")
+                          : t("当前章"),
+            }),
+            t("时间: {time}", {
+                time: formatDateTimeLocalized(new Date()),
+            }),
+            logPath ? t("日志文件: {path}", { path: logPath }) : "",
         ].filter(Boolean);
         return [
             ...header,
             "",
-            "===== 日志 =====",
-            aiProofingLogs.join("\n") || "暂无日志",
+            t("===== 日志 ====="),
+            aiProofingLogs.join("\n") || t("暂无日志"),
             "",
-            "===== 当前人工建议 =====",
-            rows.length ? JSON.stringify(rows, null, 2) : "暂无待人工审核建议",
+            t("===== 当前人工建议 ====="),
+            rows.length
+                ? JSON.stringify(rows, null, 2)
+                : t("暂无待人工审核建议"),
         ].join("\n");
     }
 
@@ -2953,9 +3019,9 @@
                 aiProofingRows = [];
                 aiProofingSelectedIds = new Set();
                 aiProofingLogs = [
-                    `[${new Date().toLocaleTimeString()}] 已跳过旧校对缓存：当前文本内容已变化`,
+                    `[${formatTimeLocalized()}] ${t("已跳过旧校对缓存：当前文本内容已变化")}`,
                 ];
-                proofMessage = "旧智能校对缓存已跳过：当前文本内容已变化";
+                proofMessage = t("旧智能校对缓存已跳过：当前文本内容已变化");
                 return;
             }
             aiProofingScope =
@@ -2980,7 +3046,9 @@
             proofMessage =
                 state.message ||
                 (aiProofingRows.length
-                    ? `已恢复 ${aiProofingRows.length} 条智能校对建议`
+                    ? t("已恢复 {count} 条智能校对建议", {
+                          count: aiProofingRows.length,
+                      })
                     : "");
         } catch (error) {
             console.warn("读取智能校对缓存失败:", error);
@@ -3002,11 +3070,11 @@
                 model: aiProofingConfig.model,
                 content: buildAiProofingLogContent(),
             });
-            appendAiProofingLog(`日志已保存：${path}`);
+            appendAiProofingLog(t("日志已保存：{path}", { path }));
             saveAiProofingCache(path);
             return path;
         } catch (error) {
-            appendAiProofingLog(`日志保存失败：${error}`);
+            appendAiProofingLog(t("日志保存失败：{error}", { error }));
             saveAiProofingCache();
             return "";
         }
@@ -3144,7 +3212,10 @@
             return { approvedRows: [] as AiProofingRow[], pendingRows: rows };
         }
         appendAiProofingLog(
-            `自动审批：${chapterTitle}，待审 ${rows.length} 条`,
+            t("自动审批：{chapter}，待审 {count} 条", {
+                chapter: chapterTitle,
+                count: rows.length,
+            }),
         );
         try {
             const response = await platform.invoke<AiProofingResponse>(
@@ -3176,11 +3247,16 @@
                 (row) => !approvedKeys.has(row.original),
             );
             appendAiProofingLog(
-                `自动审批完成：通过 ${approvedRows.length} 条，存疑 ${pendingRows.length} 条`,
+                t("自动审批完成：通过 {approved} 条，存疑 {pending} 条", {
+                    approved: approvedRows.length,
+                    pending: pendingRows.length,
+                }),
             );
             return { approvedRows, pendingRows };
         } catch (error) {
-            appendAiProofingLog(`自动审批失败，全部转人工审核：${error}`);
+            appendAiProofingLog(
+                t("自动审批失败，全部转人工审核：{error}", { error }),
+            );
             return { approvedRows: [] as AiProofingRow[], pendingRows: rows };
         }
     }
@@ -3195,11 +3271,11 @@
             !aiProofingConfig.baseUrl.trim() ||
             !aiProofingConfig.model.trim()
         ) {
-            proofMessage = "请先补全 API 地址、Key 和模型名";
+            proofMessage = t("请先补全 API 地址、Key 和模型名");
             return;
         }
         if (!fileContent.trim()) {
-            proofMessage = "请先打开文本文件";
+            proofMessage = t("请先打开文本文件");
             return;
         }
         if (flatToc.length === 0) {
@@ -3224,30 +3300,56 @@
         try {
             const scopeLabel =
                 aiProofingScope === "all"
-                    ? "全书逐章"
+                    ? t("全书逐章")
                     : aiProofingScope === "volume"
-                      ? "当前卷"
-                      : "当前章";
+                      ? t("当前卷")
+                      : t("当前章");
             appendAiProofingLog(
-                `开始智能校对：${scopeLabel}，指针行 ${cursorLine || "未知"}，共 ${chapters.length} 章`,
+                t("开始智能校对：{scope}，指针行 {line}，共 {count} 章", {
+                    scope: scopeLabel,
+                    line: cursorLine || t("未知"),
+                    count: chapters.length,
+                }),
             );
             for (let i = 0; i < chapters.length; i++) {
                 if (aiProofingAbortRequested) {
-                    appendAiProofingLog("用户请求停止，结束剩余章节");
+                    appendAiProofingLog(t("用户请求停止，结束剩余章节"));
                     break;
                 }
                 const chapter = chapters[i];
                 if (chapter.text.length > aiProofingConfig.maxChapterChars) {
                     skipped++;
-                    proofMessage = `跳过超长章节：${chapter.title}`;
+                    proofMessage = t("跳过超长章节：{title}", {
+                        title: chapter.title,
+                    });
                     appendAiProofingLog(
-                        `跳过超长章节 ${i + 1}/${chapters.length}：${chapter.title}（${chapter.text.length} 字）`,
+                        t(
+                            "跳过超长章节 {current}/{total}：{title}（{count} 字）",
+                            {
+                                current: i + 1,
+                                total: chapters.length,
+                                title: chapter.title,
+                                count: chapter.text.length,
+                            },
+                        ),
                     );
                     continue;
                 }
-                proofMessage = `智能校对中 ${i + 1}/${chapters.length}：${chapter.title}`;
+                proofMessage = t("智能校对中 {current}/{total}：{title}", {
+                    current: i + 1,
+                    total: chapters.length,
+                    title: chapter.title,
+                });
                 appendAiProofingLog(
-                    `请求章节 ${i + 1}/${chapters.length}：${chapter.title}（发送 ${chapter.text.length}/${chapter.text.length} 字）`,
+                    t(
+                        "请求章节 {current}/{total}：{title}（发送 {count} 字）",
+                        {
+                            current: i + 1,
+                            total: chapters.length,
+                            title: chapter.title,
+                            count: chapter.text.length,
+                        },
+                    ),
                 );
                 let suggestions: AiProofingSuggestion[] = [];
                 try {
@@ -3270,10 +3372,17 @@
                         );
                     } catch (parseError) {
                         appendAiProofingLog(
-                            `响应 JSON 解析失败：${chapter.title}；${parseError}`,
+                            t("响应 JSON 解析失败：{title}；{error}", {
+                                title: chapter.title,
+                                error: parseError,
+                            }),
                         );
                         appendAiProofingLog(
-                            `响应片段：${response.content.slice(0, 500).replace(/\s+/g, " ")}`,
+                            t("响应片段：{content}", {
+                                content: response.content
+                                    .slice(0, 500)
+                                    .replace(/\s+/g, " "),
+                            }),
                         );
                         throw parseError;
                     }
@@ -3282,18 +3391,25 @@
                         !response.content.trim().endsWith("}")
                     ) {
                         appendAiProofingLog(
-                            `响应可能被截断，已采用 ${suggestions.length} 条完整建议`,
+                            t("响应可能被截断，已采用 {count} 条完整建议", {
+                                count: suggestions.length,
+                            }),
                         );
                     }
                     for (const suggestion of suggestions) {
                         logAiProofingSuggestion(
-                            "返回",
+                            t("返回结果"),
                             suggestion,
                             chapter.title,
                         );
                     }
                 } catch (error) {
-                    appendAiProofingLog(`章节失败：${chapter.title}；${error}`);
+                    appendAiProofingLog(
+                        t("章节失败：{title}；{error}", {
+                            title: chapter.title,
+                            error,
+                        }),
+                    );
                     throw error;
                 }
                 const chapterRows: AiProofingRow[] = [];
@@ -3313,10 +3429,16 @@
                         : chapter.text.indexOf(suggestion.original);
                     if (localStart < 0 || usedOffsets.has(localStart)) {
                         appendAiProofingLog(
-                            `忽略未匹配建议：${chapter.title} / ${suggestion.type} / ${suggestion.reason || suggestion.original.slice(0, 20)}`,
+                            t("忽略未匹配建议：{title} / {type} / {reason}", {
+                                title: chapter.title,
+                                type: suggestion.type,
+                                reason:
+                                    suggestion.reason ||
+                                    suggestion.original.slice(0, 20),
+                            }),
                         );
                         logAiProofingSuggestion(
-                            "未匹配",
+                            t("未匹配"),
                             suggestion,
                             chapter.title,
                         );
@@ -3361,13 +3483,20 @@
                     if (riskReason && isAiProofingHardBlockedSuggestion(row)) {
                         blockedRows++;
                         appendAiProofingLog(
-                            `拦截高风险建议：${row.original} -> ${row.replacement || "删除"}（${riskReason}）`,
+                            t(
+                                "拦截高风险建议：{original} -> {replacement}（{reason}）",
+                                {
+                                    original: row.original,
+                                    replacement: row.replacement || t("删除"),
+                                    reason: riskReason,
+                                },
+                            ),
                         );
                         logAiProofingSuggestion(
-                            "拦截",
+                            t("已拦截"),
                             row,
                             row.chapterTitle,
-                            `风险：${riskReason}`,
+                            t("风险：{reason}", { reason: riskReason }),
                         );
                         blockedManualRows.push(row);
                     } else {
@@ -3392,14 +3521,21 @@
                 ];
                 if (autoRows.length > 0) {
                     appendAiProofingLog(
-                        `自动应用：${chapter.title}，${autoRows.length} 条标点/的地得修正`,
+                        t("自动应用：{chapter}，{count} 条标点/的地得修正", {
+                            chapter: chapter.title,
+                            count: autoRows.length,
+                        }),
                     );
                     for (const row of autoRows) {
                         appendAiProofingLog(
-                            `自动：${row.original} -> ${row.replacement || "删除"}（${row.reason}）`,
+                            t("自动：{original} -> {replacement}（{reason}）", {
+                                original: row.original,
+                                replacement: row.replacement || t("删除"),
+                                reason: row.reason,
+                            }),
                         );
                         logAiProofingSuggestion(
-                            "自动应用",
+                            t("自动应用"),
                             row,
                             row.chapterTitle,
                         );
@@ -3407,21 +3543,35 @@
                 }
                 if (approvedRows.length > 0) {
                     appendAiProofingLog(
-                        `审批通过自动应用：${chapter.title}，${approvedRows.length} 条`,
+                        t("审批通过自动应用：{chapter}，{count} 条", {
+                            chapter: chapter.title,
+                            count: approvedRows.length,
+                        }),
                     );
                     for (const row of approvedRows) {
                         appendAiProofingLog(
-                            `审批通过：${row.original} -> ${row.replacement || "删除"}（${row.reason}）`,
+                            t(
+                                "审批通过：{original} -> {replacement}（{reason}）",
+                                {
+                                    original: row.original,
+                                    replacement: row.replacement || t("删除"),
+                                    reason: row.reason,
+                                },
+                            ),
                         );
                         logAiProofingSuggestion(
-                            "审批通过",
+                            t("AI 审批通过"),
                             row,
                             row.chapterTitle,
                         );
                     }
                 }
                 for (const row of manualRows) {
-                    logAiProofingSuggestion("人工待审", row, row.chapterTitle);
+                    logAiProofingSuggestion(
+                        t("待人工审核"),
+                        row,
+                        row.chapterTitle,
+                    );
                 }
                 autoApplyRows = [...autoApplyRows, ...autoRows];
                 approvedApplyRows = [...approvedApplyRows, ...approvedRows];
@@ -3429,7 +3579,17 @@
                 accepted += manualRows.length;
                 aiProofingRows = pendingRows;
                 appendAiProofingLog(
-                    `完成章节：${chapter.title}，返回 ${suggestions.length} 条，本地 ${localEllipsisRows.length} 条，自动 ${autoRows.length + approvedRows.length} 条，建议 ${manualRows.length} 条，拦截 ${blockedRows} 条`,
+                    t(
+                        "完成章节：{chapter}，返回 {returned} 条，本地 {local} 条，自动 {auto} 条，建议 {suggested} 条，拦截 {blocked} 条",
+                        {
+                            chapter: chapter.title,
+                            returned: suggestions.length,
+                            local: localEllipsisRows.length,
+                            auto: autoRows.length + approvedRows.length,
+                            suggested: manualRows.length,
+                            blocked: blockedRows,
+                        },
+                    ),
                 );
             }
             if (autoApplyRows.length > 0) {
@@ -3441,7 +3601,9 @@
                     await applyProofResult({
                         text: result.text,
                         changedCount: result.changed,
-                        message: `已自动应用 ${result.changed} 条标点/的地得修正`,
+                        message: t("已自动应用 {count} 条标点/的地得修正", {
+                            count: result.changed,
+                        }),
                     });
                     pendingRows = shiftAiProofingRowsAfterEdits(
                         pendingRows,
@@ -3452,9 +3614,15 @@
                         result.edits,
                     );
                     aiProofingRows = pendingRows;
-                    appendAiProofingLog(`已自动写入 ${result.changed} 条修正`);
+                    appendAiProofingLog(
+                        t("已自动写入 {count} 条修正", {
+                            count: result.changed,
+                        }),
+                    );
                 } else {
-                    appendAiProofingLog("自动修正未写入：原文已变化或未匹配");
+                    appendAiProofingLog(
+                        t("自动修正未写入：原文已变化或未匹配"),
+                    );
                 }
             }
             if (approvedApplyRows.length > 0) {
@@ -3468,7 +3636,9 @@
                     await applyProofResult({
                         text: result.text,
                         changedCount: result.changed,
-                        message: `已应用 ${result.changed} 条 AI 审批建议`,
+                        message: t("已应用 {count} 条 AI 审批建议", {
+                            count: result.changed,
+                        }),
                     });
                     pendingRows = shiftAiProofingRowsAfterEdits(
                         pendingRows,
@@ -3480,7 +3650,8 @@
                         {
                             id: `approval-${Date.now()}`,
                             chapterTitle:
-                                approvedApplyRows[0]?.chapterTitle || "AI 审批",
+                                approvedApplyRows[0]?.chapterTitle ||
+                                t("AI 审批"),
                             rows: approvedApplyRows.filter((row) =>
                                 result.appliedIds.has(row.id),
                             ),
@@ -3491,11 +3662,13 @@
                         },
                     ];
                     appendAiProofingLog(
-                        `已写入 AI 审批修正 ${result.changed} 条，可在审批页撤销`,
+                        t("已写入 AI 审批修正 {count} 条，可在审批页撤销", {
+                            count: result.changed,
+                        }),
                     );
                 } else {
                     appendAiProofingLog(
-                        "AI 审批修正未写入：原文已变化或未匹配",
+                        t("AI 审批修正未写入：原文已变化或未匹配"),
                     );
                 }
             }
@@ -3504,12 +3677,19 @@
                 aiProofingRows.map((row) => row.id),
             );
             proofMessage = aiProofingAbortRequested
-                ? `已停止，找到 ${aiProofingRows.length} 条建议`
-                : `智能校对完成，找到 ${accepted} 条建议${skipped ? `，跳过 ${skipped} 个超长章节` : ""}`;
+                ? t("已停止，找到 {count} 条建议", {
+                      count: aiProofingRows.length,
+                  })
+                : t("智能校对完成，找到 {count} 条建议", {
+                      count: accepted,
+                  }) +
+                  (skipped
+                      ? t("，跳过 {count} 个超长章节", { count: skipped })
+                      : "");
             appendAiProofingLog(proofMessage);
         } catch (error) {
             console.error("智能校对失败:", error);
-            proofMessage = `智能校对失败：${error}`;
+            proofMessage = t("智能校对失败：{error}", { error });
             appendAiProofingLog(proofMessage);
         } finally {
             aiProofingRunning = false;
@@ -3585,7 +3765,7 @@
 
     function stopAiProofing() {
         aiProofingAbortRequested = true;
-        proofMessage = "正在停止智能校对...";
+        proofMessage = t("正在停止智能校对...");
     }
 
     function toggleAiProofingRow(rowId: string, checked: boolean) {
@@ -3605,7 +3785,7 @@
 
     function jumpToAiProofingRow(row: AiProofingRow) {
         editorComponent?.selectMatch(row.lineStart, row.startChar, row.endChar);
-        proofMessage = "已定位到智能校对建议";
+        proofMessage = t("已定位到智能校对建议");
     }
 
     function compactAiTooltipText(value: string, maxLength = 160) {
@@ -3616,7 +3796,7 @@
     }
 
     function compactAiProofingCellText(value: string, maxLength = 34) {
-        return compactAiTooltipText(value || "删除", maxLength);
+        return compactAiTooltipText(value || t("删除"), maxLength);
     }
 
     function aiProofingReasonText(
@@ -3625,21 +3805,29 @@
         const reason = String(row.reason || "").trim();
         if (reason) return reason;
         const type = String(row.type || "").trim();
-        return type ? `未返回具体原因（类型：${type}）` : "未返回具体原因";
+        return type
+            ? t("未返回具体原因（类型：{type}）", { type })
+            : t("未返回具体原因");
     }
 
     function buildAiProofingReplacementPreview(row: AiProofingRow) {
         if (row.fullChapterRemoval) {
-            return "修改后：整章移除";
+            return t("修改后：整章移除");
         }
-        return `修改后：${compactAiTooltipText(row.replacement || "删除")}`;
+        return t("修改后：{replacement}", {
+            replacement: compactAiTooltipText(row.replacement || t("删除")),
+        });
     }
 
     function buildAiProofingReplacementTooltip(row: AiProofingRow) {
         return [
-            `类型：${row.type}`,
-            `置信度：${(row.confidence * 100).toFixed(0)}%`,
-            `原因：${aiProofingReasonText(row)}`,
+            t("类型：{type}", { type: row.type }),
+            t("置信度：{value}%", {
+                value: (row.confidence * 100).toFixed(0),
+            }),
+            t("原因：{reason}", {
+                reason: aiProofingReasonText(row),
+            }),
             buildAiProofingReplacementPreview(row),
         ].join("\n");
     }
@@ -3657,8 +3845,10 @@
             changedCount: result.changed,
             message:
                 result.changed > 0
-                    ? `已应用 ${result.changed} 条智能校对建议`
-                    : "原文已变化，未应用任何建议",
+                    ? t("已应用 {count} 条智能校对建议", {
+                          count: result.changed,
+                      })
+                    : t("原文已变化，未应用任何建议"),
         });
         if (result.changed > 0) {
             const remainingRows = aiProofingRows.filter(
@@ -3672,7 +3862,10 @@
                 aiProofingRows.map((row) => row.id),
             );
             appendAiProofingLog(
-                `人工应用：${result.changed} 条，剩余 ${aiProofingRows.length} 条`,
+                t("人工应用：{applied} 条，剩余 {remaining} 条", {
+                    applied: result.changed,
+                    remaining: aiProofingRows.length,
+                }),
             );
         }
         saveAiProofingCache();
@@ -3683,19 +3876,22 @@
             (item) => item.id === batchId,
         );
         if (!batch || batch.reverted || fileContent !== batch.afterText) {
-            proofMessage = "当前文本已变化，无法安全撤销该审批";
+            proofMessage = t("当前文本已变化，无法安全撤销该审批");
             appendAiProofingLog(
-                `审批撤销失败：${batch?.chapterTitle || batchId} / ${rowId}，文本已变化`,
+                t("审批撤销失败：{chapter} / {row}，文本已变化", {
+                    chapter: batch?.chapterTitle || batchId,
+                    row: rowId,
+                }),
             );
             return;
         }
         const targetRow = batch.rows.find((row) => row.id === rowId);
         if (!targetRow) {
-            proofMessage = "未找到对应审批结果";
+            proofMessage = t("未找到对应审批结果");
             return;
         }
         if (batch.revertedRowIds?.includes(rowId)) {
-            proofMessage = "该审批结果已撤销";
+            proofMessage = t("该审批结果已撤销");
             return;
         }
         const revertedRows = new Set(batch.revertedRowIds || []);
@@ -3707,16 +3903,19 @@
             batch.beforeText,
         );
         if (reapplyResult.changed !== remainingRows.length) {
-            proofMessage = "当前文本已变化，无法安全撤销该审批";
+            proofMessage = t("当前文本已变化，无法安全撤销该审批");
             appendAiProofingLog(
-                `审批撤销失败：${batch.chapterTitle} / ${targetRow.original}，重建文本未完全匹配`,
+                t("审批撤销失败：{chapter} / {row}，重建文本未完全匹配", {
+                    chapter: batch.chapterTitle,
+                    row: targetRow.original,
+                }),
             );
             return;
         }
         await applyProofResult({
             text: reapplyResult.text,
             changedCount: 1,
-            message: `已撤销 1 条 AI 审批改动`,
+            message: t("已撤销 1 条 AI 审批改动"),
         });
         aiApprovalAppliedBatches = aiApprovalAppliedBatches.map((item) =>
             item.id === batchId
@@ -3729,7 +3928,10 @@
                 : item,
         );
         appendAiProofingLog(
-            `审批撤销：${batch.chapterTitle} / ${targetRow.original}`,
+            t("审批撤销：{chapter} / {row}", {
+                chapter: batch.chapterTitle,
+                row: targetRow.original,
+            }),
         );
         saveAiProofingCache();
     }
@@ -3739,20 +3941,23 @@
             (item) => item.id === batchId,
         );
         if (!batch || fileContent !== batch.afterText) {
-            proofMessage = "当前文本已变化，无法安全恢复该审批";
+            proofMessage = t("当前文本已变化，无法安全恢复该审批");
             appendAiProofingLog(
-                `审批恢复失败：${batch?.chapterTitle || batchId} / ${rowId}，文本已变化`,
+                t("审批恢复失败：{chapter} / {row}，文本已变化", {
+                    chapter: batch?.chapterTitle || batchId,
+                    row: rowId,
+                }),
             );
             return;
         }
         const targetRow = batch.rows.find((row) => row.id === rowId);
         if (!targetRow) {
-            proofMessage = "未找到对应审批结果";
+            proofMessage = t("未找到对应审批结果");
             return;
         }
         const revertedRows = new Set(batch.revertedRowIds || []);
         if (!revertedRows.has(rowId)) {
-            proofMessage = "该审批结果当前已处于应用状态";
+            proofMessage = t("该审批结果当前已处于应用状态");
             return;
         }
         const activeRows = batch.rows.filter(
@@ -3766,16 +3971,19 @@
             batch.beforeText,
         );
         if (reapplyResult.changed !== nextRows.length) {
-            proofMessage = "当前文本已变化，无法安全恢复该审批";
+            proofMessage = t("当前文本已变化，无法安全恢复该审批");
             appendAiProofingLog(
-                `审批恢复失败：${batch.chapterTitle} / ${targetRow.original}，重建文本未完全匹配`,
+                t("审批恢复失败：{chapter} / {row}，重建文本未完全匹配", {
+                    chapter: batch.chapterTitle,
+                    row: targetRow.original,
+                }),
             );
             return;
         }
         await applyProofResult({
             text: reapplyResult.text,
             changedCount: 1,
-            message: `已恢复 1 条 AI 审批改动`,
+            message: t("已恢复 1 条 AI 审批改动"),
         });
         revertedRows.delete(rowId);
         aiApprovalAppliedBatches = aiApprovalAppliedBatches.map((item) =>
@@ -3789,7 +3997,10 @@
                 : item,
         );
         appendAiProofingLog(
-            `审批恢复：${batch.chapterTitle} / ${targetRow.original}`,
+            t("审批恢复：{chapter} / {row}", {
+                chapter: batch.chapterTitle,
+                row: targetRow.original,
+            }),
         );
         saveAiProofingCache();
     }
@@ -4438,6 +4649,14 @@
         return normalizeLocalPath(raw);
     }
 
+    function displayEpubTitle() {
+        return epubMeta.title === "书名" ? t("书名") : epubMeta.title;
+    }
+
+    function displayEpubCreator() {
+        return epubMeta.creator === "作者" ? t("作者") : epubMeta.creator;
+    }
+
     async function pickLocalCover() {
         let selection: string | string[] | null = null;
         try {
@@ -4452,12 +4671,14 @@
         } catch (e) {
             // web 端无原生文件选择器（openDialog 抛 PlatformUnsupportedError），
             // 桌面端选择器异常也在此兜底提示。
-            coverSearchMessage = `打开文件选择器失败：${e}`;
+            coverSearchMessage = t("打开文件选择器失败：{error}", {
+                error: e,
+            });
             return;
         }
         if (!selection) return;
         epubMeta.cover_path = extractPickedPath(selection as string | string[]);
-        coverSearchMessage = "已使用本地封面";
+        coverSearchMessage = t("已使用本地封面");
         await loadCoverPreview();
     }
 
@@ -4478,16 +4699,20 @@
             epubMeta.cover_path = localPath;
             await loadCoverPreview();
             coverSearchMessage = automatic
-                ? `已自动使用 ${result.source} 封面`
-                : `已使用《${result.title || epubMeta.title}》封面`;
+                ? t("已自动使用 {source} 封面", {
+                      source: result.source,
+                  })
+                : t("已使用《{title}》封面", {
+                      title: result.title || epubMeta.title,
+                  });
             if (!automatic) {
                 coverSearchResults = [];
             }
         } catch (e) {
             console.error("应用远程封面失败:", e);
             coverSearchMessage = automatic
-                ? "自动应用失败，可手动选择其他封面"
-                : "应用封面失败，请换一个结果或使用本地图片";
+                ? t("自动应用失败，可手动选择其他封面")
+                : t("应用封面失败，请换一个结果或使用本地图片");
         } finally {
             isCoverApplying = false;
         }
@@ -4497,12 +4722,12 @@
         const title = epubMeta.title.trim();
         const author = epubMeta.creator.trim();
         if (!title || title === "书名") {
-            coverSearchMessage = "请先填写书名";
+            coverSearchMessage = t("请先填写书名");
             return;
         }
 
         isCoverSearching = true;
-        coverSearchMessage = "正在搜索封面...";
+        coverSearchMessage = t("正在搜索封面...");
         coverSearchResults = [];
         try {
             const results = await platform.invoke<CoverSearchResult[]>(
@@ -4511,13 +4736,15 @@
             );
             coverSearchResults = results;
             if (!results.length) {
-                coverSearchMessage = "没有找到可用封面";
+                coverSearchMessage = t("没有找到可用封面");
                 return;
             }
 
-            coverSearchMessage = `找到 ${results.length} 个封面`;
+            coverSearchMessage = t("找到 {count} 个封面", {
+                count: results.length,
+            });
         } catch (e) {
-            coverSearchMessage = `搜索封面失败：${e}`;
+            coverSearchMessage = t("搜索封面失败：{error}", { error: e });
         } finally {
             isCoverSearching = false;
         }
@@ -4535,7 +4762,7 @@
                 "epub-metadata",
                 "/epub-metadata",
                 {
-                    title: "高级选项",
+                    title: t("高级选项"),
                     width: 540,
                     height: 620,
                     minWidth: 540,
@@ -4579,7 +4806,9 @@
                 unlisten();
             });
         } catch (e) {
-            platform.message("打开高级选项失败: " + e, { kind: "error" });
+            platform.message(t("打开高级选项失败: {error}", { error: e }), {
+                kind: "error",
+            });
         }
     }
 
@@ -4656,10 +4885,15 @@
                         // 无论隐藏与否，都监听错误
                         epubWindow.once("tauri://error", (e) => {
                             console.error("窗口创建失败:", e);
-                            platform.message("打开 EPUB 编辑器失败: " + e, {
-                                title: "错误",
-                                kind: "error",
-                            });
+                            platform.message(
+                                t("打开 EPUB 编辑器失败: {error}", {
+                                    error: e,
+                                }),
+                                {
+                                    title: t("错误"),
+                                    kind: "error",
+                                },
+                            );
                         });
 
                         // 监听已销毁事件：当 EPUB 窗口关闭时，恢复主窗口显示
@@ -4673,10 +4907,13 @@
                         });
                     } catch (e) {
                         console.error("EPUB 窗口打开错误:", e);
-                        await platform.message("打开 EPUB 编辑器失败: " + e, {
-                            title: "错误",
-                            kind: "error",
-                        });
+                        await platform.message(
+                            t("打开 EPUB 编辑器失败: {error}", { error: e }),
+                            {
+                                title: t("错误"),
+                                kind: "error",
+                            },
+                        );
                     }
                     return; // EPUB 文件处理完毕，直接返回
                 }
@@ -4743,7 +4980,9 @@
         } catch (e) {
             isLoading = false;
             console.error("Open file failed:", e);
-            platform.message(`打开文件失败: ${e}`, { kind: "error" });
+            platform.message(t("打开文件失败: {error}", { error: e }), {
+                kind: "error",
+            });
         }
     }
 
@@ -4751,7 +4990,7 @@
         if (!paths || paths.length === 0) return;
         const firstSupported = paths.find((p) => /\.(txt|md|epub)$/i.test(p));
         if (!firstSupported) {
-            await platform.message("仅支持拖入 TXT/MD/EPUB 文件", {
+            await platform.message(t("仅支持拖入 TXT/MD/EPUB 文件"), {
                 kind: "warning",
             });
             return;
@@ -4765,11 +5004,11 @@
                 multiple: false,
                 filters: [
                     {
-                        name: "所有支持的文件",
+                        name: t("所有支持的文件"),
                         extensions: ["txt", "md", "epub"],
                     },
-                    { name: "文本文件", extensions: ["txt", "md"] },
-                    { name: "EPUB 文件", extensions: ["epub"] },
+                    { name: t("文本文件"), extensions: ["txt", "md"] },
+                    { name: t("EPUB 文件"), extensions: ["epub"] },
                 ],
             });
             if (selected) {
@@ -4777,7 +5016,7 @@
             }
         } catch (e) {
             console.error("Select file failed:", e);
-            toastError("打开文件失败：" + e);
+            toastError(t("打开文件失败：{error}", { error: e }));
         }
     }
 
@@ -4817,7 +5056,9 @@
             // await platform.message("保存成功！"); // 移除弹窗，保持静默成功
         } catch (e) {
             await platform.message(
-                `保存失败: ${e}\n请确保已授予“所有文件访问权限”`,
+                t("保存失败: {error}\n请确保已授予“所有文件访问权限”", {
+                    error: e,
+                }),
                 {
                     kind: "error",
                 },
@@ -5581,7 +5822,7 @@
                         id: node.id,
                         title: node.title,
                         line: node.line,
-                        msg: "无标题",
+                        msg: t("无标题"),
                         val: 0,
                     });
                 }
@@ -5596,8 +5837,12 @@
                         line: node.line,
                         msg:
                             node.word_count < appSettings.wordCountMinThreshold
-                                ? `低于 ${appSettings.wordCountMinThreshold}`
-                                : `高于 ${appSettings.wordCountMaxThreshold}`,
+                                ? t("低于 {count}", {
+                                      count: appSettings.wordCountMinThreshold,
+                                  })
+                                : t("高于 {count}", {
+                                      count: appSettings.wordCountMaxThreshold,
+                                  }),
                         val: node.word_count,
                     });
                 }
@@ -5616,7 +5861,10 @@
         if (!allMatches || allMatches.length === 0) await performFind();
         if (allMatches && allMatches.length > 0) {
             currentMatchIndex = (currentMatchIndex + 1) % allMatches.length;
-            replaceMsg = `第 ${currentMatchIndex + 1}/${allMatches.length} 处`;
+            replaceMsg = t("第 {current}/{total} 处", {
+                current: currentMatchIndex + 1,
+                total: allMatches.length,
+            });
             editorComponent.selectMatch(
                 allMatches[currentMatchIndex].line,
                 allMatches[currentMatchIndex].start_char,
@@ -5630,7 +5878,10 @@
         if (allMatches && allMatches.length > 0) {
             currentMatchIndex =
                 (currentMatchIndex - 1 + allMatches.length) % allMatches.length;
-            replaceMsg = `第 ${currentMatchIndex + 1}/${allMatches.length} 处`;
+            replaceMsg = t("第 {current}/{total} 处", {
+                current: currentMatchIndex + 1,
+                total: allMatches.length,
+            });
             editorComponent.selectMatch(
                 allMatches[currentMatchIndex].line,
                 allMatches[currentMatchIndex].start_char,
@@ -5650,7 +5901,10 @@
             if (res.found) {
                 allMatches = res.matches;
                 currentMatchIndex = 0;
-                replaceMsg = `第 1/${res.count} 处`;
+                replaceMsg = t("第 {current}/{total} 处", {
+                    current: 1,
+                    total: res.count,
+                });
                 editorComponent.selectMatch(
                     allMatches[0].line,
                     allMatches[0].start_char,
@@ -5658,17 +5912,17 @@
                 );
             } else {
                 allMatches = [];
-                replaceMsg = "未找到";
+                replaceMsg = t("未找到");
             }
         } catch (e) {
-            replaceMsg = "正则错误";
+            replaceMsg = t("正则错误");
         }
     }
 
     async function performReplaceAll() {
         if (!fileContent || !findPattern) return;
         const confirmed = await platform.ask(
-            "确定执行全书替换吗？此操作无法撤销。",
+            t("确定执行全书替换吗？此操作无法撤销。"),
             {
                 kind: "warning",
             },
@@ -5684,11 +5938,11 @@
             });
             fileContent = res;
             editorComponent.resetDoc(res);
-            replaceMsg = "替换完成";
+            replaceMsg = t("替换完成");
             allMatches = [];
         } catch (e) {
-            replaceMsg = "替换失败";
-            toastError("替换失败：" + e);
+            replaceMsg = t("替换失败");
+            toastError(t("替换失败：{error}", { error: e }));
         }
     }
 
@@ -5703,7 +5957,7 @@
                 filePath
                     .split(/[\\/]/)
                     .pop()
-                    ?.replace(/\.[^/.]+$/, "") || "未命名书籍";
+                    ?.replace(/\.[^/.]+$/, "") || t("未命名书籍");
             epubMeta.title = basename;
         }
         if (!epubMeta.uuid) epubMeta.uuid = crypto.randomUUID();
@@ -5791,7 +6045,9 @@
             lastGeneratedEpubPath = savePath;
         } catch (e) {
             // 失败时显示错误并重置状态
-            await platform.message("制作失败: " + e, { kind: "error" });
+            await platform.message(t("制作失败: {error}", { error: e }), {
+                kind: "error",
+            });
             epubGenerationStatus = "idle";
         } finally {
             isLoading = false;
@@ -5808,7 +6064,10 @@
         try {
             await platform.revealPath(lastGeneratedEpubPath);
         } catch (e) {
-            await platform.message("打开文件位置失败: " + e, { kind: "error" });
+            await platform.message(
+                t("打开文件位置失败: {error}", { error: e }),
+                { kind: "error" },
+            );
         }
     }
 
@@ -5835,7 +6094,9 @@
             closeAllPanels();
             await scanToc();
         } catch (e) {
-            await platform.message("回退失败: " + e, { kind: "error" });
+            await platform.message(t("回退失败: {error}", { error: e }), {
+                kind: "error",
+            });
         }
     }
 
@@ -5966,7 +6227,9 @@
                 <div class="proof-header">
                     <div>
                         <div class="proof-title">校对</div>
-                        <div class="proof-subtitle">{proofPreviewMessage}</div>
+                        <div class="proof-subtitle">
+                            {t(proofPreviewMessage)}
+                        </div>
                     </div>
                     <button
                         class="icon-close proof-close"
@@ -6009,17 +6272,26 @@
                                     id="proof-title-scope"
                                     value={proofTitleScope}
                                     options={[
-                                        { value: "all", label: "卷和章" },
+                                        {
+                                            value: "all",
+                                            label: t("卷和章"),
+                                        },
                                         {
                                             value: "chapters",
-                                            label: "只排章节",
+                                            label: t("只排章节"),
                                         },
-                                        { value: "volumes", label: "只排卷部" },
+                                        {
+                                            value: "volumes",
+                                            label: t("只排卷部"),
+                                        },
                                         {
                                             value: "numbers-only",
-                                            label: "只转数字",
+                                            label: t("只转数字"),
                                         },
-                                        { value: "regex", label: "正则选取" },
+                                        {
+                                            value: "regex",
+                                            label: t("正则选取"),
+                                        },
                                     ]}
                                     on:change={(event) =>
                                         (proofTitleScope =
@@ -6049,7 +6321,7 @@
                                         options={[
                                             {
                                                 value: "chinese",
-                                                label: "一二三四",
+                                                label: t("一二三四"),
                                             },
                                             { value: "arabic", label: "1234" },
                                         ]}
@@ -6070,7 +6342,7 @@
                                         options={[
                                             {
                                                 value: "chinese",
-                                                label: "一二三四",
+                                                label: t("一二三四"),
                                             },
                                             { value: "arabic", label: "1234" },
                                         ]}
@@ -6093,8 +6365,8 @@
                                 on:click={applyProofTitleRewrite}
                             >
                                 {proofTitleScope === "numbers-only"
-                                    ? "应用数字转换"
-                                    : "应用目录重排序"}
+                                    ? t("应用数字转换")
+                                    : t("应用目录重排序")}
                             </button>
                         </div>
 
@@ -6113,7 +6385,15 @@
                                         role="button"
                                         tabindex="0"
                                         title={row.sequenceBroken
-                                            ? `断序：当前应为第 ${row.expectedIndex} 章，原标题为第 ${row.originalIndex} 章`
+                                            ? t(
+                                                  "断序：当前应为第 {expected} 章，原标题为第 {original} 章",
+                                                  {
+                                                      expected:
+                                                          row.expectedIndex,
+                                                      original:
+                                                          row.originalIndex,
+                                                  },
+                                              )
                                             : row.original}
                                         on:click={() =>
                                             jumpToProofTitleRow(row)}
@@ -6132,8 +6412,8 @@
                                                 title={proofCollapsedVolumeKeys.has(
                                                     row.volumeKey,
                                                 )
-                                                    ? "展开本卷"
-                                                    : "折叠本卷"}
+                                                    ? t("展开本卷")
+                                                    : t("折叠本卷")}
                                                 on:click|stopPropagation={() =>
                                                     toggleProofVolumeCollapse(
                                                         row.volumeKey,
@@ -6166,8 +6446,14 @@
                                     id="proof-text-tool"
                                     value={proofTextTool}
                                     options={[
-                                        { value: "builtin", label: "内置规则" },
-                                        { value: "convert", label: "繁简转换" },
+                                        {
+                                            value: "builtin",
+                                            label: t("内置规则"),
+                                        },
+                                        {
+                                            value: "convert",
+                                            label: t("繁简转换"),
+                                        },
                                     ]}
                                     on:change={(event) => {
                                         proofTextTool =
@@ -6187,7 +6473,7 @@
                                         options={PROOF_BUILTIN_REGEX_RULES.map(
                                             (rule) => ({
                                                 value: rule.id,
-                                                label: rule.name,
+                                                label: t(rule.name),
                                             }),
                                         )}
                                         on:change={(event) =>
@@ -6196,9 +6482,12 @@
                                     />
                                 </div>
                                 <div class="proof-rule-note">
-                                    {PROOF_BUILTIN_REGEX_RULES.find(
-                                        (rule) => rule.id === proofBuiltinRule,
-                                    )?.description}
+                                    {t(
+                                        PROOF_BUILTIN_REGEX_RULES.find(
+                                            (rule) =>
+                                                rule.id === proofBuiltinRule,
+                                        )?.description ?? "",
+                                    )}
                                 </div>
                                 <div class="proof-actions-row">
                                     <button
@@ -6237,11 +6526,11 @@
                                         options={[
                                             {
                                                 value: "traditional-to-simplified",
-                                                label: "繁体转简体",
+                                                label: t("繁体转简体"),
                                             },
                                             {
                                                 value: "simplified-to-traditional",
-                                                label: "简体转繁体",
+                                                label: t("简体转繁体"),
                                             },
                                         ]}
                                         on:change={(event) => {
@@ -6334,8 +6623,10 @@
                                         >
                                             {row.original}
                                         </span>
-                                        <span title={row.replacement || "删除"}>
-                                            {row.replacement || "删除"}
+                                        <span
+                                            title={row.replacement || t("删除")}
+                                        >
+                                            {row.replacement || t("删除")}
                                         </span>
                                     </label>
                                 {:else}
@@ -6567,16 +6858,22 @@
                                     value={aiProofingScope}
                                     disabled={aiProofingRunning}
                                     options={[
-                                        { value: "current", label: "当前章" },
+                                        {
+                                            value: "current",
+                                            label: t("当前章"),
+                                        },
                                         ...(hasProofVolumeScope
                                             ? [
                                                   {
                                                       value: "volume",
-                                                      label: "当前卷",
+                                                      label: t("当前卷"),
                                                   },
                                               ]
                                             : []),
-                                        { value: "all", label: "全书逐章" },
+                                        {
+                                            value: "all",
+                                            label: t("全书逐章"),
+                                        },
                                     ]}
                                     on:change={(event) =>
                                         (aiProofingScope =
@@ -6591,8 +6888,8 @@
                                     disabled={aiProofingRunning}
                                     on:click={runAiProofing}
                                     >{aiProofingRunning
-                                        ? "校对中..."
-                                        : "开始"}</button
+                                        ? t("校对中...")
+                                        : t("开始")}</button
                                 >
                                 <button
                                     class="proof-ai-action-btn"
@@ -6675,7 +6972,16 @@
                                         <span
                                             role="button"
                                             tabindex="0"
-                                            title={`${row.chapterTitle}\n原因：${aiProofingReasonText(row)}\n原文：${row.original}`}
+                                            title={t(
+                                                "{chapter}\n原因：{reason}\n原文：{original}",
+                                                {
+                                                    chapter: row.chapterTitle,
+                                                    reason: aiProofingReasonText(
+                                                        row,
+                                                    ),
+                                                    original: row.original,
+                                                },
+                                            )}
                                             on:click|preventDefault={() =>
                                                 jumpToAiProofingRow(row)}
                                             on:keydown|preventDefault={(e) => {
@@ -6704,10 +7010,10 @@
                                                 class="ai-proof-replacement-text"
                                             >
                                                 {row.fullChapterRemoval
-                                                    ? "移除整章"
+                                                    ? t("移除整章")
                                                     : compactAiProofingCellText(
                                                           row.replacement ||
-                                                              "删除",
+                                                              t("删除"),
                                                       )}
                                             </span>
                                         </span>
@@ -6734,8 +7040,8 @@
                                                 >{(
                                                     batch.revertedRowIds || []
                                                 ).includes(row.id)
-                                                    ? "已撤销"
-                                                    : "已应用"}</span
+                                                    ? t("已撤销")
+                                                    : t("已应用")}</span
                                             >
                                             <span
                                                 role="button"
@@ -6758,7 +7064,9 @@
                                             >
                                                 <small
                                                     >{row.original} -> {row.replacement ||
-                                                        "删除"}（{row.reason}）</small
+                                                        t(
+                                                            "删除",
+                                                        )}（{row.reason}）</small
                                                 >
                                             </span>
                                             <span class="approval-action-cell">
@@ -6771,7 +7079,8 @@
                                                             reapplyAiApprovalRow(
                                                                 batch.id,
                                                                 row.id,
-                                                            )}>应用</button
+                                                            )}
+                                                        >{t("应用")}</button
                                                     >
                                                 {:else}
                                                     <button
@@ -6782,7 +7091,8 @@
                                                             revertAiApprovalRow(
                                                                 batch.id,
                                                                 row.id,
-                                                            )}>撤销</button
+                                                            )}
+                                                        >{t("撤销")}</button
                                                     >
                                                 {/if}
                                             </span>
@@ -6802,7 +7112,7 @@
                                 on:contextmenu|stopPropagation
                             >
                                 {#each aiProofingLogs as item}
-                                    <div>{item}</div>
+                                    <div>{t(item)}</div>
                                 {:else}
                                     <div>暂无日志</div>
                                 {/each}
@@ -6812,8 +7122,8 @@
                 </div>
 
                 <div class="proof-footer">
-                    {proofMessage ||
-                        "处理结果会显示在这里，文本修改后可用撤销返回。"}
+                    {t(proofMessage) ||
+                        t("处理结果会显示在这里，文本修改后可用撤销返回。")}
                 </div>
             </aside>
         {/if}
@@ -6999,7 +7309,10 @@
                                     <input
                                         id="et"
                                         type="text"
-                                        bind:value={epubMeta.title}
+                                        value={displayEpubTitle()}
+                                        on:input={(event) =>
+                                            (epubMeta.title =
+                                                event.currentTarget.value)}
                                         class="epub-input-small"
                                     />
                                 </div>
@@ -7008,7 +7321,10 @@
                                     <input
                                         id="ec"
                                         type="text"
-                                        bind:value={epubMeta.creator}
+                                        value={displayEpubCreator()}
+                                        on:input={(event) =>
+                                            (epubMeta.creator =
+                                                event.currentTarget.value)}
                                         class="epub-input-small"
                                     />
                                 </div>
@@ -7070,8 +7386,8 @@
                                         on:click={searchCovers}
                                     >
                                         {isCoverSearching
-                                            ? "搜索中..."
-                                            : "搜索封面"}
+                                            ? t("搜索中...")
+                                            : t("搜索封面")}
                                     </button>
                                     <button
                                         class="cover-source-btn"
@@ -7122,12 +7438,12 @@
                                             <span class="cover-result-info">
                                                 <span class="cover-result-title"
                                                     >{result.title ||
-                                                        "未命名"}</span
+                                                        t("未命名")}</span
                                                 >
                                                 <span
                                                     class="cover-result-source"
                                                     >{result.source ||
-                                                        "未知来源"}</span
+                                                        t("未知来源")}</span
                                                 >
                                             </span>
                                         </button>
@@ -7143,8 +7459,8 @@
                                     "success"}
                             >
                                 {epubGenerationStatus === "generating"
-                                    ? "正在制作 EPUB..."
-                                    : "EPUB 制作完成"}
+                                    ? t("正在制作 EPUB...")
+                                    : t("EPUB 制作完成")}
                             </div>
                         {/if}
 
@@ -7177,8 +7493,8 @@
                                 on:click={generateEpub}
                             >
                                 {epubGenerationStatus === "generating"
-                                    ? "制作中..."
-                                    : "开始制作"}
+                                    ? t("制作中...")
+                                    : t("开始制作")}
                             </button>
                         </div>
                     </div>
@@ -7209,9 +7525,9 @@
                                 }}
                             >
                                 <span class="hist-time"
-                                    >{new Date(
+                                    >{formatDateTimeLocalized(
                                         h.timestamp * 1000,
-                                    ).toLocaleString()}</span
+                                    )}</span
                                 >
                                 <span class="hist-size"
                                     >{(h.size / 1024).toFixed(1)}KB</span
@@ -7415,7 +7731,7 @@
                     on:click={handleDialogSave}
                     disabled={isDialogSaving}
                 >
-                    {isDialogSaving ? "保存中..." : "保存"}
+                    {isDialogSaving ? t("保存中...") : t("保存")}
                 </button>
                 <button
                     class="btn danger"
@@ -9051,7 +9367,9 @@
           280px 吃掉，编辑器只剩一条缝，而且没有任何东西能把它关掉。
        2. 工具栏 9 个按钮、gap 8px、按钮 38px，总宽 424px > 390px，右边的
           校对/设置直接被裁掉。 */
-    :global(:root[data-tepub-layout="phone"] .app-container .main-body .sidebar-mask) {
+    :global(
+        :root[data-tepub-layout="phone"] .app-container .main-body .sidebar-mask
+    ) {
         position: absolute;
         inset: 0;
         z-index: 40;
@@ -9097,7 +9415,8 @@
         gap: 4px;
     }
 
-    :global(:root[data-tepub-layout="phone"] .app-container) :global(.btn-group),
+    :global(:root[data-tepub-layout="phone"] .app-container)
+        :global(.btn-group),
     :global(:root[data-tepub-layout="phone"] .app-container)
         :global(.toolbar-tail) {
         gap: 4px;
@@ -9144,7 +9463,9 @@
             gap: 2px;
         }
 
-        :global(:root[data-tepub-layout="phone"] .app-container .toolbar button) {
+        :global(
+            :root[data-tepub-layout="phone"] .app-container .toolbar button
+        ) {
             min-width: 30px;
         }
     }

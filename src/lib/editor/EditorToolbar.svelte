@@ -1,5 +1,6 @@
 <script lang="ts">
     import Icon from "$lib/icons/Icon.svelte";
+    import { t } from "$lib/i18n.svelte";
 
     let {
         isModified,
@@ -30,62 +31,62 @@
     <div class="btn-group">
         <button
             class="btn-primary"
-            title="打开文件"
-            aria-label="打开文件"
+            title={t("打开文件")}
+            aria-label={t("打开文件")}
             onclick={onSelectFile}
         >
             <Icon name="folder-open" />
         </button>
         <button
             class={isModified ? "btn-save-modified" : "btn-save-default"}
-            title="保存 (Ctrl+S)"
-            aria-label="保存"
+            title={t("保存 (Ctrl+S)")}
+            aria-label={t("保存")}
             onclick={onSaveFile}><Icon name="save" /></button
         >
         <button
             class="btn-secondary"
-            title="撤销 (Ctrl+Z)"
-            aria-label="撤销"
+            title={t("撤销 (Ctrl+Z)")}
+            aria-label={t("撤销")}
             onclick={onUndo}><Icon name="undo" /></button
         >
         <button
             class="btn-secondary"
-            title="重做 (Ctrl+Y)"
-            aria-label="重做"
+            title={t("重做 (Ctrl+Y)")}
+            aria-label={t("重做")}
             onclick={onRedo}><Icon name="redo" /></button
         >
         <button
             class="btn-secondary"
-            title="章节侧栏"
-            aria-label="章节侧栏"
+            title={t("章节侧栏")}
+            aria-label={t("章节侧栏")}
             onclick={onToggleSidebar}><Icon name="book-open" /></button
         >
         <button
             class="btn-secondary"
-            title="制作 EPUB"
-            aria-label="制作 EPUB"
+            title={t("制作 EPUB")}
+            aria-label={t("制作 EPUB")}
             onclick={onOpenEpubModal}><Icon name="books" /></button
         >
     </div>
     <div class="toolbar-tail">
         <button
             class="btn-secondary"
-            title="查找与替换 (Ctrl+F)"
-            aria-label="查找与替换"
+            title={t("查找与替换 (Ctrl+F)")}
+            aria-label={t("查找与替换")}
             onclick={onOpenSearch}><Icon name="search" /></button
         >
         <button
             class="btn-secondary proof-tool-btn"
-            title="校对"
-            aria-label="校对"
+            title={t("校对")}
+            aria-label={t("校对")}
             onclick={onToggleProof}
         >
             <Icon name="proof" />
         </button>
         <button
             class="btn-secondary"
-            title="偏好设置"
-            aria-label="偏好设置"
+            title={t("偏好设置")}
+            aria-label={t("偏好设置")}
             onclick={onOpenSettings}><Icon name="settings" /></button
         >
     </div>

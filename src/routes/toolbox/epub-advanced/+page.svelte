@@ -6,6 +6,7 @@
     const ownUrl = viewUrl();
     import { onDestroy } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import { localizeUiData, t } from "$lib/i18n.svelte";
     import {
         listWebEpubChapterTargets,
         processWebEpubAdvanced,
@@ -257,7 +258,7 @@
         "tool",
     ) as WebEpubAdvancedAction | null;
     $: action = rawAction && ACTIONS.has(rawAction) ? rawAction : "epub-to-txt";
-    $: config = CONFIG[action];
+    $: config = localizeUiData(CONFIG[action]);
 
     function clearOutputs() {
         for (const item of outputUrls) URL.revokeObjectURL(item.url);
@@ -270,15 +271,17 @@
             file.name.toLowerCase().endsWith(".epub"),
         );
         files = config.multiple ? accepted : accepted.slice(0, 1);
-        errorText = accepted.length ? "" : "请选择 EPUB 文件。";
+        errorText = accepted.length ? "" : t("请选择 EPUB 文件。");
         status = "";
         chapterTargets = [];
         clearOutputs();
         if (action === "epub-split" && files[0]) {
-            status = "正在读取章节目标...";
+            status = t("正在读取章节目标...");
             try {
                 chapterTargets = await listWebEpubChapterTargets(files[0]);
-                status = `已识别 ${chapterTargets.length} 个阅读顺序条目`;
+                status = t("已识别 {count} 个阅读顺序条目", {
+                    count: chapterTargets.length,
+                });
             } catch (error) {
                 errorText =
                     error instanceof Error ? error.message : String(error);
@@ -310,23 +313,27 @@
         busy = true;
         activeController = new AbortController();
         errorText = "";
-        status = `正在执行${config.title}...`;
+        status = t("正在执行{title}...", { title: config.title });
         try {
             result = await processWebEpubAdvanced(files, action, {
                 ...options,
                 signal: activeController.signal,
                 onProgress: (completed, total) => {
-                    status = `正在执行${config.title}：${completed} / ${total}`;
+                    status = t("正在执行{title}：{completed} / {total}", {
+                        title: config.title,
+                        completed,
+                        total,
+                    });
                 },
             });
             outputUrls = result.outputs.map((output) => ({
                 ...output,
                 url: URL.createObjectURL(output.blob),
             }));
-            status = result.message;
+            status = t(result.message);
         } catch (error) {
             errorText = error instanceof Error ? error.message : String(error);
-            status = "处理未完成";
+            status = t("处理未完成");
         } finally {
             busy = false;
             activeController = null;
@@ -660,7 +667,7 @@
         {#if chapterTargets.length && action === "epub-split"}
             <section class="chapters">
                 <header>
-                    <strong>拆分目标预览</strong><span>{status}</span>
+                    <strong>拆分目标预览</strong><span>{t(status)}</span>
                 </header>
                 <div>
                     {#each chapterTargets as chapter}<span
@@ -680,7 +687,7 @@
                 <header>
                     <div>
                         <span class="kicker">PROCESS RESULT</span>
-                        <h3>{errorText || status}</h3>
+                        <h3>{errorText || t(status)}</h3>
                     </div>
                 </header>
                 {#if result?.report}<pre>{result.report}</pre>{/if}
@@ -688,7 +695,7 @@
                         {#each outputUrls as output}<article>
                                 <div>
                                     <strong>{output.name}</strong><span
-                                        >{output.message}</span
+                                        >{t(output.message)}</span
                                     >
                                 </div>
                                 <button

@@ -32,6 +32,7 @@
         type EpubStyleModule,
     } from "$lib/epubStyleLibrary";
     import { EPUB_STYLE_LIBRARY_KEY as EPUB_STYLE_LIBRARY_STORAGE_KEY } from "$lib/storageKeys";
+    import { t } from "$lib/i18n.svelte";
 
     interface RegexRule {
         enabled: boolean;
@@ -125,7 +126,7 @@
     ];
 
     function chevronLabel(open: boolean) {
-        return open ? "收起" : "展开";
+        return t(open ? "收起" : "展开");
     }
 
     const DEFAULT_META_VOLUME_REGEX =
@@ -955,12 +956,14 @@ p.te-divider-line {
             }
             applyDetectedMetadata(content, selectedName);
             if (uuidAuto) uuid = crypto.randomUUID?.() ?? uuid;
-            status = `已导入 ${selectedName}，正在扫描目录。`;
+            status = t("已导入 {name}，正在扫描目录。", {
+                name: selectedName,
+            });
             await previewToc();
         } catch (err) {
-            status = "导入文本失败";
-            await platform.message(`导入文本失败：${err}`, {
-                title: "制作 EPUB",
+            status = t("导入文本失败");
+            await platform.message(t("导入文本失败：{error}", { error: err }), {
+                title: t("制作 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -978,16 +981,18 @@ p.te-divider-line {
                 content = await withFileText(file);
                 applyDetectedMetadata(content, file.name);
                 if (uuidAuto) uuid = crypto.randomUUID?.() ?? uuid;
-                status = `已导入 ${selectedName}，正在扫描目录。`;
+                status = t("已导入 {name}，正在扫描目录。", {
+                    name: selectedName,
+                });
                 await previewToc();
                 return;
             }
             const cachedPath = await cacheBrowserFileStable(file, "txt");
             await loadSource(cachedPath, file.name);
         } catch (err) {
-            status = "导入文本失败";
-            await platform.message(`导入文本失败：${err}`, {
-                title: "制作 EPUB",
+            status = t("导入文本失败");
+            await platform.message(t("导入文本失败：{error}", { error: err }), {
+                title: t("制作 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -1014,8 +1019,8 @@ p.te-divider-line {
                 resetResult();
             }
         } catch (err) {
-            await platform.message(`封面导入失败：${err}`, {
-                title: "制作 EPUB",
+            await platform.message(t("封面导入失败：{error}", { error: err }), {
+                title: t("制作 EPUB"),
                 kind: "error",
             });
         }
@@ -1043,7 +1048,7 @@ p.te-divider-line {
 
     function handleBackClick(event: MouseEvent) {
         if (!hasUnsavedMakeChanges) return;
-        if (!window.confirm("当前 EPUB 制作内容尚未导出，确定离开吗？"))
+        if (!window.confirm(t("当前 EPUB 制作内容尚未导出，确定离开吗？")))
             event.preventDefault();
     }
 
@@ -1055,10 +1060,13 @@ p.te-divider-line {
         try {
             await setWebImageSlot("fullCover", file);
         } catch (err) {
-            await platform.message(`全屏封面导入失败：${err}`, {
-                title: "制作 EPUB",
-                kind: "error",
-            });
+            await platform.message(
+                t("全屏封面导入失败：{error}", { error: err }),
+                {
+                    title: t("制作 EPUB"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1070,10 +1078,13 @@ p.te-divider-line {
         try {
             await setWebImageSlot("banner", file);
         } catch (err) {
-            await platform.message(`阅微横幅导入失败：${err}`, {
-                title: "制作 EPUB",
-                kind: "error",
-            });
+            await platform.message(
+                t("阅微横幅导入失败：{error}", { error: err }),
+                {
+                    title: t("制作 EPUB"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1085,8 +1096,8 @@ p.te-divider-line {
         try {
             await setWebImageSlot("header", file);
         } catch (err) {
-            await platform.message(`头图导入失败：${err}`, {
-                title: "制作 EPUB",
+            await platform.message(t("头图导入失败：{error}", { error: err }), {
+                title: t("制作 EPUB"),
                 kind: "error",
             });
         }
@@ -1121,13 +1132,15 @@ p.te-divider-line {
             );
             reorderCollapsedVolumeKeys = new Set();
             status = chapters.length
-                ? `已识别 ${chapters.length} 个目录项，可展开预览或调整正则后重扫。`
-                : "没有识别到目录，将按单章正文生成。";
+                ? t("已识别 {count} 个目录项，可展开预览或调整正则后重扫。", {
+                      count: chapters.length,
+                  })
+                : t("没有识别到目录，将按单章正文生成。");
             runTocCheck(buildToc(chapters));
         } catch (err) {
-            status = "目录扫描失败";
-            await platform.message(`目录扫描失败：${err}`, {
-                title: "制作 EPUB",
+            status = t("目录扫描失败");
+            await platform.message(t("目录扫描失败：{error}", { error: err }), {
+                title: t("制作 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -1168,7 +1181,7 @@ p.te-divider-line {
 
     function backToWebEditStep() {
         webMakeStep = "edit";
-        status = "已返回目录与元数据编辑。";
+        status = t("已返回目录与元数据编辑。");
     }
 
     async function exportDesktopStyledEpubBytes(
@@ -1181,10 +1194,13 @@ p.te-divider-line {
             filters: [{ name: "EPUB", extensions: ["epub"] }],
         });
         if (!selected) {
-            return { message: "已取消导出 EPUB。", path: "" };
+            return { message: t("已取消导出 EPUB。"), path: "" };
         }
         await platform.writeFile(selected, bytes);
-        return { message: `已导出 EPUB：${selected}`, path: selected };
+        return {
+            message: t("已导出 EPUB：{path}", { path: selected }),
+            path: selected,
+        };
     }
 
     function onWebHeaderStyleChange(styleId: string) {
@@ -1278,13 +1294,23 @@ p.te-divider-line {
                     rules,
                 },
             );
-            status = `已生成《${makeResult.title}》，${makeResult.chapter_count} 个目录项，约 ${makeResult.word_count} 字。`;
+            status = t(
+                "已生成《{title}》，{chapters} 个目录项，约 {words} 字。",
+                {
+                    title: makeResult.title,
+                    chapters: makeResult.chapter_count,
+                    words: makeResult.word_count,
+                },
+            );
         } catch (err) {
-            status = "制作 EPUB 失败";
-            await platform.message(`制作 EPUB 失败：${err}`, {
-                title: "制作 EPUB",
-                kind: "error",
-            });
+            status = t("制作 EPUB 失败");
+            await platform.message(
+                t("制作 EPUB 失败：{error}", { error: err }),
+                {
+                    title: t("制作 EPUB"),
+                    kind: "error",
+                },
+            );
         } finally {
             busy = false;
         }
@@ -1315,13 +1341,16 @@ p.te-divider-line {
                 safeFileName(makeResult.title, "epub"),
             );
             exportPath = result.output_path;
-            status = result.message;
+            status = t(result.message);
         } catch (err) {
-            status = "导出 EPUB 失败";
-            await platform.message(`导出 EPUB 失败：${err}`, {
-                title: "制作 EPUB",
-                kind: "error",
-            });
+            status = t("导出 EPUB 失败");
+            await platform.message(
+                t("导出 EPUB 失败：{error}", { error: err }),
+                {
+                    title: t("制作 EPUB"),
+                    kind: "error",
+                },
+            );
         } finally {
             busy = false;
         }
@@ -1467,7 +1496,7 @@ p.te-divider-line {
         await saveCurrentText();
         closeRenameTitle();
         await previewToc();
-        status = `已重命名目录标题：${nextTitle}`;
+        status = t("已重命名目录标题：{title}", { title: nextTitle });
     }
 
     function chapterBodyRange(item: TocItem) {
@@ -1522,7 +1551,7 @@ p.te-divider-line {
         const titleText = chapterEditSheet.item.title;
         closeChapterEditor();
         await previewToc();
-        status = `已更新章节正文：${titleText}`;
+        status = t("已更新章节正文：{title}", { title: titleText });
     }
 
     async function cancelChapterTitle(item: TocItem) {
@@ -1538,7 +1567,7 @@ p.te-divider-line {
         tocActionTarget = null;
         await saveCurrentText();
         await previewToc();
-        status = `已取消本章标题：${item.title}`;
+        status = t("已取消本章标题：{title}", { title: item.title });
     }
 
     async function deleteChapterContent(item: TocItem) {
@@ -1553,7 +1582,9 @@ p.te-divider-line {
         tocActionTarget = null;
         await saveCurrentText();
         await previewToc();
-        status = `已删除本章标题和内容：${item.title}`;
+        status = t("已删除本章标题和内容：{title}", {
+            title: item.title,
+        });
     }
 
     async function revealTocItem(id: string) {
@@ -1882,8 +1913,8 @@ p.te-divider-line {
         await saveCurrentText();
         await previewToc();
         status = changed
-            ? `已重排 ${changed} 个目录标题。`
-            : "目录标题已是当前顺序。";
+            ? t("已重排 {count} 个目录标题。", { count: changed })
+            : t("目录标题已是当前顺序。");
     }
 
     function enableManualUuid() {
@@ -1901,7 +1932,7 @@ p.te-divider-line {
             const reader = new FileReader();
             reader.onload = () => resolve(String(reader.result || ""));
             reader.onerror = () =>
-                reject(reader.error || new Error("读取文件失败"));
+                reject(reader.error || new Error(t("读取文件失败")));
             reader.readAsText(file);
         });
     }
@@ -3028,7 +3059,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
                             disabled={busy}>重新扫描并检查</button
                         >
                     </div>
-                    <div class="status">{status}</div>
+                    <div class="status">{t(status)}</div>
                     {#if visibleToc.length}
                         <div class="toc-list">
                             {#each visibleToc as item}
@@ -3504,8 +3535,7 @@ ${headerFigure}${heading}${buildTextBody(section.lines)}</body>
     .page {
         min-height: 100vh;
         box-sizing: border-box;
-        padding: max(10px, var(--safe-top)) 14px
-            max(44px, var(--safe-bottom));
+        padding: max(10px, var(--safe-top)) 14px max(44px, var(--safe-bottom));
         background: var(--color-canvas);
         color: var(--color-text);
     }

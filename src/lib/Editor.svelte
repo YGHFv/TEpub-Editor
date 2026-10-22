@@ -24,6 +24,7 @@
     import { platform } from "./platform";
     import { escapeRegExpLiteral, expandExtendedEscapes } from "./findReplace";
     import { EDITOR_FONT_SIZE_KEY } from "./storageKeys";
+    import { t } from "$lib/i18n.svelte";
 
     export let doc = "";
     export let titleLines: number[] = [];
@@ -306,8 +307,10 @@
                         current: replacedCount > 0 ? replacedCount : 0,
                         message:
                             replacedCount > 0
-                                ? `已替换 ${replacedCount} 处`
-                                : "无结果",
+                                ? t("已替换 {count} 处", {
+                                      count: replacedCount,
+                                  })
+                                : t("无结果"),
                     });
                     return;
                 }
@@ -358,7 +361,9 @@
                         exception instanceof Error
                             ? exception.stack || exception.message
                             : String(exception);
-                    initError = "运行时崩溃：\n" + detail;
+                    initError = t("运行时崩溃：\n{detail}", {
+                        detail,
+                    });
                 }),
                 basicSetup,
                 wrapCompartment.of(wordWrap ? EditorView.lineWrapping : []),
@@ -716,7 +721,7 @@
                 "search-replace",
                 "/search-replace",
                 {
-                    title: "查找与替换",
+                    title: t("查找与替换"),
                     width: 560,
                     // 250px 装不下两行输入 + 复选框 + 查找模式 + 状态栏 + 右侧
                     // 四个按钮（实测需要 ~300 内容高度），同时给滚动留余量

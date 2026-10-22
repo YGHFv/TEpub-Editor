@@ -8,6 +8,7 @@
 <script lang="ts">
     import { onDestroy } from "svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import { t } from "$lib/i18n.svelte";
 
     let {
         rules,
@@ -72,10 +73,13 @@
     // presetOptions 一旦提供就优先使用，便于以后从调用侧直接给可读名。
     const resolvedPresetOptions = $derived(
         presetOptions && presetOptions.length > 0
-            ? presetOptions
+            ? presetOptions.map((option) => ({
+                  ...option,
+                  label: t(option.label),
+              }))
             : presetPatterns.map((pattern) => ({
                   value: pattern,
-                  label: inferPresetLabel(pattern),
+                  label: t(inferPresetLabel(pattern)),
               })),
     );
 
@@ -114,7 +118,7 @@
     });
 </script>
 
-<div class="rules-header">正则表达式</div>
+<div class="rules-header">{t("正则表达式")}</div>
 <div class="rule-helper">
     <div class="rule-helper-row">
         <CustomSelect
@@ -122,26 +126,26 @@
             value={String(prefixLevel)}
             options={[1, 2, 3, 4, 5].map((level) => ({
                 value: String(level),
-                label: `层级 ${level}`,
+                label: t("层级 {level}", { level }),
             }))}
-            ariaLabel="前缀层级"
+            ariaLabel={t("前缀层级")}
             on:change={(event) => (prefixLevel = Number(event.detail))}
         />
         <input
             class="rule-prefix-input"
             bind:value={prefixText}
-            placeholder="前缀识别，例如：番外、后日谈"
+            placeholder={t("前缀识别，例如：番外、后日谈")}
         />
         <button
             type="button"
             class="rule-btn add"
             class:invalid={prefixRejected}
-            onclick={handleAddPrefix}>＋ 前缀</button
+            onclick={handleAddPrefix}>{t("前缀")}</button
         >
     </div>
     {#if prefixHint}
         <div class="rule-helper-hint" role="status" aria-live="polite">
-            {prefixHint}
+            {t(prefixHint)}
         </div>
     {/if}
 </div>
@@ -153,9 +157,9 @@
                 value={String(rule.level)}
                 options={[1, 2, 3, 4, 5].map((level) => ({
                     value: String(level),
-                    label: `层级 ${level}`,
+                    label: t("层级 {level}", { level }),
                 }))}
-                ariaLabel="目录层级"
+                ariaLabel={t("目录层级")}
                 on:change={(event) =>
                     onUpdateRule(idx, { level: Number(event.detail) })}
             />
@@ -169,14 +173,14 @@
                         onUpdateRule(idx, {
                             pattern: event.currentTarget.value,
                         })}
-                    placeholder="输入正则表达式"
+                    placeholder={t("输入正则表达式")}
                 />
                 <CustomSelect
                     className="rule-preset-select"
                     value=""
-                    placeholder="预设"
+                    placeholder={t("预设")}
                     options={resolvedPresetOptions}
-                    ariaLabel="选择预设正则"
+                    ariaLabel={t("选择预设正则")}
                     on:change={(event) => {
                         if (event.detail)
                             onUpdateRule(idx, { pattern: event.detail });
@@ -196,12 +200,12 @@
     <button
         class="grid-btn"
         style="padding: 4px 10px; font-size: 13px;"
-        onclick={onResetRules}>↺ 还原正则</button
+        onclick={onResetRules}>↺ {t("还原正则")}</button
     >
     <button
         class="grid-btn"
         style="padding: 4px 10px; font-size: 13px; color: #0066b8; border-color: #0066b8;"
-        onclick={onAddRule}>＋ 新增正则</button
+        onclick={onAddRule}>＋ {t("新增正则")}</button
     >
 </div>
 

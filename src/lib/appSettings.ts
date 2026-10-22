@@ -3,6 +3,10 @@ import {
   readScopedSettingsRaw,
   writeScopedSettingsRaw,
 } from "$lib/webAccount";
+import {
+  isUiLanguagePreference,
+  type UiLanguagePreference,
+} from "$lib/i18n.svelte";
 
 export type UiTheme = "light" | "dark" | "system";
 export type EffectiveTheme = "light" | "dark";
@@ -43,6 +47,7 @@ export interface TxtAiProofingConfig {
 
 export interface GlobalAppSettings {
   uiTheme: UiTheme;
+  uiLanguage: UiLanguagePreference;
   assocEpubRead: boolean;
   assocEpubEdit: boolean;
   assocTxtMakeEpub: boolean;
@@ -102,6 +107,7 @@ export const DEFAULT_TOC_REGEX_RULES: TocRegexRule[] = [
 
 export const DEFAULT_APP_SETTINGS: GlobalAppSettings = {
   uiTheme: "system",
+  uiLanguage: "auto",
   assocEpubRead: false,
   assocEpubEdit: false,
   assocTxtMakeEpub: false,
@@ -260,6 +266,9 @@ export function normalizeAppSettings(
     ...DEFAULT_APP_SETTINGS,
     ...raw,
     uiTheme: migrateUiTheme(raw.uiTheme) ?? DEFAULT_APP_SETTINGS.uiTheme,
+    uiLanguage: isUiLanguagePreference(raw.uiLanguage)
+      ? raw.uiLanguage
+      : DEFAULT_APP_SETTINGS.uiLanguage,
     assocEpubRead: Boolean(raw.assocEpubRead),
     assocEpubEdit: Boolean(raw.assocEpubEdit),
     assocTxtMakeEpub: Boolean(raw.assocTxtMakeEpub),

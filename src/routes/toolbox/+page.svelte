@@ -36,6 +36,13 @@
         type WebAccountSession,
     } from "$lib/webAccount";
     import { batchTaskKey } from "$lib/storageKeys";
+    import {
+        initializeI18n,
+        localizeAiProviderName,
+        t,
+        UI_LANGUAGE_OPTIONS,
+        type UiLanguagePreference,
+    } from "$lib/i18n.svelte";
 
     type ToolId =
         | "library"
@@ -117,6 +124,14 @@
         { value: "light", label: "浅色" },
         { value: "dark", label: "深色" },
     ];
+    $: themeOptions = THEME_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
+    $: languageOptions = UI_LANGUAGE_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
     const tools: Tool[] = [
         {
             id: "library",
@@ -360,7 +375,7 @@
                     ((!platform.isWeb && !isMobileClient) ||
                         tool.id !== "library") &&
                     (!normalizedToolSearch ||
-                        `${tool.title} ${tool.detail}`
+                        `${tool.title} ${tool.detail} ${t(tool.title)} ${t(tool.detail)}`
                             .toLocaleLowerCase("zh-CN")
                             .includes(normalizedToolSearch)),
             ),
@@ -378,12 +393,14 @@
     let toolboxSettingsActiveTab: "account" | "general" | "assoc" | "api" =
         "general";
     $: toolboxSettingsTabs = [
-        ...(usesWebScopedSettings() ? [{ id: "account", label: "账号" }] : []),
-        { id: "general", label: "通用" },
+        ...(usesWebScopedSettings()
+            ? [{ id: "account", label: t("账号") }]
+            : []),
+        { id: "general", label: t("通用") },
         ...(usesWebScopedSettings()
             ? []
-            : [{ id: "assoc", label: "文件关联" }]),
-        { id: "api", label: "API 配置" },
+            : [{ id: "assoc", label: t("文件关联") }]),
+        { id: "api", label: t("API 配置") },
     ];
     let appSettings: GlobalAppSettings = loadAppSettings();
     let accountSession: WebAccountSession | null = getWebAccountSession();
@@ -464,7 +481,7 @@
             }
             if (tool.id === "image-tools") {
                 await openImageTools();
-                statusText = "封面与横幅工具已打开";
+                statusText = t("封面与横幅工具已打开");
                 return;
             }
 
@@ -479,23 +496,28 @@
                 multiple: false,
                 filters: [
                     tool.id === "txt-epub" || tool.id === "txt-edit"
-                        ? { name: "TXT 文件", extensions: ["txt"] }
-                        : { name: "EPUB 文件", extensions: ["epub"] },
+                        ? { name: t("TXT 文件"), extensions: ["txt"] }
+                        : { name: t("EPUB 文件"), extensions: ["epub"] },
                 ],
             });
 
             if (!selected || Array.isArray(selected)) return;
             if (isBatchTool(tool.id)) {
                 await openBatchWindow(tool, [selected]);
-                statusText = `${tool.title} 鎵归噺绐楀彛宸叉墦寮€`;
+                statusText = t("{tool} 批量窗口已打开", {
+                    tool: t(tool.title),
+                });
             } else if ((tool.id as ToolId) === "epub-diagnose") {
                 const result = await runEpubDiagnose(selected);
                 statusText =
                     result.issues.length === 0
-                        ? "EPUB 诊断未发现明显问题"
-                        : `EPUB 诊断完成：${result.errorCount} 错误 / ${result.warningCount} 警告`;
+                        ? t("EPUB 诊断未发现明显问题")
+                        : t("EPUB 诊断完成：{errors} 错误 / {warnings} 警告", {
+                              errors: result.errorCount,
+                              warnings: result.warningCount,
+                          });
                 await platform.message(formatDiagnosticReport(result), {
-                    title: tool.title,
+                    title: t(tool.title),
                     kind:
                         result.errorCount > 0
                             ? "error"
@@ -510,34 +532,37 @@
                         string | string[] | null
                     >({
                         multiple: false,
-                        filters: [{ name: "TXT 文件", extensions: ["txt"] }],
-                        title: "选择与 EPUB 对应的明文 TXT",
+                        filters: [{ name: t("TXT 文件"), extensions: ["txt"] }],
+                        title: t("选择与 EPUB 对应的明文 TXT"),
                     });
                     if (!selectedTxt || Array.isArray(selectedTxt)) return;
                     txtPath = selectedTxt;
                 }
                 const result = await runProcessingTool(tool, selected, txtPath);
                 statusText = result.changed
-                    ? `${tool.title} 已完成`
-                    : result.message;
+                    ? t("{tool} 已完成", { tool: t(tool.title) })
+                    : t(result.message);
                 await platform.message(
-                    `${result.message}\n\n${result.outputPath}`,
+                    `${t(result.message)}\n\n${result.outputPath}`,
                     {
-                        title: tool.title,
+                        title: t(tool.title),
                         kind: result.changed ? "info" : "warning",
                     },
                 );
             } else {
                 await openToolForPath(tool, selected);
-                statusText = `${tool.title} 已打开`;
+                statusText = t("{tool} 已打开", { tool: t(tool.title) });
             }
         } catch (e: any) {
             console.error("工具箱打开失败:", e);
-            statusText = "打开失败";
-            await platform.message(`打开失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            statusText = t("打开失败");
+            await platform.message(
+                t("打开失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             busyTool = "";
         }
@@ -570,7 +595,7 @@
         }
         if (tool.id === "send-to-kindle") {
             event.preventDefault();
-            statusText = "正在打开 Send to Kindle";
+            statusText = t("正在打开 Send to Kindle");
             void platform.openExternal("https://www.amazon.com/sendtokindle");
             return;
         }
@@ -657,7 +682,7 @@
 
         const win = await createToolWindow(windowLabel("image-tools"), {
             url: appPath("/toolbox/image-tools"),
-            title: "TEpub-Editor-封面与横幅",
+            title: t("TEpub-Editor-封面与横幅"),
             width: TOOLBOX_WINDOW_WIDTH,
             height: TOOLBOX_WINDOW_HEIGHT,
             minWidth: TOOLBOX_WINDOW_WIDTH,
@@ -670,7 +695,7 @@
 
     async function openStyleLibrary() {
         busyTool = "epub-style-library";
-        statusText = "正在打开 EPUB 样式库...";
+        statusText = t("正在打开 EPUB 样式库...");
         try {
             const win = await createToolWindow(
                 windowLabel("epub-style-library"),
@@ -686,14 +711,17 @@
                 },
             );
             await hideToolboxHomeWhileOpen(win);
-            statusText = "EPUB 样式库已打开";
+            statusText = t("EPUB 样式库已打开");
         } catch (e: any) {
             console.error("打开 EPUB 样式库失败:", e);
-            statusText = "打开 EPUB 样式库失败";
-            await platform.message(`打开 EPUB 样式库失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            statusText = t("打开 EPUB 样式库失败");
+            await platform.message(
+                t("打开 EPUB 样式库失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             busyTool = "";
         }
@@ -701,7 +729,7 @@
 
     async function openOnlineImageDownload() {
         busyTool = "online-image-download";
-        statusText = "正在打开 EPUB 在线图片下载...";
+        statusText = t("正在打开 EPUB 在线图片下载...");
         try {
             const win = await createToolWindow(
                 windowLabel("online-image-download"),
@@ -717,14 +745,19 @@
                 },
             );
             await hideToolboxHomeWhileOpen(win);
-            statusText = "EPUB 在线图片下载已打开";
+            statusText = t("EPUB 在线图片下载已打开");
         } catch (e: any) {
             console.error("打开 EPUB 在线图片下载失败:", e);
-            statusText = "打开 EPUB 在线图片下载失败";
-            await platform.message(`打开 EPUB 在线图片下载失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            statusText = t("打开 EPUB 在线图片下载失败");
+            await platform.message(
+                t("打开 EPUB 在线图片下载失败: {error}", {
+                    error: String(e),
+                }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             busyTool = "";
         }
@@ -787,29 +820,34 @@
 
     function formatDiagnosticReport(result: ToolboxDiagnosticResult) {
         const lines = [
-            `文件：${result.sourcePath}`,
-            `OPF：${result.opfPath || "未发现"}`,
-            `ZIP 条目：${result.totalEntries}`,
-            `manifest 条目：${result.manifestItems}`,
-            `结果：${result.errorCount} 错误 / ${result.warningCount} 警告`,
+            t("文件：{path}", { path: result.sourcePath }),
+            t("OPF：{path}", { path: result.opfPath || t("未发现") }),
+            t("ZIP 条目：{count}", { count: result.totalEntries }),
+            t("manifest 条目：{count}", { count: result.manifestItems }),
+            t("结果：{errors} 错误 / {warnings} 警告", {
+                errors: result.errorCount,
+                warnings: result.warningCount,
+            }),
         ];
 
         if (result.issues.length === 0) {
-            lines.push("", "未发现明显结构问题。");
+            lines.push("", t("未发现明显结构问题。"));
             return lines.join("\n");
         }
 
-        lines.push("", "问题列表：");
+        lines.push("", t("问题列表："));
         const visibleIssues = result.issues.slice(0, 16);
         for (const issue of visibleIssues) {
             const path = issue.path ? ` [${issue.path}]` : "";
             lines.push(
-                `- ${issue.level}/${issue.kind}${path}: ${issue.message}`,
+                `- ${issue.level}/${issue.kind}${path}: ${t(issue.message)}`,
             );
         }
         if (result.issues.length > visibleIssues.length) {
             lines.push(
-                `... 还有 ${result.issues.length - visibleIssues.length} 条未显示`,
+                t("... 还有 {count} 条未显示", {
+                    count: result.issues.length - visibleIssues.length,
+                }),
             );
         }
         return lines.join("\n");
@@ -826,7 +864,7 @@
                 JSON.stringify({
                     taskId,
                     tool: tool.id,
-                    toolTitle: tool.title,
+                    toolTitle: t(tool.title),
                     inputPaths,
                     imageFormat:
                         tool.id === "image-convert" ? "auto" : undefined,
@@ -834,9 +872,9 @@
             );
             const win = await createToolWindow(windowLabel("batch-progress"), {
                 url: appPath(
-                    `/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(tool.title)}`,
+                    `/batch-progress?taskId=${encodeURIComponent(taskId)}&tool=${encodeURIComponent(t(tool.title))}`,
                 ),
-                title: `${tool.title} 批量处理`,
+                title: t("{tool} 批量处理", { tool: t(tool.title) }),
                 width: TOOLBOX_WINDOW_WIDTH,
                 height: TOOLBOX_WINDOW_HEIGHT,
                 minWidth: TOOLBOX_WINDOW_WIDTH,
@@ -845,14 +883,19 @@
                 center: true,
             });
             await hideToolboxHomeWhileOpen(win);
-            statusText = `${tool.title} 批量窗口已打开`;
+            statusText = t("{tool} 批量窗口已打开", {
+                tool: t(tool.title),
+            });
         } catch (e: any) {
             console.error("批量处理失败:", e);
-            statusText = "批量处理失败";
-            await platform.message(`批量处理失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            statusText = t("批量处理失败");
+            await platform.message(
+                t("批量处理失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             busyTool = "";
         }
@@ -867,7 +910,7 @@
         if (tool.id === "txt-epub" || tool.id === "txt-edit") {
             const win = await createToolWindow(windowLabel("editor"), {
                 url: appPath(`/editor?file=${encoded}&fromLibrary=1`),
-                title: "TEpub-Editor-TXT",
+                title: t("TXT 编辑器"),
                 width: TOOLBOX_WINDOW_WIDTH,
                 height: TOOLBOX_WINDOW_HEIGHT,
                 minWidth: TOOLBOX_WINDOW_WIDTH,
@@ -882,7 +925,7 @@
         if (tool.id === "epub-edit") {
             const win = await createToolWindow(windowLabel("epub-editor"), {
                 url: appPath(`/epub-editor?file=${encoded}`),
-                title: "TEpub-Editor-EPUB",
+                title: t("EPUB 编辑器"),
                 width: TOOLBOX_WINDOW_WIDTH,
                 height: TOOLBOX_WINDOW_HEIGHT,
                 minWidth: TOOLBOX_WINDOW_WIDTH,
@@ -896,7 +939,7 @@
 
         const win = await createToolWindow(windowLabel("reader"), {
             url: appPath(`/reader?file=${encoded}`),
-            title: "TEpub-Editor-Reader",
+            title: t("EPUB 阅读器"),
             width: TOOLBOX_WINDOW_WIDTH,
             height: TOOLBOX_WINDOW_HEIGHT,
             minWidth: TOOLBOX_WINDOW_WIDTH,
@@ -930,15 +973,18 @@
             accountSession = getWebAccountSession();
             appSettings = loadAppSettings();
             applyTheme(appSettings.uiTheme);
+            initializeI18n(appSettings.uiLanguage);
             return;
         }
         try {
             const data =
                 await platform.invoke<LegacyLibraryData>("load_library");
             appSettings = saveAppSettings(loadAppSettings(data?.config || {}));
+            initializeI18n(appSettings.uiLanguage);
         } catch {
             appSettings = loadAppSettings();
             applyTheme(appSettings.uiTheme);
+            initializeI18n(appSettings.uiLanguage);
         }
     }
 
@@ -964,6 +1010,7 @@
             );
         }
         appSettings = saveAppSettings(appSettings);
+        initializeI18n(appSettings.uiLanguage);
     }
 
     function setUiTheme(value: string) {
@@ -979,8 +1026,21 @@
         saveGlobalSettings();
     }
 
+    function setUiLanguage(value: string) {
+        if (
+            value !== "auto" &&
+            value !== "zh-CN" &&
+            value !== "zh-TW" &&
+            value !== "en"
+        ) {
+            return;
+        }
+        appSettings.uiLanguage = value as UiLanguagePreference;
+        saveGlobalSettings();
+    }
+
     function providerKindLabel(kind: AiProviderConfig["kind"]) {
-        return kind === "image" ? "生图模型" : "文字模型";
+        return t(kind === "image" ? "生图模型" : "文字模型");
     }
 
     function openNewApiEditor() {
@@ -1040,7 +1100,7 @@
             !provider.baseUrl.trim() ||
             !provider.model.trim()
         ) {
-            apiSettingsMessage = "请填写名称、API 地址和模型。";
+            apiSettingsMessage = t("请填写名称、API 地址和模型。");
             return;
         }
         if (apiEditorMode === "edit") {
@@ -1058,7 +1118,7 @@
         }
         saveGlobalSettings();
         apiEditorOpen = false;
-        apiSettingsMessage = "API 配置已保存。";
+        apiSettingsMessage = t("API 配置已保存。");
     }
 
     async function removeAiProvider(providerId: string) {
@@ -1075,7 +1135,7 @@
             appSettings.txtAiProofing.approvalProviderId =
                 appSettings.txtAiProofing.providerId || fallbackId;
         saveGlobalSettings();
-        apiSettingsMessage = "API 配置已删除。";
+        apiSettingsMessage = t("API 配置已删除。");
     }
 
     async function toggleFileAssoc(
@@ -1089,10 +1149,13 @@
             if (verb === "epub-read") appSettings.assocEpubRead = !enabled;
             else if (verb === "epub-edit") appSettings.assocEpubEdit = !enabled;
             else appSettings.assocTxtMakeEpub = !enabled;
-            await platform.message(`设置失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("设置失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1122,7 +1185,7 @@
         const nextDesktop = !webDesktopViewEnabled;
         setWebClientViewOverride(nextDesktop ? "desktop" : "");
         webDesktopViewEnabled = nextDesktop;
-        statusText = nextDesktop ? "已切换为电脑页面" : "已恢复自动页面";
+        statusText = nextDesktop ? t("已切换为电脑页面") : t("已恢复自动页面");
     }
 
     function setToolboxSettingsTab(tabId: string) {
@@ -1141,21 +1204,22 @@
         accountMessage = "";
         const username = accountUsername.trim();
         if (!username || !accountPassword) {
-            accountMessage = "请填写账号和密码。";
+            accountMessage = t("请填写账号和密码。");
             return;
         }
         try {
             if (accountMode === "register") {
                 await registerWebAccount(username, accountPassword);
-                accountMessage = "注册成功，已登录。";
+                accountMessage = t("注册成功，已登录。");
             } else {
                 await loginWebAccount(username, accountPassword);
-                accountMessage = "登录成功。";
+                accountMessage = t("登录成功。");
             }
             accountPassword = "";
             accountSession = getWebAccountSession();
             appSettings = loadAppSettings();
             applyTheme(appSettings.uiTheme);
+            initializeI18n(appSettings.uiLanguage);
         } catch (error) {
             accountMessage = String((error as Error)?.message || error);
         }
@@ -1166,7 +1230,8 @@
         accountSession = null;
         appSettings = loadAppSettings();
         applyTheme(appSettings.uiTheme);
-        accountMessage = "已退出登录，当前修改只保存在本次浏览器会话。";
+        initializeI18n(appSettings.uiLanguage);
+        accountMessage = t("已退出登录，当前修改只保存在本次浏览器会话。");
     }
 
     onMount(() => {
@@ -1189,17 +1254,18 @@
 <svelte:window on:keydown={handleKeydown} />
 
 <main class="toolbox-app" class:desktop-view={webDesktopViewEnabled}>
-    <section class="toolbox-content" aria-label="工具列表">
+    <section class="toolbox-content" aria-label={t("工具列表")}>
         <div class="toolbox-commandbar">
             <div
                 class="toolbox-filter-tabs"
                 role="tablist"
-                aria-label="工具分类"
+                aria-label={t("工具分类")}
             >
                 <button
                     type="button"
                     class:active={activeToolGroup === "all"}
-                    on:click={() => (activeToolGroup = "all")}>全部</button
+                    on:click={() => (activeToolGroup = "all")}
+                    >{t("全部")}</button
                 >
                 {#each toolGroups as group}
                     <button
@@ -1207,7 +1273,7 @@
                         class:active={activeToolGroup === group.id}
                         on:click={() =>
                             (activeToolGroup = group.id as ToolGroupFilter)}
-                        >{group.title}</button
+                        >{t(group.title)}</button
                     >
                 {/each}
             </div>
@@ -1216,8 +1282,8 @@
                 <input
                     type="search"
                     bind:value={toolSearch}
-                    placeholder="搜索工具"
-                    aria-label="搜索工具"
+                    placeholder={t("搜索工具")}
+                    aria-label={t("搜索工具")}
                 />
             </label>
             <div class="toolbox-home-actions">
@@ -1227,9 +1293,11 @@
                         class:active={webDesktopViewEnabled}
                         type="button"
                         on:click={toggleWebDesktopView}
-                        aria-label={webDesktopViewEnabled
-                            ? "恢复自动页面"
-                            : "切换电脑页面"}
+                        aria-label={t(
+                            webDesktopViewEnabled
+                                ? "恢复自动页面"
+                                : "切换电脑页面",
+                        )}
                         aria-pressed={webDesktopViewEnabled}
                         ><Icon name="monitor" size={17} /></button
                     >
@@ -1238,8 +1306,9 @@
                     class="toolbox-settings-btn"
                     type="button"
                     on:click={openSettings}
-                    title="设置"
-                    aria-label="设置"><Icon name="settings" size={17} /></button
+                    title={t("设置")}
+                    aria-label={t("设置")}
+                    ><Icon name="settings" size={17} /></button
                 >
             </div>
         </div>
@@ -1256,7 +1325,7 @@
                             class="tool-card tool-card-{group.id}"
                             class:tool-card-disabled={busyTool !== ""}
                             data-tool-id={tool.id}
-                            aria-label={tool.title}
+                            aria-label={t(tool.title)}
                         >
                             <a
                                 class="tool-main"
@@ -1267,11 +1336,13 @@
                             >
                                 <span class="tool-icon">{tool.icon}</span>
                                 <span class="tool-copy">
-                                    <span class="tool-title">{tool.title}</span>
+                                    <span class="tool-title"
+                                        >{t(tool.title)}</span
+                                    >
                                     <span class="tool-detail"
                                         >{busyTool === tool.id
-                                            ? "处理中..."
-                                            : tool.detail}</span
+                                            ? t("处理中...")
+                                            : t(tool.detail)}</span
                                     >
                                 </span>
                             </a>
@@ -1280,11 +1351,11 @@
                 {/each}
             </div>
         {:else}
-            <div class="toolbox-empty">没有匹配的工具</div>
+            <div class="toolbox-empty">{t("没有匹配的工具")}</div>
         {/if}
 
         {#if platform.isWeb}
-            <footer class="web-toolbox-footer" aria-label="版权信息">
+            <footer class="web-toolbox-footer" aria-label={t("版权信息")}>
                 <div class="web-toolbox-footer-card">
                     <div class="web-footer-line">
                         <span>© 2026</span>
@@ -1319,62 +1390,64 @@
         }}
     >
         <SettingsShell
-            title="工具箱设置"
+            title={t("工具箱设置")}
             tabs={toolboxSettingsTabs}
             activeTab={toolboxSettingsActiveTab}
             onTabChange={setToolboxSettingsTab}
             onClose={() => (showSettings = false)}
-            actionLabel="完成"
+            actionLabel={t("完成")}
             onAction={() => (showSettings = false)}
             shellClass="toolbox-settings-panel"
             contentClass="toolbox-settings-content"
         >
             {#if toolboxSettingsActiveTab === "account"}
                 <section class="settings-section account-settings">
-                    <div class="section-title">账号</div>
+                    <div class="section-title">{t("账号")}</div>
                     {#if accountSession}
                         <p class="section-hint">
-                            当前账号：<strong>{accountSession.username}</strong
+                            {t("当前账号：")}<strong
+                                >{accountSession.username}</strong
                             >{accountSession.localOnly
-                                ? "（本机开发模式）"
-                                : ""}。设置会按账号独立保存。
+                                ? t("（本机开发模式）")
+                                : ""}{t("。设置会按账号独立保存。")}
                         </p>
                         <button
                             class="toolbox-mini-btn"
                             type="button"
-                            on:click={logoutAccount}>退出登录</button
+                            on:click={logoutAccount}>{t("退出登录")}</button
                         >
                     {:else}
                         <p class="section-hint">
-                            未登录时，Web
-                            端设置只保存在本次浏览器会话；关闭后重新进入会恢复默认。
+                            {t(
+                                "未登录时，Web 端设置只保存在本次浏览器会话；关闭后重新进入会恢复默认。",
+                            )}
                         </p>
                         <div class="api-kind-switch account-mode-switch">
                             <button
                                 type="button"
                                 class:active={accountMode === "login"}
                                 on:click={() => (accountMode = "login")}
-                                >登录</button
+                                >{t("登录")}</button
                             >
                             <button
                                 type="button"
                                 class:active={accountMode === "register"}
                                 on:click={() => (accountMode = "register")}
-                                >注册</button
+                                >{t("注册")}</button
                             >
                         </div>
                         <div class="set-row">
-                            <span class="set-label">账号</span>
+                            <span class="set-label">{t("账号")}</span>
                             <input
                                 class="set-control"
                                 type="text"
                                 bind:value={accountUsername}
                                 autocomplete="username"
-                                placeholder="3-32 位字母、数字或下划线"
+                                placeholder={t("3-32 位字母、数字或下划线")}
                             />
                         </div>
                         <div class="set-row">
-                            <span class="set-label">密码</span>
+                            <span class="set-label">{t("密码")}</span>
                             <input
                                 class="set-control"
                                 type="password"
@@ -1382,7 +1455,7 @@
                                 autocomplete={accountMode === "login"
                                     ? "current-password"
                                     : "new-password"}
-                                placeholder="至少 6 位"
+                                placeholder={t("至少 6 位")}
                             />
                         </div>
                         <button
@@ -1390,7 +1463,7 @@
                             type="button"
                             on:click={submitAccountForm}
                         >
-                            {accountMode === "login" ? "登录" : "注册并登录"}
+                            {t(accountMode === "login" ? "登录" : "注册并登录")}
                         </button>
                     {/if}
                     {#if accountMessage}
@@ -1399,21 +1472,32 @@
                 </section>
             {:else if toolboxSettingsActiveTab === "general"}
                 <section class="settings-section">
-                    <div class="section-title">通用</div>
+                    <div class="section-title">{t("通用")}</div>
                     <div class="set-row">
-                        <span class="set-label">界面主题</span>
+                        <span class="set-label">{t("界面主题")}</span>
                         <CustomSelect
                             className="set-control"
                             value={appSettings.uiTheme}
-                            options={THEME_OPTIONS}
+                            options={themeOptions}
                             on:change={(e) => setUiTheme(e.detail)}
+                        />
+                    </div>
+                    <div class="set-row">
+                        <span class="set-label">{t("界面语言")}</span>
+                        <CustomSelect
+                            className="set-control"
+                            value={appSettings.uiLanguage}
+                            options={languageOptions}
+                            on:change={(e) => setUiLanguage(e.detail)}
                         />
                     </div>
                     <label class="set-row toggle-row">
                         <span class="set-label"
-                            >使用多窗口打开二级页面
+                            >{t("使用多窗口打开二级页面")}
                             <small
-                                >关闭时在当前窗口内切换，顶部用标签栏在页面间跳转</small
+                                >{t(
+                                    "关闭时在当前窗口内切换，顶部用标签栏在页面间跳转",
+                                )}</small
                             ></span
                         >
                         <input
@@ -1432,7 +1516,7 @@
                     {#if appSettings.secondaryWindows}
                         <label class="set-row toggle-row">
                             <span class="set-label"
-                                >打开工具时隐藏工具箱主页</span
+                                >{t("打开工具时隐藏工具箱主页")}</span
                             >
                             <input
                                 type="checkbox"
@@ -1445,8 +1529,11 @@
                     {/if}
                     <label class="set-row toggle-row">
                         <span class="set-label"
-                            >显示 EPUB 预览滚动条
-                            <small>关闭时预览内容水平居中，不会有右侧留白</small
+                            >{t("显示 EPUB 预览滚动条")}
+                            <small
+                                >{t(
+                                    "关闭时预览内容水平居中，不会有右侧留白",
+                                )}</small
                             ></span
                         >
                         <input
@@ -1458,13 +1545,15 @@
                 </section>
             {:else if toolboxSettingsActiveTab === "assoc"}
                 <section class="settings-section">
-                    <div class="section-title">文件关联</div>
+                    <div class="section-title">{t("文件关联")}</div>
                     <p class="section-hint">
-                        注册到系统右键菜单和默认打开方式，修改时会写入注册表。
+                        {t(
+                            "注册到系统右键菜单和默认打开方式，修改时会写入注册表。",
+                        )}
                     </p>
                     <label class="set-row toggle-row">
                         <span class="set-label"
-                            >EPUB 阅读 <small>(.epub)</small></span
+                            >{t("EPUB 阅读")} <small>(.epub)</small></span
                         >
                         <input
                             type="checkbox"
@@ -1479,7 +1568,7 @@
                     </label>
                     <label class="set-row toggle-row">
                         <span class="set-label"
-                            >EPUB 编辑 <small>(.epub)</small></span
+                            >{t("EPUB 编辑")} <small>(.epub)</small></span
                         >
                         <input
                             type="checkbox"
@@ -1494,7 +1583,7 @@
                     </label>
                     <label class="set-row toggle-row">
                         <span class="set-label"
-                            >制作 EPUB <small>(.txt)</small></span
+                            >{t("制作 EPUB")} <small>(.txt)</small></span
                         >
                         <input
                             type="checkbox"
@@ -1512,15 +1601,17 @@
                 <section class="settings-section">
                     <div class="api-section-head">
                         <div>
-                            <div class="section-title">API 配置</div>
+                            <div class="section-title">{t("API 配置")}</div>
                             <p class="section-hint">
-                                保存后的文字模型用于校对和书库智能匹配，生图模型用于图片处理。
+                                {t(
+                                    "保存后的文字模型用于校对和书库智能匹配，生图模型用于图片处理。",
+                                )}
                             </p>
                         </div>
                         <button
                             class="toolbox-mini-btn"
                             type="button"
-                            on:click={openNewApiEditor}>新增</button
+                            on:click={openNewApiEditor}>{t("新增")}</button
                         >
                     </div>
                     {#if apiSettingsMessage}
@@ -1528,7 +1619,9 @@
                     {/if}
                     {#if appSettings.aiProviders.length === 0 && !apiEditorOpen}
                         <div class="api-empty">
-                            暂无 API 配置，点击“新增”添加文字模型或生图模型。
+                            {t(
+                                "暂无 API 配置，点击“新增”添加文字模型或生图模型。",
+                            )}
                         </div>
                     {:else}
                         <div class="api-list">
@@ -1537,8 +1630,9 @@
                                     <div class="api-item-main">
                                         <div class="api-item-title">
                                             <strong
-                                                >{provider.name ||
-                                                    provider.model}</strong
+                                                >{localizeAiProviderName(
+                                                    provider.name,
+                                                ) || provider.model}</strong
                                             >
                                             <span
                                                 class:api-kind-image={provider.kind ===
@@ -1551,16 +1645,16 @@
                                         <div class="api-item-meta">
                                             <span
                                                 >{provider.model ||
-                                                    "未填写模型"}</span
+                                                    t("未填写模型")}</span
                                             >
                                             <span
                                                 >{provider.baseUrl ||
-                                                    "未填写 API 地址"}</span
+                                                    t("未填写 API 地址")}</span
                                             >
                                             <span
                                                 >{provider.apiKey
-                                                    ? "已保存 Key"
-                                                    : "未填写 Key"}</span
+                                                    ? t("已保存 Key")
+                                                    : t("未填写 Key")}</span
                                             >
                                         </div>
                                     </div>
@@ -1570,14 +1664,14 @@
                                             type="button"
                                             on:click={() =>
                                                 openEditApiEditor(provider)}
-                                            >编辑</button
+                                            >{t("编辑")}</button
                                         >
                                         <button
                                             class="toolbox-mini-btn danger"
                                             type="button"
                                             on:click={() =>
                                                 removeAiProvider(provider.id)}
-                                            >删除</button
+                                            >{t("删除")}</button
                                         >
                                     </div>
                                 </div>
@@ -1590,51 +1684,55 @@
                             <div class="api-editor-head">
                                 <strong
                                     >{apiEditorMode === "new"
-                                        ? "新增 API"
-                                        : "编辑 API"}</strong
+                                        ? t("新增 API")
+                                        : t("编辑 API")}</strong
                                 >
                                 <div class="api-editor-actions">
                                     <button
                                         class="toolbox-mini-btn"
                                         type="button"
-                                        on:click={saveApiEditor}>保存</button
+                                        on:click={saveApiEditor}
+                                        >{t("保存")}</button
                                     >
                                     <button
                                         class="toolbox-mini-btn"
                                         type="button"
-                                        on:click={cancelApiEditor}>取消</button
+                                        on:click={cancelApiEditor}
+                                        >{t("取消")}</button
                                     >
                                 </div>
                             </div>
                             <div class="set-row">
-                                <span class="set-label">模型类型</span>
+                                <span class="set-label">{t("模型类型")}</span>
                                 <div class="api-kind-switch">
                                     <button
                                         type="button"
                                         class:active={apiDraft.kind === "text"}
                                         on:click={() => setApiDraftKind("text")}
-                                        >文字模型</button
+                                        >{t("文字模型")}</button
                                     >
                                     <button
                                         type="button"
                                         class:active={apiDraft.kind === "image"}
                                         on:click={() =>
                                             setApiDraftKind("image")}
-                                        >生图模型</button
+                                        >{t("生图模型")}</button
                                     >
                                 </div>
                             </div>
                             <div class="set-row">
-                                <span class="set-label">名称</span>
+                                <span class="set-label">{t("名称")}</span>
                                 <input
                                     class="set-control"
                                     type="text"
                                     bind:value={apiDraft.name}
-                                    placeholder="例如 DeepSeek / OpenAI 生图"
+                                    placeholder={t(
+                                        "例如 DeepSeek / OpenAI 生图",
+                                    )}
                                 />
                             </div>
                             <div class="set-row">
-                                <span class="set-label">API 地址</span>
+                                <span class="set-label">{t("API 地址")}</span>
                                 <input
                                     class="set-control"
                                     type="text"
@@ -1652,7 +1750,7 @@
                                 />
                             </div>
                             <div class="set-row">
-                                <span class="set-label">模型</span>
+                                <span class="set-label">{t("模型")}</span>
                                 <input
                                     class="set-control"
                                     type="text"
@@ -1664,7 +1762,7 @@
                             </div>
                             {#if apiDraft.kind !== "image"}
                                 <div class="set-row">
-                                    <span class="set-label">温度</span>
+                                    <span class="set-label">{t("温度")}</span>
                                     <input
                                         class="set-control"
                                         type="number"
@@ -2410,7 +2508,9 @@
         z-index: var(--z-sheet-backdrop);
     }
 
-    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel) {
+    :global(
+        :root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel
+    ) {
         display: flex;
         flex-direction: column;
         width: min(100%, 520px);
@@ -2419,7 +2519,11 @@
         max-height: min(90dvh, 720px);
     }
 
-    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel .settings-shell-tabs) {
+    :global(
+        :root[data-tepub-layout="phone"]
+            .settings-shell.toolbox-settings-panel
+            .settings-shell-tabs
+    ) {
         flex-direction: row;
         /* 面板是 column flex：页签条可收缩，横屏 844×390 里会被压到 35px，
            而按钮是 44px —— 整排文字底部被横切。固定为内容高度不收缩。 */
@@ -2432,13 +2536,22 @@
         padding: 6px 12px;
     }
 
-    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel .settings-shell-tabs .tab-btn) {
+    :global(
+        :root[data-tepub-layout="phone"]
+            .settings-shell.toolbox-settings-panel
+            .settings-shell-tabs
+            .tab-btn
+    ) {
         width: auto;
         white-space: nowrap;
         min-height: var(--tap-target);
     }
 
-    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel .settings-shell-body) {
+    :global(
+        :root[data-tepub-layout="phone"]
+            .settings-shell.toolbox-settings-panel
+            .settings-shell-body
+    ) {
         flex: 1 1 auto;
         min-height: 0;
         overflow: auto;
@@ -2446,7 +2559,11 @@
         grid-row: auto;
     }
 
-    :global(:root[data-tepub-layout="phone"] .settings-shell.toolbox-settings-panel .settings-shell-footer) {
+    :global(
+        :root[data-tepub-layout="phone"]
+            .settings-shell.toolbox-settings-panel
+            .settings-shell-footer
+    ) {
         flex: 0 0 auto;
         grid-column: auto;
         grid-row: auto;

@@ -7,6 +7,7 @@
 
 <script lang="ts">
     import { createEventDispatcher } from "svelte";
+    import { t } from "$lib/i18n.svelte";
     import { validateBrowserFiles } from "$lib/webFileWorkflow";
 
     export let mark = "FILE";
@@ -67,12 +68,12 @@
         <div class="tool-import-mark">{mark}</div>
         <div class="tool-import-copy">
             <span class="tool-import-kicker">{kicker}</span>
-            <h1>{title}</h1>
-            <p>{description}</p>
-            <small>{privacy}</small>
+            <h1>{t(title)}</h1>
+            <p>{t(description)}</p>
+            <small>{t(privacy)}</small>
         </div>
         <div class="tool-import-output">
-            <span>{outputLabel}</span>
+            <span>{t(outputLabel)}</span>
             <strong>{outputValue}</strong>
         </div>
     </section>
@@ -82,7 +83,7 @@
         class="tool-import-drop"
         type="button"
         disabled={busy}
-        aria-label={actionLabel}
+        aria-label={t(actionLabel)}
         on:click={choose}
         on:dragenter={(event) => {
             event.preventDefault();
@@ -99,9 +100,11 @@
         {:else}
             <span class="tool-import-drop-icon" aria-hidden="true">+</span>
         {/if}
-        <strong>{busy ? "正在读取文件" : prompt}</strong>
-        {#if hint}<span class="tool-import-hint">{hint}</span>{/if}
-        <span class="tool-import-action">{busy ? "处理中…" : actionLabel}</span>
+        <strong>{busy ? t("正在读取文件") : t(prompt)}</strong>
+        {#if hint}<span class="tool-import-hint">{t(hint)}</span>{/if}
+        <span class="tool-import-action"
+            >{busy ? t("处理中…") : t(actionLabel)}</span
+        >
     </button>
 
     {#if features.length}
@@ -109,8 +112,8 @@
             {#each features as feature, index}
                 <article>
                     <b>{String(index + 1).padStart(2, "0")}</b>
-                    <strong>{feature.title}</strong>
-                    <span>{feature.detail}</span>
+                    <strong>{t(feature.title)}</strong>
+                    <span>{t(feature.detail)}</span>
                 </article>
             {/each}
         </section>

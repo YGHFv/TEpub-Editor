@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Snippet } from "svelte";
+    import { t } from "$lib/i18n.svelte";
 
     export type SettingsTab = {
         id: string;
@@ -56,12 +57,12 @@
     }}
 >
     <div class="settings-shell-header">
-        <h3>{title}</h3>
+        <h3>{t(title)}</h3>
         <button
             class="settings-shell-close"
             type="button"
-            title={closeLabel}
-            aria-label={closeLabel}
+            title={t(closeLabel)}
+            aria-label={t(closeLabel)}
             onclick={onClose}
         >
             ×
@@ -79,7 +80,7 @@
                 aria-pressed={activeTab === tab.id}
                 onclick={() => onTabChange(tab.id)}
             >
-                {tab.label}
+                {t(tab.label)}
             </button>
         {/each}
     </div>
@@ -100,7 +101,7 @@
                 disabled={actionDisabled}
                 onclick={onAction}
             >
-                {actionLabel}
+                {t(actionLabel)}
             </button>
         {/if}
         {@render footer?.()}

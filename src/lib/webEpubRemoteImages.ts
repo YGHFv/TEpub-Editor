@@ -7,6 +7,7 @@ import {
   updateWebEpubText,
   type WebEpubDocument,
 } from "$lib/webEpub";
+import { t } from "$lib/i18n.svelte";
 
 export type RemoteImageReference = {
   url: string;
@@ -158,7 +159,12 @@ function mediaTypeFromBytes(bytes: Uint8Array, declared: string, url: string) {
     return { mediaType: "image/webp", extension: "webp" };
   }
   throw new Error(
-    `响应不是支持的 JPG、PNG、WebP 或 GIF 图片（${mediaType || new URL(url).pathname.split(".").pop() || "未知类型"}）`,
+    t("响应不是支持的 JPG、PNG、WebP 或 GIF 图片（{type}）", {
+      type:
+        mediaType ||
+        new URL(url).pathname.split(".").pop() ||
+        t("未知类型"),
+    }),
   );
 }
 
@@ -354,12 +360,13 @@ export async function embedWebEpubRemoteImages(
   const selectedUrls = [
     ...new Set(urls.filter((url) => /^https?:\/\//i.test(url))),
   ];
-  if (!selectedUrls.length) throw new Error("没有选择需要下载的在线图片。");
+  if (!selectedUrls.length)
+    throw new Error(t("没有选择需要下载的在线图片。"));
   if (
     style.kind !== "illustration" ||
     style.target === "annotation-illustration"
   ) {
-    throw new Error("请选择普通插图样式。");
+    throw new Error(t("请选择普通插图样式。"));
   }
 
   const reservedPaths = new Set<string>();
@@ -371,7 +378,10 @@ export async function embedWebEpubRemoteImages(
       total: selectedUrls.length,
       url,
       stage: "downloading",
-      message: `正在下载 ${index + 1} / ${selectedUrls.length}`,
+      message: t("正在下载 {current} / {total}", {
+        current: index + 1,
+        total: selectedUrls.length,
+      }),
     });
     let downloaded: DownloadedRemoteImage | null = null;
     let type: ReturnType<typeof mediaTypeFromBytes> | null = null;
@@ -379,9 +389,10 @@ export async function embedWebEpubRemoteImages(
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           downloaded = await downloader(url);
-          if (!downloaded.bytes.byteLength) throw new Error("图片响应为空");
+          if (!downloaded.bytes.byteLength)
+            throw new Error(t("图片响应为空"));
           if (downloaded.bytes.byteLength > MAX_REMOTE_IMAGE_BYTES)
-            throw new Error("图片超过 32 MB 限制");
+            throw new Error(t("图片超过 32 MB 限制"));
           type = mediaTypeFromBytes(
             downloaded.bytes,
             downloaded.mediaType,
@@ -396,13 +407,20 @@ export async function embedWebEpubRemoteImages(
             total: selectedUrls.length,
             url,
             stage: "retrying",
-            message: `第 ${index + 1} 张下载失败，${(retryDelayMs / 1000).toFixed(1)} 秒后慢速重试：${reason}`,
+            message: t(
+              "第 {index} 张下载失败，{delay} 秒后慢速重试：{reason}",
+              {
+                index: index + 1,
+                delay: (retryDelayMs / 1000).toFixed(1),
+                reason,
+              },
+            ),
           });
           if (retryDelayMs > 0)
             await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         }
       }
-      if (!downloaded || !type) throw new Error("图片下载失败");
+      if (!downloaded || !type) throw new Error(t("图片下载失败"));
       const path = uniqueImagePath(
         doc,
         downloaded.finalUrl || url,
@@ -420,7 +438,10 @@ export async function embedWebEpubRemoteImages(
         total: selectedUrls.length,
         url,
         stage: "downloaded",
-        message: `已下载 ${index + 1} / ${selectedUrls.length}`,
+        message: t("已下载 {current} / {total}", {
+          current: index + 1,
+          total: selectedUrls.length,
+        }),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -453,7 +474,7 @@ export async function embedWebEpubRemoteImages(
     total: selectedUrls.length,
     url: "",
     stage: "rewriting",
-    message: "正在更新 XHTML 与 OPF",
+    message: t("正在更新 XHTML 与 OPF"),
   });
   for (const file of doc.files.filter((entry) => entry.kind === "xhtml")) {
     const source = await readWebEpubText(doc, file.path);

@@ -8,6 +8,8 @@
 </script>
 
 <script lang="ts">
+    import { formatDateTimeLocalized, t } from "$lib/i18n.svelte";
+
     let {
         history,
         onRestore,
@@ -21,12 +23,12 @@
     {#each history as h}
         <button class="hist-item" onclick={() => onRestore(h)}>
             <span class="hist-time"
-                >{new Date(h.timestamp * 1000).toLocaleString()}</span
+                >{formatDateTimeLocalized(h.timestamp * 1000)}</span
             >
             <span class="hist-size">{(h.size / 1024).toFixed(1)}KB</span>
         </button>
     {:else}
-        <div class="empty-msg">暂无历史快照</div>
+        <div class="empty-msg">{t("暂无历史快照")}</div>
     {/each}
 </div>
 

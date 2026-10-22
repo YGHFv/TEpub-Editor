@@ -15,6 +15,7 @@
         type SecondaryTab,
     } from "$lib/secondaryTabs";
     import type { WindowChromeMode } from "$lib/windowChrome";
+    import { t } from "$lib/i18n.svelte";
 
     /**
      * 窗口标题行。
@@ -98,7 +99,7 @@
         return tabTooltipFor(
             tab.id.split("?")[0],
             rest.join("?"),
-            tab.title,
+            t(tab.title),
             tab.detail,
         );
     }
@@ -121,7 +122,7 @@
 
 {#if chrome === "none"}
     {#if showTabs}
-        <nav class="title-bar inline" aria-label="已打开的页面">
+        <nav class="title-bar inline" aria-label={t("已打开的页面")}>
             <div class="tab-strip">{@render tabStrip()}</div>
         </nav>
     {/if}
@@ -153,8 +154,8 @@
                 <button
                     class="window-btn"
                     type="button"
-                    aria-label="最小化"
-                    title="最小化"
+                    aria-label={t("最小化")}
+                    title={t("最小化")}
                     onclick={() => platform.minimizeCurrentWindow()}
                 >
                     <svg viewBox="0 0 10 10" aria-hidden="true">
@@ -164,8 +165,8 @@
                 <button
                     class="window-btn"
                     type="button"
-                    aria-label={maximized ? "还原" : "最大化"}
-                    title={maximized ? "还原" : "最大化"}
+                    aria-label={t(maximized ? "还原" : "最大化")}
+                    title={t(maximized ? "还原" : "最大化")}
                     onclick={toggleMaximize}
                 >
                     {#if maximized}
@@ -182,8 +183,8 @@
                 <button
                     class="window-btn close"
                     type="button"
-                    aria-label="关闭"
-                    title="关闭"
+                    aria-label={t("关闭")}
+                    title={t("关闭")}
                     onclick={() => platform.closeCurrentWindow()}
                 >
                     <svg viewBox="0 0 10 10" aria-hidden="true">
@@ -205,14 +206,14 @@
                 aria-current={activeId === tab.id ? "page" : undefined}
                 onclick={() => activate(tab)}
             >
-                {tab.title}
+                {t(tab.title)}
             </button>
             {#if tab.id !== HOME_TAB.id}
                 <button
                     class="title-tab-close"
                     type="button"
-                    title="关闭标签"
-                    aria-label={`关闭 ${tab.title}`}
+                    title={t("关闭标签")}
+                    aria-label={t("关闭 {title}", { title: t(tab.title) })}
                     onclick={(event) => close(event, tab)}>×</button
                 >
             {/if}

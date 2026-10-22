@@ -14,6 +14,7 @@
 
 <script lang="ts">
     import Icon from "$lib/icons/Icon.svelte";
+    import { t } from "$lib/i18n.svelte";
 
     let {
         stats,
@@ -42,11 +43,13 @@
     <!-- 头部固定，不再随列表滚动 -->
     <div class="sidebar-header-fixed">
         <div class="sidebar-header-row">
-            <span>{stats.volumes}卷 {stats.chapters}章</span>
+            <span
+                >{stats.volumes}{t("卷")} {stats.chapters}{t("章")}</span
+            >
             <div class="header-btns">
                 <button
                     class="icon-btn"
-                    title="全部展开/折叠"
+                    title={t("全部展开/折叠")}
                     onclick={onToggleAllVolumes}
                 >
                     <Icon name="expand-vertical" size={15} />
@@ -54,7 +57,7 @@
                 <button
                     class="mini-btn {checkActive ? 'active' : ''}"
                     onpointerdown={onOpenProofCheck}
-                    onclick={onOpenProofCheck}>检查</button
+                    onclick={onOpenProofCheck}>{t("检查")}</button
                 >
             </div>
         </div>

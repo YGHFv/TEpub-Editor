@@ -1,6 +1,7 @@
 <script lang="ts">
     import { tick, type Snippet } from "svelte";
     import Icon from "$lib/icons/Icon.svelte";
+    import { t } from "$lib/i18n.svelte";
 
     /**
      * 手机底部抽屉。
@@ -131,7 +132,7 @@
         class:above-overlays={aboveOverlays}
         type="button"
         tabindex="-1"
-        aria-label="关闭"
+        aria-label={t("关闭")}
         onclick={onclose}
     ></button>
 
@@ -150,7 +151,7 @@
             <button
                 class="m-icon-btn"
                 type="button"
-                aria-label="关闭"
+                aria-label={t("关闭")}
                 bind:this={closeBtn}
                 onclick={onclose}
             >

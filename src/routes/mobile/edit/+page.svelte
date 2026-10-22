@@ -17,6 +17,7 @@
     } from "$lib/mobileFlow";
     import EpubCodeEditor from "$lib/EpubCodeEditor.svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import { t } from "$lib/i18n.svelte";
 
     interface EpubFileNode {
         name: string;
@@ -108,8 +109,8 @@
     let addFileInputEl: HTMLInputElement | null = null;
     let selectedPath = "";
     let selectedName = "";
-    let bookTitle = "编辑 EPUB";
-    let status = "从元数据页进入后浏览内部文件结构。";
+    let bookTitle = t("编辑 EPUB");
+    let status = t("从元数据页进入后浏览内部文件结构。");
     let busy = false;
     let fileTree: EpubFileNode[] = [];
     let flatFiles: FlatFile[] = [];
@@ -145,9 +146,9 @@
         open: false,
         title: "",
         message: "",
-        confirmLabel: "确定",
+        confirmLabel: t("确定"),
         secondaryLabel: "",
-        cancelLabel: "取消",
+        cancelLabel: t("取消"),
         tone: "primary",
     };
 
@@ -190,13 +191,15 @@
                 epubPath,
             });
             refreshFlatFiles(fileTree);
-            status = `已解包 ${flatFiles.length} 个文件。`;
+            status = t("已解包 {count} 个文件。", {
+                count: flatFiles.length,
+            });
             // 后台补全 HTML 标题与图片分辨率，不阻塞首屏
             loadFileMetaInBackground(epubPath);
         } catch (err) {
-            status = "EPUB 解包失败";
-            await message(`EPUB 解包失败：${err}`, {
-                title: "编辑 EPUB",
+            status = t("EPUB 解包失败");
+            await message(t("EPUB 解包失败：{error}", { error: String(err) }), {
+                title: t("编辑 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -214,9 +217,9 @@
             const cachedPath = await cacheBrowserFileStable(file, "epub");
             await loadEpub(cachedPath, file.name);
         } catch (err) {
-            status = "导入 EPUB 失败";
-            await message(`导入 EPUB 失败：${err}`, {
-                title: "编辑 EPUB",
+            status = t("导入 EPUB 失败");
+            await message(t("导入 EPUB 失败：{error}", { error: String(err) }), {
+                title: t("编辑 EPUB"),
                 kind: "error",
             });
         }
@@ -341,19 +344,19 @@
 
     function fileDetail(file: FlatFile) {
         if (file.file_type === "html")
-            return file.title?.trim() || "未命名章节";
-        if (file.file_type === "css") return "层叠样式表";
+            return file.title?.trim() || t("未命名章节");
+        if (file.file_type === "css") return t("层叠样式表");
         if (file.file_type === "xml")
             return file.name.toLowerCase().includes("toc") ||
                 file.name.endsWith(".ncx")
-                ? "目录结构"
-                : "元数据";
+                ? t("目录结构")
+                : t("元数据");
         if (file.file_type === "font")
-            return `字体${file.size ? `  ${formatSize(file.size)}` : ""}`;
+            return `${t("字体")}${file.size ? `  ${formatSize(file.size)}` : ""}`;
         if (isImageFile(file)) {
-            return `图片${file.resolution ? `  ${file.resolution}` : ""}${file.size ? `  ${formatSize(file.size)}` : ""}`;
+            return `${t("图片")}${file.resolution ? `  ${file.resolution}` : ""}${file.size ? `  ${formatSize(file.size)}` : ""}`;
         }
-        return file.size ? formatSize(file.size) : "文件";
+        return file.size ? formatSize(file.size) : t("文件");
     }
 
     function formatSize(size: number) {
@@ -554,9 +557,9 @@
             open: false,
             title: "",
             message: "",
-            confirmLabel: "确定",
+            confirmLabel: t("确定"),
             secondaryLabel: "",
-            cancelLabel: "取消",
+            cancelLabel: t("取消"),
             tone: "primary",
         };
         resolver?.(result);
@@ -619,16 +622,16 @@
                     filePath: file.path,
                 });
                 const bytes = bytesFromInvoke(data);
-                if (!bytes.length) throw new Error("图片数据为空");
+                if (!bytes.length) throw new Error(t("图片数据为空"));
                 const blob = new Blob([bytes], {
                     type: imageMimeFor(file, bytes),
                 });
                 previewUrl = URL.createObjectURL(blob);
-                status = `正在预览：${file.path}`;
+                status = t("正在预览：{path}", { path: file.path });
             } catch (err) {
-                status = "读取图片失败";
-                await message(`读取图片失败：${err}`, {
-                    title: "编辑 EPUB",
+                status = t("读取图片失败");
+                await message(t("读取图片失败：{error}", { error: String(err) }), {
+                    title: t("编辑 EPUB"),
                     kind: "error",
                 });
             } finally {
@@ -645,7 +648,7 @@
                     filePath: file.path,
                 });
                 const bytes = bytesFromInvoke(data);
-                if (!bytes.length) throw new Error("字体数据为空");
+                if (!bytes.length) throw new Error(t("字体数据为空"));
                 const ext = file.name.split(".").pop()?.toLowerCase();
                 const mime =
                     ext === "otf"
@@ -665,11 +668,11 @@
                 );
                 fontPreviewFace = await face.load();
                 document.fonts.add(fontPreviewFace);
-                status = `正在预览：${file.path}`;
+                status = t("正在预览：{path}", { path: file.path });
             } catch (err) {
-                status = "读取字体失败";
-                await message(`读取字体失败：${err}`, {
-                    title: "编辑 EPUB",
+                status = t("读取字体失败");
+                await message(t("读取字体失败：{error}", { error: String(err) }), {
+                    title: t("编辑 EPUB"),
                     kind: "error",
                 });
             } finally {
@@ -679,7 +682,7 @@
         }
 
         if (!isEditable(file)) {
-            status = `${file.name} 暂不支持直接编辑。`;
+            status = t("{name} 暂不支持直接编辑。", { name: file.name });
             return;
         }
         try {
@@ -689,11 +692,11 @@
                 filePath: file.path,
             });
             editorDirty = false;
-            status = `正在编辑：${file.path}`;
+            status = t("正在编辑：{path}", { path: file.path });
         } catch (err) {
-            status = "读取文件失败";
-            await message(`读取文件失败：${err}`, {
-                title: "编辑 EPUB",
+            status = t("读取文件失败");
+            await message(t("读取文件失败：{error}", { error: String(err) }), {
+                title: t("编辑 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -711,7 +714,7 @@
         });
         editorDirty = false;
         replacePanelOpen = true;
-        status = `正在编辑：${match.file.path}`;
+        status = t("正在编辑：{path}", { path: match.file.path });
         await tick();
         setTimeout(
             () =>
@@ -734,11 +737,11 @@
                 content: editingContent,
             });
             editorDirty = false;
-            status = `已保存：${editingFile.path}`;
+            status = t("已保存：{path}", { path: editingFile.path });
         } catch (err) {
-            status = "保存文件失败";
-            await message(`保存文件失败：${err}`, {
-                title: "编辑 EPUB",
+            status = t("保存文件失败");
+            await message(t("保存文件失败：{error}", { error: String(err) }), {
+                title: t("编辑 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -757,11 +760,14 @@
             return true;
 
         const result = await openConfirmSheet({
-            title: "暂存当前文件修改？",
-            message: `${editingFile.name} 还有未保存的内容。暂存后会保留到本次 EPUB 导出，不暂存会丢失当前文件这次修改。`,
-            confirmLabel: "暂存并返回",
-            secondaryLabel: "不暂存",
-            cancelLabel: "继续编辑",
+            title: t("暂存当前文件修改？"),
+            message: t(
+                "{name} 还有未保存的内容。暂存后会保留到本次 EPUB 导出，不暂存会丢失当前文件这次修改。",
+                { name: editingFile.name },
+            ),
+            confirmLabel: t("暂存并返回"),
+            secondaryLabel: t("不暂存"),
+            cancelLabel: t("继续编辑"),
             tone: "primary",
         });
 
@@ -781,15 +787,15 @@
         const nextName = renameSheet.value.trim();
         if (!selectedPath || !file) return;
         if (!nextName) {
-            await message("文件名不能为空。", {
-                title: "重命名文件",
+            await message(t("文件名不能为空。"), {
+                title: t("重命名文件"),
                 kind: "warning",
             });
             return;
         }
         if (/[\\/]/.test(nextName)) {
-            await message("文件名不能包含斜杠。", {
-                title: "重命名文件",
+            await message(t("文件名不能包含斜杠。"), {
+                title: t("重命名文件"),
                 kind: "warning",
             });
             return;
@@ -823,12 +829,15 @@
             if (currentMatch?.filePath === file.path) {
                 currentMatch = { ...currentMatch, filePath: newPath };
             }
-            status = `已重命名：${file.name} → ${nextName}`;
+            status = t("已重命名：{from} → {to}", {
+                from: file.name,
+                to: nextName,
+            });
             closeRenameSheet();
             await reloadTree(new Set(openGroups), file.group);
         } catch (err) {
-            await message(`重命名失败：${err}`, {
-                title: "重命名文件",
+            await message(t("重命名失败：{error}", { error: String(err) }), {
+                title: t("重命名文件"),
                 kind: "error",
             });
         } finally {
@@ -839,11 +848,14 @@
     async function requestDeleteFile(file: FlatFile) {
         fileActionTarget = null;
         const result = await openConfirmSheet({
-            title: "删除这个文件？",
-            message: `${file.name} 会从当前 EPUB 缓存副本中移除，保存并导出后才会体现在导出文件里。`,
-            confirmLabel: "删除文件",
+            title: t("删除这个文件？"),
+            message: t(
+                "{name} 会从当前 EPUB 缓存副本中移除，保存并导出后才会体现在导出文件里。",
+                { name: file.name },
+            ),
+            confirmLabel: t("删除文件"),
             secondaryLabel: "",
-            cancelLabel: "取消",
+            cancelLabel: t("取消"),
             tone: "danger",
         });
         if (result !== "confirm" || !selectedPath) return;
@@ -864,11 +876,11 @@
                 nextThumbs.delete(file.path);
                 thumbnailUrls = nextThumbs;
             }
-            status = `已删除：${file.path}`;
+            status = t("已删除：{path}", { path: file.path });
             await reloadTree(new Set(openGroups), file.group);
         } catch (err) {
-            await message(`删除文件失败：${err}`, {
-                title: "删除文件",
+            await message(t("删除文件失败：{error}", { error: String(err) }), {
+                title: t("删除文件"),
                 kind: "error",
             });
         } finally {
@@ -1045,7 +1057,7 @@
             !editingFile ||
             editingFile.path !== currentMatch.filePath
         ) {
-            replaceStatus = "请先定位到当前匹配项。";
+            replaceStatus = t("请先定位到当前匹配项。");
             return;
         }
         const view = epubEditorComponent?.getView();
@@ -1068,13 +1080,13 @@
         editingContent = view.state.doc.toString();
         editorDirty = true;
         currentMatch = null;
-        replaceStatus = "已替换当前匹配。";
+        replaceStatus = t("已替换当前匹配。");
         refreshCurrentMatch();
     }
 
     async function gotoCurrentMatch(direction: "prev" | "next") {
         if (!selectedPath || !editingFile || !findPattern) {
-            replaceStatus = "请输入查找内容。";
+            replaceStatus = t("请输入查找内容。");
             return;
         }
 
@@ -1086,7 +1098,7 @@
                 currentMatch = null;
                 currentMatchIndex = 0;
                 currentMatchCount = 0;
-                replaceStatus = "当前范围没有匹配项。";
+                replaceStatus = t("当前范围没有匹配项。");
                 return;
             }
 
@@ -1124,11 +1136,15 @@
             } else {
                 applyMatchToEditor(currentMatch);
             }
-            replaceStatus = `第 ${currentMatchIndex}/${currentMatchCount} 处：${nextMatch.file.name}`;
+            replaceStatus = t("第 {current}/{total} 处：{file}", {
+                current: currentMatchIndex,
+                total: currentMatchCount,
+                file: nextMatch.file.name,
+            });
         } catch (err) {
-            replaceStatus = "定位失败";
-            await message(`定位失败：${err}`, {
-                title: "查找替换",
+            replaceStatus = t("定位失败");
+            await message(t("定位失败：{error}", { error: String(err) }), {
+                title: t("查找替换"),
                 kind: "error",
             });
         } finally {
@@ -1182,7 +1198,7 @@
 
     async function countBatchMatches() {
         if (!selectedPath || !findPattern) {
-            replaceStatus = "请输入查找内容。";
+            replaceStatus = t("请输入查找内容。");
             return;
         }
 
@@ -1191,7 +1207,7 @@
             await flushEditingFileIfDirty();
             const files = activeSearchFiles();
             if (!files.length) {
-                replaceStatus = "当前范围没有可查找的文本文件。";
+                replaceStatus = t("当前范围没有可查找的文本文件。");
                 return;
             }
 
@@ -1203,11 +1219,14 @@
                       pattern: findPattern,
                       isRegex: replaceIsRegex,
                   });
-            replaceStatus = `共 ${count} 处匹配，范围 ${files.length} 个文件。`;
+            replaceStatus = t("共 {count} 处匹配，范围 {files} 个文件。", {
+                count,
+                files: files.length,
+            });
         } catch (err) {
-            replaceStatus = "查找失败";
-            await message(`查找失败：${err}`, {
-                title: "批量查找替换",
+            replaceStatus = t("查找失败");
+            await message(t("查找失败：{error}", { error: String(err) }), {
+                title: t("批量查找替换"),
                 kind: "error",
             });
         } finally {
@@ -1217,22 +1236,25 @@
 
     async function replaceBatchMatches() {
         if (!selectedPath || !findPattern) {
-            replaceStatus = "请输入查找内容。";
+            replaceStatus = t("请输入查找内容。");
             return;
         }
 
         const files = activeSearchFiles();
         if (!files.length) {
-            replaceStatus = "当前范围没有可替换的文本文件。";
+            replaceStatus = t("当前范围没有可替换的文本文件。");
             return;
         }
 
         const confirmed = await openConfirmSheet({
-            title: "执行批量替换？",
-            message: `这会在 ${files.length} 个文件里写入替换结果，继续后会直接覆盖当前缓存中的对应文件。`,
-            confirmLabel: "开始替换",
+            title: t("执行批量替换？"),
+            message: t(
+                "这会在 {count} 个文件里写入替换结果，继续后会直接覆盖当前缓存中的对应文件。",
+                { count: files.length },
+            ),
+            confirmLabel: t("开始替换"),
             secondaryLabel: "",
-            cancelLabel: "取消",
+            cancelLabel: t("取消"),
             tone: "danger",
         });
         if (confirmed !== "confirm") return;
@@ -1240,7 +1262,7 @@
         try {
             busy = true;
             await flushEditingFileIfDirty();
-            replaceStatus = "正在替换...";
+            replaceStatus = t("正在替换...");
 
             const encoder = new TextEncoder();
             const changedFiles: Record<string, number[]> = {};
@@ -1248,7 +1270,10 @@
 
             for (let index = 0; index < files.length; index += 1) {
                 const file = files[index];
-                replaceStatus = `正在处理 ${index + 1}/${files.length}`;
+                replaceStatus = t("正在处理 {current}/{total}", {
+                    current: index + 1,
+                    total: files.length,
+                });
                 let content = await invoke<string>("read_epub_file_content", {
                     epubPath: selectedPath,
                     filePath: file.path,
@@ -1275,13 +1300,16 @@
                 });
             }
 
-            replaceStatus = `已替换 ${total} 处，修改 ${Object.keys(changedFiles).length} 个文件。`;
+            replaceStatus = t("已替换 {count} 处，修改 {files} 个文件。", {
+                count: total,
+                files: Object.keys(changedFiles).length,
+            });
             status = replaceStatus;
             refreshCurrentMatch();
         } catch (err) {
-            replaceStatus = "批量替换失败";
-            await message(`批量替换失败：${err}`, {
-                title: "批量查找替换",
+            replaceStatus = t("批量替换失败");
+            await message(t("批量替换失败：{error}", { error: String(err) }), {
+                title: t("批量查找替换"),
                 kind: "error",
             });
         } finally {
@@ -1340,11 +1368,11 @@
                 content: Array.from(bytes),
             });
             await reloadTree(new Set(openGroups), addTargetGroup.name);
-            status = `已添加：${targetPath}`;
+            status = t("已添加：{path}", { path: targetPath });
         } catch (err) {
-            status = "添加文件失败";
-            await message(`添加文件失败：${err}`, {
-                title: "编辑 EPUB",
+            status = t("添加文件失败");
+            await message(t("添加文件失败：{error}", { error: String(err) }), {
+                title: t("编辑 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -1365,10 +1393,13 @@
             await invoke("save_epub_to_disk", { epubPath: selectedPath });
             await goto(metadataRoute(String(Date.now())));
         } catch (err) {
-            await message(`返回编辑元数据页失败：${err}`, {
-                title: "编辑 EPUB",
-                kind: "error",
-            });
+            await message(
+                t("返回编辑元数据页失败：{error}", { error: String(err) }),
+                {
+                    title: t("编辑 EPUB"),
+                    kind: "error",
+                },
+            );
         } finally {
             busy = false;
         }

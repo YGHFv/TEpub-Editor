@@ -2,6 +2,7 @@
     import { onMount, type Snippet } from "svelte";
     import { afterNavigate, goto } from "$app/navigation";
     import { applyTheme, loadAppSettings } from "$lib/appSettings";
+    import { initializeI18n, t } from "$lib/i18n.svelte";
     import { applyClientProfile, phoneDevice } from "$lib/clientProfile";
     import { platform } from "$lib/platform";
     import { listenForLaunchFiles } from "$lib/launchFiles";
@@ -100,11 +101,9 @@
             !showPhoneNav,
     );
     const phoneSecondaryTitle = $derived(
-        titleForRoute(page.url.pathname) || "TEpub-Editor",
+        t(titleForRoute(page.url.pathname) || "TEpub-Editor"),
     );
-    const phoneSecondarySubtitle = $derived(
-        fileLabel(page.url.search) || "",
-    );
+    const phoneSecondarySubtitle = $derived(fileLabel(page.url.search) || "");
 
     // 只记录应用内导航。Android WebView 冷启动时 history.length 往往已经
     // 大于 1，直接 history.back() 可能退到空白页或应用外，再回来时保活视图
@@ -118,8 +117,7 @@
         const primaryRoute =
             isHomeRoute(to.url.pathname) ||
             appRoutePath(to.url.pathname) === "/library";
-        const customBack =
-            pendingPhoneBack !== "" && href === pendingPhoneBack;
+        const customBack = pendingPhoneBack !== "" && href === pendingPhoneBack;
         if (pendingPhoneBack && !customBack) pendingPhoneBack = "";
         phoneHistory = recordPhoneNavigation(
             phoneHistory,
@@ -222,9 +220,13 @@
     });
 
     onMount(() => {
-        applyTheme(loadAppSettings().uiTheme);
+        const initialSettings = loadAppSettings();
+        applyTheme(initialSettings.uiTheme);
+        initializeI18n(initialSettings.uiLanguage);
         const cleanupClientProfile = applyClientProfile();
         const refreshTheme = () => applyTheme(loadAppSettings().uiTheme);
+        const refreshLanguage = () =>
+            initializeI18n(loadAppSettings().uiLanguage);
         const refreshTabs = () => (multiWindow = usesMultiWindow());
         let disposed = false;
         let stopLaunchListener: (() => void) | undefined;
@@ -235,17 +237,24 @@
             })
             .catch((error) => console.error("启动文件监听失败:", error));
         window.addEventListener("tepub-settings-updated", refreshTheme);
+        window.addEventListener("tepub-settings-updated", refreshLanguage);
         window.addEventListener("tepub-settings-updated", refreshTabs);
         // 跨窗口：设置写进 localStorage 后另一个窗口收到 storage 事件
         window.addEventListener("storage", refreshTheme);
+        window.addEventListener("storage", refreshLanguage);
         window.addEventListener("storage", refreshTabs);
         return () => {
             disposed = true;
             stopLaunchListener?.();
             cleanupClientProfile();
             window.removeEventListener("tepub-settings-updated", refreshTheme);
+            window.removeEventListener(
+                "tepub-settings-updated",
+                refreshLanguage,
+            );
             window.removeEventListener("tepub-settings-updated", refreshTabs);
             window.removeEventListener("storage", refreshTheme);
+            window.removeEventListener("storage", refreshLanguage);
             window.removeEventListener("storage", refreshTabs);
         };
     });

@@ -8,6 +8,8 @@
 </script>
 
 <script lang="ts">
+    import { t } from "$lib/i18n.svelte";
+
     let {
         fonts,
         message,
@@ -32,17 +34,17 @@
 <div class="font-settings-panel">
     <div class="font-settings-head">
         <div>
-            <div class="font-settings-title">外部字体</div>
+    <div class="font-settings-title">{t("外部字体")}</div>
             <div class="font-settings-note">
-                导入后自动复制到当前书库目录下的“字体”文件夹，并可直接在块编辑里选择使用。
+        {t("导入后自动复制到当前书库目录下的“字体”文件夹，并可直接在块编辑里选择使用。")}
             </div>
         </div>
         <button class="grid-btn blue" disabled={isImporting} onclick={onImport}>
-            {isImporting ? "导入中..." : "导入字体"}
+        {t(isImporting ? "导入中..." : "导入字体")}
         </button>
     </div>
     {#if message}
-        <div class="font-settings-status">{message}</div>
+        <div class="font-settings-status">{t(message)}</div>
     {/if}
     <div class="font-settings-list">
         {#each fonts as font}
@@ -60,8 +62,8 @@
                                 deletingFileName === font.file_name}
                             onclick={() => onRename(font)}
                             >{renamingFileName === font.file_name
-                                ? "重命名中..."
-                                : "重命名"}</button
+            ? t("重命名中...")
+            : t("重命名")}</button
                         >
                         <button
                             class="mini-action"
@@ -70,15 +72,15 @@
                                 renamingFileName === font.file_name}
                             onclick={() => onDelete(font)}
                             >{deletingFileName === font.file_name
-                                ? "删除中..."
-                                : "删除"}</button
+            ? t("删除中...")
+            : t("删除")}</button
                         >
                     </div>
                 </div>
                 <code>{font.css_value}</code>
             </div>
         {:else}
-            <div class="empty-msg">还没有导入外部字体</div>
+    <div class="empty-msg">{t("还没有导入外部字体")}</div>
         {/each}
     </div>
 </div>

@@ -8,6 +8,7 @@
      */
     import { onMount, setContext, tick, type Component } from "svelte";
     import { titleForRoute } from "$lib/secondaryTabs";
+    import { t } from "$lib/i18n.svelte";
     import { KEEP_ALIVE_CONTEXT_KEY } from "./viewContext";
 
     let {
@@ -52,7 +53,7 @@
         void tick().then(() => {
             if (explicitTitle) return;
             const routeTitle = titleForRoute(url.pathname);
-            onTitleChange(routeTitle || "TEpub-Editor");
+            onTitleChange(t(routeTitle || "TEpub-Editor"));
         });
     });
 </script>

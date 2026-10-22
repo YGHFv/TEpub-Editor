@@ -5,6 +5,7 @@
     import { getCurrentWindow } from "@tauri-apps/api/window";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import { isPhoneLayout } from "$lib/clientProfile";
+    import { t } from "$lib/i18n.svelte";
 
     let activeTab = "meta";
 
@@ -96,17 +97,19 @@
                 selectedRepositoryId = templateRepositories[0].id;
             }
         } catch (err) {
-            templateRepoMessage = `读取模板仓库失败：${err}`;
+            templateRepoMessage = t("读取模板仓库失败：{error}", {
+                error: String(err),
+            });
         }
     }
 
     async function addTemplateRepository() {
         if (!repoUrl.trim()) {
-            templateRepoMessage = "请输入 GitHub 仓库地址";
+            templateRepoMessage = t("请输入 GitHub 仓库地址");
             return;
         }
         templateRepoBusy = true;
-        templateRepoMessage = "正在添加仓库...";
+        templateRepoMessage = t("正在添加仓库...");
         try {
             templateRepositories = await invoke<TemplateRepository[]>(
                 "add_epub_template_repository",
@@ -121,9 +124,11 @@
             repoName = "";
             repoUrl = "";
             repoBranch = "main";
-            templateRepoMessage = "仓库已添加";
+            templateRepoMessage = t("仓库已添加");
         } catch (err) {
-            templateRepoMessage = `添加模板仓库失败：${err}`;
+            templateRepoMessage = t("添加模板仓库失败：{error}", {
+                error: String(err),
+            });
         } finally {
             templateRepoBusy = false;
         }
@@ -131,11 +136,11 @@
 
     async function syncTemplateRepository() {
         if (!selectedRepositoryId) {
-            templateRepoMessage = "请先选择模板仓库";
+            templateRepoMessage = t("请先选择模板仓库");
             return;
         }
         templateRepoBusy = true;
-        templateRepoMessage = "正在同步模板索引...";
+        templateRepoMessage = t("正在同步模板索引...");
         try {
             const index = await invoke<{ templates: RemoteTemplate[] }>(
                 "sync_epub_template_repository",
@@ -145,9 +150,13 @@
             );
             remoteTemplates = index.templates || [];
             await loadTemplateRepositories();
-            templateRepoMessage = `已同步 ${remoteTemplates.length} 个模板`;
+            templateRepoMessage = t("已同步 {count} 个模板", {
+                count: remoteTemplates.length,
+            });
         } catch (err) {
-            templateRepoMessage = `同步模板仓库失败：${err}`;
+            templateRepoMessage = t("同步模板仓库失败：{error}", {
+                error: String(err),
+            });
         } finally {
             templateRepoBusy = false;
         }
@@ -156,7 +165,9 @@
     async function installRemoteTemplate(template: RemoteTemplate) {
         if (!selectedRepositoryId) return;
         templateRepoBusy = true;
-        templateRepoMessage = `正在安装 ${template.name}...`;
+        templateRepoMessage = t("正在安装 {name}...", {
+            name: template.name,
+        });
         try {
             const result = await invoke<{
                 local_path: string;
@@ -165,9 +176,17 @@
                 repositoryId: selectedRepositoryId,
                 template,
             });
-            templateRepoMessage = `已安装到 ${result.local_path}，共 ${result.file_count} 个文件`;
+            templateRepoMessage = t(
+                "已安装到 {path}，共 {count} 个文件",
+                {
+                    path: result.local_path,
+                    count: result.file_count,
+                },
+            );
         } catch (err) {
-            templateRepoMessage = `安装模板失败：${err}`;
+            templateRepoMessage = t("安装模板失败：{error}", {
+                error: String(err),
+            });
         } finally {
             templateRepoBusy = false;
         }

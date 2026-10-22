@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
@@ -56,6 +56,55 @@
               : raw && raw.uiTheme === "dark"
                 ? "dark"
                 : "system";
+          var languagePreference =
+            raw &&
+            (raw.uiLanguage === "zh-CN" ||
+              raw.uiLanguage === "zh-TW" ||
+              raw.uiLanguage === "en")
+              ? raw.uiLanguage
+              : "auto";
+          var browserLanguages =
+            navigator.languages && navigator.languages.length
+              ? navigator.languages
+              : [navigator.language || "en"];
+          var language = languagePreference;
+          if (languagePreference === "auto") {
+            language = "en";
+            for (var languageIndex = 0; languageIndex < browserLanguages.length; languageIndex += 1) {
+              var browserLanguage = String(
+                browserLanguages[languageIndex] || "",
+              )
+                .replace(/_/g, "-")
+                .toLowerCase();
+              if (
+                browserLanguage === "zh-tw" ||
+                browserLanguage === "zh-hk" ||
+                browserLanguage === "zh-mo" ||
+                browserLanguage === "zh-hant" ||
+                browserLanguage.indexOf("zh-hant-") === 0 ||
+                browserLanguage.indexOf("-hant") >= 0
+              ) {
+                language = "zh-TW";
+                break;
+              }
+              if (
+                browserLanguage === "zh" ||
+                browserLanguage.indexOf("zh-") === 0
+              ) {
+                language = "zh-CN";
+                break;
+              }
+              if (
+                browserLanguage === "en" ||
+                browserLanguage.indexOf("en-") === 0
+              ) {
+                language = "en";
+                break;
+              }
+            }
+          }
+          document.documentElement.lang = language;
+          document.documentElement.dataset.language = language;
           var systemDark = !!(
             window.matchMedia &&
             window.matchMedia("(prefers-color-scheme: dark)").matches

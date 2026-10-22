@@ -14,6 +14,7 @@
     import { APP_VERSION } from "$lib/appVersion";
     import Icon from "$lib/icons/Icon.svelte";
     import MobileSheet from "./MobileSheet.svelte";
+    import { t } from "$lib/i18n.svelte";
 
     /**
      * 手机底部导航。
@@ -51,7 +52,7 @@
     }
 </script>
 
-<nav class="m-nav" aria-label="主导航">
+<nav class="m-nav" aria-label={t("主导航")}>
     <button
         class="m-nav-item"
         class:is-active={toolboxActive}
@@ -60,7 +61,7 @@
         onclick={() => navigate(base + "/")}
     >
         <Icon name="grid" size={20} />
-        <span>工具箱</span>
+        <span>{t("工具箱")}</span>
     </button>
 
     {#if !platform.isWeb}
@@ -72,7 +73,7 @@
             onclick={() => navigate(base + "/library")}
         >
             <Icon name="books" size={20} />
-            <span>书库</span>
+            <span>{t("书库")}</span>
         </button>
     {/if}
 
@@ -84,13 +85,17 @@
         onclick={() => (moreOpen = true)}
     >
         <Icon name="settings" size={20} />
-        <span>更多</span>
+        <span>{t("更多")}</span>
     </button>
 </nav>
 
 <!-- 不用 bind:open：MobileSheet 的 API 是受控的（open + onclose），
      回写状态由这里做，避免子组件多一个可写 prop -->
-<MobileSheet open={moreOpen} title="更多" onclose={() => (moreOpen = false)}>
+<MobileSheet
+    open={moreOpen}
+    title={t("更多")}
+    onclose={() => (moreOpen = false)}
+>
     <!-- 已打开的二级页面：标签为空时整段不渲染，避免出现一个空标题 -->
     {#if tabs.length}
         {#each tabs as tab (tab.id)}
@@ -100,7 +105,7 @@
                 onclick={() => navigate(tab.href)}
             >
                 <Icon name="file" size={20} />
-                <span>{tab.title}</span>
+                <span>{t(tab.title)}</span>
             </button>
         {/each}
     {/if}
@@ -108,7 +113,7 @@
     {#if platform.isWeb}
         <button class="m-list-row" type="button" onclick={switchToDesktop}>
             <Icon name="monitor" size={20} />
-            <span>电脑版</span>
+            <span>{t("电脑版")}</span>
         </button>
     {:else}
         <button
@@ -117,13 +122,13 @@
             onclick={() => navigate(base + "/mobile")}
         >
             <Icon name="folder" size={20} />
-            <span>移动端工具</span>
+            <span>{t("移动端工具")}</span>
         </button>
     {/if}
 
     <div class="m-list-row">
         <Icon name="settings" size={20} />
-        <span>关于</span>
+        <span>{t("关于")}</span>
         <span class="m-about-version">TEpub Editor {APP_VERSION}</span>
     </div>
 </MobileSheet>

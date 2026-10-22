@@ -1,5 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher } from "svelte";
+    import { formatDateLocalized, t } from "$lib/i18n.svelte";
 
     export let book: any = null;
     export let coverCache: Map<string, string> = new Map();
@@ -9,8 +10,7 @@
 
     function formatDate(ts: number | undefined): string {
         if (!ts) return "";
-        const d = new Date(ts * 1000);
-        return d.toLocaleDateString("zh-CN");
+        return formatDateLocalized(ts * 1000);
     }
 
     // 把简介按换行拆成段落；trim 后前置两个全角空格作为统一缩进。
@@ -46,7 +46,7 @@
                 <div class="preview-subtitle">{book.subtitle}</div>
             {/if}
             {#if book.author}
-                <div class="preview-author">作者：{book.author}</div>
+                <div class="preview-author">{t("作者：")}{book.author}</div>
             {/if}
             {#if book.tags && book.tags.length > 0}
                 <div class="preview-tags">
@@ -57,27 +57,27 @@
             {/if}
             <div class="preview-meta">
                 <div class="meta-item">
-                    <span class="meta-label">文件名</span>
+                    <span class="meta-label">{t("文件名")}</span>
                     <span class="meta-value">{book.filename || "-"}</span>
                 </div>
                 <div class="meta-item">
-                    <span class="meta-label">格式</span>
+                    <span class="meta-label">{t("格式")}</span>
                     <span class="meta-value">{book.fileType.toUpperCase()}</span
                     >
                 </div>
                 <div class="meta-item">
-                    <span class="meta-label">大小</span>
+                    <span class="meta-label">{t("大小")}</span>
                     <span class="meta-value"
                         >{formatFileSize(book.fileSize)}</span
                     >
                 </div>
                 <div class="meta-item">
-                    <span class="meta-label">添加日期</span>
+                    <span class="meta-label">{t("添加日期")}</span>
                     <span class="meta-value">{formatDate(book.addedAt)}</span>
                 </div>
                 {#if book.createdAt}
                     <div class="meta-item">
-                        <span class="meta-label">创建日期</span>
+                        <span class="meta-label">{t("创建日期")}</span>
                         <span class="meta-value"
                             >{formatDate(book.createdAt)}</span
                         >
@@ -85,7 +85,7 @@
                 {/if}
                 {#if book.modifiedAt}
                     <div class="meta-item">
-                        <span class="meta-label">修改日期</span>
+                        <span class="meta-label">{t("修改日期")}</span>
                         <span class="meta-value"
                             >{formatDate(book.modifiedAt)}</span
                         >
@@ -103,17 +103,17 @@
         <div class="preview-actions">
             <button
                 class="preview-btn primary"
-                on:click={() => dispatch("open")}>阅读</button
+                on:click={() => dispatch("open")}>{t("阅读")}</button
             >
             <button
                 class="preview-btn danger"
-                on:click={() => dispatch("remove")}>移除</button
+                on:click={() => dispatch("remove")}>{t("移除")}</button
             >
         </div>
     {:else}
         <div class="preview-empty">
             <div class="preview-empty-icon">📖</div>
-            <div class="preview-empty-text">选择一本书查看详情</div>
+            <div class="preview-empty-text">{t("选择一本书查看详情")}</div>
         </div>
     {/if}
 </div>

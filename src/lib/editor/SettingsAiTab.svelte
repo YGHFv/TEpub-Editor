@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { localizeAiProviderName, t } from "$lib/i18n.svelte";
     import CustomSelect from "$lib/CustomSelect.svelte";
     import type { AiProviderConfig } from "./SettingsApiTab.svelte";
 
@@ -29,34 +30,34 @@
 
 <div class="ai-settings-form">
     {#if message}
-        <div class="font-settings-status">{message}</div>
+        <div class="font-settings-status">{t(message)}</div>
     {/if}
     <div class="set-row">
-        <label for="aiProofProvider">校对 API:</label>
+        <label for="aiProofProvider">{t("校对 API:")}</label>
         <CustomSelect
             id="aiProofProvider"
             value={proofProviderId}
             options={providers.map((provider) => ({
                 value: provider.id,
-                label: provider.name || provider.model,
+                label: localizeAiProviderName(provider.name) || provider.model,
             }))}
             on:change={(event) => onProofProviderChange(event.detail)}
         />
     </div>
     <div class="set-row">
-        <label for="aiApprovalProvider">审批 API:</label>
+        <label for="aiApprovalProvider">{t("审批 API:")}</label>
         <CustomSelect
             id="aiApprovalProvider"
             value={approvalProviderId}
             options={providers.map((provider) => ({
                 value: provider.id,
-                label: provider.name || provider.model,
+                label: localizeAiProviderName(provider.name) || provider.model,
             }))}
             on:change={(event) => onApprovalProviderChange(event.detail)}
         />
     </div>
     <div class="set-row">
-        <label for="aiMaxChars">单章上限:</label>
+        <label for="aiMaxChars">{t("单章上限:")}</label>
         <input
             id="aiMaxChars"
             type="number"
@@ -66,7 +67,7 @@
         />
     </div>
     <div class="set-row">
-        <label for="aiTimeoutSec">最长响应时间:</label>
+        <label for="aiTimeoutSec">{t("最长响应时间:")}</label>
         <input
             id="aiTimeoutSec"
             type="number"
@@ -77,17 +78,19 @@
         />
     </div>
     <label class="set-row ai-toggle-row" for="aiAutoApprove">
-        <span>自动审批:</span>
+        <span>{t("自动审批:")}</span>
         <input id="aiAutoApprove" type="checkbox" bind:checked={autoApprove} />
-        <small>AI 审核非自动建议，通过则自动应用，存疑保留人工审核。</small>
+        <small
+            >{t("AI 审核非自动建议，通过则自动应用，存疑保留人工审核。")}</small
+        >
     </label>
     <div class="set-row ai-textarea-row">
-        <label for="aiExtraPrompt">额外要求:</label>
+        <label for="aiExtraPrompt">{t("额外要求:")}</label>
         <textarea
             id="aiExtraPrompt"
             rows="4"
             bind:value={extraPrompt}
-            placeholder="例如：保留作者口癖，不做风格润色。"></textarea>
+            placeholder={t("例如：保留作者口癖，不做风格润色。")}></textarea>
     </div>
 </div>
 

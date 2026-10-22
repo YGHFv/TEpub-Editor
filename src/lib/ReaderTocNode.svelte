@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { t } from "$lib/i18n.svelte";
+
     /**
      * 阅读器目录的递归节点。负责：
      *   1. 显示一行（缩进按 level 计算）
@@ -55,7 +57,8 @@
             type="button"
             class="toc-toggle"
             on:click={toggle}
-            title={expanded ? "折叠" : "展开"}>{expanded ? "▾" : "▸"}</button
+            title={t(expanded ? "折叠" : "展开")}
+            >{expanded ? "▾" : "▸"}</button
         >
     {:else}
         <span class="toc-toggle-spacer"></span>

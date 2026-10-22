@@ -24,15 +24,37 @@ describe("app settings persistence", () => {
     const saved = saveAppSettings({
       ...initial,
       uiTheme: "dark",
+      uiLanguage: "zh-TW",
       closeToolboxOnToolOpen: false,
       txtEditorCloseAction: "exit",
     });
     const loaded = loadAppSettings();
     expect(loaded.uiTheme).toBe("dark");
+    expect(loaded.uiLanguage).toBe("zh-TW");
     expect(loaded.closeToolboxOnToolOpen).toBe(false);
     expect(loaded.txtEditorCloseAction).toBe("exit");
     expect(saved.aiProviders).toEqual(loaded.aiProviders);
     expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+});
+
+describe("interface language setting", () => {
+  afterEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("defaults to automatic browser detection", () => {
+    expect(DEFAULT_APP_SETTINGS.uiLanguage).toBe("auto");
+    expect(normalizeAppSettings({}).uiLanguage).toBe("auto");
+  });
+
+  it("keeps a supported explicit language and rejects invalid values", () => {
+    expect(normalizeAppSettings({ uiLanguage: "en" }).uiLanguage).toBe("en");
+    expect(normalizeAppSettings({ uiLanguage: "zh-TW" }).uiLanguage).toBe(
+      "zh-TW",
+    );
+    expect(normalizeAppSettings({ uiLanguage: "fr" }).uiLanguage).toBe("auto");
   });
 });
 

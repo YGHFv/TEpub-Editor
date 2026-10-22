@@ -11,6 +11,8 @@
 </script>
 
 <script lang="ts">
+    import { localizeAiProviderName, t } from "$lib/i18n.svelte";
+
     let {
         message,
         providers,
@@ -43,40 +45,48 @@
 
 <div class="ai-settings-form">
     {#if message}
-        <div class="font-settings-status">{message}</div>
+        <div class="font-settings-status">{t(message)}</div>
     {/if}
     <div class="font-settings-head ai-provider-head">
         <div>
-            <div class="font-settings-title">API 配置</div>
+            <div class="font-settings-title">{t("API 配置")}</div>
             <div class="font-settings-note">
-                可添加多个 OpenAI 兼容 API，分别供校对和自动审批选择。
+                {t("可添加多个 OpenAI 兼容 API，分别供校对和自动审批选择。")}
             </div>
         </div>
         <div class="style-settings-actions">
             <button class="mini-action" type="button" onclick={onAdd}
-                >新增</button
+                >{t("新增")}</button
             >
         </div>
     </div>
 
     {#if providers.length === 0 && !editorOpen}
-        <div class="api-empty">暂无 API 配置，点击“新增”添加文字模型。</div>
+        <div class="api-empty">
+            {t("暂无 API 配置，点击“新增”添加文字模型。")}
+        </div>
     {:else}
         <div class="api-list">
             {#each providers as provider}
                 <div class="api-item">
                     <div class="api-item-main">
                         <div class="api-item-title">
-                            <strong>{provider.name || provider.model}</strong>
-                            <span>文字模型</span>
+                            <strong
+                                >{localizeAiProviderName(provider.name) ||
+                                    provider.model}</strong
+                            >
+                            <span>{t("文字模型")}</span>
                         </div>
                         <div class="api-item-meta">
-                            <span>{provider.model || "未填写模型"}</span>
-                            <span>{provider.baseUrl || "未填写 API 地址"}</span>
+                            <span>{provider.model || t("未填写模型")}</span>
+                            <span
+                                >{provider.baseUrl ||
+                                    t("未填写 API 地址")}</span
+                            >
                             <span
                                 >{provider.apiKey
-                                    ? "已保存 Key"
-                                    : "未填写 Key"}</span
+                                    ? t("已保存 Key")
+                                    : t("未填写 Key")}</span
                             >
                         </div>
                     </div>
@@ -84,12 +94,13 @@
                         <button
                             class="mini-action"
                             type="button"
-                            onclick={() => onEdit(provider)}>编辑</button
+                            onclick={() => onEdit(provider)}>{t("编辑")}</button
                         >
                         <button
                             class="mini-action danger"
                             type="button"
-                            onclick={() => onRemove(provider.id)}>删除</button
+                            onclick={() => onRemove(provider.id)}
+                            >{t("删除")}</button
                         >
                     </div>
                 </div>
@@ -100,21 +111,22 @@
     {#if editorOpen && editorDraft}
         <div class="api-editor">
             <div class="api-editor-head">
-                <strong>{editorMode === "new" ? "新增 API" : "编辑 API"}</strong
+                <strong
+                    >{t(editorMode === "new" ? "新增 API" : "编辑 API")}</strong
                 >
                 <div class="api-editor-actions">
                     <button
                         class="mini-action primary"
                         type="button"
-                        onclick={onSave}>保存</button
+                        onclick={onSave}>{t("保存")}</button
                     >
                     <button class="mini-action" type="button" onclick={onCancel}
-                        >取消</button
+                        >{t("取消")}</button
                     >
                 </div>
             </div>
             <div class="set-row">
-                <label for="aiProviderName">名称:</label>
+                <label for="aiProviderName">{t("名称")}:</label>
                 <input
                     id="aiProviderName"
                     type="text"
@@ -124,7 +136,7 @@
                 />
             </div>
             <div class="set-row">
-                <label for="aiProviderBaseUrl">API 地址:</label>
+                <label for="aiProviderBaseUrl">{t("API 地址")}:</label>
                 <input
                     id="aiProviderBaseUrl"
                     type="text"
@@ -146,7 +158,7 @@
                 />
             </div>
             <div class="set-row">
-                <label for="aiProviderModel">模型:</label>
+                <label for="aiProviderModel">{t("模型")}:</label>
                 <input
                     id="aiProviderModel"
                     type="text"
@@ -157,7 +169,7 @@
                 />
             </div>
             <div class="set-row">
-                <label for="aiProviderTemperature">温度:</label>
+                <label for="aiProviderTemperature">{t("温度")}:</label>
                 <input
                     id="aiProviderTemperature"
                     type="number"

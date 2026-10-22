@@ -1,6 +1,7 @@
 ﻿<script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import { isInHiddenView } from "./keepAlive/viewState";
+    import { t } from "$lib/i18n.svelte";
 
     let showMenu = false;
     let pos = { x: 0, y: 0 };
@@ -300,7 +301,7 @@
         bind:this={menuElement}
         style="top: {pos.y}px; left: {pos.x}px;"
         role="menu"
-        aria-label="上下文菜单"
+        aria-label={t("上下文菜单")}
         tabindex="-1"
     >
         {#each currentItems as item}
@@ -316,7 +317,7 @@
                     on:keydown={(e) => handleMenuItemKeydown(e, item.action)}
                 >
                     <span class="icon">{item.icon}</span>
-                    <span>{item.label}</span>
+                    <span>{t(item.label)}</span>
                 </div>
             {/if}
         {/each}

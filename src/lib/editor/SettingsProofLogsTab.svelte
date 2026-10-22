@@ -8,6 +8,8 @@
 </script>
 
 <script lang="ts">
+    import { formatDateTimeLocalized, t } from "$lib/i18n.svelte";
+
     let {
         logs,
         message,
@@ -27,9 +29,12 @@
 
 <div class="proof-log-settings">
     <div class="proof-log-toolbar">
-        <span>{message || `共 ${logs.length} 个日志文件`}</span>
+        <span
+            >{message ||
+                t("共 {count} 个日志文件", { count: logs.length })}</span
+        >
         <button class="mini-action" type="button" onclick={onRefresh}
-            >刷新</button
+            >{t("刷新")}</button
         >
     </div>
     <div class="proof-log-browser">
@@ -42,19 +47,19 @@
                 >
                     <span class="proof-log-name">{log.fileName}</span>
                     <span class="proof-log-meta">
-                        {new Date(log.timestamp * 1000).toLocaleString()} · {(
+                        {formatDateTimeLocalized(log.timestamp * 1000)} · {(
                             log.size / 1024
                         ).toFixed(1)}KB
                     </span>
                 </button>
             {:else}
-                <div class="empty-msg">暂无校对日志</div>
+                <div class="empty-msg">{t("暂无校对日志")}</div>
             {/each}
         </div>
         <textarea
             class="proof-log-content"
             readonly
-            value={selectedContent || "选择左侧日志后查看完整内容"}
+            value={selectedContent || t("选择左侧日志后查看完整内容")}
             data-native-context-menu="true"
             oncontextmenu={(event) => event.stopPropagation()}></textarea>
     </div>

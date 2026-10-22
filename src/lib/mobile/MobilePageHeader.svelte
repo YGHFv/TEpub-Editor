@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { t } from "$lib/i18n.svelte";
+
     let {
         title,
         subtitle = "",
@@ -10,12 +12,12 @@
     } = $props();
 </script>
 
-<header class="m-page-header" aria-label="页面导航">
+<header class="m-page-header" aria-label={t("页面导航")}>
     <button
         class="m-page-back"
         type="button"
-        aria-label="返回"
-        title="返回"
+        aria-label={t("返回")}
+        title={t("返回")}
         onclick={onback}
     >
         <svg viewBox="0 0 24 24" aria-hidden="true">

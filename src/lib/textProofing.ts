@@ -1,3 +1,5 @@
+import { t } from "./i18n.svelte";
+
 export type ProofTitleScope =
   "all" | "volumes" | "chapters" | "regex" | "numbers-only";
 export type ProofNumberStyle = "arabic" | "chinese";
@@ -806,8 +808,8 @@ export function applyTitleRewrite(
     message:
       changedCount > 0
         ? options.scope === "numbers-only"
-          ? `已转换 ${changedCount} 个标题数字`
-          : `已重排 ${changedCount} 个标题`
+          ? t("已转换 {count} 个标题数字", { count: changedCount })
+          : t("已重排 {count} 个标题", { count: changedCount })
         : "标题已是标准格式",
   };
 }
@@ -837,7 +839,7 @@ export function removeBracketContentFromTitles(
     changedCount,
     message:
       changedCount > 0
-        ? `已清理 ${changedCount} 个标题括号`
+        ? t("已清理 {count} 个标题括号", { count: changedCount })
         : "没有找到括号内容",
   };
 }
@@ -885,7 +887,7 @@ export function removeCommonAds(content: string): ProofTransformResult {
     changedCount,
     message:
       changedCount > 0
-        ? `已移除 ${changedCount} 行广告/说明`
+        ? t("已移除 {count} 行广告/说明", { count: changedCount })
         : "没有找到广告内容",
   };
 }
@@ -936,7 +938,9 @@ export function removePinyin(
     text: lines.join("\n"),
     changedCount,
     message:
-      changedCount > 0 ? `已清理 ${changedCount} 处拼音` : "没有找到拼音内容",
+      changedCount > 0
+        ? t("已清理 {count} 处拼音", { count: changedCount })
+        : "没有找到拼音内容",
   };
 }
 
@@ -1106,7 +1110,7 @@ export function applyBuiltinRegexPreview(
     changedCount,
     message:
       changedCount > 0
-        ? `已替换 ${changedCount} 个匹配项`
+        ? t("已替换 {count} 个匹配项", { count: changedCount })
         : "没有可替换的匹配项",
   };
 }
@@ -1251,7 +1255,9 @@ export function applyChineseConvertPreview(
     text: lines.join("\n"),
     changedCount,
     message:
-      changedCount > 0 ? `已转换 ${changedCount} 处` : "没有可转换的内容",
+      changedCount > 0
+        ? t("已转换 {count} 处", { count: changedCount })
+        : "没有可转换的内容",
   };
 }
 
@@ -1294,7 +1300,9 @@ export function replaceByRegex(
     return {
       text: content,
       changedCount: 0,
-      message: `正则错误: ${error?.message || error}`,
+      message: t("正则错误：{error}", {
+        error: error?.message || String(error),
+      }),
     };
   }
 
@@ -1324,7 +1332,9 @@ export function replaceByRegex(
       text: lines.join("\n"),
       changedCount,
       message:
-        changedCount > 0 ? `已替换 ${changedCount} 处标题` : "没有匹配到标题",
+        changedCount > 0
+          ? t("已替换 {count} 处标题", { count: changedCount })
+          : "没有匹配到标题",
     };
   }
 
@@ -1337,7 +1347,10 @@ export function replaceByRegex(
   return {
     text: next,
     changedCount,
-    message: changedCount > 0 ? `已替换 ${changedCount} 处` : "没有匹配到内容",
+    message:
+      changedCount > 0
+        ? t("已替换 {count} 处", { count: changedCount })
+        : "没有匹配到内容",
   };
 }
 

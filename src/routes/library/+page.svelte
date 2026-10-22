@@ -24,6 +24,7 @@
         type GlobalAppSettings,
     } from "$lib/appSettings";
     import { SHELF_SETTINGS_KEY } from "$lib/storageKeys";
+    import { localizeAiProviderName, t } from "$lib/i18n.svelte";
 
     const TOOLBOX_WINDOW_WIDTH = 1200;
     const TOOLBOX_WINDOW_HEIGHT = 740;
@@ -94,6 +95,22 @@
         { value: "first", label: "新加入的在前" },
         { value: "last", label: "新加入的在后" },
     ];
+    $: namingModeOptions = NAMING_MODE_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
+    $: shelfPreviewOptions = SHELF_PREVIEW_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
+    $: dblClickOptions = DBL_CLICK_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
+    $: newBookOrderOptions = NEW_BOOK_ORDER_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
 
     interface AiProofingConfig {
         enabled: boolean;
@@ -161,17 +178,23 @@
     );
     $: storageModeOptions = [
         ...(appMode?.isPortable
-            ? [{ value: "copy_portable", label: "复制到 books/ 文件夹" }]
+            ? [
+                  {
+                      value: "copy_portable",
+                      label: t("复制到 books/ 文件夹"),
+                  },
+              ]
             : []),
-        { value: "index", label: "仅索引文件位置（不复制）" },
-        { value: "copy_custom", label: "复制到指定工作目录" },
+        { value: "index", label: t("仅索引文件位置（不复制）") },
+        { value: "copy_custom", label: t("复制到指定工作目录") },
     ];
     $: libraryAiProviderOptions =
         textAiProviders.length === 0
-            ? [{ value: "", label: "未配置文字模型", disabled: true }]
+            ? [{ value: "", label: t("未配置文字模型"), disabled: true }]
             : textAiProviders.map((provider) => ({
                   value: provider.id,
-                  label: provider.name || provider.model,
+                  label:
+                      localizeAiProviderName(provider.name) || provider.model,
                   meta: provider.model,
               }));
     let selectedBook: BookEntry | null = null;
@@ -182,10 +205,10 @@
     let isLoading = true;
     let showSettings = false;
     let librarySettingsActiveTab: "storage" | "ai" | "shelf" = "storage";
-    const librarySettingsTabs = [
-        { id: "storage", label: "文件存储" },
-        { id: "ai", label: "智能匹配" },
-        { id: "shelf", label: "书架显示" },
+    $: librarySettingsTabs = [
+        { id: "storage", label: t("文件存储") },
+        { id: "ai", label: t("智能匹配") },
+        { id: "shelf", label: t("书架显示") },
     ];
     let aiMatchRunning = false;
     let aiMatchMessage = "";
@@ -578,7 +601,7 @@
                 throw e;
             }
         }
-        throw new Error("命名冲突重试次数过多");
+        throw new Error(t("命名冲突重试次数过多"));
     }
     // 重命名本地文件弹框
     interface RenamePromptState {
@@ -615,7 +638,10 @@
     async function confirmRenameBook() {
         const v = renamePrompt.inputValue.trim();
         if (!v) {
-            renamePrompt = { ...renamePrompt, error: "文件名不能为空" };
+            renamePrompt = {
+                ...renamePrompt,
+                error: t("文件名不能为空"),
+            };
             return;
         }
         try {
@@ -631,11 +657,14 @@
                 const suggested = msg.substring("BOOK_FILE_COLLISION:".length);
                 renamePrompt = {
                     ...renamePrompt,
-                    error: `已存在同名: ${suggested}`,
+                    error: t("已存在同名: {name}", { name: suggested }),
                 };
                 return;
             }
-            renamePrompt = { ...renamePrompt, error: `重命名失败: ${e}` };
+            renamePrompt = {
+                ...renamePrompt,
+                error: t("重命名失败: {error}", { error: String(e) }),
+            };
         }
     }
     function cancelRenameBook() {
@@ -646,10 +675,13 @@
         try {
             await platform.revealPath(book.filePath);
         } catch (e: any) {
-            await platform.message(`打开文件位置失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("打开文件位置失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
     // 简洁列表列配置
@@ -855,7 +887,7 @@
             }
         } catch (e) {
             console.error("选择目录失败:", e);
-            toastError("选择目录失败：" + e);
+            toastError(t("选择目录失败：{error}", { error: String(e) }));
         }
     }
 
@@ -902,8 +934,8 @@
     async function confirmFirstLaunchDir() {
         const trimmed = firstLaunchInput.trim();
         if (!trimmed) {
-            await platform.message("请选择书库存放目录", {
-                title: "需要选择目录",
+            await platform.message(t("请选择书库存放目录"), {
+                title: t("需要选择目录"),
                 kind: "warning",
             });
             return;
@@ -952,10 +984,13 @@
             } catch {}
         } catch (e: any) {
             console.error("保存书库目录失败:", e);
-            await platform.message(`保存失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("保存失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             firstLaunchSaving = false;
         }
@@ -1024,7 +1059,7 @@
             }
         } catch (e) {
             console.error("加载书库失败:", e);
-            toastError("加载书库失败：" + e);
+            toastError(t("加载书库失败：{error}", { error: String(e) }));
         } finally {
             isLoading = false;
         }
@@ -1055,12 +1090,17 @@
         let selected: string | string[] | null = null;
         try {
             selected = await platform.openDialog({
-                filters: [{ name: "图书文件", extensions: ["epub", "txt"] }],
+                filters: [
+                    {
+                        name: t("图书文件"),
+                        extensions: ["epub", "txt"],
+                    },
+                ],
                 multiple: true,
             });
         } catch (e: any) {
             console.error("打开文件对话框失败:", e);
-            toastError("打开文件对话框失败：" + e);
+            toastError(t("打开文件对话框失败：{error}", { error: String(e) }));
             return;
         }
         if (!selected) return;
@@ -1082,10 +1122,15 @@
         if (failures.length > 0) {
             const head =
                 added > 0
-                    ? `成功添加 ${added} 本，${failures.length} 本失败:\n`
-                    : `添加失败 (${failures.length}):\n`;
+                    ? `${t("成功添加 {added} 本，{failed} 本失败:", {
+                          added,
+                          failed: failures.length,
+                      })}\n`
+                    : `${t("添加失败 ({count}):", {
+                          count: failures.length,
+                      })}\n`;
             await platform.message(head + failures.join("\n"), {
-                title: "添加图书",
+                title: t("添加图书"),
                 kind: added > 0 ? "warning" : "error",
             });
         }
@@ -1096,12 +1141,17 @@
         let selected: string | string[] | null = null;
         try {
             selected = await platform.openDialog({
-                filters: [{ name: "图书文件", extensions: ["epub", "txt"] }],
+                filters: [
+                    {
+                        name: t("图书文件"),
+                        extensions: ["epub", "txt"],
+                    },
+                ],
                 multiple: true,
             });
         } catch (e: any) {
             console.error("打开文件对话框失败:", e);
-            toastError("打开文件对话框失败：" + e);
+            toastError(t("打开文件对话框失败：{error}", { error: String(e) }));
             return;
         }
         if (!selected) return;
@@ -1146,7 +1196,7 @@
                 "toolbox",
                 "/toolbox",
                 {
-                    title: "TEpub-Editor 工具箱",
+                    title: t("TEpub-Editor 工具箱"),
                     width: TOOLBOX_WINDOW_WIDTH,
                     height: TOOLBOX_WINDOW_HEIGHT,
                     minWidth: TOOLBOX_WINDOW_WIDTH,
@@ -1168,10 +1218,13 @@
             }
         } catch (e: any) {
             console.error("打开工具箱失败:", e);
-            await platform.message(`打开工具箱失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("打开工具箱失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1191,7 +1244,7 @@
         const url = isEpub
             ? `/epub-editor?file=${encoded}`
             : `/editor?file=${encoded}&fromLibrary=1`;
-        const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
+        const title = isEpub ? t("EPUB 编辑器") : t("TXT 编辑器");
 
         // 默认同窗口：书库留在标签栏里，编辑器作为新标签打开
         if (!appSettings.secondaryWindows) {
@@ -1229,10 +1282,13 @@
             }
         } catch (e: any) {
             console.error("打开编辑器失败:", e);
-            await platform.message(`打开失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("打开失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1245,10 +1301,13 @@
             await loadLibrary();
         } catch (e: any) {
             console.error("移除图书失败:", e);
-            await platform.message(`移除图书失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("移除图书失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1259,7 +1318,7 @@
         const url = isEpub
             ? `/epub-editor?file=${encoded}`
             : `/editor?file=${encoded}&fromLibrary=1`;
-        const title = isEpub ? "TEpub-Editor-EPUB" : "TEpub-Editor-TXT";
+        const title = isEpub ? t("EPUB 编辑器") : t("TXT 编辑器");
 
         // 默认同窗口：书库留在标签栏里，编辑器作为新标签打开
         if (!appSettings.secondaryWindows) {
@@ -1296,10 +1355,13 @@
             }
         } catch (e: any) {
             console.error("打开编辑器失败:", e);
-            await platform.message(`打开失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("打开失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1314,7 +1376,7 @@
         }
         const encoded = encodeURIComponent(book.filePath);
         const url = `/reader?file=${encoded}`;
-        const title = `${book.title || "阅读"} · 阅读`;
+        const title = `${book.title || t("阅读")} · ${t("阅读")}`;
 
         // 默认同窗口：书库留在标签栏里，阅读器作为新标签打开
         if (!appSettings.secondaryWindows) {
@@ -1352,10 +1414,13 @@
             }
         } catch (e: any) {
             console.error("打开阅读器失败:", e);
-            await platform.message(`打开失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("打开失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1429,7 +1494,7 @@
             return;
         }
         aiMatchRunning = true;
-        aiMatchMessage = "智能匹配中...";
+        aiMatchMessage = t("匹配中...");
         aiMatchResult = null;
         try {
             const response = await platform.invoke<{ content: string }>(
@@ -1461,10 +1526,16 @@
             metaForm.tags = Array.from(
                 new Set([...(aiMatchResult.tags || [])]),
             );
-            aiMatchMessage = `智能匹配完成${aiMatchResult.reason ? `：${aiMatchResult.reason}` : ""}`;
+            aiMatchMessage = aiMatchResult.reason
+                ? t("智能匹配完成：{reason}", {
+                      reason: aiMatchResult.reason,
+                  })
+                : t("智能匹配完成");
         } catch (error) {
             console.error("智能匹配失败:", error);
-            aiMatchMessage = `智能匹配失败：${error}`;
+            aiMatchMessage = t("智能匹配失败：{error}", {
+                error: String(error),
+            });
         } finally {
             aiMatchRunning = false;
         }
@@ -1516,10 +1587,13 @@
             showMetaEditor = false;
         } catch (e: any) {
             console.error("保存元数据失败:", e);
-            await platform.message(`保存失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("保存失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             savingMetadata = false;
         }
@@ -1699,10 +1773,13 @@
             if (!metaForm.epubUuid) metaForm.epubUuid = updated.epubUuid || "";
         } catch (e: any) {
             console.error("重新提取元数据失败:", e);
-            await platform.message(`重新提取失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("重新提取失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         } finally {
             refreshing = false;
         }
@@ -1726,7 +1803,7 @@
             const selected = await platform.openDialog({
                 filters: [
                     {
-                        name: "图片文件",
+                        name: t("图片文件"),
                         extensions: ["jpg", "jpeg", "png", "gif"],
                     },
                 ],
@@ -1755,10 +1832,13 @@
             if (idx >= 0) books[idx].coverPath = newPath;
         } catch (e: any) {
             console.error("更换封面失败:", e);
-            await platform.message(`更换封面失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("更换封面失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -1774,7 +1854,7 @@
             }, 1200);
         } catch (e) {
             console.error("复制失败:", e);
-            toastError("复制失败：" + e);
+            toastError(t("复制失败：{error}", { error: String(e) }));
         }
     }
 
@@ -1883,7 +1963,11 @@
                     await addBookWithCollisionRetry(path);
                 } catch (e) {
                     console.error("拖放添加失败:", e);
-                    toastError("拖放添加图书失败：" + e);
+                    toastError(
+                        t("拖放添加图书失败：{error}", {
+                            error: String(e),
+                        }),
+                    );
                 }
             }
         }
@@ -1905,7 +1989,7 @@
             });
         } catch (e) {
             console.error("保存设置失败:", e);
-            toastError("保存设置失败：" + e);
+            toastError(t("保存设置失败：{error}", { error: String(e) }));
         }
     }
 
@@ -1961,19 +2045,19 @@
     ];
     $: namingPresetOptions = [
         ...NAMING_PRESETS,
-        { value: "custom", label: "自定义…" },
+        { value: "custom", label: t("自定义…") },
     ];
     // 当前下拉选中的预设；若库里存的模板不在预设里就显示 "custom"
     let namingPresetSel: string = "{title}-{author}";
     // 同步：libraryConfig 变 → 调整预设下拉
     function syncNamingPresetFromConfig() {
-        const t = (libraryConfig.namingTemplate || "").trim();
-        if (!t) {
+        const template = (libraryConfig.namingTemplate || "").trim();
+        if (!template) {
             namingPresetSel = "{title}-{author}";
             return;
         }
-        namingPresetSel = NAMING_PRESETS.some((p) => p.value === t)
-            ? t
+        namingPresetSel = NAMING_PRESETS.some((p) => p.value === template)
+            ? template
             : "custom";
     }
     // 命名模式或模板变更 → 保存配置 + 询问是否立即批量重命名
@@ -1986,8 +2070,11 @@
         ).length;
         if (localCount === 0) return;
         const yes = await platform.ask(
-            `是否立即按新规则重命名书库中的 ${localCount} 本本地书文件？\n（仅会重命名复制进书库的副本，引用模式下的原文件不会动）`,
-            { kind: "info", title: "应用新命名" },
+            t(
+                "是否立即按新规则重命名书库中的 {count} 本本地书文件？\n（仅会重命名复制进书库的副本，引用模式下的原文件不会动）",
+                { count: localCount },
+            ),
+            { kind: "info", title: t("应用新命名") },
         );
         if (!yes) return;
         try {
@@ -1997,22 +2084,29 @@
                 failed: number;
                 failures: string[];
             }>("rebuild_book_filenames", { config: libraryConfig });
-            let msg = `已重命名 ${summary.renamed} 本，跳过 ${summary.skipped} 本`;
+            let msg = t("已重命名 {renamed} 本，跳过 {skipped} 本", {
+                renamed: summary.renamed,
+                skipped: summary.skipped,
+            });
             if (summary.failed > 0) {
                 msg +=
-                    `，失败 ${summary.failed} 本：\n` +
-                    summary.failures.slice(0, 5).join("\n");
+                    t("，失败 {count} 本：\n", {
+                        count: summary.failed,
+                    }) + summary.failures.slice(0, 5).join("\n");
             }
             await platform.message(msg, {
-                title: "重命名完成",
+                title: t("重命名完成"),
                 kind: summary.failed > 0 ? "warning" : "info",
             });
             await loadLibrary();
         } catch (e: any) {
-            await platform.message(`重命名失败: ${e}`, {
-                title: "错误",
-                kind: "error",
-            });
+            await platform.message(
+                t("重命名失败: {error}", { error: String(e) }),
+                {
+                    title: t("错误"),
+                    kind: "error",
+                },
+            );
         }
     }
     function onNamingPresetChange(v: string) {
@@ -2044,7 +2138,7 @@
             return false;
         } catch (e) {
             console.error("选择目录失败:", e);
-            toastError("选择目录失败：" + e);
+            toastError(t("选择目录失败：{error}", { error: String(e) }));
             return false;
         }
     }
@@ -2111,7 +2205,11 @@
                         await addBookWithCollisionRetry(p);
                     } catch (e) {
                         console.error("拖放添加失败:", e);
-                        toastError("拖放添加图书失败：" + e);
+                        toastError(
+                            t("拖放添加图书失败：{error}", {
+                                error: String(e),
+                            }),
+                        );
                     }
                 }
                 await loadLibrary();
@@ -2138,15 +2236,15 @@
     <div class="toolbar">
         <div class="toolbar-left">
             <button class="tb-btn primary" on:click={addBook}
-                ><Icon name="plus" size={15} /> 添加图书</button
+                ><Icon name="plus" size={15} /> {t("添加图书")}</button
             >
             <button class="tb-btn" on:click={openExternalFiles}
-                ><Icon name="folder-open" size={15} /> 打开文件</button
+                ><Icon name="folder-open" size={15} /> {t("打开文件")}</button
             >
             <div class="search-box">
                 <input
                     type="text"
-                    placeholder="搜索书名或作者..."
+                    placeholder={t("搜索书名或作者...")}
                     bind:value={searchQuery}
                 />
             </div>
@@ -2155,23 +2253,25 @@
         <div class="toolbar-right">
             {#if ingestStatus}
                 <span class="ingest-status">
-                    {ingestStatus === "decrypting" ? "解密入库中" : "入库中"}
+                    {t(ingestStatus === "decrypting" ? "解密入库中" : "入库中")}
                 </span>
             {/if}
-            <span class="book-count">{books.length} 本书</span>
+            <span class="book-count"
+                >{t("{count} 本书", { count: books.length })}</span
+            >
             <button
                 class="tb-btn icon-btn"
                 on:click={cycleViewMode}
-                title="切换视图"
-                aria-label="切换视图"
+                title={t("切换视图")}
+                aria-label={t("切换视图")}
             >
                 <Icon name={VIEW_ICONS[viewMode]} size={17} />
             </button>
             <button
                 class="tb-btn icon-btn"
                 on:click={openToolbox}
-                title="工具箱"
-                aria-label="工具箱"
+                title={t("工具箱")}
+                aria-label={t("工具箱")}
             >
                 <Icon name="folder" size={17} />
             </button>
@@ -2181,8 +2281,8 @@
                     appSettings = loadAppSettings();
                     showSettings = !showSettings;
                 }}
-                title="书库设置"
-                aria-label="书库设置"
+                title={t("书库设置")}
+                aria-label={t("书库设置")}
             >
                 <Icon name="settings" size={17} />
             </button>
@@ -2192,13 +2292,13 @@
     <!-- 已激活的标签筛选条 —— 仅当至少有一个筛选时显示 -->
     {#if activeTagFilters.length > 0}
         <div class="filter-bar">
-            <span class="filter-label">已筛选:</span>
+            <span class="filter-label">{t("已筛选:")}</span>
             {#each activeTagFilters as tag}
                 <button
                     type="button"
                     class="filter-chip"
                     on:click={() => toggleTagFilter(tag)}
-                    title="点击移除该筛选"
+                    title={t("点击移除该筛选")}
                 >
                     <span class="filter-chip-text">{tag}</span>
                     <span class="filter-chip-remove"
@@ -2209,10 +2309,10 @@
             <button
                 type="button"
                 class="filter-clear"
-                on:click={clearTagFilters}>清除全部</button
+                on:click={clearTagFilters}>{t("清除全部")}</button
             >
             <span class="filter-count"
-                >{filteredBooks.length} / {books.length} 本</span
+                >{filteredBooks.length} / {books.length} {t("本")}</span
             >
         </div>
     {/if}
@@ -2223,19 +2323,19 @@
         <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div class="browser-area" on:click={handleBrowserAreaClick}>
             {#if isLoading}
-                <div class="empty-state">加载中...</div>
+                <div class="empty-state">{t("加载中...")}</div>
             {:else if filteredBooks.length === 0}
                 <div class="empty-state">
                     {#if books.length === 0}
                         <div class="empty-icon">
                             <Icon name="books" size={56} strokeWidth={1.4} />
                         </div>
-                        <div class="empty-text">书库为空</div>
+                        <div class="empty-text">{t("书库为空")}</div>
                         <div class="empty-hint">
-                            点击「+ 添加图书」或拖放文件到此处
+                            {t("点击「+ 添加图书」或拖放文件到此处")}
                         </div>
                     {:else}
-                        <div class="empty-text">无匹配结果</div>
+                        <div class="empty-text">{t("无匹配结果")}</div>
                     {/if}
                 </div>
             {:else if viewMode === "grid"}
@@ -2329,7 +2429,7 @@
             <div
                 class="context-menu"
                 role="menu"
-                aria-label="图书操作"
+                aria-label={t("图书操作")}
                 style="left: {contextMenuPos.x}px; top: {contextMenuPos.y}px;"
             >
                 <button
@@ -2337,21 +2437,21 @@
                     on:click={() => {
                         openReader(selectedBook!);
                         closeContextMenu();
-                    }}>阅读</button
+                    }}>{t("阅读")}</button
                 >
                 <button
                     class="ctx-item"
                     on:click={() => {
                         openBook(selectedBook!);
                         closeContextMenu();
-                    }}>编辑文件</button
+                    }}>{t("编辑文件")}</button
                 >
                 <button
                     class="ctx-item"
                     on:click={() => {
                         openEditMetadata(selectedBook!);
                         closeContextMenu();
-                    }}>编辑元数据</button
+                    }}>{t("编辑元数据")}</button
                 >
                 <div class="ctx-separator"></div>
                 <button
@@ -2359,14 +2459,14 @@
                     on:click={() => {
                         openFileLocation(selectedBook!);
                         closeContextMenu();
-                    }}>打开文件位置</button
+                    }}>{t("打开文件位置")}</button
                 >
                 <button
                     class="ctx-item"
                     on:click={() => {
                         openRenameDialog(selectedBook!);
                         closeContextMenu();
-                    }}>重命名本地文件</button
+                    }}>{t("重命名本地文件")}</button
                 >
                 <div class="ctx-separator"></div>
                 <button
@@ -2374,7 +2474,7 @@
                     on:click={() => {
                         removeBook(selectedBook!);
                         closeContextMenu();
-                    }}>从书库移除</button
+                    }}>{t("从书库移除")}</button
                 >
             </div>
         </div>
@@ -2386,7 +2486,7 @@
     {#if phoneLayout}
         <MobileSheet
             open={phoneBookOpen}
-            title={selectedBook?.title || "图书"}
+            title={selectedBook?.title || t("图书")}
             onclose={() => (phoneBookOpen = false)}
         >
             {#if selectedBook}
@@ -2419,7 +2519,7 @@
                     on:click={() => phoneBookAction("read")}
                 >
                     <Icon name="books" size={20} />
-                    <span>阅读</span>
+                    <span>{t("阅读")}</span>
                 </button>
                 <button
                     class="m-list-row"
@@ -2427,7 +2527,7 @@
                     on:click={() => phoneBookAction("edit")}
                 >
                     <Icon name="book-open" size={20} />
-                    <span>编辑文件</span>
+                    <span>{t("编辑文件")}</span>
                 </button>
                 <button
                     class="m-list-row"
@@ -2435,7 +2535,7 @@
                     on:click={() => phoneBookAction("metadata")}
                 >
                     <Icon name="settings" size={20} />
-                    <span>编辑元数据</span>
+                    <span>{t("编辑元数据")}</span>
                 </button>
                 <button
                     class="m-list-row"
@@ -2446,7 +2546,7 @@
                     }}
                 >
                     <Icon name="folder-open" size={20} />
-                    <span>打开文件位置</span>
+                    <span>{t("打开文件位置")}</span>
                 </button>
                 <button
                     class="m-list-row"
@@ -2454,7 +2554,7 @@
                     on:click={() => phoneBookAction("rename")}
                 >
                     <Icon name="file" size={20} />
-                    <span>重命名本地文件</span>
+                    <span>{t("重命名本地文件")}</span>
                 </button>
                 <button
                     class="m-list-row danger-row"
@@ -2462,7 +2562,7 @@
                     on:click={() => phoneBookAction("remove")}
                 >
                     <Icon name="trash" size={20} />
-                    <span>从书库移除</span>
+                    <span>{t("从书库移除")}</span>
                 </button>
             {/if}
         </MobileSheet>
@@ -2480,26 +2580,26 @@
             }}
         >
             <SettingsShell
-                title="书库设置"
+                title={t("书库设置")}
                 tabs={librarySettingsTabs}
                 activeTab={librarySettingsActiveTab}
                 onTabChange={(tabId) =>
                     (librarySettingsActiveTab =
                         tabId as typeof librarySettingsActiveTab)}
                 onClose={() => (showSettings = false)}
-                actionLabel="完成"
+                actionLabel={t("完成")}
                 onAction={() => (showSettings = false)}
                 shellClass="library-settings-panel"
                 contentClass="library-settings-content"
             >
                 {#if librarySettingsActiveTab === "storage"}
                     <section class="settings-section">
-                        <div class="section-title">文件存储</div>
+                        <div class="section-title">{t("文件存储")}</div>
                         <div class="set-row">
-                            <span class="set-label">存储方式</span>
+                            <span class="set-label">{t("存储方式")}</span>
                             <CustomSelect
                                 className="set-control"
-                                ariaLabel="存储方式"
+                                ariaLabel={t("存储方式")}
                                 value={libraryConfig.storageMode}
                                 options={storageModeOptions}
                                 on:change={(e) => setStorageMode(e.detail)}
@@ -2507,17 +2607,18 @@
                         </div>
                         {#if libraryConfig.storageMode === "copy_custom"}
                             <div class="set-row">
-                                <span class="set-label">工作目录</span>
+                                <span class="set-label">{t("工作目录")}</span>
                                 <span
                                     class="custom-dir-display"
                                     title={libraryConfig.customWorkDir}
                                     >{libraryConfig.customWorkDir ||
-                                        "未选择"}</span
+                                        t("未选择")}</span
                                 >
                                 {#if !appMode?.isMobile}
                                     <button
                                         class="tb-btn"
-                                        on:click={pickCustomWorkDir}>更改</button
+                                        on:click={pickCustomWorkDir}
+                                        >{t("更改")}</button
                                     >
                                 {:else}
                                     <button
@@ -2525,13 +2626,15 @@
                                         on:click={() =>
                                             openLibraryDirectoryPicker(
                                                 "settings",
-                                            )}>选择目录</button
+                                            )}>{t("选择目录")}</button
                                     >
                                 {/if}
                             </div>
                         {/if}
                         <label class="set-row toggle-row">
-                            <span class="set-label">保存时更新修改日期</span>
+                            <span class="set-label"
+                                >{t("保存时更新修改日期")}</span
+                            >
                             <input
                                 type="checkbox"
                                 bind:checked={
@@ -2541,21 +2644,21 @@
                             />
                         </label>
                         <div class="set-row">
-                            <span class="set-label">入库命名方式</span>
+                            <span class="set-label">{t("入库命名方式")}</span>
                             <CustomSelect
                                 className="set-control"
-                                ariaLabel="入库命名方式"
+                                ariaLabel={t("入库命名方式")}
                                 value={libraryConfig.namingMode || "template"}
-                                options={NAMING_MODE_OPTIONS}
+                                options={namingModeOptions}
                                 on:change={(e) => setNamingMode(e.detail)}
                             />
                         </div>
                         {#if libraryConfig.namingMode === "template"}
                             <div class="set-row">
-                                <span class="set-label">命名模板</span>
+                                <span class="set-label">{t("命名模板")}</span>
                                 <CustomSelect
                                     className="set-control"
-                                    ariaLabel="命名模板"
+                                    ariaLabel={t("命名模板")}
                                     value={namingPresetSel}
                                     options={namingPresetOptions}
                                     on:change={(e) =>
@@ -2573,16 +2676,19 @@
                                             libraryConfig.namingTemplate
                                         }
                                         on:change={onNamingChanged}
-                                        placeholder="例如: {`{title}-{author}`}"
-                                        aria-label="自定义命名模板"
+                                        placeholder={t("例如: {template}", {
+                                            template: "{title}-{author}",
+                                        })}
+                                        aria-label={t("自定义命名模板")}
                                     />
                                 </div>
                             {/if}
                             <p class="section-hint" style="margin-top: 4px;">
-                                可用占位符：<code
+                                {t("可用占位符：")}<code
                                     >{`{title} {author} {subtitle} {series} {maker} {publisher} {tags}`}</code
                                 >。
-                                <code>{`{tags}`}</code> 自动展开为
+                                <code>{`{tags}`}</code>
+                                {t("自动展开为")}
                                 <code>[标签1][标签2]…</code>。
                             </p>
                         {/if}
@@ -2591,16 +2697,17 @@
                     <section
                         class="settings-section legacy-ai-proofing-settings"
                     >
-                        <div class="section-title">智能匹配</div>
+                        <div class="section-title">{t("智能匹配")}</div>
                         <p class="section-hint">
-                            用于自动匹配书库图书的标签和简介，不再和 TXT
-                            编辑器智能校对共用用途设置。
+                            {t(
+                                "用于自动匹配书库图书的标签和简介，不再和 TXT 编辑器智能校对共用用途设置。",
+                            )}
                         </p>
                         <div class="set-row" style="align-items: flex-start;">
-                            <span class="set-label">匹配 API</span>
+                            <span class="set-label">{t("匹配 API")}</span>
                             <CustomSelect
                                 className="set-control"
-                                ariaLabel="匹配 API"
+                                ariaLabel={t("匹配 API")}
                                 value={libraryConfig.libraryAiMatch
                                     ?.providerId || ""}
                                 options={libraryAiProviderOptions}
@@ -2610,7 +2717,7 @@
                             />
                         </div>
                         <div class="set-row" style="align-items: flex-start;">
-                            <span class="set-label">额外要求</span>
+                            <span class="set-label">{t("额外要求")}</span>
                             <textarea
                                 class="set-control"
                                 rows="3"
@@ -2618,15 +2725,17 @@
                                     libraryConfig.libraryAiMatch!.extraPrompt
                                 }
                                 on:change={saveLibraryConfig}
-                                placeholder="例如：标签优先使用书库现有分类；简介不要剧透。"
-                                aria-label="智能匹配额外要求"></textarea>
+                                placeholder={t(
+                                    "例如：标签优先使用书库现有分类；简介不要剧透。",
+                                )}
+                                aria-label={t("智能匹配额外要求")}></textarea>
                         </div>
                     </section>
                 {:else}
                     <section class="settings-section">
-                        <div class="section-title">书架显示</div>
+                        <div class="section-title">{t("书架显示")}</div>
                         <label class="set-row toggle-row">
-                            <span class="set-label">九宫格显示书名</span>
+                            <span class="set-label">{t("九宫格显示书名")}</span>
                             <input
                                 type="checkbox"
                                 bind:checked={shelfSettings.gridShowTitle}
@@ -2634,7 +2743,7 @@
                             />
                         </label>
                         <label class="set-row toggle-row">
-                            <span class="set-label">九宫格显示作者</span>
+                            <span class="set-label">{t("九宫格显示作者")}</span>
                             <input
                                 type="checkbox"
                                 bind:checked={shelfSettings.gridShowAuthor}
@@ -2642,35 +2751,35 @@
                             />
                         </label>
                         <div class="set-row">
-                            <span class="set-label">预览区显示</span>
+                            <span class="set-label">{t("预览区显示")}</span>
                             <CustomSelect
                                 className="set-control"
-                                ariaLabel="预览区显示"
+                                ariaLabel={t("预览区显示")}
                                 value={shelfSettings.previewMode}
-                                options={SHELF_PREVIEW_OPTIONS}
+                                options={shelfPreviewOptions}
                                 on:change={(e) => setShelfPreviewMode(e.detail)}
                             />
                         </div>
                         <div class="set-row">
-                            <span class="set-label">双击图书时</span>
+                            <span class="set-label">{t("双击图书时")}</span>
                             <CustomSelect
                                 className="set-control"
-                                ariaLabel="双击图书时"
+                                ariaLabel={t("双击图书时")}
                                 value={shelfSettings.dblClickAction}
-                                options={DBL_CLICK_OPTIONS}
+                                options={dblClickOptions}
                                 on:change={(e) =>
                                     setShelfDblClickAction(e.detail)}
                             />
                         </div>
                         <div class="set-row">
-                            <span class="set-label">新书排序</span>
+                            <span class="set-label">{t("新书排序")}</span>
                             <CustomSelect
                                 className="set-control"
-                                ariaLabel="新书排序"
+                                ariaLabel={t("新书排序")}
                                 value={shelfSettings.newBookFirst
                                     ? "first"
                                     : "last"}
-                                options={NEW_BOOK_ORDER_OPTIONS}
+                                options={newBookOrderOptions}
                                 on:change={(e) => setNewBookOrder(e.detail)}
                             />
                         </div>
@@ -2734,7 +2843,9 @@
                     </div>
                     {#if appMode?.isMobile}
                         <p class="first-launch-tip">
-                            建议直接使用应用私有目录。也可以点「选择目录」查看系统允许本应用访问的目录；受 Android 共享存储限制，部分「下载」「文档」或内部存储目录可能无法读取，遇到时请改回应用私有目录。
+                            建议直接使用应用私有目录。也可以点「选择目录」查看系统允许本应用访问的目录；受
+                            Android
+                            共享存储限制，部分「下载」「文档」或内部存储目录可能无法读取，遇到时请改回应用私有目录。
                         </p>
                     {:else}
                         <p class="first-launch-tip">
@@ -2792,7 +2903,10 @@
                     {directoryPickerError}
                 </div>
             {:else if directoryPickerListing}
-                <div class="mobile-dir-current" title={directoryPickerListing.current}>
+                <div
+                    class="mobile-dir-current"
+                    title={directoryPickerListing.current}
+                >
                     <span>当前目录</span>
                     <code>{directoryPickerListing.current}</code>
                 </div>
@@ -2816,16 +2930,14 @@
                         <button
                             class="mobile-dir-row"
                             type="button"
-                            on:click={() =>
-                                browseLibraryDirectory(entry.path)}
+                            on:click={() => browseLibraryDirectory(entry.path)}
                         >
                             <Icon name="folder" size={19} />
                             <span>{entry.name}</span>
                             <Icon name="chevron-right" size={16} />
                         </button>
                     {/each}
-                    {#if !directoryPickerListing.parent &&
-                        directoryPickerListing.entries.length === 0}
+                    {#if !directoryPickerListing.parent && directoryPickerListing.entries.length === 0}
                         <div class="mobile-dir-placeholder">这里没有子目录</div>
                     {/if}
                 </div>
@@ -4639,7 +4751,9 @@
     }
 
     /* 网格两列：minmax(150px, 1fr) 在 390px 上会挤成两列半，卡片窄到看不清书名 */
-    :global(:root[data-tepub-layout="phone"]) .browser-area :global(.book-grid) {
+    :global(:root[data-tepub-layout="phone"])
+        .browser-area
+        :global(.book-grid) {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
     }

@@ -10,6 +10,7 @@
         downloadBrowserBlob,
         validateBrowserFiles,
     } from "$lib/webFileWorkflow";
+    import { t } from "$lib/i18n.svelte";
 
     type IssueFilter = "all" | "error" | "warning";
 
@@ -50,7 +51,7 @@
         });
         const epubFiles = validation.accepted;
         if (!epubFiles.length) {
-            errorText = "请选择扩展名为 .epub 的文件。";
+            errorText = t("请选择扩展名为 .epub 的文件。");
             return;
         }
 
@@ -62,13 +63,22 @@
         try {
             const nextResults: WebEpubDiagnosticResult[] = [];
             for (let index = 0; index < epubFiles.length; index += 1) {
-                progressText = `正在诊断 ${index + 1} / ${epubFiles.length}：${epubFiles[index].name}`;
+                progressText = t(
+                    "正在诊断 {current} / {total}：{name}",
+                    {
+                        current: index + 1,
+                        total: epubFiles.length,
+                        name: epubFiles[index].name,
+                    },
+                );
                 nextResults.push(await diagnoseWebEpub(epubFiles[index]));
                 results = [...nextResults];
             }
-            progressText = `已完成 ${epubFiles.length} 个 EPUB 文件的诊断。`;
+            progressText = t("已完成 {count} 个 EPUB 文件的诊断。", {
+                count: epubFiles.length,
+            });
         } catch (error) {
-            errorText = `诊断失败：${String(error)}`;
+            errorText = t("诊断失败：{error}", { error: String(error) });
         } finally {
             busy = false;
             if (fileInput) fileInput.value = "";
@@ -108,18 +118,18 @@
 
     function issueLabel(issue: WebEpubDiagnosticIssue) {
         const labels: Record<string, string> = {
-            "invalid-zip": "压缩包无效",
-            "missing-mimetype": "缺少 mimetype",
-            "missing-container": "缺少 container.xml",
-            "container-parse": "container.xml 无法解析",
-            "missing-opf": "缺少 OPF",
-            "manifest-parse": "manifest 无法解析",
-            "manifest-missing": "manifest 资源缺失",
-            "case-mismatch": "路径大小写不一致",
-            "unregistered-resource": "资源未登记",
-            "ref-case-mismatch": "引用大小写不一致",
-            "missing-reference": "引用目标缺失",
-            "read-entry": "资源读取失败",
+            "invalid-zip": t("压缩包无效"),
+            "missing-mimetype": t("缺少 mimetype"),
+            "missing-container": t("缺少 container.xml"),
+            "container-parse": t("container.xml 无法解析"),
+            "missing-opf": t("缺少 OPF"),
+            "manifest-parse": t("manifest 无法解析"),
+            "manifest-missing": t("manifest 资源缺失"),
+            "case-mismatch": t("路径大小写不一致"),
+            "unregistered-resource": t("资源未登记"),
+            "ref-case-mismatch": t("引用大小写不一致"),
+            "missing-reference": t("引用目标缺失"),
+            "read-entry": t("资源读取失败"),
         };
         return labels[issue.kind] || issue.kind;
     }

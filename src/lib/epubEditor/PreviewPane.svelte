@@ -289,8 +289,8 @@
             <div class="error-header">
                 <span class="error-icon">!</span>
                 <span
-                    >&#39044;&#35272;&#36807;&#31243;&#20013;&#20986;&#29616;&#20102;
-                    {errors.length} &#20010;&#38169;&#35823;</span
+                    >预览过程中出现了
+                    {errors.length} 个错误</span
                 >
             </div>
             <div class="error-content">

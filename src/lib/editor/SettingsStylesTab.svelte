@@ -27,6 +27,8 @@
 </script>
 
 <script lang="ts">
+    import { localizeUiData, t } from "$lib/i18n.svelte";
+
     import CustomSelect from "$lib/CustomSelect.svelte";
 
     let {
@@ -84,18 +86,44 @@
     } = $props();
 
     const visibleBlocks = $derived(
-        blocks
-            .filter((block) => !block.hiddenInBlockEditor)
-            .map((block) => ({
-                ...block,
-                properties: block.properties.filter(
-                    (prop) => !prop.hiddenInBlockEditor,
-                ),
-            })),
+        localizeUiData(
+            blocks
+                .filter((block) => !block.hiddenInBlockEditor)
+                .map((block) => ({
+                    ...block,
+                    properties: block.properties.filter(
+                        (prop) => !prop.hiddenInBlockEditor,
+                    ),
+                })),
+        ),
     );
     const activeBlock = $derived(
         visibleBlocks.find((block) => block.id === activeBlockId) ||
             visibleBlocks[0],
+    );
+    const selectedTemplate = $derived(
+        templates.find((template) => template.id === selectedTemplateId),
+    );
+    const currentTemplateDisplayName = $derived(
+        selectedTemplate
+            ? selectedTemplate.is_builtin
+                ? t(selectedTemplate.name)
+                : selectedTemplate.name
+            : t(currentTemplateName),
+    );
+    const localizedFontFamilyOptions = $derived(
+        fontFamilyOptions.map((option) => {
+            const importedSuffix = " / 已导入";
+            return option.label.endsWith(importedSuffix)
+                ? {
+                      ...option,
+                      label: `${option.label.slice(
+                          0,
+                          -importedSuffix.length,
+                      )} / ${t("已导入")}`,
+                  }
+                : { ...option, label: t(option.label) };
+        }),
     );
     $effect(() => {
         if (
@@ -110,9 +138,9 @@
 <div class="font-settings-panel style-settings-panel">
     <div class="font-settings-head">
         <div>
-            <div class="font-settings-title">样式模板</div>
+            <div class="font-settings-title">{t("样式模板")}</div>
             <div class="font-settings-note">
-                选择默认 CSS 模板，并直接编辑当前 EPUB 输出样式。
+                {t("选择默认 CSS 模板，并直接编辑当前 EPUB 输出样式。")}
             </div>
         </div>
         <div class="style-settings-actions">
@@ -121,25 +149,26 @@
                 disabled={isImporting}
                 onclick={onImport}
             >
-                {isImporting ? "导入中..." : "导入 CSS"}
+                {t(isImporting ? "导入中..." : "导入 CSS")}
             </button>
             <button
                 class="mini-action style-toolbar-btn"
                 onclick={onToggleSourceEditor}
-                >{showSourceEditor ? "块编辑" : "源码"}</button
+                >{t(showSourceEditor ? "块编辑" : "源码")}</button
             >
             <button class="mini-action style-toolbar-btn" onclick={onReset}
-                >重置</button
+                >{t("重置")}</button
             >
             <button
                 class="mini-action primary style-toolbar-btn"
                 disabled={isSaving}
-                onclick={onSave}>{isSaving ? "保存中..." : "保存模板"}</button
+                onclick={onSave}
+                >{t(isSaving ? "保存中..." : "保存模板")}</button
             >
         </div>
     </div>
     {#if message}
-        <div class="font-settings-status">{message}</div>
+        <div class="font-settings-status">{t(message)}</div>
     {/if}
     <div class="style-template-list">
         {#each templates as template}
@@ -156,10 +185,14 @@
                         onchange={() => onSelectTemplate(template)}
                     />
                     <div class="style-template-meta">
-                        <strong>{template.name}</strong>
+                        <strong
+                            >{template.is_builtin
+                                ? t(template.name)
+                                : template.name}</strong
+                        >
                         <span
                             >{template.is_builtin
-                                ? "内置模板（始终置顶）"
+                                ? t("内置模板（始终置顶）")
                                 : template.file_name}</span
                         >
                     </div>
@@ -171,7 +204,7 @@
                         onclick={(event) => {
                             event.stopPropagation();
                             onRestoreBuiltin();
-                        }}>恢复默认样式</button
+                        }}>{t("恢复默认样式")}</button
                     >
                 {/if}
             </label>
@@ -180,9 +213,9 @@
     <div class="style-settings-editor">
         <div class="style-panel-header in-settings">
             <div>
-                <div class="style-panel-title">样式编辑</div>
+                <div class="style-panel-title">{t("样式编辑")}</div>
                 <div class="style-panel-subtitle">
-                    当前模板：{currentTemplateName}
+                    {t("当前模板：")}{currentTemplateDisplayName}
                 </div>
             </div>
         </div>
@@ -196,7 +229,7 @@
             </div>
         {:else}
             <div class="style-block-editor-layout">
-                <nav class="style-block-nav" aria-label="样式块">
+                <nav class="style-block-nav" aria-label={t("样式块")}>
                     {#each visibleBlocks as block}
                         <button
                             type="button"
@@ -245,7 +278,7 @@
                                                 value={prop.value}
                                                 options={(prop.name ===
                                                 "font-family"
-                                                    ? fontFamilyOptions
+                                                    ? localizedFontFamilyOptions
                                                     : prop.options
                                                 ).map((option) => ({
                                                     value: option.value,

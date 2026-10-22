@@ -4,6 +4,7 @@
     // 保活视图里页面常驻，全局 page.url 会随别的标签跳转而变
     const ownUrl = viewUrl();
     import { onDestroy } from "svelte";
+    import { localizeUiData, t } from "$lib/i18n.svelte";
     import {
         processWebEpub,
         type WebEpubProcessAction,
@@ -135,7 +136,7 @@
     ) as WebEpubProcessAction | null;
     $: action =
         rawAction && ACTIONS.has(rawAction) ? rawAction : "epub-reformat";
-    $: config = CONFIGS[action];
+    $: config = localizeUiData(CONFIGS[action]);
 
     function clearResults() {
         for (const result of results) URL.revokeObjectURL(result.url);
@@ -150,8 +151,8 @@
         if (!epubFiles.length) {
             failures = [
                 {
-                    sourceName: "未选择文件",
-                    error: "请选择扩展名为 .epub 的文件。",
+                    sourceName: t("未选择文件"),
+                    error: t("请选择扩展名为 .epub 的文件。"),
                 },
             ];
             return;
@@ -163,7 +164,11 @@
         try {
             for (let index = 0; index < epubFiles.length; index += 1) {
                 const file = epubFiles[index];
-                progress = `正在处理 ${index + 1} / ${epubFiles.length}：${file.name}`;
+                progress = t("正在处理 {current} / {total}：{name}", {
+                    current: index + 1,
+                    total: epubFiles.length,
+                    name: file.name,
+                });
                 try {
                     const result = await processWebEpub(file, action, {
                         imageFormat,
@@ -184,7 +189,10 @@
                     failures = [...failed];
                 }
             }
-            progress = `处理完成：${completed.length} 成功 / ${failed.length} 失败`;
+            progress = t("处理完成：{success} 成功 / {failed} 失败", {
+                success: completed.length,
+                failed: failed.length,
+            });
         } finally {
             busy = false;
             if (fileInput) fileInput.value = "";
@@ -323,7 +331,7 @@
             >
                 {#if busy}<span class="spinner"></span><strong
                         >正在处理 EPUB</strong
-                    ><span>{progress}</span>
+                    ><span>{t(progress)}</span>
                 {:else}<span class="upload-icon">+</span><strong
                         >选择或拖入 EPUB 文件</strong
                     ><span>支持一次处理多个文件 · 文件不会上传服务器</span><span
@@ -346,7 +354,7 @@
                 <div class="results-head">
                     <div>
                         <span class="kicker">PROCESS RESULTS</span>
-                        <h3>{progress}</h3>
+                        <h3>{t(progress)}</h3>
                     </div>
                     <button
                         class="secondary"
@@ -363,9 +371,11 @@
                             >
                             <div class="result-copy">
                                 <strong>{result.sourceName}</strong>
-                                <p>{result.message}</p>
+                                <p>{t(result.message)}</p>
                                 <small
-                                    >{result.processedEntries} 个相关条目 · {result.outputName}</small
+                                    >{t("{count} 个相关条目", {
+                                        count: result.processedEntries,
+                                    })} · {result.outputName}</small
                                 >
                             </div>
                             <button
@@ -382,7 +392,7 @@
                             <span class="state">×</span>
                             <div class="result-copy">
                                 <strong>{failure.sourceName}</strong>
-                                <p>{failure.error}</p>
+                                <p>{t(failure.error)}</p>
                             </div>
                         </article>
                     {/each}
@@ -390,7 +400,7 @@
                             <span class="spinner small"></span>
                             <div class="result-copy">
                                 <strong>处理中</strong>
-                                <p>{progress}</p>
+                                <p>{t(progress)}</p>
                             </div>
                         </article>{/if}
                 </div>

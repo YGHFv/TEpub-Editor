@@ -1,4 +1,5 @@
 import { platform } from "$lib/platform";
+import { t } from "$lib/i18n.svelte";
 
 export interface MobileExportResult {
   output_path: string;
@@ -97,7 +98,7 @@ export async function cacheBrowserFile(file: File, fallbackExt: string) {
     await withTimeout(
       file.arrayBuffer(),
       45000,
-      "读取文件超时，请确认文件在本机可访问后重试。",
+      t("读取文件超时，请确认文件在本机可访问后重试。"),
     ),
   );
   if (!platform.isTauri) {
@@ -171,9 +172,9 @@ export async function offerSystemExport(
         await nav.share({
           files: [file],
           title: outputName,
-          text: "TEpub-Editor EPUB 导出",
+          text: t("TEpub-Editor EPUB 导出"),
         });
-        return `已打开系统分享/保存面板：${outputName}`;
+        return t("已打开系统分享/保存面板：{name}", { name: outputName });
       } catch (shareErr) {
         console.warn(
           "System share/save failed; falling back to browser download",
@@ -191,16 +192,19 @@ export async function offerSystemExport(
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
-    return `已触发系统下载：${outputName}`;
+    return t("已触发系统下载：{name}", { name: outputName });
   } catch (err) {
     await platform.message(
-      `系统另存/分享失败：${err}\n\n后端副本位置：${path}`,
+      t("系统另存/分享失败：{error}\n\n后端副本位置：{path}", {
+        error: String(err),
+        path,
+      }),
       {
-        title: "导出 EPUB",
+        title: t("导出 EPUB"),
         kind: "warning",
       },
     );
-    return `已导出后端副本：${path}`;
+    return t("已导出后端副本：{path}", { path });
   }
 }
 

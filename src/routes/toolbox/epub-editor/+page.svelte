@@ -67,6 +67,7 @@
         unregisterKeepAliveGuard,
     } from "$lib/keepAlive/dirtyGuard";
     import { clientLayout, isMobileUserAgent } from "$lib/clientProfile";
+    import { t } from "$lib/i18n.svelte";
 
     type WebFileTreeNode = {
         name: string;
@@ -133,7 +134,9 @@
     let metadataDirty = false;
     let documentDirty = false;
     let busy = false;
-    let status = "选择 EPUB 文件后在浏览器内解包，编辑文本资源并导出新文件。";
+    let statusSource = "选择 EPUB 文件后在浏览器内解包，编辑文本资源并导出新文件。";
+    let statusParams: Record<string, unknown> = {};
+    $: status = t(statusSource, statusParams);
     let activeTab: "files" | "metadata" = "files";
     let rightTab: "preview" | "toc" = "preview";
     let restorePageOverflow: (() => void) | null = null;
@@ -158,7 +161,9 @@
     let searchDirection: "down" | "up" = "down";
     let wrapAround = true;
     let textOnly = false;
-    let searchMessage = "";
+    let searchMessageSource = "";
+    let searchMessageParams: Record<string, unknown> = {};
+    $: searchMessage = t(searchMessageSource, searchMessageParams);
     let currentMatchInfo: { path: string; from: number; to: number } | null =
         null;
     let previewBuildId = 0;
@@ -277,19 +282,44 @@
         return symbol === "    " ? "Tab" : symbol;
     }
 
+    function setStatus(source: string, params: Record<string, unknown> = {}) {
+        statusSource = source;
+        statusParams = params;
+    }
+
+    function setSearchMessage(
+        source: string,
+        params: Record<string, unknown> = {},
+    ) {
+        searchMessageSource = source;
+        searchMessageParams = params;
+    }
+
+    $: findModeOptions = FIND_MODE_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
+    $: searchScopeOptions = SEARCH_SCOPE_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
+    $: searchDirectionOptions = SEARCH_DIRECTION_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
     $: headTitle = readerMode
-        ? "Web EPUB 阅读器 - TEpub Editor"
-        : "Web EPUB 编辑器 - TEpub Editor";
+        ? t("Web EPUB 阅读器 - TEpub Editor")
+        : t("Web EPUB 编辑器 - TEpub Editor");
     $: importHeading = readerMode
-        ? "选择 EPUB 文件开始阅读"
-        : "选择 EPUB 文件开始编辑";
+        ? t("选择 EPUB 文件开始阅读")
+        : t("选择 EPUB 文件开始编辑");
     $: importDescription = readerMode
-        ? "导入后在浏览器内解包，左侧显示目录，中间以宽屏滚动预览方式阅读。"
-        : "支持无 DRM 的标准 EPUB，导入后可编辑文件结构、资源和元数据。";
-    $: importAction = readerMode ? "选择 EPUB 文件" : "选择 EPUB 文件";
+        ? t("导入后在浏览器内解包，左侧显示目录，中间以宽屏滚动预览方式阅读。")
+        : t("支持无 DRM 的标准 EPUB，导入后可编辑文件结构、资源和元数据。");
+    $: importAction = t("选择 EPUB 文件");
     $: currentPreviewTitle = selectedFile
         ? fileTitleMap.get(selectedFile.path) || selectedFile.name
-        : doc?.metadata.title || doc?.fileName || "未选择章节";
+        : doc?.metadata.title || doc?.fileName || t("未选择章节");
 
     /* 刻意不在 previewHtml 清空时把 previewFrameHeight 归零：
        换章节时 previewHtml 会先被置空再填新内容，归零会让新 iframe
@@ -759,7 +789,9 @@
             await openFile(file);
             return;
         }
-        status = `${file.path} 暂不支持在 Web 版中直接编辑。`;
+        setStatus("{path} 暂不支持在 Web 版中直接编辑。", {
+            path: file.path,
+        });
     }
 
     function getFileDescription(node: WebFileTreeNode) {
@@ -769,10 +801,11 @@
             if (title) return title;
         }
         const name = node.name.toLowerCase();
-        if (name === "container.xml") return "容器配置";
-        if (name.endsWith(".opf")) return "元数据";
-        if (name.includes("toc") || name.endsWith(".ncx")) return "目录结构";
-        if (node.file_type === "css") return "样式表";
+        if (name === "container.xml") return t("容器配置");
+        if (name.endsWith(".opf")) return t("元数据");
+        if (name.includes("toc") || name.endsWith(".ncx"))
+            return t("目录结构");
+        if (node.file_type === "css") return t("样式表");
         if (node.file_type === "font")
             return `font · ${fileSizeLabel(node.size || 0)}`;
         if (node.file_type === "image")
@@ -824,7 +857,10 @@
     function buildTocTree(items: WebEpubNavItem[], prefix = "toc") {
         return items.map((item, index): WebTocTreeNode => ({
             id: `${prefix}-${index}`,
-            label: item.label || item.href || `目录 ${index + 1}`,
+            label:
+                item.label ||
+                item.href ||
+                t("目录 {index}", { index: index + 1 }),
             src: item.fullPath,
             children: item.children?.length
                 ? buildTocTree(item.children, `${prefix}-${index}`)
@@ -842,7 +878,7 @@
             // 文案不能只说「未暂存」：用户先点过「暂存当前文件」再换书时，
             // 没有任何未暂存内容，被丢掉的恰恰是已暂存的那份。
             const ok = window.confirm(
-                "当前 EPUB 有未导出的修改（含已暂存内容），换书会丢弃这些改动。是否继续？",
+                t("当前 EPUB 有未导出的修改（含已暂存内容），换书会丢弃这些改动。是否继续？"),
             );
             if (!ok) return;
         }
@@ -985,10 +1021,13 @@
         const currentPath =
             selectedFile?.path || selectedImage?.path || selectedTreePath;
         if (currentPath && currentPath !== doc.opfPath) {
-            lines.push(`当前文件：${currentPath}`);
+            lines.push(t("当前文件：{path}", { path: currentPath }));
         } else if (!currentPath) {
             lines.push(
-                `${doc.files.length} 个文件 · ${doc.spine.length} 个阅读项`,
+                t("{files} 个文件 · {items} 个阅读项", {
+                    files: doc.files.length,
+                    items: doc.spine.length,
+                }),
             );
         }
         setTabDetail(ownTabId, lines.join("\n"));
@@ -1001,18 +1040,23 @@
     function normalizationSuffix(current: WebEpubDocument) {
         const notes: string[] = [];
         if (current.normalization.repairedEncryption)
-            notes.push("已解除伪加密");
-        if (current.normalization.xorKey !== null) notes.push("已解混淆");
+            notes.push(t("已解除伪加密"));
+        if (current.normalization.xorKey !== null)
+            notes.push(t("已解混淆"));
         if (current.normalization.renamedEntries > 0)
             notes.push(
-                `已恢复 ${current.normalization.renamedEntries} 个可读文件名`,
+                t("已恢复 {count} 个可读文件名", {
+                    count: current.normalization.renamedEntries,
+                }),
             );
-        return notes.length ? `；${notes.join("，")}` : "";
+        return notes.length
+            ? t("；{notes}", { notes: notes.join(t("，")) })
+            : "";
     }
 
     async function loadEpubFile(file: File) {
         busy = true;
-        status = "正在解包 EPUB...";
+        setStatus("正在解包 EPUB...");
         selectedFile = null;
         editorText = "";
         savedEditorText = "";
@@ -1034,7 +1078,15 @@
             // 阅读模式没有元数据面板，封面取来也没地方画，白占一个 blob URL
             if (!readerMode) await loadCoverPreview();
             publishTabDetail();
-            status = `已导入 ${file.name}，读取到 ${doc.files.length} 个文件 / ${doc.spine.length} 个阅读项${normalizationSuffix(doc)}`;
+            setStatus(
+                "已导入 {name}，读取到 {files} 个文件 / {items} 个阅读项{suffix}",
+                {
+                    name: file.name,
+                    files: doc.files.length,
+                    items: doc.spine.length,
+                    suffix: normalizationSuffix(doc),
+                },
+            );
             const firstEditable =
                 doc.spine
                     .map((item) => fileByPath(item.manifest?.fullPath))
@@ -1052,7 +1104,7 @@
             selectedImage = null;
             revokeImagePreviewUrl();
             revokeCoverPreviewUrl();
-            status = `导入失败：${String(error)}`;
+            setStatus("导入失败：{error}", { error: String(error) });
         } finally {
             busy = false;
             if (fileInput) fileInput.value = "";
@@ -1087,7 +1139,7 @@
         if (!doc || !file.editable || (busy && !force)) return false;
         persistCurrentFile({ refreshPreview: false });
         busy = true;
-        status = `正在读取 ${file.path}`;
+        setStatus("正在读取 {path}", { path: file.path });
         try {
             selectedFile = file;
             selectedTreePath = file.path;
@@ -1109,10 +1161,10 @@
             }
             currentMatchInfo = null;
             publishTabDetail();
-            status = `已打开 ${file.path}`;
+            setStatus("已打开 {path}", { path: file.path });
             return true;
         } catch (error) {
-            status = `读取失败：${String(error)}`;
+            setStatus("读取失败：{error}", { error: String(error) });
             return false;
         } finally {
             busy = false;
@@ -1159,7 +1211,7 @@
         } catch (error) {
             if (requestId !== previewBuildId) return;
             previewHtml = "";
-            status = `预览失败：${String(error)}`;
+            setStatus("预览失败：{error}", { error: String(error) });
             revokePreviewUrls();
         }
     }
@@ -1167,7 +1219,7 @@
     function prepareOpfMutation() {
         if (!doc || selectedFile?.path !== doc.opfPath || !dirty) return true;
         const ok = window.confirm(
-            "当前 OPF 源码有未暂存修改，继续会先暂存 OPF 再写入资源清单。是否继续？",
+            t("当前 OPF 源码有未暂存修改，继续会先暂存 OPF 再写入资源清单。是否继续？"),
         );
         if (!ok) return false;
         stageCurrentFile();
@@ -1221,7 +1273,7 @@
         if (!doc || file.kind !== "image" || (busy && !force)) return false;
         persistCurrentFile({ refreshPreview: false });
         busy = true;
-        status = `正在读取图片 ${file.path}`;
+        setStatus("正在读取图片 {path}", { path: file.path });
         try {
             const blob = await readWebEpubBlob(
                 doc,
@@ -1240,10 +1292,12 @@
             currentMatchInfo = null;
             imagePreviewUrl = URL.createObjectURL(blob);
             publishTabDetail();
-            status = `已打开图片 ${file.path}`;
+            setStatus("已打开图片 {path}", { path: file.path });
             return true;
         } catch (error) {
-            status = `图片读取失败：${String(error)}`;
+            setStatus("图片读取失败：{error}", {
+                error: String(error),
+            });
             return false;
         } finally {
             busy = false;
@@ -1332,7 +1386,10 @@
                     : defaultImportPath(file.name);
                 const requestedPath =
                     askPath && files.length === 1
-                        ? window.prompt("导入到 EPUB 内部路径：", initialPath)
+                        ? window.prompt(
+                              t("导入到 EPUB 内部路径："),
+                              initialPath,
+                          )
                         : initialPath;
                 if (!requestedPath) continue;
                 const path = uniqueResourcePath(requestedPath);
@@ -1340,9 +1397,9 @@
                 const addToSpine =
                     mediaType === "application/xhtml+xml" &&
                     (files.length === 1
-                        ? window.confirm("将该 XHTML 加入阅读顺序？")
+                        ? window.confirm(t("将该 XHTML 加入阅读顺序？"))
                         : /\/text\//i.test(path));
-                status = `正在导入资源 ${path}`;
+                setStatus("正在导入资源 {path}", { path });
                 const entry = await addWebEpubResource(doc, {
                     path,
                     content: await file.arrayBuffer(),
@@ -1366,12 +1423,14 @@
             } else {
                 await syncOpenOpfSource();
             }
-            status =
+            setStatus(
                 importedPaths.length > 0
-                    ? `已导入 ${importedPaths.length} 个资源。`
-                    : "未导入资源。";
+                    ? "已导入 {count} 个资源。"
+                    : "未导入资源。",
+                { count: importedPaths.length },
+            );
         } catch (error) {
-            status = `导入资源失败：${String(error)}`;
+            setStatus("导入资源失败：{error}", { error: String(error) });
         } finally {
             busy = false;
             pendingImportFolder = "";
@@ -1444,15 +1503,17 @@
         if (!current) return;
         const currentPath = current.path;
         if (currentPath === doc.opfPath) {
-            status = "不能删除 OPF 核心文件。";
+            setStatus("不能删除 OPF 核心文件。");
             return;
         }
         const ok = window.confirm(
-            `确认删除资源？\n${currentPath}\n\n会同步移除 OPF manifest/spine 引用，导出后生效。`,
+            t("确认删除资源？\n{path}\n\n会同步移除 OPF manifest/spine 引用，导出后生效。", {
+                path: currentPath,
+            }),
         );
         if (!ok) return;
         busy = true;
-        status = `正在删除 ${currentPath}`;
+        setStatus("正在删除 {path}", { path: currentPath });
         try {
             await deleteWebEpubResource(doc, currentPath);
             doc = doc;
@@ -1471,9 +1532,9 @@
             selectedTreePath = "";
             await loadCoverPreview();
             await loadFileTitles();
-            status = `已删除 ${currentPath}`;
+            setStatus("已删除 {path}", { path: currentPath });
         } catch (error) {
-            status = `删除失败：${String(error)}`;
+            setStatus("删除失败：{error}", { error: String(error) });
         } finally {
             busy = false;
             closeFileMenu();
@@ -1492,11 +1553,11 @@
         const current = fileByPath(path);
         if (!current) return;
         if (path === doc.opfPath) {
-            status = "不能重命名 OPF 核心文件。";
+            setStatus("不能重命名 OPF 核心文件。");
             return;
         }
         const requestedName = window.prompt(
-            "新的文件名或 EPUB 内部路径：",
+            t("新的文件名或 EPUB 内部路径："),
             current.name,
         );
         if (requestedName === null) return;
@@ -1504,7 +1565,7 @@
         if (!nextPath || nextPath === path) return;
         if (selectedFile?.path === path && dirty) stageCurrentFile();
         busy = true;
-        status = `正在重命名 ${path}`;
+        setStatus("正在重命名 {path}", { path });
         try {
             const renamed = await renameWebEpubResource(doc, path, nextPath);
             doc = doc;
@@ -1522,9 +1583,9 @@
             await loadCoverPreview();
             await loadFileTitles();
             await syncOpenOpfSource();
-            status = `已重命名为 ${nextPath}`;
+            setStatus("已重命名为 {path}", { path: nextPath });
         } catch (error) {
-            status = `重命名失败：${String(error)}`;
+            setStatus("重命名失败：{error}", { error: String(error) });
         } finally {
             busy = false;
             closeFileMenu();
@@ -1535,12 +1596,12 @@
         if (!doc || busy || !metadataDirty) return;
         if (selectedFile?.path === doc.opfPath && dirty) {
             const ok = window.confirm(
-                "当前 OPF 源码有未暂存修改，保存元数据会重新写入 OPF。是否继续？",
+                t("当前 OPF 源码有未暂存修改，保存元数据会重新写入 OPF。是否继续？"),
             );
             if (!ok) return;
         }
         busy = true;
-        status = "正在写入 OPF 元数据...";
+        setStatus("正在写入 OPF 元数据...");
         try {
             const saved = await updateWebEpubMetadata(doc, metadataDraft);
             documentDirty = true;
@@ -1552,9 +1613,11 @@
                 previewHtml = "";
                 revokePreviewUrls();
             }
-            status = "元数据已写入，导出 EPUB 后生效。";
+            setStatus("元数据已写入，导出 EPUB 后生效。");
         } catch (error) {
-            status = `元数据保存失败：${String(error)}`;
+            setStatus("元数据保存失败：{error}", {
+                error: String(error),
+            });
         } finally {
             busy = false;
         }
@@ -1564,7 +1627,7 @@
         if (!doc || busy) return;
         if (dirty) stageCurrentFile();
         busy = true;
-        status = "正在重新打包 EPUB...";
+        setStatus("正在重新打包 EPUB...");
         try {
             const blob = await exportWebEpubBlob(doc);
             const fileName = outputFileName();
@@ -1572,9 +1635,9 @@
             // （手机 WebView 上同步 revoke 会导致"点了导出没反应"）
             downloadBrowserBlob(blob, fileName);
             documentDirty = false;
-            status = `已导出 ${fileName}`;
+            setStatus("已导出 {name}", { name: fileName });
         } catch (error) {
-            status = `导出失败：${String(error)}`;
+            setStatus("导出失败：{error}", { error: String(error) });
         } finally {
             busy = false;
         }
@@ -1651,7 +1714,7 @@
     function previewNavLabel() {
         const files = previewableSpineFiles();
         const index = currentPreviewIndex();
-        if (index < 0 || files.length === 0) return "未定位到书脊";
+        if (index < 0 || files.length === 0) return t("未定位到书脊");
         return `${index + 1} / ${files.length}`;
     }
 
@@ -2021,19 +2084,23 @@
     async function previewCurrentFile() {
         if (!selectedFile || busy) return;
         if (selectedFile.kind !== "xhtml") {
-            status = "当前文件不是 XHTML/HTML 章节，暂不能预览。";
+            setStatus("当前文件不是 XHTML/HTML 章节，暂不能预览。");
             return;
         }
         busy = true;
-        status = `正在生成 ${selectedFile.path} 的预览`;
+        setStatus("正在生成 {path} 的预览", {
+            path: selectedFile.path,
+        });
         revokePreviewUrls();
         try {
             previewHtml = await buildPreviewHtml();
             rightTab = "preview";
-            status = `已生成 ${selectedFile.path} 的预览`;
+            setStatus("已生成 {path} 的预览", {
+                path: selectedFile.path,
+            });
         } catch (error) {
             previewHtml = "";
-            status = `预览失败：${String(error)}`;
+            setStatus("预览失败：{error}", { error: String(error) });
             revokePreviewUrls();
         } finally {
             busy = false;
@@ -2150,7 +2217,7 @@
         showFindHistory = false;
         showReplaceHistory = false;
         currentMatchInfo = null;
-        searchMessage = "";
+        setSearchMessage("");
     }
 
     function getFilesInScope() {
@@ -2200,13 +2267,13 @@
     async function findNextInDirection(direction: "down" | "up") {
         if (!doc || !selectedFile) return;
         if (!findPattern) {
-            searchMessage = "请输入查找内容";
+            setSearchMessage("请输入查找内容");
             return;
         }
         rememberSearchInputs();
         const files = getFilesInScope();
         if (files.length === 0) {
-            searchMessage = "没有可搜索文件";
+            setSearchMessage("没有可搜索文件");
             return;
         }
         const currentIndex = Math.max(
@@ -2249,16 +2316,18 @@
                 }
                 if (match) {
                     await selectMatch(file, match.from, match.to);
-                    searchMessage = `已定位 ${file.name}`;
+                    setSearchMessage("已定位 {name}", {
+                        name: file.name,
+                    });
                     return;
                 }
                 if (!wrapAround && isCurrent) break;
             }
         } catch {
-            searchMessage = "正则表达式错误";
+            setSearchMessage("正则表达式错误");
             return;
         }
-        searchMessage = "未找到匹配内容";
+        setSearchMessage("未找到匹配内容");
     }
 
     async function findNext() {
@@ -2275,7 +2344,7 @@
             !currentMatchInfo ||
             currentMatchInfo.path !== selectedFile.path
         ) {
-            searchMessage = "请先查找";
+            setSearchMessage("请先查找");
             return;
         }
         const before = editorText.slice(0, currentMatchInfo.from);
@@ -2289,13 +2358,13 @@
         rememberSearchInputs();
         await tick();
         selectEditorRange(currentMatchInfo.from, currentMatchInfo.to);
-        searchMessage = "已替换";
+        setSearchMessage("已替换");
         await findNext();
     }
 
     async function performReplaceAll() {
         if (!doc || !findPattern) {
-            searchMessage = "请输入查找内容";
+            setSearchMessage("请输入查找内容");
             return;
         }
         rememberSearchInputs();
@@ -2322,15 +2391,17 @@
                 await refreshPreviewFromEditor();
             await loadFileTitles();
             currentMatchInfo = null;
-            searchMessage = `已替换 ${total} 处`;
+            setSearchMessage("已替换 {count} 处", { count: total });
         } catch (error) {
-            searchMessage = `替换失败：${String(error)}`;
+            setSearchMessage("替换失败：{error}", {
+                error: String(error),
+            });
         }
     }
 
     async function countMatches() {
         if (!findPattern) {
-            searchMessage = "请输入查找内容";
+            setSearchMessage("请输入查找内容");
             return;
         }
         let total = 0;
@@ -2340,9 +2411,9 @@
                 const content = await contentForFile(file);
                 total += countMatchesInContent(content, query);
             }
-            searchMessage = `共 ${total} 处匹配`;
+            setSearchMessage("共 {count} 处匹配", { count: total });
         } catch {
-            searchMessage = "正则表达式错误";
+            setSearchMessage("正则表达式错误");
         }
     }
 </script>
@@ -2376,7 +2447,11 @@
                 kicker={readerMode ? "EPUB READER" : "EPUB EDITOR"}
                 title={readerMode ? "EPUB 阅读器" : "EPUB 编辑器"}
                 description={importDescription}
-                privacy={`文件仅在当前设备中读取，选择后继续进入原有${readerMode ? "阅读" : "编辑"}页面。`}
+                privacy={t(
+                    readerMode
+                        ? "文件仅在当前设备中读取，选择后继续进入原有阅读页面。"
+                        : "文件仅在当前设备中读取，选择后继续进入原有编辑页面。",
+                )}
                 outputLabel={readerMode ? "阅读格式" : "编辑格式"}
                 outputValue="EPUB"
                 features={readerMode
@@ -2900,14 +2975,14 @@
                                 <CustomSelect
                                     className="fr-custom-select fr-select-sm"
                                     value={isRegex ? "regex" : "text"}
-                                    options={FIND_MODE_OPTIONS}
+                                    options={findModeOptions}
                                     on:change={(event) =>
                                         (isRegex = event.detail === "regex")}
                                 />
                                 <CustomSelect
                                     className="fr-custom-select"
                                     value={searchScope}
-                                    options={SEARCH_SCOPE_OPTIONS}
+                                    options={searchScopeOptions}
                                     on:change={(event) =>
                                         (searchScope =
                                             event.detail as typeof searchScope)}
@@ -2915,7 +2990,7 @@
                                 <CustomSelect
                                     className="fr-custom-select fr-select-xs"
                                     value={searchDirection}
-                                    options={SEARCH_DIRECTION_OPTIONS}
+                                    options={searchDirectionOptions}
                                     on:change={(event) =>
                                         (searchDirection =
                                             event.detail as typeof searchDirection)}
@@ -3033,8 +3108,8 @@
                                         on:click={toggleReaderToc}
                                         aria-pressed={!readerTocCollapsed}
                                         title={readerTocCollapsed
-                                            ? "显示目录"
-                                            : "收起目录"}>目录</button
+                                            ? t("显示目录")
+                                            : t("收起目录")}>目录</button
                                     >
                                 {/if}
                                 <button
@@ -3102,8 +3177,8 @@
                                         bind:this={previewIframeEl}
                                         class="chapter-preview"
                                         title={readerMode
-                                            ? "章节阅读预览"
-                                            : "章节预览"}
+                                            ? t("章节阅读预览")
+                                            : t("章节预览")}
                                         srcdoc={previewHtml}
                                         sandbox="allow-same-origin allow-scripts"
                                         style:height={previewFrameHeight
@@ -3115,8 +3190,8 @@
                             {:else if (!selectedFile && !selectedImage) || selectedFile?.kind === "xhtml"}
                                 <div class="preview-empty">
                                     {readerMode
-                                        ? "选择目录中的章节后开始阅读。"
-                                        : "选择 XHTML 章节后自动预览。"}
+                                        ? t("选择目录中的章节后开始阅读。")
+                                        : t("选择 XHTML 章节后自动预览。")}
                                 </div>
                             {/if}
                         </div>

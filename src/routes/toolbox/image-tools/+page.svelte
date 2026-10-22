@@ -15,6 +15,7 @@
         registerKeepAliveGuard,
         unregisterKeepAliveGuard,
     } from "$lib/keepAlive/dirtyGuard";
+    import { localizeAiProviderName, t } from "$lib/i18n.svelte";
 
     type AiTarget = "duokan" | "standard" | "banner";
     type ToolMode = "cover" | "header" | "ai";
@@ -277,9 +278,12 @@
               : headerSourceObjectUrl;
     $: previewOutputTitle =
         activeMode === "cover"
-            ? `全屏封面 ${localWidth}x${localHeight}`
+            ? t("全屏封面 {width}x{height}", {
+                  width: localWidth,
+                  height: localHeight,
+              })
             : activeMode === "header"
-              ? "头图制作"
+              ? t("头图制作")
               : targetLabel(aiTarget);
     $: selectedFormatLabel =
         FORMAT_OPTIONS.find((option) => option.value === outputFormat)?.label ||
@@ -287,8 +291,8 @@
     $: selectedProviderLabel = selectedImageProvider
         ? `${selectedImageProvider.name || selectedImageProvider.model} · ${selectedImageProvider.model}`
         : imageProviders.length === 0
-          ? "未配置生图模型"
-          : "选择生图模型";
+          ? t("未配置生图模型")
+          : t("选择生图模型");
     $: saveDisabled =
         activeMode === "cover"
             ? !coverImage
@@ -353,7 +357,7 @@
         const img = new Image();
         await new Promise<void>((resolve, reject) => {
             img.onload = () => resolve();
-            img.onerror = () => reject(new Error("图片加载失败"));
+            img.onerror = () => reject(new Error(t("图片加载失败")));
             img.src = url;
         });
         return img;
@@ -363,7 +367,7 @@
         return new Promise<string>((resolve, reject) => {
             canvas.toBlob((blob) => {
                 if (!blob) {
-                    reject(new Error("生成图片失败"));
+                    reject(new Error(t("生成图片失败")));
                     return;
                 }
                 resolve(URL.createObjectURL(blob));
@@ -382,7 +386,7 @@
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("无法创建头图样图画布");
+        if (!ctx) throw new Error(t("无法创建头图样图画布"));
         ctx.clearRect(0, 0, width, height);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
@@ -421,8 +425,8 @@
     }
 
     function targetLabel(target: AiTarget) {
-        return (
-            AI_TARGETS.find((item) => item.id === target)?.label || "全屏封面"
+        return t(
+            AI_TARGETS.find((item) => item.id === target)?.label || "全屏封面",
         );
     }
 
@@ -484,8 +488,8 @@
             : nextProviders[0]?.id || "";
         status =
             nextProviders.length > 0
-                ? "已刷新生图模型"
-                : "未找到已保存的生图模型";
+                ? t("已刷新生图模型")
+                : t("未找到已保存的生图模型");
     }
 
     function detectMime(bytes: Uint8Array, fallback: string) {
@@ -518,8 +522,8 @@
         purpose: ImagePurpose = fileInputPurpose,
     ) {
         if (!file.type.startsWith("image/")) {
-            await platform.message("请选择图片文件。", {
-                title: "图片处理",
+            await platform.message(t("请选择图片文件。"), {
+                title: t("图片处理"),
                 kind: "warning",
             });
             return;
@@ -560,8 +564,8 @@
         );
         status =
             purpose === "headerSource"
-                ? `已载入处理图片 ${file.name}`
-                : `已载入参考图 ${file.name}`;
+                ? t("已载入处理图片 {name}", { name: file.name })
+                : t("已载入参考图 {name}", { name: file.name });
         await tick();
         drawLocalPreview();
         drawHeaderPreview();
@@ -569,8 +573,8 @@
 
     async function loadHeaderSampleFile(file: File) {
         if (!file.type.startsWith("image/")) {
-            await platform.message("请选择图片文件。", {
-                title: "图片处理",
+            await platform.message(t("请选择图片文件。"), {
+                title: t("图片处理"),
                 kind: "warning",
             });
             return;
@@ -588,7 +592,15 @@
             headerSampleImage = normalized.image;
             headerSampleName = file.name;
             markDirty("header");
-            status = `已载入头图样图 ${file.name}，长边已规范为 ${HEADER_SAMPLE_LONG_EDGE}px（${normalized.width}x${normalized.height}）`;
+            status = t(
+                "已载入头图样图 {name}，长边已规范为 {edge}px（{width}x{height}）",
+                {
+                    name: file.name,
+                    edge: HEADER_SAMPLE_LONG_EDGE,
+                    width: normalized.width,
+                    height: normalized.height,
+                },
+            );
             resetHeaderTransform();
             await tick();
             drawHeaderPreview();
@@ -603,9 +615,9 @@
         const file = input.files?.[0];
         if (file) {
             loadImageFile(file, fileInputPurpose).catch((err) => {
-                status = "图片载入失败";
+                status = t("图片载入失败");
                 platform.message(String(err?.message ?? err), {
-                    title: "图片处理",
+                    title: t("图片处理"),
                     kind: "error",
                 });
             });
@@ -618,9 +630,9 @@
         const file = input.files?.[0];
         if (file) {
             loadHeaderSampleFile(file).catch((err) => {
-                status = "头图样图载入失败";
+                status = t("头图样图载入失败");
                 platform.message(String(err?.message ?? err), {
-                    title: "图片处理",
+                    title: t("图片处理"),
                     kind: "error",
                 });
             });
@@ -634,9 +646,9 @@
         if (file) {
             if (activeMode === "header" && !headerSampleImage) {
                 loadHeaderSampleFile(file).catch((err) => {
-                    status = "头图样图载入失败";
+                    status = t("头图样图载入失败");
                     platform.message(String(err?.message ?? err), {
-                        title: "图片处理",
+                        title: t("图片处理"),
                         kind: "error",
                     });
                 });
@@ -649,9 +661,9 @@
                       ? "ai"
                       : "cover";
             loadImageFile(file, purpose).catch((err) => {
-                status = "图片载入失败";
+                status = t("图片载入失败");
                 platform.message(String(err?.message ?? err), {
-                    title: "图片处理",
+                    title: t("图片处理"),
                     kind: "error",
                 });
             });
@@ -809,7 +821,7 @@
         coverMime = "";
         coverObjectUrl = "";
         markSaved("cover");
-        status = "已清空封面处理参考图";
+        status = t("已清空封面处理参考图");
     }
 
     function clearHeaderImages() {
@@ -825,7 +837,7 @@
         headerOffsetX = 0;
         headerOffsetY = 0;
         markSaved("header");
-        status = "已清空头图样图和处理图片";
+        status = t("已清空头图样图和处理图片");
     }
 
     function clearGeneratedImage() {
@@ -840,7 +852,7 @@
         aiSize = defaultSize(aiTarget);
         aiPrompt = defaultPrompt(aiTarget);
         generatedTarget = aiTarget;
-        status = "AI 生成参数已重置";
+        status = t("AI 生成参数已重置");
     }
 
     function clearAiReference() {
@@ -852,7 +864,7 @@
         aiReferenceObjectUrl = "";
         clearGeneratedImage();
         markSaved("ai");
-        status = "已清空 AI 参考图";
+        status = t("已清空 AI 参考图");
     }
 
     function resetHeaderTransform() {
@@ -977,7 +989,7 @@
             canvas.toBlob(
                 async (blob) => {
                     if (!blob) {
-                        reject(new Error("生成图片失败"));
+                        reject(new Error(t("生成图片失败")));
                         return;
                     }
                     resolve(new Uint8Array(await blob.arrayBuffer()));
@@ -1008,7 +1020,7 @@
         // 用户取消：产物还在手里，页面依然算「有未保存的东西」
         if (!selected) return false;
         await platform.writeFile(selected, bytes);
-        status = `已保存 ${selected}`;
+        status = t("已保存 {path}", { path: selected });
         return true;
     }
 
@@ -1230,7 +1242,7 @@
     }
 
     async function requestBrowserAiImage(body: Record<string, unknown>) {
-        if (!selectedImageProvider) throw new Error("未选择生图模型");
+        if (!selectedImageProvider) throw new Error(t("未选择生图模型"));
         const response = await fetch(
             browserAiImageGenerationUrl(selectedImageProvider.baseUrl),
             {
@@ -1258,19 +1270,24 @@
             } catch {
                 // Keep raw text.
             }
-            throw new Error(`生图接口返回 ${response.status}: ${detail}`);
+            throw new Error(
+                t("生图接口返回 {status}: {detail}", {
+                    status: response.status,
+                    detail,
+                }),
+            );
         }
         if (contentType.startsWith("image/")) return buffer;
         const text = new TextDecoder().decode(buffer);
         const value = JSON.parse(text);
         const bytes = extractBrowserAiImageBytes(value);
-        if (!bytes) throw new Error("生图接口返回中没有图片数据");
+        if (!bytes) throw new Error(t("生图接口返回中没有图片数据"));
         return bytes;
     }
 
     async function generateAiImageInBrowser() {
         if (!selectedImageProvider || !aiReferenceBytes)
-            throw new Error("缺少生图模型或参考图");
+            throw new Error(t("缺少生图模型或参考图"));
         const prompt = renderAiPrompt(aiPrompt);
         const referenceDataUrl = bytesToDataUrl(
             aiReferenceBytes,
@@ -1309,11 +1326,13 @@
         const message = String(
             (lastError as Error | null)?.message ||
                 lastError ||
-                "浏览器直连生图失败",
+                t("浏览器直连生图失败"),
         );
         if (/Failed to fetch|NetworkError|Load failed/i.test(message)) {
             throw new Error(
-                "浏览器直连生图失败，通常是该 API 不允许跨域请求。Docker/正式部署请更新后走后端代理。",
+                t(
+                    "浏览器直连生图失败，通常是该 API 不允许跨域请求。Docker/正式部署请更新后走后端代理。",
+                ),
             );
         }
         throw new Error(message);
@@ -1321,16 +1340,16 @@
 
     async function generateAiImage() {
         if (!aiReferenceBytes) {
-            await platform.message("请先选择参考封面。", {
-                title: "图片处理",
+            await platform.message(t("请先选择参考封面。"), {
+                title: t("图片处理"),
                 kind: "warning",
             });
             return;
         }
         if (!selectedImageProvider) {
             await platform.message(
-                "请先在工具箱设置的 API 配置中新增生图模型。",
-                { title: "图片处理", kind: "warning" },
+                t("请先在工具箱设置的 API 配置中新增生图模型。"),
+                { title: t("图片处理"), kind: "warning" },
             );
             return;
         }
@@ -1340,14 +1359,14 @@
             !selectedImageProvider.model.trim()
         ) {
             await platform.message(
-                "选中的生图模型缺少 API 地址、Key 或模型名。",
-                { title: "图片处理", kind: "warning" },
+                t("选中的生图模型缺少 API 地址、Key 或模型名。"),
+                { title: t("图片处理"), kind: "warning" },
             );
             return;
         }
         if (!title.trim()) {
-            await platform.message("请填写书名。", {
-                title: "图片处理",
+            await platform.message(t("请填写书名。"), {
+                title: t("图片处理"),
                 kind: "warning",
             });
             return;
@@ -1355,7 +1374,7 @@
         if (!canGenerate) return;
         saveConfig();
         generating = true;
-        status = `正在生成${targetLabel(aiTarget)}...`;
+        status = t("正在生成{target}...", { target: targetLabel(aiTarget) });
         try {
             const request = {
                 baseUrl: selectedImageProvider.baseUrl,
@@ -1371,10 +1390,10 @@
             let result: AiImageResult;
             if (platform.isWeb) {
                 try {
-                    status = "正在尝试浏览器直连生图...";
+                    status = t("正在尝试浏览器直连生图...");
                     result = await generateAiImageInBrowser();
                 } catch (error) {
-                    status = "浏览器直连失败，尝试后端代理...";
+                    status = t("浏览器直连失败，尝试后端代理...");
                     result = await platform.invoke<AiImageResult>(
                         "toolbox_generate_ai_image",
                         { request },
@@ -1390,11 +1409,13 @@
             generatedTarget = aiTarget;
             markDirty("ai");
             setGeneratedUrl(new Uint8Array(result.bytes), result.mime);
-            status = `生成完成：${result.size || "auto"}`;
+            status = t("生成完成：{size}", {
+                size: result.size || "auto",
+            });
         } catch (err) {
-            status = "AI 生成失败";
+            status = t("AI 生成失败");
             await platform.message(String(err), {
-                title: "图片处理",
+                title: t("图片处理"),
                 kind: "error",
             });
         } finally {
@@ -2108,7 +2129,7 @@
                                     class:active={aiTarget === target.id}
                                     on:click={() => setAiTarget(target.id)}
                                 >
-                                    <span>{target.label}</span>
+                                    <span>{t(target.label)}</span>
                                     <small>{target.ratioLabel}</small>
                                 </button>
                             {/each}
@@ -2168,8 +2189,9 @@
                                                             provider.id,
                                                         )}
                                                 >
-                                                    {provider.name ||
-                                                        provider.model} · {provider.model}
+                                                    {localizeAiProviderName(
+                                                        provider.name,
+                                                    ) || provider.model} · {provider.model}
                                                 </button>
                                             {/each}
                                         </div>
@@ -3100,8 +3122,7 @@
         /* 用 token 而不是裸 env()：安卓 WebView 的 env(safe-area-inset-*)
            恒为 0，--safe-top 里带着 --safe-top-min 的 24px 兜底。裸 env()
            特异性相同但注入更晚，会把兜底整个绕过去，状态栏压住第一行。 */
-        padding: max(12px, var(--safe-top)) 12px
-            max(12px, var(--safe-bottom));
+        padding: max(12px, var(--safe-top)) 12px max(12px, var(--safe-bottom));
         overflow: visible;
     }
 

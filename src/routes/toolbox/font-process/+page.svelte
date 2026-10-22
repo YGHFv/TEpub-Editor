@@ -11,6 +11,7 @@
         type WebEpubFontProcessResult,
     } from "$lib/webEpubFontProcess";
     import { triggerBrowserDownload } from "$lib/webFileWorkflow";
+    import { t } from "$lib/i18n.svelte";
 
     let epubInput: HTMLInputElement | null = null;
     let txtInput: HTMLInputElement | null = null;
@@ -32,15 +33,21 @@
     $: decryptMode = action === "font-decrypt";
     $: subsetMode = action === "font-subset";
     $: title = decryptMode
-        ? "EPUB 字体解密"
+        ? t("EPUB 字体解密")
         : subsetMode
-          ? "EPUB 字体精简"
-          : "EPUB 字体加密";
+          ? t("EPUB 字体精简")
+          : t("EPUB 字体加密");
     $: description = decryptMode
-        ? "恢复 EPUB 中经过字体映射混淆的正文；旧式私用区加密可自动识别，新式正文字形置换需使用同版本明文 TXT 对齐。"
+        ? t(
+              "恢复 EPUB 中经过字体映射混淆的正文；旧式私用区加密可自动识别，新式正文字形置换需使用同版本明文 TXT 对齐。",
+          )
         : subsetMode
-          ? "扫描整本 EPUB 正文实际使用的 Unicode 码点，裁剪未使用字形以减小内嵌字体体积。"
-          : "按段落实际使用的正文字体分别随机打乱汉字映射；标点、标题和字体不支持的文字保持原样，加密前自动精简全部内嵌字体。";
+          ? t(
+                "扫描整本 EPUB 正文实际使用的 Unicode 码点，裁剪未使用字形以减小内嵌字体体积。",
+            )
+          : t(
+                "按段落实际使用的正文字体分别随机打乱汉字映射；标点、标题和字体不支持的文字保持原样，加密前自动精简全部内嵌字体。",
+            );
 
     function clearResult() {
         if (result) URL.revokeObjectURL(result.url);
@@ -67,10 +74,10 @@
         busy = true;
         errorText = "";
         progress = decryptMode
-            ? "正在分析字体映射并恢复正文…"
+            ? t("正在分析字体映射并恢复正文…")
             : subsetMode
-              ? "正在收集正文码点并裁剪字体…"
-              : "正在分析正文与内嵌字体…";
+              ? t("正在收集正文码点并裁剪字体…")
+              : t("正在分析正文与内嵌字体…");
         try {
             const processed = await processWebEpubFont(
                 file,
@@ -78,10 +85,10 @@
                 await readPlainText(),
             );
             result = { ...processed, url: URL.createObjectURL(processed.blob) };
-            progress = processed.message;
+            progress = t(processed.message);
         } catch (error) {
             errorText = error instanceof Error ? error.message : String(error);
-            progress = "处理未完成";
+            progress = t("处理未完成");
         } finally {
             busy = false;
             if (epubInput) epubInput.value = "";
@@ -114,7 +121,7 @@
         );
         if (txt) plainTxtFile = txt;
         if (epub) void run(epub);
-        else errorText = "请拖入 EPUB 文件。";
+        else errorText = t("请拖入 EPUB 文件。");
     }
 
     function download() {

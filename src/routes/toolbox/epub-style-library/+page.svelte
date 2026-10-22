@@ -28,6 +28,7 @@
         unregisterKeepAliveGuard,
     } from "$lib/keepAlive/dirtyGuard";
     import { viewUrl } from "$lib/keepAlive/viewState";
+    import { t } from "$lib/i18n.svelte";
 
     type ViewMode = EpubStyleKind | "interface";
     type PanelMode = "browse" | "create";
@@ -188,8 +189,9 @@
     $: contentStyleError = validateContentStyle(false);
     $: titleStyleOptions = titleStyles.map((style) => ({
         value: style.id,
-        label: style.name,
-        meta: style.sourceKind === "saved" ? "自定义" : "内置",
+        label: t(style.name),
+        meta:
+            style.sourceKind === "saved" ? t("自定义") : t("内置"),
     }));
     $: {
         void titleStyles;
@@ -413,7 +415,9 @@
 
     function applyContentTemplate(style: EpubStyleModule | undefined) {
         if (!style) return;
-        contentName = `${style.name}（自定义）`;
+        contentName = t("{name}（自定义）", {
+            name: t(style.name),
+        });
         contentCss = style.css;
         contentMarkup = style.markup || "";
         contentPreviewDataUrl =
@@ -710,15 +714,24 @@
                 kind: "header",
                 target: "header-image",
                 sourceKind: "saved",
-                name: headerName.trim() || "未命名头图样式",
-                description: `样板长边已规范为 ${HEADER_TEMPLATE_LONG_EDGE}px，保存生成后的透明样板图，尺寸 ${headerDraft.width}x${headerDraft.height}。`,
+                name: headerName.trim() || t("未命名头图样式"),
+                description: t(
+                    "样板长边已规范为 {edge}px，保存生成后的透明样板图，尺寸 {width}x{height}。",
+                    {
+                        edge: HEADER_TEMPLATE_LONG_EDGE,
+                        width: headerDraft.width,
+                        height: headerDraft.height,
+                    },
+                ),
                 selectors: [
                     "body.te-chapter-page",
                     EPUB_STYLE_INTERFACE.headerFigure,
                     EPUB_STYLE_INTERFACE.headerImage,
                     EPUB_STYLE_INTERFACE.headerCaption,
                 ],
-                usage: "保存后制作 EPUB 可用该透明样板生成贴边章节头图。",
+                usage: t(
+                    "保存后制作 EPUB 可用该透明样板生成贴边章节头图。",
+                ),
                 css: headerBaseCss(),
                 previewHtml: headerPreviewHtml(
                     headerDraft.sampleDataUrl,
@@ -746,13 +759,13 @@
                 kind: "title",
                 target: "chapter-title",
                 sourceKind: "saved",
-                name: titleName.trim() || "未命名标题样式",
+                name: titleName.trim() || t("未命名标题样式"),
                 description:
                     titleInputMode === "full"
-                        ? "自定义完整 CSS 定义。"
+                        ? t("自定义完整 CSS 定义。")
                         : split
-                          ? "number/name 双行标题样式。"
-                          : "name 单行标题样式。",
+                          ? t("number/name 双行标题样式。")
+                          : t("name 单行标题样式。"),
                 selectors: split
                     ? [
                           EPUB_STYLE_INTERFACE.chapterTitle,
@@ -762,8 +775,10 @@
                     : [EPUB_STYLE_INTERFACE.chapterTitle],
                 usage:
                     titleInputMode === "full"
-                        ? "保存完整 CSS，制作时按命名接口自动应用。"
-                        : "保存 number/name 样式内容，制作时自动套到标题结构。",
+                        ? t("保存完整 CSS，制作时按命名接口自动应用。")
+                        : t(
+                              "保存 number/name 样式内容，制作时自动套到标题结构。",
+                          ),
                 css,
                 previewHtml: titlePreviewHtml(split ? "split" : "single"),
                 titleLayout: split ? "split" : "single",
@@ -797,17 +812,19 @@
                 name:
                     contentName.trim() ||
                     (kind === "transition"
-                        ? "未命名转场样式"
-                        : "未命名插图样式"),
+                        ? t("未命名转场样式")
+                        : t("未命名插图样式")),
                 description:
                     kind === "transition"
-                        ? "自定义转场 CSS 与 XHTML。"
-                        : "自定义插图 CSS 与 XHTML。",
+                        ? t("自定义转场 CSS 与 XHTML。")
+                        : t("自定义插图 CSS 与 XHTML。"),
                 selectors: contentSelectors(contentCss, markup),
                 usage:
                     kind === "transition"
-                        ? "默认用于替换前后都有正文的单段孤立省略号。"
-                        : "将图片路径、替代文字和图注替换为实际内容后插入正文。",
+                        ? t("默认用于替换前后都有正文的单段孤立省略号。")
+                        : t(
+                              "将图片路径、替代文字和图注替换为实际内容后插入正文。",
+                          ),
                 css: contentCss.trim(),
                 markup,
                 previewHtml: contentPreviewHtml(
@@ -824,26 +841,28 @@
     }
 
     function validateUnsafeCss(css: string) {
-        if (/<\/?\s*script/i.test(css)) return "CSS 中不能包含 script。";
-        if (/@import/i.test(css)) return "CSS 中暂不允许 @import。";
+        if (/<\/?\s*script/i.test(css))
+            return t("CSS 中不能包含 script。");
+        if (/@import/i.test(css)) return t("CSS 中暂不允许 @import。");
         if (/javascript\s*:/i.test(css))
-            return "CSS 中不能包含 javascript: URL。";
+            return t("CSS 中不能包含 javascript: URL。");
         return "";
     }
 
     function validateContentStyle(requireName: boolean) {
         if (viewMode !== "illustration" && viewMode !== "transition") return "";
-        if (requireName && !contentName.trim()) return "请填写样式名称。";
-        if (!contentCss.trim()) return "CSS 不能为空。";
+        if (requireName && !contentName.trim())
+            return t("请填写样式名称。");
+        if (!contentCss.trim()) return t("CSS 不能为空。");
         const cssError = validateUnsafeCss(contentCss);
         if (cssError) return cssError;
-        if (!contentMarkup.trim()) return "XHTML 结构不能为空。";
+        if (!contentMarkup.trim()) return t("XHTML 结构不能为空。");
         if (
             /<\/?\s*script/i.test(contentMarkup) ||
             /\bon\w+\s*=/i.test(contentMarkup) ||
             /javascript\s*:/i.test(contentMarkup)
         ) {
-            return "XHTML 中不能包含脚本、事件属性或 javascript: URL。";
+            return t("XHTML 中不能包含脚本、事件属性或 javascript: URL。");
         }
         return "";
     }
@@ -854,21 +873,24 @@
         required: boolean,
     ) {
         const trimmed = css.trim();
-        if (!trimmed) return required ? `${label} 不能为空。` : "";
+        if (!trimmed)
+            return required ? t("{label} 不能为空。", { label }) : "";
         const unsafe = validateUnsafeCss(trimmed);
         if (unsafe) return unsafe;
         if (/[{}]/.test(trimmed))
-            return `${label} 只填写样式内容，不要写选择器或大括号。`;
+            return t("{label} 只填写样式内容，不要写选择器或大括号。", {
+                label,
+            });
         return "";
     }
 
     function validateFullCss(css: string) {
         const trimmed = css.trim();
-        if (!trimmed) return "完整 CSS 不能为空。";
+        if (!trimmed) return t("完整 CSS 不能为空。");
         const unsafe = validateUnsafeCss(trimmed);
         if (unsafe) return unsafe;
         if (!/\.[A-Za-z_][\w-]*/.test(trimmed))
-            return "完整 CSS 至少要包含一个标准 class 选择器。";
+            return t("完整 CSS 至少要包含一个标准 class 选择器。");
         const classNames = Array.from(
             trimmed.matchAll(/\.([A-Za-z_][\w-]*)/g),
         ).map((match) => match[1]);
@@ -876,12 +898,19 @@
             (className) => !SAFE_CLASS_NAMES.has(className),
         );
         if (invalid.length)
-            return `存在不符合命名规范的 class：${Array.from(new Set(invalid)).join(", ")}`;
+            return t("存在不符合命名规范的 class：{classes}", {
+                classes: Array.from(new Set(invalid)).join(", "),
+            });
         const offTarget = classNames.filter(
             (className) => !TITLE_STYLE_CLASS_NAMES.has(className),
         );
         if (offTarget.length)
-            return `标题样式暂只允许章节标题接口：${Array.from(new Set(offTarget)).join(", ")} 将放到单独样式列表处理。`;
+            return t(
+                "标题样式暂只允许章节标题接口：{classes} 将放到单独样式列表处理。",
+                {
+                    classes: Array.from(new Set(offTarget)).join(", "),
+                },
+            );
         return "";
     }
 
@@ -890,15 +919,27 @@
         if (titleInputMode === "full") return validateFullCss(titleFullCss);
         if (titleLayout === "split") {
             return (
-                validateDeclarationBlock("number 样式", titleNumberCss, true) ||
-                validateDeclarationBlock("name 样式", titleNameCss, true)
+                validateDeclarationBlock(
+                    t("number 样式"),
+                    titleNumberCss,
+                    true,
+                ) ||
+                validateDeclarationBlock(
+                    t("name 样式"),
+                    titleNameCss,
+                    true,
+                )
             );
         }
-        return validateDeclarationBlock("name 样式", titleNameCss, true);
+        return validateDeclarationBlock(
+            t("name 样式"),
+            titleNameCss,
+            true,
+        );
     }
 
     function validateTitleForSave() {
-        if (!titleName.trim()) return "请填写样式名称。";
+        if (!titleName.trim()) return t("请填写样式名称。");
         return validateTitleCssOnly();
     }
 
@@ -907,7 +948,7 @@
             const reader = new FileReader();
             reader.onload = () => resolve(String(reader.result || ""));
             reader.onerror = () =>
-                reject(reader.error || new Error("读取图片失败"));
+                reject(reader.error || new Error(t("读取图片失败")));
             reader.readAsDataURL(file);
         });
     }
@@ -916,7 +957,8 @@
         return new Promise<HTMLImageElement>((resolve, reject) => {
             const image = new Image();
             image.onload = () => resolve(image);
-            image.onerror = () => reject(new Error("图片加载失败"));
+            image.onerror = () =>
+                reject(new Error(t("图片加载失败")));
             image.src = dataUrl;
         });
     }
@@ -942,17 +984,20 @@
         const file = input.files?.[0];
         if (!file) return;
         if (!file.type.startsWith("image/")) {
-            contentMessage = "请选择图片文件。";
+            contentMessage = t("请选择图片文件。");
             input.value = "";
             return;
         }
         try {
             contentPreviewDataUrl = await readFileAsDataUrl(file);
             contentPreviewFileName = file.name;
-            contentMessage =
-                "预览图片已更新；XHTML 中仍保留 EPUB 内部相对路径。";
+            contentMessage = t(
+                "预览图片已更新；XHTML 中仍保留 EPUB 内部相对路径。",
+            );
         } catch (error) {
-            contentMessage = `读取图片失败：${String(error)}`;
+            contentMessage = t("读取图片失败：{error}", {
+                error: String(error),
+            });
         } finally {
             input.value = "";
         }
@@ -963,7 +1008,7 @@
         const file = input.files?.[0];
         if (!file) return;
         if (!file.type.startsWith("image/")) {
-            headerMessage = "请选择图片样板。";
+            headerMessage = t("请选择图片样板。");
             input.value = "";
             return;
         }
@@ -981,7 +1026,7 @@
             templateCanvas.width = width;
             templateCanvas.height = height;
             const templateCtx = templateCanvas.getContext("2d");
-            if (!templateCtx) throw new Error("无法创建画布。");
+            if (!templateCtx) throw new Error(t("无法创建画布。"));
             templateCtx.imageSmoothingEnabled = true;
             templateCtx.imageSmoothingQuality = "high";
             templateCtx.drawImage(image, 0, 0, width, height);
@@ -990,7 +1035,8 @@
             defaultCanvas.width = width;
             defaultCanvas.height = height;
             const defaultCtx = defaultCanvas.getContext("2d");
-            if (!defaultCtx) throw new Error("无法创建默认头图画布。");
+            if (!defaultCtx)
+                throw new Error(t("无法创建默认头图画布。"));
             const fixedHeaderImage = await imageFromDataUrl(
                 FIXED_HEADER_PREVIEW_URL,
             );
@@ -1012,10 +1058,21 @@
             };
             if (!headerName.trim())
                 headerName = file.name.replace(/\.[^.]+$/, "");
-            headerMessage = `已按长边 ${HEADER_TEMPLATE_LONG_EDGE}px 生成遮罩预览：${width}x${height}（原图 ${originalWidth}x${originalHeight}）。`;
+            headerMessage = t(
+                "已按长边 {edge}px 生成遮罩预览：{width}x{height}（原图 {originalWidth}x{originalHeight}）。",
+                {
+                    edge: HEADER_TEMPLATE_LONG_EDGE,
+                    width,
+                    height,
+                    originalWidth,
+                    originalHeight,
+                },
+            );
         } catch (error) {
             headerDraft = null;
-            headerMessage = `导入失败：${String(error)}`;
+            headerMessage = t("导入失败：{error}", {
+                error: String(error),
+            });
         } finally {
             input.value = "";
         }
@@ -1023,11 +1080,11 @@
 
     function saveHeaderStyle() {
         if (!headerName.trim()) {
-            headerMessage = "请填写样式名称。";
+            headerMessage = t("请填写样式名称。");
             return;
         }
         if (!headerDraft) {
-            headerMessage = "请先导入样板图片。";
+            headerMessage = t("请先导入样板图片。");
             return;
         }
         const style: EpubStyleModule = {
@@ -1045,7 +1102,7 @@
         // 桌面以前保存后再点「新增」还能看到刚导入的样板与尺寸，是既有行为；
         // 无条件清空会让桌面看到「未导入」+「已保存到样式库。」的矛盾组合。
         if (dropsDraftOnPhone()) headerDraft = null;
-        headerMessage = "已保存到样式库。";
+        headerMessage = t("已保存到样式库。");
     }
 
     function updateSelectedHeaderTitleBinding(titleStyleId: string) {
@@ -1079,7 +1136,7 @@
         }
         const draft = buildDraftStyle();
         if (!draft) {
-            titleMessage = "请先确认样式预览无误。";
+            titleMessage = t("请先确认样式预览无误。");
             return;
         }
         const style: EpubStyleModule = {
@@ -1093,7 +1150,7 @@
         persistSavedStyles(nextStyles);
         selectedStyleId = style.id;
         panelMode = "browse";
-        titleMessage = "已保存到样式库。";
+        titleMessage = t("已保存到样式库。");
     }
 
     function saveContentStyle() {
@@ -1107,7 +1164,7 @@
             !draft ||
             (draft.kind !== "illustration" && draft.kind !== "transition")
         ) {
-            contentMessage = "请先确认样式预览无误。";
+            contentMessage = t("请先确认样式预览无误。");
             return;
         }
         const style: EpubStyleModule = {
@@ -1121,7 +1178,7 @@
         persistSavedStyles(nextStyles);
         selectedStyleId = style.id;
         panelMode = "browse";
-        contentMessage = "已保存到样式库。";
+        contentMessage = t("已保存到样式库。");
     }
 
     function deleteSelectedStyle() {
@@ -1142,7 +1199,9 @@
             await navigator.clipboard.writeText(value);
             copyMessage = successMessage;
         } catch (error) {
-            copyMessage = `复制失败：${String(error)}`;
+            copyMessage = t("复制失败：{error}", {
+                error: String(error),
+            });
         }
         window.setTimeout(() => {
             copyMessage = "";
@@ -1151,12 +1210,12 @@
 
     async function copyCss() {
         if (!selectedStyle) return;
-        await copyStyleText(selectedStyle.css, "已复制 CSS");
+        await copyStyleText(selectedStyle.css, t("已复制 CSS"));
     }
 
     async function copyMarkup() {
         if (!selectedStyle?.markup) return;
-        await copyStyleText(selectedStyle.markup, "已复制 XHTML");
+        await copyStyleText(selectedStyle.markup, t("已复制 XHTML"));
     }
 </script>
 
@@ -1207,7 +1266,7 @@
                             <div>
                                 <strong>{row.slot}</strong>
                                 <code>{row.selector}</code>
-                                <small>{row.note}</small>
+                                <small>{t(row.note)}</small>
                             </div>
                         {/each}
                     </div>
@@ -1249,11 +1308,11 @@
                                 selectedStyleId = style.id;
                             }}
                         >
-                            <span>{style.name}</span>
+                            <span>{t(style.name)}</span>
                             <small
                                 >{style.sourceKind === "saved"
-                                    ? "自定义"
-                                    : "内置"} · {style.description}</small
+                                    ? t("自定义")
+                                    : t("内置")} · {t(style.description)}</small
                             >
                         </button>
                     {/each}
@@ -1460,9 +1519,12 @@
                 <div class="preview-head">
                     <div>
                         <h2>
-                            新增{viewMode === "illustration"
-                                ? "插图"
-                                : "转场"}样式
+                            {t("新增{kind}样式", {
+                                kind:
+                                    viewMode === "illustration"
+                                        ? t("插图")
+                                        : t("转场"),
+                            })}
                         </h2>
                         <p>
                             编辑可复用的 CSS 与
@@ -1517,8 +1579,8 @@
                                 type="text"
                                 bind:value={contentName}
                                 placeholder={viewMode === "illustration"
-                                    ? "例如：档案卡片插图"
-                                    : "例如：章节菱形转场"}
+                                    ? t("例如：档案卡片插图")
+                                    : t("例如：章节菱形转场")}
                             />
                         </label>
                         <label>
@@ -1567,7 +1629,12 @@
                     <div class="live-preview">
                         {#if draftPreviewDoc}
                             <iframe
-                                title={`新增${viewMode === "illustration" ? "插图" : "转场"}样式预览`}
+                                title={t("新增{kind}样式预览", {
+                                    kind:
+                                        viewMode === "illustration"
+                                            ? t("插图")
+                                            : t("转场"),
+                                })}
                                 srcdoc={draftPreviewDoc}
                             ></iframe>
                         {:else}
@@ -1580,8 +1647,8 @@
             {:else if selectedStyle}
                 <div class="preview-head">
                     <div>
-                        <h2>{selectedStyle.name}</h2>
-                        <p>{selectedStyle.usage}</p>
+                        <h2>{t(selectedStyle.name)}</h2>
+                        <p>{t(selectedStyle.usage)}</p>
                     </div>
                     <div class="preview-actions">
                         {#if selectedStyle.sourceKind === "saved"}
@@ -1605,7 +1672,9 @@
                 <div class="preview-grid">
                     <div class="live-preview">
                         <iframe
-                            title={`${selectedStyle.name} 预览`}
+                            title={t("{name} 预览", {
+                                name: t(selectedStyle.name),
+                            })}
                             srcdoc={selectedPreviewDoc}
                         ></iframe>
                     </div>

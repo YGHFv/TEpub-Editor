@@ -1,5 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher } from "svelte";
+    import { t } from "$lib/i18n.svelte";
 
     export let books: any[] = [];
     export let selectedBook: any = null;
@@ -119,7 +120,7 @@
     ]);
 
     function columnLabel(id: string): string {
-        return ALL_COLUMNS.find((c) => c.id === id)?.label || id;
+        return t(ALL_COLUMNS.find((c) => c.id === id)?.label || id);
     }
 
     function handleHeaderContextMenu(e: MouseEvent) {
@@ -312,7 +313,7 @@
     <div
         class="list-header"
         role="group"
-        aria-label="图书列表列标题"
+        aria-label={t("图书列表列标题")}
         style="grid-template-columns: {gridCols}"
         on:contextmenu={handleHeaderContextMenu}
     >
@@ -322,7 +323,9 @@
             <span
                 class="col-hdr"
                 role="button"
-                aria-label={`按${columnLabel(col)}排序`}
+                aria-label={t("按{column}排序", {
+                    column: columnLabel(col),
+                })}
                 tabindex="0"
                 data-col={col}
                 class:sorted={sortColumn === col}
@@ -346,7 +349,9 @@
                 <button
                     type="button"
                     class="col-resize-handle"
-                    aria-label={`调整${columnLabel(col)}列宽`}
+                    aria-label={t("调整{column}列宽", {
+                        column: columnLabel(col),
+                    })}
                     on:mousedown={(e) => onResizeMouseDown(e, col)}
                     on:click|stopPropagation
                     on:keydown={(event) => onResizeKeydown(event, col)}
@@ -393,7 +398,7 @@
                     <span
                         class="col-cell col-tags-cell"
                         role="group"
-                        aria-label="图书标签"
+                        aria-label={t("图书标签")}
                         on:mouseenter={onTagsCellEnter}
                         on:mousedown={onTagsCellMouseDown}
                     >
@@ -403,8 +408,8 @@
                                 class="col-tag"
                                 class:active={activeTagFilters.includes(tag)}
                                 title={activeTagFilters.includes(tag)
-                                    ? `点击移除筛选: ${tag}`
-                                    : `点击按"${tag}"筛选`}
+                                    ? t("点击移除筛选: {tag}", { tag })
+                                    : t("点击按“{tag}”筛选", { tag })}
                                 on:click|stopPropagation={() => onTagClick(tag)}
                                 >{tag}</button
                             >
@@ -439,13 +444,13 @@
         <div
             class="header-menu"
             role="dialog"
-            aria-label="选择显示列"
+            aria-label={t("选择显示列")}
             tabindex="-1"
             style="left: {headerMenuPos.x}px; top: {headerMenuPos.y}px;"
             on:click|stopPropagation
             on:contextmenu|stopPropagation
         >
-            <div class="header-menu-title">选择列</div>
+            <div class="header-menu-title">{t("选择列")}</div>
             {#each ALL_COLUMNS as colDef}
                 <label class="header-menu-item">
                     <input
@@ -454,7 +459,7 @@
                         disabled={colDef.id === "title" && columns.length === 1}
                         on:change={() => toggleColumn(colDef.id)}
                     />
-                    <span>{colDef.label}</span>
+                    <span>{t(colDef.label)}</span>
                 </label>
             {/each}
         </div>

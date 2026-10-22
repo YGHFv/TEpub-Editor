@@ -71,14 +71,14 @@
 
 <aside class="file-tree">
     <div class="tree-header">
-        <h3>&#25991;&#20214;&#32467;&#26500;</h3>
+        <h3>文件结构</h3>
         <div class="header-actions">
             <button
                 class="icon-btn"
                 onclick={onSaveAll}
                 disabled={isSaving || !isDirty}
-                title="&#20445;&#23384;&#25152;&#26377;&#26356;&#25913; (Ctrl+S)"
-                aria-label="&#20445;&#23384;&#25152;&#26377;&#26356;&#25913;"
+                title="保存所有更改 (Ctrl+S)"
+                aria-label="保存所有更改"
                 class:dirty={isDirty}
             >
                 {#if isSaving}
@@ -90,8 +90,8 @@
             <button
                 class="icon-btn"
                 onclick={onRefresh}
-                title="&#21047;&#26032; EPUB"
-                aria-label="&#21047;&#26032; EPUB"
+                title="刷新 EPUB"
+                aria-label="刷新 EPUB"
             >
                 <Icon name="refresh" size={17} />
             </button>

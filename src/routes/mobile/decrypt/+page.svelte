@@ -9,13 +9,14 @@
         safeFileName,
         selectionName,
     } from "$lib/mobileFlow";
+    import { t } from "$lib/i18n.svelte";
 
     let fileInputEl: HTMLInputElement | null = null;
     let selectedPath = "";
     let selectedName = "";
     let resultPath = "";
     let exportPath = "";
-    let status = "选择 EPUB 后清理伪加密和异常结构。";
+    let status = t("选择 EPUB 后清理伪加密和异常结构。");
     let busy = false;
 
     function openPicker() {
@@ -36,12 +37,12 @@
             }>("prepare_epub_for_open", { epubPath });
             resultPath = result.processed_path || epubPath;
             status = result.changed
-                ? result.action
-                : "这个 EPUB 暂时不需要解密或修复，可直接导出副本。";
+                ? t(result.action)
+                : t("这个 EPUB 暂时不需要解密或修复，可直接导出副本。");
         } catch (err) {
-            status = "处理 EPUB 失败";
-            await message(`处理 EPUB 失败：${err}`, {
-                title: "解密 EPUB",
+            status = t("处理 EPUB 失败");
+            await message(t("处理 EPUB 失败：{error}", { error: String(err) }), {
+                title: t("解密 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -59,9 +60,9 @@
             const cachedPath = await cacheBrowserFileStable(file, "epub");
             await processEpub(cachedPath, file.name);
         } catch (err) {
-            status = "导入 EPUB 失败";
-            await message(`导入 EPUB 失败：${err}`, {
-                title: "解密 EPUB",
+            status = t("导入 EPUB 失败");
+            await message(t("导入 EPUB 失败：{error}", { error: String(err) }), {
+                title: t("解密 EPUB"),
                 kind: "error",
             });
         }
@@ -81,11 +82,11 @@
                 safeFileName(`${base}-clean`, "epub"),
             );
             exportPath = result.output_path;
-            status = result.message;
+            status = t(result.message);
         } catch (err) {
-            status = "导出 EPUB 失败";
-            await message(`导出 EPUB 失败：${err}`, {
-                title: "解密 EPUB",
+            status = t("导出 EPUB 失败");
+            await message(t("导出 EPUB 失败：{error}", { error: String(err) }), {
+                title: t("解密 EPUB"),
                 kind: "error",
             });
         } finally {

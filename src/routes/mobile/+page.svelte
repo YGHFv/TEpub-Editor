@@ -4,6 +4,18 @@
     import { buildMobileRoute, cacheBrowserFileStable } from "$lib/mobileFlow";
     import { platform } from "$lib/platform";
     import { APP_VERSION } from "$lib/appVersion";
+    import {
+        loadAppSettings,
+        saveAppSettings,
+        type GlobalAppSettings,
+    } from "$lib/appSettings";
+    import {
+        initializeI18n,
+        localizeUiData,
+        t,
+        UI_LANGUAGE_OPTIONS,
+        type UiLanguagePreference,
+    } from "$lib/i18n.svelte";
 
     interface MobileModule {
         title: string;
@@ -85,6 +97,14 @@
     let pickToken = 0;
     let activeTab: MobileTab = "home";
     let status = "点击功能入口后直接选择文件。";
+    let appSettings: GlobalAppSettings = loadAppSettings();
+
+    $: localizedModules = localizeUiData(modules);
+    $: localizedAboutLinks = localizeUiData(aboutLinks);
+    $: languageOptions = UI_LANGUAGE_OPTIONS.map((option) => ({
+        ...option,
+        label: t(option.label),
+    }));
 
     $: pageTitle =
         activeTab === "home"
@@ -128,7 +148,7 @@
         const token = ++pickToken;
         try {
             busy = true;
-            status = `正在导入 ${file.name}...`;
+            status = t("正在导入 {name}...", { name: file.name });
             const cachedPath = await cacheBrowserFileStable(
                 file,
                 item.fallbackExt,
@@ -143,14 +163,30 @@
             );
         } catch (err) {
             if (token !== pickToken) return;
-            status = "导入文件失败";
-            await platform.message(`导入文件失败：${err}`, {
-                title: item.title,
+            status = t("导入文件失败");
+            await platform.message(t("导入文件失败：{error}", { error: err }), {
+                title: t(item.title),
                 kind: "error",
             });
         } finally {
             if (token === pickToken) busy = false;
         }
+    }
+
+    function setUiLanguage(value: string) {
+        if (
+            value !== "auto" &&
+            value !== "zh-CN" &&
+            value !== "zh-TW" &&
+            value !== "en"
+        ) {
+            return;
+        }
+        appSettings = saveAppSettings({
+            ...appSettings,
+            uiLanguage: value as UiLanguagePreference,
+        });
+        initializeI18n(appSettings.uiLanguage);
     }
 
     onMount(() => {
@@ -197,7 +233,7 @@
 
         {#if activeTab === "home"}
             <nav class="entry-list" aria-label="功能入口">
-                {#each modules as item}
+                {#each localizedModules as item}
                     <button
                         class="entry-card"
                         type="button"
@@ -246,6 +282,30 @@
                     </div>
                     <span class="setting-orb" aria-hidden="true"></span>
                 </div>
+                <label class="settings-card language-setting">
+                    <span class="language-copy">
+                        <span>界面语言</span>
+                        <strong
+                            >{languageOptions.find(
+                                (option) =>
+                                    option.value === appSettings.uiLanguage,
+                            )?.label}</strong
+                        >
+                        <small
+                            >跟随系统时会自动读取设备或浏览器语言；也可以在这里手动切换。</small
+                        >
+                    </span>
+                    <select
+                        value={appSettings.uiLanguage}
+                        aria-label="界面语言"
+                        on:change={(event) =>
+                            setUiLanguage(event.currentTarget.value)}
+                    >
+                        {#each languageOptions as option}
+                            <option value={option.value}>{option.label}</option>
+                        {/each}
+                    </select>
+                </label>
             </section>
         {:else}
             <section class="about-page">
@@ -275,7 +335,7 @@
                 </button>
 
                 <div class="about-list" aria-label="关于链接">
-                    {#each aboutLinks as item}
+                    {#each localizedAboutLinks as item}
                         <button
                             class="about-row"
                             type="button"
@@ -575,6 +635,30 @@
         color: #7b5ac8;
         font-size: 12px;
         font-weight: 900;
+    }
+
+    .language-setting {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(132px, 0.55fr);
+    }
+
+    .language-copy {
+        color: inherit !important;
+        font-size: inherit !important;
+        font-weight: inherit !important;
+    }
+
+    .language-setting select {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid color-mix(in srgb, #7b5ac8 24%, transparent);
+        border-radius: 12px;
+        padding: 11px 34px 11px 12px;
+        background: color-mix(in srgb, var(--card) 86%, #7b5ac8 14%);
+        color: var(--text);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 750;
     }
 
     .settings-card strong {

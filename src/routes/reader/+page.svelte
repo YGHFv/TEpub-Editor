@@ -46,6 +46,7 @@
         readerProgressKey,
         readerBookmarksKey,
     } from "$lib/storageKeys";
+    import { t } from "$lib/i18n.svelte";
 
     // ===== EPUB 数据结构 =====
     interface SpineEntry {
@@ -69,7 +70,7 @@
     // 书名解析出来后同步窗口标题。保活下由视图宿主登记 —— 隐藏页面的
     // <title> 会覆盖当前页的标题，所以不能只靠 svelte:head。
     // 这个文件是传统 `$:` 语法，不能混用 runes。
-    $: setWindowTitle(bookTitle ? `${bookTitle} · 阅读` : "阅读");
+    $: setWindowTitle(bookTitle ? `${bookTitle} · ${t("阅读")}` : t("阅读"));
     let spine: SpineEntry[] = [];
     let toc: TocNode[] = []; // 多级目录树（顶层节点列表）
     let chapterStartCols: number[] = []; // 每章首列索引
@@ -80,8 +81,18 @@
     let scrollChapterOffset = 0;
 
     let loading = true;
-    let loadingMsg = "正在解压 EPUB…";
+    let loadingSource = "正在解压 EPUB…";
+    let loadingParams: Record<string, unknown> = {};
+    $: loadingMsg = t(loadingSource, loadingParams);
     let errorMsg = "";
+
+    function setLoadingMessage(
+        source: string,
+        params: Record<string, unknown> = {},
+    ) {
+        loadingSource = source;
+        loadingParams = params;
+    }
     let unlistenPrepareStage: PlatformUnlisten | undefined;
 
     type EpubPrepareStageEvent = {
@@ -419,7 +430,7 @@
         errorMsg = "";
         try {
             // 1) 准备文件（处理混淆 / 加密格式）
-            loadingMsg = "正在解压 EPUB…";
+            setLoadingMessage("正在解压 EPUB…");
             // 源文件身份（修改时间 + 大小），与解压目录一起构成缓存键
             let sourceModifiedMs = 0;
             let sourceSize = 0;
@@ -551,22 +562,27 @@
                 toc = cachedSnapshot.toc;
                 chapterFullHtml = cachedSnapshot.chapterFullHtml;
                 chapterBgStyle = cachedSnapshot.chapterBgStyle;
-                loadingMsg = "恢复上次的排版…";
+                setLoadingMessage("恢复上次的排版…");
             } else {
                 // 3) 读取 container.xml -> OPF 路径（解析与 webEpub.ts 共用同一实现）
-                loadingMsg = "解析目录…";
+                setLoadingMessage("解析目录…");
                 let containerXml = "";
                 try {
                     containerXml = await fetchText("META-INF/container.xml");
                 } catch (e) {
-                    throw new Error("找不到 META-INF/container.xml: " + e);
+                    throw new Error(
+                        t("找不到 META-INF/container.xml：{error}", {
+                            error: String(e),
+                        }),
+                    );
                 }
                 const opfPath = parseContainerRootfilePath(containerXml);
 
                 // 4) 读取并解析 OPF
                 const opfXml = await fetchText(opfPath);
                 const pkg = parseOpfPackage(opfXml, opfPath);
-                bookTitle = (pkg.metadata.title || "").trim() || "未命名";
+                bookTitle =
+                    (pkg.metadata.title || "").trim() || t("未命名");
                 bookAuthor = (pkg.metadata.creator || "").trim();
 
                 const spinePaths: string[] = pkg.spine
@@ -601,7 +617,7 @@
                             titleByPath.set(abs, item.label);
                         }
                         return {
-                            title: item.label || "(未命名)",
+                            title: item.label || t("(未命名)"),
                             spineIdx: item.fullPath
                                 ? hrefToSpineIdx(item.fullPath)
                                 : -1,
@@ -643,7 +659,9 @@
                 // 最终兜底：没有 nav 也没有 ncx —— 每个 spine 文件就是一个顶层目录项。
                 if (toc.length === 0) {
                     toc = spinePaths.map((p, i) => ({
-                        title: titleByPath.get(p) || `第 ${i + 1} 节`,
+                        title:
+                            titleByPath.get(p) ||
+                            t("第 {index} 节", { index: i + 1 }),
                         spineIdx: i,
                         children: [],
                     }));
@@ -655,7 +673,7 @@
                     title: titleByPath.get(p) || "",
                 }));
                 if (spine.length === 0)
-                    throw new Error("EPUB spine 为空，无法显示");
+                    throw new Error(t("EPUB spine 为空，无法显示"));
 
                 // 7) 并行 fetch 所有章节文本（不再用 batch IPC）
                 //
@@ -667,7 +685,9 @@
                 // loadingMsg 也能实时刷帧让用户看到进度。
                 let loadedCh = 0;
                 const totalCh = spine.length;
-                loadingMsg = `读取章节 0/${totalCh}…`;
+                setLoadingMessage("读取章节 0/{total}…", {
+                    total: totalCh,
+                });
                 const chapterTextEntries = await Promise.all(
                     spine.map(async (s) => {
                         try {
@@ -679,7 +699,13 @@
                         } finally {
                             loadedCh++;
                             // 每完成一个章节都更新一次 loadingMsg，配合 await 让 UI 能刷帧
-                            loadingMsg = `读取章节 ${loadedCh}/${totalCh}…`;
+                            setLoadingMessage(
+                                "读取章节 {current}/{total}…",
+                                {
+                                    current: loadedCh,
+                                    total: totalCh,
+                                },
+                            );
                         }
                     }),
                 );
@@ -687,7 +713,7 @@
                     Object.fromEntries(chapterTextEntries);
 
                 // 8) 解析章节并收集所有图片 / 外部 CSS 引用（一次性，不发起 IPC）
-                loadingMsg = "解析章节…";
+                setLoadingMessage("解析章节…");
                 const parsedDocs: (Document | null)[] = new Array(
                     spine.length,
                 ).fill(null);
@@ -807,7 +833,9 @@
                 const cssContent = new Map<string, string>();
                 if (cssPaths.length > 0) {
                     let loadedCss = 0;
-                    loadingMsg = `读取样式表 0/${cssPaths.length}…`;
+                    setLoadingMessage("读取样式表 0/{total}…", {
+                        total: cssPaths.length,
+                    });
                     const cssEntries = await Promise.all(
                         cssPaths.map(async (p) => {
                             try {
@@ -817,7 +845,13 @@
                                 return [p, ""] as const;
                             } finally {
                                 loadedCss++;
-                                loadingMsg = `读取样式表 ${loadedCss}/${cssPaths.length}…`;
+                                setLoadingMessage(
+                                    "读取样式表 {current}/{total}…",
+                                    {
+                                        current: loadedCss,
+                                        total: cssPaths.length,
+                                    },
+                                );
                             }
                         }),
                     );
@@ -1054,7 +1088,7 @@
                 // 这种 inline 写法设的背景全部丢失（用户看到"自带背景无法显示"）。
                 // body inline style 里的 url() 也要走 url 替换（与 processCss 同样规则），
                 // 否则 asset 协议拿不到文件。
-                loadingMsg = "渲染…";
+                setLoadingMessage("渲染…");
                 chapterFullHtml = new Array(spine.length);
                 // 转义 HTML 属性值用，避免 class/style 里的特殊字符破坏 outerHTML 注入
                 const escapeAttr = (s: string) =>
@@ -1234,11 +1268,14 @@
             //     从"几分钟"压缩到"几百毫秒"。
             renderedSet = new Set<number>();
             function chapterPlaceholder(i: number): string {
-                const t = (spine[i].title || `第 ${i + 1} 节`).replace(
+                const title = (
+                    spine[i].title ||
+                    t("第 {index} 节", { index: i + 1 })
+                ).replace(
                     /[<>&]/g,
                     (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]!,
                 );
-                return `<section class="rd-chapter rd-pending" data-idx="${i}"><div class="rd-pending-title">${t}</div></section>`;
+                return `<section class="rd-chapter rd-pending" data-idx="${i}"><div class="rd-pending-title">${title}</div></section>`;
             }
             const initialParts: string[] = new Array(spine.length);
             for (let i = 0; i < spine.length; i++) {
@@ -3134,7 +3171,7 @@
         // 保活模式下读本视图自己的地址：全局 page.url 会随别的标签跳转而变
         epubPath = ownUrl.searchParams.get("file") || "";
         if (!epubPath) {
-            errorMsg = "未提供 EPUB 文件路径";
+            errorMsg = t("未提供 EPUB 文件路径");
             loading = false;
             return;
         }
@@ -3159,7 +3196,7 @@
                     event.payload.epubPath !== epubPath
                 )
                     return;
-                loadingMsg = event.payload.message;
+                setLoadingMessage(event.payload.message);
             })
             .then((fn) => {
                 unlistenPrepareStage = fn;
@@ -3257,7 +3294,7 @@
 
 <svelte:head>
     <!-- 保活时这条会被别的页面覆盖，真正的标题登记在视图宿主里（见脚本） -->
-    <title>{bookTitle ? `${bookTitle} · 阅读` : "阅读"}</title>
+    <title>{bookTitle ? `${bookTitle} · ${t("阅读")}` : t("阅读")}</title>
 </svelte:head>
 
 <div
@@ -3279,7 +3316,7 @@
         class="rd-frame"
         bind:this={frameEl}
         role="application"
-        aria-label="EPUB 阅读区域"
+        aria-label={t("EPUB 阅读区域")}
         tabindex="0"
         on:click={onFrameClick}
         on:keydown={onFrameKeydown}
@@ -3288,7 +3325,7 @@
             <div class="rd-loading">{loadingMsg}</div>
         {:else if errorMsg}
             <div class="rd-error">
-                <p>加载失败</p>
+                <p>{t("加载失败")}</p>
                 <pre>{errorMsg}</pre>
             </div>
         {/if}
@@ -3337,7 +3374,7 @@
                 <button
                     class="rd-footnote-close"
                     type="button"
-                    aria-label="关闭注释"
+                    aria-label={t("关闭注释")}
                     on:click={() => (footnotePopupHtml = "")}>×</button
                 >
                 {@html footnotePopupHtml}
@@ -3358,7 +3395,7 @@
         {/if}
         {#if pageMode === "paginated" && totalCols > 0 && !isChapterFirstPage}
             <div class="rd-corner rd-corner-tr">
-                本章剩余 {chapterRemaining} 页
+                {t("本章剩余 {count} 页", { count: chapterRemaining })}
             </div>
         {/if}
         <div class="rd-corner rd-corner-bl">{nowStr}</div>
@@ -3368,7 +3405,9 @@
             {:else if totalCols > 0}
                 {displayPageNum} / {totalCols}
             {:else}
-                约 {progressPercent.toFixed(0)}%
+                {t("约 {percent}%", {
+                    percent: progressPercent.toFixed(0),
+                })}
             {/if}
         </div>
     {/if}
@@ -3387,7 +3426,7 @@
             <!-- 当前面板（位于 tab 条上方） -->
             {#if activePanel === "toc"}
                 <div class="rd-panel rd-panel-toc" bind:this={tocPanelEl}>
-                    <div class="rd-panel-title">目录</div>
+                    <div class="rd-panel-title">{t("目录")}</div>
                     <div class="rd-toc-list">
                         {#each toc as node}
                             <ReaderTocNode
@@ -3402,21 +3441,21 @@
             {:else if activePanel === "bookmarks"}
                 <div class="rd-panel rd-panel-bookmarks">
                     <div class="rd-panel-title">
-                        书签
+                        {t("书签")}
                         <button
                             class="rd-mini-btn"
                             class:active={isBookmarked}
                             on:click={() =>
                                 isBookmarked ? null : addBookmark()}
                             disabled={isBookmarked}
-                            >{isBookmarked
-                                ? "已添加"
-                                : "+ 添加当前位置"}</button
+                            >{t(
+                                isBookmarked ? "已添加" : "+ 添加当前位置",
+                            )}</button
                         >
                     </div>
                     {#if bookmarks.length === 0}
                         <div class="rd-empty">
-                            暂无书签。点击上方"+ 添加当前位置"。
+                            {t('暂无书签。点击上方"+ 添加当前位置"。')}
                         </div>
                     {:else}
                         <div class="rd-bookmarks-list">
@@ -3441,7 +3480,7 @@
                                     <button
                                         class="rd-mini-btn rd-bookmark-del"
                                         on:click={() => removeBookmark(i)}
-                                        title="删除">×</button
+                                        title={t("删除")}>×</button
                                     >
                                 </div>
                             {/each}
@@ -3450,64 +3489,66 @@
                 </div>
             {:else if activePanel === "theme"}
                 <div class="rd-panel rd-panel-theme">
-                    <div class="rd-panel-title">主题</div>
+                    <div class="rd-panel-title">{t("主题")}</div>
                     <div class="rd-theme-grid">
                         <button
                             class="rd-theme-chip rd-theme-paper"
                             class:active={themePreset === "paper" &&
                                 !customBgImage}
                             on:click={() => setTheme("paper")}
-                            ><span>纸张</span></button
+                            ><span>{t("纸张")}</span></button
                         >
                         <button
                             class="rd-theme-chip rd-theme-eye"
                             class:active={themePreset === "eye" &&
                                 !customBgImage}
                             on:click={() => setTheme("eye")}
-                            ><span>护眼</span></button
+                            ><span>{t("护眼")}</span></button
                         >
                         <button
                             class="rd-theme-chip rd-theme-sepia"
                             class:active={themePreset === "sepia" &&
                                 !customBgImage}
                             on:click={() => setTheme("sepia")}
-                            ><span>羊皮</span></button
+                            ><span>{t("羊皮")}</span></button
                         >
                         <button
                             class="rd-theme-chip rd-theme-snow"
                             class:active={themePreset === "snow" &&
                                 !customBgImage}
                             on:click={() => setTheme("snow")}
-                            ><span>雪白</span></button
+                            ><span>{t("雪白")}</span></button
                         >
                         <button
                             class="rd-theme-chip rd-theme-dark"
                             class:active={themePreset === "dark" &&
                                 !customBgImage}
                             on:click={() => setTheme("dark")}
-                            ><span>暗夜</span></button
+                            ><span>{t("暗夜")}</span></button
                         >
                     </div>
                     <div class="rd-row">
                         <button class="rd-secondary" on:click={pickCustomBg}
-                            >更换背景图…</button
+                            >{t("更换背景图…")}</button
                         >
                         <button
                             class="rd-secondary"
                             disabled={!customBgImage}
-                            on:click={clearCustomBg}>恢复默认</button
+                            on:click={clearCustomBg}>{t("恢复默认")}</button
                         >
                     </div>
                     {#if customBgImage}
-                        <div class="rd-row rd-tip">已应用自定义背景图</div>
+                        <div class="rd-row rd-tip">
+                            {t("已应用自定义背景图")}
+                        </div>
                     {/if}
                 </div>
             {:else if activePanel === "typography"}
                 <div class="rd-panel rd-panel-typography">
-                    <div class="rd-panel-title">排版</div>
+                    <div class="rd-panel-title">{t("排版")}</div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">字号</span>
+                        <span class="rd-set-label">{t("字号")}</span>
                         <div class="rd-segctrl">
                             <button
                                 on:click={() => changeFont(-1)}
@@ -3522,7 +3563,7 @@
                     </div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">行距</span>
+                        <span class="rd-set-label">{t("行距")}</span>
                         <div class="rd-segctrl">
                             <button
                                 on:click={() => changeLineHeight(-0.1)}
@@ -3539,7 +3580,7 @@
                     </div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">段距</span>
+                        <span class="rd-set-label">{t("段距")}</span>
                         <div class="rd-segctrl">
                             <button
                                 on:click={() => changeParagraphSpacing(-0.1)}
@@ -3556,49 +3597,49 @@
                     </div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">字色</span>
+                        <span class="rd-set-label">{t("字色")}</span>
                         <div class="rd-segctrl">
                             <button
                                 class:active={bodyTextTone === "theme"}
                                 on:click={() => setBodyTextTone("theme")}
-                                >主题</button
+                                >{t("主题")}</button
                             >
                             <button
                                 class:active={bodyTextTone === "deep"}
                                 on:click={() => setBodyTextTone("deep")}
-                                >加深</button
+                                >{t("加深")}</button
                             >
                             <button
                                 class:active={bodyTextTone === "black"}
                                 on:click={() => setBodyTextTone("black")}
-                                >黑字</button
+                                >{t("黑字")}</button
                             >
                         </div>
                     </div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">字重</span>
+                        <span class="rd-set-label">{t("字重")}</span>
                         <div class="rd-segctrl">
                             <button
                                 class:active={bodyFontWeight === 400}
                                 on:click={() => setBodyFontWeight(400)}
-                                >常规</button
+                                >{t("常规")}</button
                             >
                             <button
                                 class:active={bodyFontWeight === 500}
                                 on:click={() => setBodyFontWeight(500)}
-                                >适中</button
+                                >{t("适中")}</button
                             >
                             <button
                                 class:active={bodyFontWeight === 600}
                                 on:click={() => setBodyFontWeight(600)}
-                                >加粗</button
+                                >{t("加粗")}</button
                             >
                         </div>
                     </div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">左右</span>
+                        <span class="rd-set-label">{t("左右")}</span>
                         <div class="rd-segctrl">
                             <button
                                 on:click={() => changeMarginH(-0.01)}
@@ -3615,7 +3656,7 @@
                     </div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">上下</span>
+                        <span class="rd-set-label">{t("上下")}</span>
                         <div class="rd-segctrl">
                             <button
                                 on:click={() => changeMarginV(-0.01)}
@@ -3632,30 +3673,36 @@
                     </div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">字体</span>
+                        <span class="rd-set-label">{t("字体")}</span>
                         <div class="rd-segctrl rd-font-picker">
                             <CustomSelect
                                 value={userFontFamily}
                                 options={[
-                                    { value: "", label: "默认（衬线）" },
+                                    { value: "", label: t("默认（衬线）") },
                                     {
                                         value: "Source Han Sans SC",
-                                        label: "思源黑体",
+                                        label: t("思源黑体"),
                                     },
                                     {
                                         value: "Microsoft YaHei",
-                                        label: "微软雅黑",
+                                        label: t("微软雅黑"),
                                     },
-                                    { value: "PingFang SC", label: "苹方" },
-                                    { value: "SimSun", label: "宋体" },
-                                    { value: "KaiTi", label: "楷体" },
-                                    { value: "FangSong", label: "仿宋" },
+                                    {
+                                        value: "PingFang SC",
+                                        label: t("苹方"),
+                                    },
+                                    { value: "SimSun", label: t("宋体") },
+                                    { value: "KaiTi", label: t("楷体") },
+                                    {
+                                        value: "FangSong",
+                                        label: t("仿宋"),
+                                    },
                                     {
                                         value: "Source Han Serif SC",
-                                        label: "思源宋体",
+                                        label: t("思源宋体"),
                                     },
                                 ]}
-                                ariaLabel="阅读字体"
+                                ariaLabel={t("阅读字体")}
                                 on:change={(event) =>
                                     setUserFontFamily(event.detail)}
                             />
@@ -3663,60 +3710,61 @@
                     </div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">EPUB 字体</span>
+                        <span class="rd-set-label">{t("EPUB 字体")}</span>
                         <div class="rd-segctrl">
                             <button
                                 class:active={useEpubFonts}
-                                on:click={() => setEpubFonts(true)}>启用</button
+                                on:click={() => setEpubFonts(true)}
+                                >{t("启用")}</button
                             >
                             <button
                                 class:active={!useEpubFonts}
                                 on:click={() => setEpubFonts(false)}
-                                >禁用</button
+                                >{t("禁用")}</button
                             >
                         </div>
                     </div>
                 </div>
             {:else if activePanel === "settings"}
                 <div class="rd-panel rd-panel-settings">
-                    <div class="rd-panel-title">设置</div>
+                    <div class="rd-panel-title">{t("设置")}</div>
 
                     <div class="rd-set-row">
-                        <span class="rd-set-label">翻页样式</span>
+                        <span class="rd-set-label">{t("翻页样式")}</span>
                         <div class="rd-segctrl">
                             <button
                                 class:active={pageMode === "paginated"}
                                 on:click={() => setPageMode("paginated")}
-                                >平移翻页</button
+                                >{t("平移翻页")}</button
                             >
                             <button
                                 class:active={pageMode === "scroll"}
                                 on:click={() => setPageMode("scroll")}
-                                >滚动翻页</button
+                                >{t("滚动翻页")}</button
                             >
                         </div>
                     </div>
 
                     {#if pageMode === "paginated"}
                         <div class="rd-set-row">
-                            <span class="rd-set-label">列布局</span>
+                            <span class="rd-set-label">{t("列布局")}</span>
                             <div class="rd-segctrl">
                                 <button
                                     class:active={columnLayout === "single"}
                                     on:click={() => setColumnLayout("single")}
-                                    >单列</button
+                                    >{t("单列")}</button
                                 >
                                 <button
                                     class:active={columnLayout === "double"}
                                     on:click={() => setColumnLayout("double")}
-                                    >双列</button
+                                    >{t("双列")}</button
                                 >
                             </div>
                         </div>
                     {/if}
 
                     <div class="rd-set-row rd-toggle-row">
-                        <span class="rd-set-label">全屏下一页</span>
+                        <span class="rd-set-label">{t("全屏下一页")}</span>
                         <label class="rd-switch">
                             <input
                                 type="checkbox"
@@ -3728,7 +3776,7 @@
                     </div>
 
                     <div class="rd-set-row rd-toggle-row">
-                        <span class="rd-set-label">滚轮翻页</span>
+                        <span class="rd-set-label">{t("滚轮翻页")}</span>
                         <label class="rd-switch">
                             <input
                                 type="checkbox"
@@ -3740,7 +3788,7 @@
                     </div>
 
                     <div class="rd-set-row rd-toggle-row">
-                        <span class="rd-set-label">方向键翻页</span>
+                        <span class="rd-set-label">{t("方向键翻页")}</span>
                         <label class="rd-switch">
                             <input
                                 type="checkbox"
@@ -3760,7 +3808,7 @@
                     on:click={() => tabClick("toc")}
                 >
                     <span class="rd-tab-icon">≡</span><span class="rd-tab-label"
-                        >目录</span
+                        >{t("目录")}</span
                     >
                 </button>
                 <button
@@ -3768,7 +3816,7 @@
                     on:click={() => tabClick("bookmarks")}
                 >
                     <span class="rd-tab-icon">❑</span><span class="rd-tab-label"
-                        >书签</span
+                        >{t("书签")}</span
                     >
                 </button>
                 <button
@@ -3776,7 +3824,7 @@
                     on:click={() => tabClick("theme")}
                 >
                     <span class="rd-tab-icon">◐</span><span class="rd-tab-label"
-                        >主题</span
+                        >{t("主题")}</span
                     >
                 </button>
                 <button
@@ -3784,7 +3832,7 @@
                     on:click={() => tabClick("typography")}
                 >
                     <span class="rd-tab-icon">A</span><span class="rd-tab-label"
-                        >排版</span
+                        >{t("排版")}</span
                     >
                 </button>
                 <button
@@ -3792,7 +3840,7 @@
                     on:click={() => tabClick("settings")}
                 >
                     <span class="rd-tab-icon">⚙</span><span class="rd-tab-label"
-                        >设置</span
+                        >{t("设置")}</span
                     >
                 </button>
             </div>

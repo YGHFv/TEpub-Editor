@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import type { TTF } from "fonteditor-core";
 import { deflate, inflate } from "pako";
 import { rewriteWebEpubTextLinks } from "$lib/webEpubProcess";
+import { t } from "$lib/i18n.svelte";
 
 export type WebEpubFontAction = "font-encrypt" | "font-decrypt" | "font-subset";
 
@@ -91,7 +92,7 @@ function elementsByLocalName(root: ParentNode, name: string) {
 function parseXml(source: string, label: string) {
   const document = new DOMParser().parseFromString(source, "application/xml");
   if (document.querySelector("parsererror"))
-    throw new Error(`${label} XML 格式无效`);
+throw new Error(t("{label} XML 格式无效", { label }));
   return document;
 }
 
@@ -206,7 +207,8 @@ async function parseFont(
   subset?: number[],
 ): Promise<ParsedFont> {
   const ext = extension(path);
-  if (!FONT_EXTENSIONS.has(ext)) throw new Error(`不支持的字体格式：${path}`);
+if (!FONT_EXTENSIONS.has(ext))
+  throw new Error(t("不支持的字体格式：{path}", { path }));
   if (ext === "woff2") await ensureWoff2();
   const options: any = {
     type: ext,
@@ -503,7 +505,7 @@ function privateCharacters(count: number, excluded: Set<number>) {
     }
     if (values.length >= count) break;
   }
-  if (values.length < count) throw new Error("可用私用区字符不足");
+if (values.length < count) throw new Error(t("可用私用区字符不足"));
   if (typeof crypto !== "undefined") {
     for (let index = values.length - 1; index > 0; index -= 1) {
       const random = new Uint32Array(1);
@@ -851,7 +853,8 @@ function injectBodyFontStyle(
 
 async function packageInfo(zip: JSZip) {
   const containerEntry = zip.file("META-INF/container.xml");
-  if (!containerEntry) throw new Error("EPUB 缺少 META-INF/container.xml");
+if (!containerEntry)
+  throw new Error(t("EPUB 缺少 META-INF/container.xml"));
   const container = parseXml(
     await containerEntry.async("text"),
     "container.xml",
@@ -859,7 +862,8 @@ async function packageInfo(zip: JSZip) {
   const opfPath =
     elementsByLocalName(container, "rootfile")[0]?.getAttribute("full-path") ||
     "";
-  if (!opfPath || !zip.file(opfPath)) throw new Error("EPUB 的 OPF 路径无效");
+if (!opfPath || !zip.file(opfPath))
+  throw new Error(t("EPUB 的 OPF 路径无效"));
   const opfSource = await zip.file(opfPath)!.async("text");
   const opf = parseXml(opfSource, "OPF");
   const opfDir = parentPath(opfPath);
@@ -909,8 +913,10 @@ async function loadFonts(zip: JSZip) {
   }
   if (!parsed.length) {
     if (failures.length)
-      throw new Error(`内嵌字体解析失败：${failures.join("；")}`);
-    throw new Error("EPUB 内未找到 TTF、OTF、WOFF 或 WOFF2 字体");
+throw new Error(
+  t("内嵌字体解析失败：{errors}", { errors: failures.join("；") }),
+);
+throw new Error(t("EPUB 内未找到 TTF、OTF、WOFF 或 WOFF2 字体"));
   }
   return parsed;
 }
@@ -1576,11 +1582,12 @@ async function encryptFonts(
   const fonts = await loadFonts(zip);
   const fallbackFamilies = await collectEmbeddedFontFamilies(zip, fonts);
   const supported = collectFontPlainCodePoints(fonts);
-  if (!supported.size) throw new Error("内嵌字体未发现可加密汉字");
+if (!supported.size) throw new Error(t("内嵌字体未发现可加密汉字"));
   const htmlPaths = Object.keys(zip.files).filter(
     (path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)),
   );
-  if (!htmlPaths.length) throw new Error("EPUB 内未找到 HTML/XHTML 文件");
+if (!htmlPaths.length)
+  throw new Error(t("EPUB 内未找到 HTML/XHTML 文件"));
 
   const seen = new Set<string>();
   const characters: string[] = [];
@@ -1601,7 +1608,7 @@ async function encryptFonts(
       }
     }
   }
-  if (!characters.length) throw new Error("未找到可加密的正文汉字");
+if (!characters.length) throw new Error(t("未找到可加密的正文汉字"));
   const shadows = privateCharacters(characters.length, existingPrivate);
   const mapping = new Map(
     characters.map((character, index) => [character, shadows[index]]),
@@ -1666,7 +1673,9 @@ async function encryptFonts(
     changedFonts += 1;
   }
   if (!changedFonts)
-    throw new Error("字体 cmap 未能写入私用区映射，无法完成字体加密");
+throw new Error(
+  t("字体 cmap 未能写入私用区映射，无法完成字体加密"),
+);
 
   if ([...pathMap].some(([from, to]) => from !== to)) {
     for (const path of Object.keys(zip.files).filter((name) =>
@@ -1699,7 +1708,10 @@ async function encryptFonts(
     mappedCharacters: mapping.size,
     changedFonts,
     mode: "embedded-map",
-    message: `字体加密完成：映射 ${mapping.size} 个汉字，更新 ${changedFonts} 个字体`,
+    message: t("字体加密完成：映射 {mapped} 个汉字，更新 {fonts} 个字体", {
+      mapped: mapping.size,
+      fonts: changedFonts,
+    }),
     blob,
   };
 }
@@ -1717,7 +1729,8 @@ async function encryptBodyFontPermutation(
     : Object.keys(zip.files).filter(
         (path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)),
       );
-  if (!htmlPaths.length) throw new Error("EPUB 内未找到正文 HTML/XHTML 文件");
+if (!htmlPaths.length)
+  throw new Error(t("EPUB 内未找到正文 HTML/XHTML 文件"));
 
   const htmlSources = new Map<string, string>();
   const bodyCharacters = new Set<string>();
@@ -1727,7 +1740,8 @@ async function encryptBodyFontPermutation(
     for (const character of collectBodyCharacters(source))
       bodyCharacters.add(character);
   }
-  if (bodyCharacters.size < 2) throw new Error("未找到可加密的正文段落汉字");
+if (bodyCharacters.size < 2)
+  throw new Error(t("未找到可加密的正文段落汉字"));
 
   const candidates = fonts
     .map((font) => {
@@ -1744,7 +1758,7 @@ async function encryptBodyFontPermutation(
     .sort((left, right) => right.characters.length - left.characters.length);
   const selected = candidates[0];
   if (!selected || selected.characters.length < 2)
-    throw new Error("正文字体中未找到足够的可加密汉字");
+throw new Error(t("正文字体中未找到足够的可加密汉字"));
 
   const shuffled = randomDerangement(selected.characters);
   const mapping = new Map(
@@ -1763,7 +1777,7 @@ async function encryptBodyFontPermutation(
       changedFiles += 1;
     }
   }
-  if (!changedFiles) throw new Error("未发现可加密的正文段落");
+if (!changedFiles) throw new Error(t("未发现可加密的正文段落"));
 
   for (const glyph of selected.font.glyphs) {
     glyph.unicode = [
@@ -1819,7 +1833,10 @@ async function encryptBodyFontPermutation(
     mappedCharacters: mapping.size,
     changedFonts: 1,
     mode: "body-font-cjk-permutation",
-    message: `字体加密完成：随机打乱 ${mapping.size} 个正文汉字，仅更新 1 个正文字体`,
+    message: t(
+      "字体加密完成：随机打乱 {count} 个正文汉字，仅更新 1 个正文字体",
+      { count: mapping.size },
+    ),
     blob,
   };
 }
@@ -1838,7 +1855,8 @@ async function encryptBodyFontsIndependently(
     : Object.keys(zip.files).filter(
         (path) => !zip.files[path].dir && HTML_EXTENSIONS.has(extension(path)),
       );
-  if (!htmlPaths.length) throw new Error("EPUB 内未找到正文 HTML/XHTML 文件");
+if (!htmlPaths.length)
+  throw new Error(t("EPUB 内未找到正文 HTML/XHTML 文件"));
   const htmlSources = new Map<string, string>();
   for (const path of htmlPaths)
     htmlSources.set(path, await zip.files[path].async("text"));
@@ -1886,7 +1904,13 @@ async function encryptBodyFontsIndependently(
     encryptableCharacterCount / bodyCharacterCount < 0.25
   ) {
     throw new Error(
-      `正文共 ${bodyCharacterCount} 个汉字，但内嵌字体仅覆盖 ${encryptableCharacterCount} 个；该 EPUB 的正文主要使用未嵌入的系统字体，无法安全完成整书字体加密。请先嵌入完整正文字体后重试。`,
+      t(
+        "正文共 {total} 个汉字，但内嵌字体仅覆盖 {covered} 个；该 EPUB 的正文主要使用未嵌入的系统字体，无法安全完成整书字体加密。请先嵌入完整正文字体后重试。",
+        {
+          total: bodyCharacterCount,
+          covered: encryptableCharacterCount,
+        },
+      ),
     );
   }
 
@@ -1902,7 +1926,7 @@ async function encryptBodyFontsIndependently(
   }
   const encryptedFonts = [...mappings.keys()];
   if (!encryptedFonts.length)
-    throw new Error("正文字体中未找到足够的可加密汉字");
+throw new Error(t("正文字体中未找到足够的可加密汉字"));
   const fontIndexes = new Map(
     encryptedFonts.map((font, index) => [font, index]),
   );
@@ -1922,7 +1946,7 @@ async function encryptBodyFontsIndependently(
       changedHtmlPaths.push(path);
     }
   }
-  if (!changedFiles) throw new Error("未发现可加密的正文段落");
+if (!changedFiles) throw new Error(t("未发现可加密的正文段落"));
 
   const pathMap = new Map(Object.keys(zip.files).map((path) => [path, path]));
   for (const [fontIndex, [font, mapping]] of [...mappings].entries()) {
@@ -1993,7 +2017,18 @@ async function encryptBodyFontsIndependently(
     mappedCharacters,
     changedFonts: encryptedFonts.length,
     mode: "independent-body-font-permutation",
-    message: `字体加密完成：${encryptedFonts.length} 个正文字体分别随机映射 ${mappedCharacters} 个汉字；${subsettedFonts ? `加密前自动精简 ${subsettedFonts} 个字体` : "内嵌字体已是精简状态，无需重复子集化"}`,
+    message: t(
+      "字体加密完成：{fonts} 个正文字体分别随机映射 {characters} 个汉字；{subset}",
+      {
+        fonts: encryptedFonts.length,
+        characters: mappedCharacters,
+        subset: subsettedFonts
+          ? t("加密前自动精简 {count} 个字体", {
+              count: subsettedFonts,
+            })
+          : t("内嵌字体已是精简状态，无需重复子集化"),
+      },
+    ),
     blob,
   };
 }
@@ -2043,7 +2078,7 @@ function mappingFromPlainText(cipherText: string, plainText: string) {
     isCjkCodePoint(character.codePointAt(0) || 0),
   );
   if (cipher.length < 50 || plain.length < 50)
-    throw new Error("EPUB 或 TXT 文本过短，无法可靠对齐");
+throw new Error(t("EPUB 或 TXT 文本过短，无法可靠对齐"));
 
   const offsets = new Map<number, number>();
   const positions = new Map<string, number[]>();
@@ -2089,7 +2124,7 @@ function mappingFromPlainText(cipherText: string, plainText: string) {
       mapping.set(cipherCharacter, sorted[0][0]);
   }
   if (mapping.size < 30)
-    throw new Error("TXT 与 EPUB 对齐失败，请确认两者是同一版本");
+throw new Error(t("TXT 与 EPUB 对齐失败，请确认两者是同一版本"));
   return mapping;
 }
 
@@ -2148,7 +2183,9 @@ async function decryptFonts(
     mode = "txt-alignment";
   }
   if (!mapping.size)
-    throw new Error("未发现可用字体映射；请选择与 EPUB 对应的明文 TXT 后重试");
+throw new Error(
+  t("未发现可用字体映射；请选择与 EPUB 对应的明文 TXT 后重试"),
+);
 
   let changedFiles = 0;
   for (const path of Object.keys(zip.files)) {
@@ -2179,7 +2216,7 @@ async function decryptFonts(
       if (transformed !== source) zip.file(path, transformed);
     }
   }
-  if (!changedFiles) throw new Error("未发现可恢复的字体混淆正文");
+if (!changedFiles) throw new Error(t("未发现可恢复的字体混淆正文"));
   await removeExternalEncryptionStylesheets(zip);
   zip.remove(MAP_PATH);
   const blob = await generateEpub(zip);
@@ -2191,7 +2228,10 @@ async function decryptFonts(
     mappedCharacters: mapping.size,
     changedFonts: fonts.length,
     mode,
-    message: `字体解密完成：恢复 ${mapping.size} 个字符，更新 ${changedFiles} 个正文文件`,
+    message: t(
+      "字体解密完成：恢复 {characters} 个字符，更新 {files} 个正文文件",
+      { characters: mapping.size, files: changedFiles },
+    ),
     blob,
   };
 }
@@ -2249,7 +2289,7 @@ async function subsetFonts(
     0,
   );
   if (!retainedCodePoints)
-    throw new Error("未能根据 EPUB 样式确定内嵌字体实际使用的文字");
+throw new Error(t("未能根据 EPUB 样式确定内嵌字体实际使用的文字"));
   const pathMap = new Map(Object.keys(zip.files).map((path) => [path, path]));
   let changedFonts = 0;
   let savedBytes = 0;
@@ -2284,7 +2324,7 @@ async function subsetFonts(
     }
   }
   if (!changedFonts)
-    throw new Error("内嵌字体无需裁剪或当前字体格式无法子集化");
+throw new Error(t("内嵌字体无需裁剪或当前字体格式无法子集化"));
 
   if ([...pathMap].some(([from, to]) => from !== to)) {
     for (const path of Object.keys(zip.files).filter((name) =>
@@ -2312,7 +2352,14 @@ async function subsetFonts(
     mappedCharacters: retainedCodePoints,
     changedFonts,
     mode: "unicode-subset",
-    message: `字体子集化完成：按实际样式裁剪 ${changedFonts} 个字体，各字体合计保留 ${retainedCodePoints} 个码点，字体数据减少 ${(savedBytes / 1024 / 1024).toFixed(2)} MB`,
+    message: t(
+      "字体子集化完成：按实际样式裁剪 {fonts} 个字体，各字体合计保留 {points} 个码点，字体数据减少 {size} MB",
+      {
+        fonts: changedFonts,
+        points: retainedCodePoints,
+        size: (savedBytes / 1024 / 1024).toFixed(2),
+      },
+    ),
     blob,
   };
 }
@@ -2326,7 +2373,7 @@ export async function processWebEpubFont(
   try {
     zip = await JSZip.loadAsync(await file.arrayBuffer());
   } catch (error) {
-    throw new Error(`无法读取 EPUB：${String(error)}`);
+throw new Error(t("无法读取 EPUB：{error}", { error: String(error) }));
   }
   if (action === "font-encrypt")
     return encryptBodyFontsIndependently(file, zip);

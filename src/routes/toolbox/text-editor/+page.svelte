@@ -36,6 +36,11 @@
     } from "$lib/tocRegexPresets";
     import TxtCodeEditor from "$lib/TxtCodeEditor.svelte";
     import ToolImportPage from "$lib/ToolImportPage.svelte";
+    import {
+        formatDateTimeLocalized,
+        localizeUiData,
+        t,
+    } from "$lib/i18n.svelte";
     import { hasUnsavedTextChanges } from "$lib/unsavedChanges";
     import {
         applyBuiltinRegexPreview,
@@ -159,6 +164,7 @@
         { id: "pinyin", label: "清理拼音", detail: "预览拼音注音和独立拼音行" },
         { id: "indent", label: "段落缩进", detail: "预览正文段落缩进调整" },
     ];
+    $: localizedProofRules = localizeUiData(proofRules);
 
     let fileInput: HTMLInputElement | null = null;
     let editorEl: any = null;
@@ -286,10 +292,7 @@
      * 用 viewUrl() 而不是全局 page.url：保活视图里全局地址会随别的标签跳转
      * 而变，拿它算出来的 id 和宿主登记的那个对不上，guard 就永远命不中。
      */
-    const ownTabId = tabIdFor(
-        viewUrl().pathname,
-        viewUrl().search,
-    );
+    const ownTabId = tabIdFor(viewUrl().pathname, viewUrl().search);
 
     onMount(() => {
         // 旧版本在真机上会自动恢复上一次的 TXT 草稿。手机用户从首页重新进入
@@ -467,8 +470,11 @@
             chapters = [];
             tocItems = [];
             updateTextStats(true);
-            status = `已导入 ${fileName}，自动识别为 ${encodingLabels[encoding]}，正在扫描目录...`;
-            await scanLoadedContent(`已导入 ${fileName}`);
+            status = t(
+                "已导入 {name}，自动识别为 {encoding}，正在扫描目录...",
+                { name: fileName, encoding: encodingLabels[encoding] },
+            );
+            await scanLoadedContent(t("已导入 {name}", { name: fileName }));
             await saveWebTextHistorySnapshot(
                 historySourceKey(),
                 fileName,
@@ -477,10 +483,13 @@
             if (historyPanelOpen) await refreshHistory();
             editorEl?.focus?.();
         } catch (error) {
-            await platform.message(`导入失败：${String(error)}`, {
-                title: "TXT 编辑器",
-                kind: "error",
-            });
+            await platform.message(
+                t("导入失败：{error}", { error: String(error) }),
+                {
+                    title: t("TXT 编辑器"),
+                    kind: "error",
+                },
+            );
         }
     }
 
@@ -586,8 +595,8 @@
     async function downloadText() {
         syncContentFromEditor();
         if (!content) {
-            await platform.message("当前没有可导出的文本。", {
-                title: "TXT 编辑器",
+            await platform.message(t("当前没有可导出的文本。"), {
+                title: t("TXT 编辑器"),
                 kind: "warning",
             });
             return;
@@ -600,7 +609,9 @@
         const bytes = new TextEncoder().encode(content);
         await platform.writeFile(selected, Array.from(bytes));
         savedContent = content;
-        status = `已导出 ${selected.split(/[\\/]/).pop() || selected}`;
+        status = t("已导出 {name}", {
+            name: selected.split(/[\\/]/).pop() || selected,
+        });
         if (historyPanelOpen) await refreshHistory();
     }
 
@@ -622,13 +633,15 @@
         if (!content) return;
         await saveWebTextHistorySnapshot(historySourceKey(), fileName, content);
         await refreshHistory();
-        status = "已创建历史快照";
+        status = t("已创建历史快照");
     }
 
     async function restoreHistorySnapshot(snapshot: WebTextHistorySnapshot) {
         if (
             !confirm(
-                `回退到 ${new Date(snapshot.timestamp).toLocaleString()} 的版本？\n当前内容会先保存为新快照。`,
+                t("回退到 {time} 的版本？\n当前内容会先保存为新快照。", {
+                    time: formatDateTimeLocalized(snapshot.timestamp),
+                }),
             )
         )
             return;
@@ -639,9 +652,11 @@
         tocLineOffsets = new Map();
         markSearchDirty();
         updateTextStats(true);
-        await scanLoadedContent("已回退到历史版本");
+        await scanLoadedContent(t("已回退到历史版本"));
         await refreshHistory();
-        status = `已回退到 ${new Date(snapshot.timestamp).toLocaleString()}，导出后写入文件`;
+        status = t("已回退到 {time}，导出后写入文件", {
+            time: formatDateTimeLocalized(snapshot.timestamp),
+        });
     }
 
     async function deleteHistorySnapshot(snapshot: WebTextHistorySnapshot) {
@@ -698,7 +713,10 @@
         try {
             for (let index = 0; index < chunks.length; index += 1) {
                 const chunk = chunks[index];
-                aiProofMessage = `智能校对 ${index + 1} / ${chunks.length}`;
+                aiProofMessage = t("智能校对 {current} / {total}", {
+                    current: index + 1,
+                    total: chunks.length,
+                });
                 const response = await runWebAiText(
                     config,
                     `你是中文小说校对编辑。修正明显错别字、标点和病句，不改变剧情、叙述人称、段落顺序与换行。只返回 JSON：{\"text\":\"完整校对后文本\"}。${config.extraPrompt || ""}`,
@@ -720,10 +738,14 @@
                 }
             }
             aiProofMessage = aiProofRows.length
-                ? `发现 ${aiProofRows.length} 个分块修改，请预览后应用`
-                : "未发现需要修改的内容";
+                ? t("发现 {count} 个分块修改，请预览后应用", {
+                      count: aiProofRows.length,
+                  })
+                : t("未发现需要修改的内容");
         } catch (error) {
-            aiProofMessage = `智能校对失败：${error instanceof Error ? error.message : String(error)}`;
+            aiProofMessage = t("智能校对失败：{error}", {
+                error: error instanceof Error ? error.message : String(error),
+            });
         } finally {
             aiProofRunning = false;
         }
@@ -742,7 +764,7 @@
     async function applyAiProofing() {
         syncContentFromEditor();
         if (content !== aiProofBaseContent) {
-            aiProofMessage = "文本已在校对后发生变化，请重新运行智能校对";
+            aiProofMessage = t("文本已在校对后发生变化，请重新运行智能校对");
             return;
         }
         const selected = aiProofRows
@@ -758,10 +780,16 @@
         tocLineOffsets = new Map();
         markSearchDirty();
         updateTextStats(true);
-        await scanLoadedContent(`已应用 ${selected.length} 个智能校对分块`);
+        await scanLoadedContent(
+            t("已应用 {count} 个智能校对分块", {
+                count: selected.length,
+            }),
+        );
         aiProofRows = [];
         aiProofBaseContent = "";
-        aiProofMessage = `已应用 ${selected.length} 个分块，原文已保存到历史版本`;
+        aiProofMessage = t("已应用 {count} 个分块，原文已保存到历史版本", {
+            count: selected.length,
+        });
     }
 
     function escapeRegex(value: string) {
@@ -781,7 +809,9 @@
                 `g${caseSensitive ? "" : "i"}`,
             );
         } catch (error: any) {
-            searchError = `正则错误：${error?.message || error}`;
+            searchError = t("正则错误：{error}", {
+                error: error?.message || error,
+            });
             return null;
         }
     }
@@ -921,7 +951,7 @@
         currentMatchIndex = -1;
         markSearchDirty();
         proofPreview = emptyProofPreview();
-        status = `已替换 ${count} 处`;
+        status = t("已替换 {count} 处", { count });
     }
 
     function compileTocRules() {
@@ -1006,7 +1036,9 @@
             lineNumber += 1;
 
             if (lineNumber > 0 && lineNumber % 1200 === 0) {
-                status = `正在扫描目录：第 ${lineNumber} 行`;
+                status = t("正在扫描目录：第 {line} 行", {
+                    line: lineNumber,
+                });
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
         }
@@ -1024,7 +1056,10 @@
                     : totalLength;
             chapter.word_count = countWords(source.slice(start, end));
             if (index > 0 && index % 80 === 0) {
-                status = `正在统计目录：${index}/${found.length}`;
+                status = t("正在统计目录：{current}/{total}", {
+                    current: index,
+                    total: found.length,
+                });
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
         }
@@ -1068,7 +1103,7 @@
     async function scanToc(showStatus = true, token = ++scanToken) {
         syncContentFromEditor();
         if (!content.trim()) return;
-        status = "正在扫描目录...";
+        status = t("正在扫描目录...");
         chapters = await scanChaptersStreaming(token);
         if (token !== scanToken) return;
         tocItems = buildToc(chapters);
@@ -1081,8 +1116,10 @@
         runTocCheck(tocItems);
         if (showStatus) {
             status = tocItems.length
-                ? `已识别 ${tocItems.length} 个目录项`
-                : "没有识别到目录项";
+                ? t("已识别 {count} 个目录项", {
+                      count: tocItems.length,
+                  })
+                : t("没有识别到目录项");
         }
     }
 
@@ -1525,7 +1562,7 @@
      */
     function saveTocRules() {
         persistTocRules();
-        status = "目录正则已保存";
+        status = t("目录正则已保存");
     }
 
     /** 真正落盘的部分，供侧栏「保存」和设置面板「保存并应用」共用 */
@@ -1563,34 +1600,36 @@
         const lineEnd = content.indexOf("\n", start);
         const end = lineEnd >= 0 ? lineEnd : content.length;
         selectRange(start, end, lineNumber);
-        status = `已定位到第 ${lineNumber} 行`;
+        status = t("已定位到第 {line} 行", { line: lineNumber });
     }
 
     function openBuiltinProofPreview(ruleId: ProofBuiltinRuleId) {
         if (!content.trim()) {
-            status = "当前没有可校对的文本";
+            status = t("当前没有可校对的文本");
             return;
         }
         const rows = buildBuiltinRegexPreview(content, ruleId, tocNodes());
-        const rule = proofRules.find((item) => item.id === ruleId);
+        const rule = localizedProofRules.find((item) => item.id === ruleId);
         proofPreview = {
             open: true,
             mode: "builtin",
             ruleId,
             direction: "",
-            title: rule?.label || "校对预览",
+            title: rule?.label || t("校对预览"),
             rows,
             selectedIds: new Set(rows.map((row) => row.id)),
             message: rows.length
-                ? `发现 ${rows.length} 处候选修改，请确认后应用。`
-                : "没有发现候选修改。",
+                ? t("发现 {count} 处候选修改，请确认后应用。", {
+                      count: rows.length,
+                  })
+                : t("没有发现候选修改。"),
         };
         status = proofPreview.message;
     }
 
     async function openConvertPreview(direction: ProofConvertDirection) {
         if (!content.trim()) {
-            status = "当前没有可转换的文本";
+            status = t("当前没有可转换的文本");
             return;
         }
         busy = true;
@@ -1603,20 +1642,25 @@
                 direction,
                 title:
                     direction === "simplified-to-traditional"
-                        ? "转繁体预览"
-                        : "转简体预览",
+                        ? t("转繁体预览")
+                        : t("转简体预览"),
                 rows,
                 selectedIds: new Set(rows.map((row) => row.id)),
                 message: rows.length
-                    ? `发现 ${rows.length} 处候选转换，请确认后应用。`
-                    : "没有发现候选转换。",
+                    ? t("发现 {count} 处候选转换，请确认后应用。", {
+                          count: rows.length,
+                      })
+                    : t("没有发现候选转换。"),
             };
             status = proofPreview.message;
         } catch (error) {
-            await platform.message(`生成预览失败：${String(error)}`, {
-                title: "TXT 编辑器",
-                kind: "error",
-            });
+            await platform.message(
+                t("生成预览失败：{error}", { error: String(error) }),
+                {
+                    title: t("TXT 编辑器"),
+                    kind: "error",
+                },
+            );
         } finally {
             busy = false;
         }
@@ -1640,7 +1684,7 @@
 
     function applyProofPreview() {
         if (!proofPreview.rows.length || proofPreview.selectedIds.size === 0) {
-            status = "没有选中要应用的修改";
+            status = t("没有选中要应用的修改");
             return;
         }
 
@@ -1665,14 +1709,16 @@
         proofPreview = emptyProofPreview();
         status =
             result.changedCount > 0
-                ? `已应用 ${result.changedCount} 处修改`
-                : "没有可应用的修改";
+                ? t("已应用 {count} 处修改", {
+                      count: result.changedCount,
+                  })
+                : t("没有可应用的修改");
     }
 
     async function prepareEpubHandoff() {
         syncContentFromEditor();
         if (!content.trim()) {
-            status = "当前没有可制作 EPUB 的文本";
+            status = t("当前没有可制作 EPUB 的文本");
             return;
         }
         if (!tocItems.length) await scanToc(false);
@@ -1686,7 +1732,7 @@
                 createdAt: new Date().toISOString(),
             }),
         );
-        status = "已准备 EPUB 制作数据";
+        status = t("已准备 EPUB 制作数据");
         void goto(appPath("/toolbox/make-epub?fromTextEditor=1"));
     }
 </script>
@@ -1740,36 +1786,37 @@
                      编辑区十行、工具栏几个折叠块，谁都干不了活 —— 就是用户说的
                      "单纯拉伸"。收成一屏一栏，用这条页签切换。
                      桌面不渲染这个节点，三栏同时可见，布局完全不变。 -->
-                <div class="phone-pane-bar" role="tablist" aria-label="编辑区切换">
+                <div
+                    class="phone-pane-bar"
+                    role="tablist"
+                    aria-label="编辑区切换"
+                >
                     <button
                         type="button"
                         role="tab"
                         aria-selected={phonePane === "toc"}
                         class:active={phonePane === "toc"}
-                        on:click={() => selectPhonePane("toc")}
-                        >目录</button
+                        on:click={() => selectPhonePane("toc")}>目录</button
                     >
                     <button
                         type="button"
                         role="tab"
                         aria-selected={phonePane === "editor"}
                         class:active={phonePane === "editor"}
-                        on:click={() => selectPhonePane("editor")}
-                        >编辑</button
+                        on:click={() => selectPhonePane("editor")}>编辑</button
                     >
                     <button
                         type="button"
                         role="tab"
                         aria-selected={phonePane === "tools"}
                         class:active={phonePane === "tools"}
-                        on:click={() => selectPhonePane("tools")}
-                        >工具</button
+                        on:click={() => selectPhonePane("tools")}>工具</button
                     >
                 </div>
                 <!-- status 以前只在脚本里赋值、从来没渲染过，手机上也没地方看
                      「已替换 12 处」这类结果，顺手补一条一行高的状态线 -->
                 <div class="phone-status" role="status" aria-live="polite">
-                    <span title={status}>{status}</span>
+                    <span title={t(status)}>{t(status)}</span>
                 </div>
             {/if}
             <aside class="toc-sidebar">
@@ -1951,9 +1998,9 @@
                                                 )}
                                         >
                                             <strong
-                                                >{new Date(
+                                                >{formatDateTimeLocalized(
                                                     snapshot.timestamp,
-                                                ).toLocaleString()}</strong
+                                                )}</strong
                                             >
                                             <small
                                                 >{(
@@ -2133,7 +2180,7 @@
                                 >
                             </div>
                             <p class:warning={!!searchError}>
-                                {searchError ||
+                                {t(searchError) ||
                                     (searchDirty && searchQuery
                                         ? "点击查找刷新匹配"
                                         : searchQuery
@@ -2315,7 +2362,7 @@
                     {#if proofPanelOpen}
                         <div class="section-body">
                             <div class="proof-grid">
-                                {#each proofRules as rule}
+                                {#each localizedProofRules as rule}
                                     <button
                                         type="button"
                                         class="proof-button"
@@ -2359,7 +2406,7 @@
                                         : "智能校对"}</button
                                 >
                                 <span
-                                    >{aiProofMessage ||
+                                    >{t(aiProofMessage) ||
                                         "使用工具箱设置中的文字模型"}</span
                                 >
                             </div>
@@ -2415,13 +2462,13 @@
                             {#if proofPreview.open}
                                 <div class="proof-preview">
                                     <div class="preview-head">
-                                        <strong>{proofPreview.title}</strong>
+                                        <strong>{t(proofPreview.title)}</strong>
                                         <span
                                             >{selectedProofCount}/{proofPreview
                                                 .rows.length}</span
                                         >
                                     </div>
-                                    <p>{proofPreview.message}</p>
+                                    <p>{t(proofPreview.message)}</p>
                                     <div class="button-row">
                                         <button
                                             type="button"
@@ -3564,9 +3611,15 @@
     /* 三栏落在同一格，只由 data-pane 决定谁可见。
        用 visibility 而不是 display:none：CodeMirror 一旦脱离布局就要重新
        测量，切回来时滚动位置和光标位置都会跳。 */
-    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .toc-sidebar,
-    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .editor-shell,
-    :global(:root[data-tepub-layout="phone"]) .workspace.phone-stack > .side-panel {
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack
+        > .toc-sidebar,
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack
+        > .editor-shell,
+    :global(:root[data-tepub-layout="phone"])
+        .workspace.phone-stack
+        > .side-panel {
         grid-area: 3 / 1;
         height: 100%;
         min-width: 0;
@@ -3673,9 +3726,7 @@
        .cm-* 是 CodeMirror 运行时生成的节点，本组件的选择器选不中，必须整条
        包进 :global()；既然出了作用域，就要锚在本页独有的 .text-editor-page 上，
        否则路由 CSS 会漏到 EPUB 编辑器的代码编辑器上。 */
-    :global(
-        :root[data-tepub-layout="phone"] .text-editor-page .cm-content
-    ) {
+    :global(:root[data-tepub-layout="phone"] .text-editor-page .cm-content) {
         padding: 10px 12px !important;
         line-height: 26px;
     }

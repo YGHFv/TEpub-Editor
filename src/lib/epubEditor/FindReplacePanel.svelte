@@ -1,5 +1,6 @@
 <script lang="ts">
     import CustomSelect from "$lib/CustomSelect.svelte";
+    import { t } from "$lib/i18n.svelte";
     import type { SearchDirection, SearchScope } from "$lib/findReplace";
 
     let {
@@ -80,7 +81,7 @@
 
 <div class="find-replace-panel">
     <div class="fr-row">
-        <span class="fr-label">&#26597;&#25214;:</span>
+        <span class="fr-label">查找:</span>
         <div class="fr-input-wrapper">
             <input
                 id="epub-search-input-fr"
@@ -98,7 +99,7 @@
                     showFindHistory = !showFindHistory;
                     showReplaceHistory = false;
                 }}
-                title="&#26174;&#31034;&#26597;&#25214;&#21382;&#21490;"
+                title="显示查找历史"
                 >&#9662;</button
             >
             {#if showFindHistory && findHistory.length > 0}
@@ -120,7 +121,7 @@
                                     e.stopPropagation();
                                     onRemoveFindHistory(i);
                                 }}
-                                title="&#21024;&#38500;">&times;</button
+                                title="删除">&times;</button
                             >
                         </div>
                     {/each}
@@ -131,24 +132,24 @@
             <button
                 class="fr-btn fr-btn-text"
                 onclick={onCountMatches}
-                title="&#35745;&#25968;">&#35745;&#25968;</button
+                title="计数">计数</button
             >
             <button
                 class="fr-btn fr-btn-text"
                 onclick={onFindPrev}
-                title="&#19978;&#19968;&#20010;"
-                >&#19978;&#19968;&#20010;</button
+                title="上一个"
+                >上一个</button
             >
             <button
                 class="fr-btn fr-btn-text"
                 onclick={onFindNext}
-                title="&#19979;&#19968;&#20010;"
-                >&#19979;&#19968;&#20010;</button
+                title="下一个"
+                >下一个</button
             >
         </div>
     </div>
     <div class="fr-row">
-        <span class="fr-label">&#26367;&#25442;:</span>
+        <span class="fr-label">替换:</span>
         <div class="fr-input-wrapper">
             <input
                 type="text"
@@ -164,7 +165,7 @@
                     showReplaceHistory = !showReplaceHistory;
                     showFindHistory = false;
                 }}
-                title="&#26174;&#31034;&#26367;&#25442;&#21382;&#21490;"
+                title="显示替换历史"
                 >&#9662;</button
             >
             {#if showReplaceHistory && replaceHistory.length > 0}
@@ -186,7 +187,7 @@
                                     e.stopPropagation();
                                     onRemoveReplaceHistory(i);
                                 }}
-                                title="&#21024;&#38500;">&times;</button
+                                title="删除">&times;</button
                             >
                         </div>
                     {/each}
@@ -197,18 +198,18 @@
             <button
                 class="fr-btn fr-btn-text"
                 onclick={onReplace}
-                title="&#26367;&#25442;">&#26367;&#25442;</button
+                title="替换">替换</button
             >
             <button
                 class="fr-btn fr-btn-wide fr-danger"
                 onclick={onReplaceAll}
-                title="&#20840;&#37096;&#26367;&#25442;"
-                >&#20840;&#37096;&#26367;&#25442;</button
+                title="全部替换"
+                >全部替换</button
             >
         </div>
     </div>
     <div class="fr-row fr-options">
-        <span class="fr-label">&#25628;&#32034;&#36873;&#39033;:</span>
+        <span class="fr-label">搜索选项:</span>
         <CustomSelect
             className="fr-custom-select fr-select-sm"
             value={isRegex ? "regex" : "text"}
@@ -229,15 +230,15 @@
                 (searchDirection = event.detail as SearchDirection)}
         />
         <label class="fr-checkbox">
-            <input type="checkbox" bind:checked={wrapAround} />&#24490;&#29615;
+            <input type="checkbox" bind:checked={wrapAround} />循环
         </label>
         <label class="fr-checkbox">
             <input
                 type="checkbox"
                 bind:checked={textOnly}
-            />&#32431;&#25991;&#26412;
+            />纯文本
         </label>
-        <span class="fr-message">{searchMessage}</span>
+        <span class="fr-message">{t(searchMessage)}</span>
     </div>
 </div>
 

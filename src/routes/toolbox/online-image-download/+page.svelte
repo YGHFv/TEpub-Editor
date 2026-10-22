@@ -21,6 +21,7 @@
     } from "$lib/webFileWorkflow";
     import { platform } from "$lib/platform";
     import { EPUB_STYLE_LIBRARY_KEY as STYLE_STORAGE_KEY } from "$lib/storageKeys";
+    import { t } from "$lib/i18n.svelte";
 
     type DesktopDownloadResponse = {
         dataBase64: string;
@@ -53,7 +54,7 @@
     $: styleOptions = styles.map((style) => ({
         value: style.id,
         label: style.name,
-        meta: style.sourceKind === "saved" ? "我的样式" : "内置",
+        meta: t(style.sourceKind === "saved" ? "我的样式" : "内置"),
     }));
     $: selectedCount = selectedUrls.size;
     $: totalOccurrences = references.reduce(
@@ -140,12 +141,12 @@
         });
         const file = validation.accepted[0];
         if (!file) {
-            errorText = "请选择扩展名为 .epub 的文件。";
+            errorText = t("请选择扩展名为 .epub 的文件。");
             return;
         }
         busy = true;
         errorText = "";
-        progressText = "正在扫描章节中的在线图片…";
+        progressText = t("正在扫描章节中的在线图片…");
         result = null;
         try {
             const doc = await loadWebEpub(file);
@@ -156,15 +157,23 @@
             references = found;
             selectedUrls = new Set(found.map((item) => item.url));
             progressText = found.length
-                ? `发现 ${found.length} 个在线图片地址，共 ${found.reduce((sum, item) => sum + item.occurrences, 0)} 处引用。`
-                : "没有发现 HTTP/HTTPS 在线图片。";
+                ? t("发现 {urls} 个在线图片地址，共 {references} 处引用。", {
+                      urls: found.length,
+                      references: found.reduce(
+                          (sum, item) => sum + item.occurrences,
+                          0,
+                      ),
+                  })
+                : t("没有发现 HTTP/HTTPS 在线图片。");
         } catch (error) {
             sourceFile = null;
             scannedDocument = null;
             workingDocument = null;
             references = [];
             selectedUrls = new Set();
-            errorText = `读取 EPUB 失败：${error instanceof Error ? error.message : String(error)}`;
+            errorText = t("读取 EPUB 失败：{error}", {
+                error: error instanceof Error ? error.message : String(error),
+            });
         } finally {
             busy = false;
             if (fileInput) fileInput.value = "";
@@ -233,18 +242,21 @@
             });
             if (!response.ok)
                 throw new Error(
-                    `图片服务器返回 ${response.status} ${response.statusText}`,
+                    t("图片服务器返回 {status} {statusText}", {
+                        status: response.status,
+                        statusText: response.statusText,
+                    }),
                 );
             const declaredLength = Number(
                 response.headers.get("content-length") || 0,
             );
             if (declaredLength > MAX_BROWSER_IMAGE_BYTES)
-                throw new Error("图片超过 32 MB 限制");
+                throw new Error(t("图片超过 32 MB 限制"));
             const bytes = new Uint8Array(await response.arrayBuffer());
             if (bytes.byteLength > MAX_BROWSER_IMAGE_BYTES)
-                throw new Error("图片超过 32 MB 限制");
+                throw new Error(t("图片超过 32 MB 限制"));
             if (!hasSupportedImageSignature(bytes))
-                throw new Error("响应不是支持的 JPG、PNG、WebP 或 GIF 图片");
+                throw new Error(t("响应不是支持的 JPG、PNG、WebP 或 GIF 图片"));
             return {
                 bytes,
                 mediaType: response.headers.get("content-type") || "",
@@ -259,7 +271,7 @@
         const extension =
             new URL(url).pathname.split(".").pop()?.toLowerCase() || "";
         if (extension === "gif")
-            throw new Error("GIF 不能通过 Canvas 转换，否则会丢失动画");
+            throw new Error(t("GIF 不能通过 Canvas 转换，否则会丢失动画"));
         if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
         if (extension === "webp") return "image/webp";
         return "image/png";
@@ -270,7 +282,7 @@
             const image = new Image();
             const timeout = window.setTimeout(() => {
                 image.src = "";
-                reject(new Error("图片元素加载超时"));
+                reject(new Error(t("图片元素加载超时")));
             }, 30_000);
             image.crossOrigin = "anonymous";
             image.referrerPolicy = "strict-origin-when-cross-origin";
@@ -281,7 +293,7 @@
             };
             image.onerror = () => {
                 window.clearTimeout(timeout);
-                reject(new Error("图片服务器未允许匿名跨域图片读取"));
+                reject(new Error(t("图片服务器未允许匿名跨域图片读取")));
             };
             image.src = url;
         });
@@ -294,14 +306,14 @@
         const image = await loadCorsImage(url);
         const width = image.naturalWidth;
         const height = image.naturalHeight;
-        if (!width || !height) throw new Error("图片没有有效尺寸");
+        if (!width || !height) throw new Error(t("图片没有有效尺寸"));
         if (width * height > MAX_CANVAS_PIXELS)
-            throw new Error("图片像素尺寸过大，无法在浏览器中安全转换");
+            throw new Error(t("图片像素尺寸过大，无法在浏览器中安全转换"));
         const canvas = document.createElement("canvas");
         canvas.width = width;
         canvas.height = height;
         const context = canvas.getContext("2d");
-        if (!context) throw new Error("浏览器无法创建图片转换画布");
+        if (!context) throw new Error(t("浏览器无法创建图片转换画布"));
         context.drawImage(image, 0, 0, width, height);
         const blob = await new Promise<Blob>((resolve, reject) => {
             try {
@@ -309,7 +321,9 @@
                     (value) =>
                         value
                             ? resolve(value)
-                            : reject(new Error("浏览器无法导出转换后的图片")),
+                            : reject(
+                                  new Error(t("浏览器无法导出转换后的图片")),
+                              ),
                     outputMediaType,
                     outputMediaType === "image/jpeg" ||
                         outputMediaType === "image/webp"
@@ -318,12 +332,16 @@
                 );
             } catch (error) {
                 reject(
-                    new Error(`跨域图片画布不可读取：${errorMessage(error)}`),
+                    new Error(
+                        t("跨域图片画布不可读取：{error}", {
+                            error: errorMessage(error),
+                        }),
+                    ),
                 );
             }
         });
         if (blob.size > MAX_BROWSER_IMAGE_BYTES)
-            throw new Error("转换后的图片超过 32 MB 限制");
+            throw new Error(t("转换后的图片超过 32 MB 限制"));
         return {
             bytes: new Uint8Array(await blob.arrayBuffer()),
             mediaType: blob.type || outputMediaType,
@@ -351,19 +369,25 @@
         try {
             return await downloadWithBrowserFetch(url);
         } catch (error) {
-            failures.push(`前端直读：${errorMessage(error)}`);
+            failures.push(
+                t("前端直读：{error}", { error: errorMessage(error) }),
+            );
         }
-        progressText = "浏览器直读受限，正在尝试前端图片解码转换…";
+        progressText = t("浏览器直读受限，正在尝试前端图片解码转换…");
         try {
             return await downloadWithCanvas(url);
         } catch (error) {
-            failures.push(`前端图片转换：${errorMessage(error)}`);
+            failures.push(
+                t("前端图片转换：{error}", { error: errorMessage(error) }),
+            );
         }
-        progressText = "纯前端通道均受跨域限制，正在使用服务端保底下载…";
+        progressText = t("纯前端通道均受跨域限制，正在使用服务端保底下载…");
         try {
             return await downloadWithWebProxy(url);
         } catch (error) {
-            failures.push(`服务端保底：${errorMessage(error)}`);
+            failures.push(
+                t("服务端保底：{error}", { error: errorMessage(error) }),
+            );
         }
         throw new Error(failures.join("；"));
     }
@@ -380,7 +404,7 @@
         busy = true;
         result = null;
         errorText = "";
-        progressText = "准备下载在线图片…";
+        progressText = t("准备下载在线图片…");
         try {
             // 每次都从原文件重新载入，避免重试时重复写入资源与 manifest。
             const cleanDocument = await loadWebEpub(sourceFile);
@@ -391,15 +415,29 @@
                 selectedStyle,
                 downloadImage,
                 (progress) => {
-                    progressText = progress.message;
+                    progressText = t(progress.message);
                 },
             );
             progressText = result.failedImages.length
-                ? `处理完成：下载 ${result.downloadedImages} 张，${result.failedImages.length} 张自动重试后仍失败。`
-                : `处理完成：下载 ${result.downloadedImages} 张，替换 ${result.replacedOccurrences} 处引用。`;
+                ? t(
+                      "处理完成：下载 {downloaded} 张，{failed} 张自动重试后仍失败。",
+                      {
+                          downloaded: result.downloadedImages,
+                          failed: result.failedImages.length,
+                      },
+                  )
+                : t(
+                      "处理完成：下载 {downloaded} 张，替换 {replaced} 处引用。",
+                      {
+                          downloaded: result.downloadedImages,
+                          replaced: result.replacedOccurrences,
+                      },
+                  );
         } catch (error) {
-            errorText = `处理失败：${error instanceof Error ? error.message : String(error)}`;
-            progressText = "处理失败，请点击“查看日志”了解详情。";
+            errorText = t("处理失败：{error}", {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            progressText = t("处理失败，请点击“查看日志”了解详情。");
         } finally {
             busy = false;
         }
@@ -417,7 +455,9 @@
         const failedUrls = previous.failedImages.map((item) => item.url);
         busy = true;
         errorText = "";
-        progressText = `正在重试 ${failedUrls.length} 张失败图片…`;
+        progressText = t("正在重试 {count} 张失败图片…", {
+            count: failedUrls.length,
+        });
         try {
             const retried = await embedWebEpubRemoteImages(
                 workingDocument,
@@ -425,7 +465,7 @@
                 selectedStyle,
                 downloadImage,
                 (progress) => {
-                    progressText = progress.message;
+                    progressText = t(progress.message);
                 },
             );
             result = {
@@ -437,11 +477,21 @@
                 changedFiles: previous.changedFiles + retried.changedFiles,
             };
             progressText = result.failedImages.length
-                ? `手动重试完成：仍有 ${result.failedImages.length} 张失败，可再次重试。`
-                : `重试成功：累计下载 ${result.downloadedImages} 张，替换 ${result.replacedOccurrences} 处引用。`;
+                ? t("手动重试完成：仍有 {count} 张失败，可再次重试。", {
+                      count: result.failedImages.length,
+                  })
+                : t(
+                      "重试成功：累计下载 {downloaded} 张，替换 {replaced} 处引用。",
+                      {
+                          downloaded: result.downloadedImages,
+                          replaced: result.replacedOccurrences,
+                      },
+                  );
         } catch (error) {
-            errorText = `重试失败：${error instanceof Error ? error.message : String(error)}`;
-            progressText = "手动重试未完成，请点击“查看日志”了解详情。";
+            errorText = t("重试失败：{error}", {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            progressText = t("手动重试未完成，请点击“查看日志”了解详情。");
         } finally {
             busy = false;
         }
@@ -669,11 +719,13 @@
                     />
                     {#if selectedStyle}
                         <div class="style-copy">
-                            <strong>{selectedStyle.name}</strong>
-                            <p>{selectedStyle.description}</p>
+                            <strong>{t(selectedStyle.name)}</strong>
+                            <p>{t(selectedStyle.description)}</p>
                         </div>
                         <iframe
-                            title={`${selectedStyle.name}预览`}
+                            title={t("{name} 预览", {
+                                name: t(selectedStyle.name),
+                            })}
                             srcdoc={previewDocument}
                         ></iframe>
                     {/if}

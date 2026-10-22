@@ -16,6 +16,7 @@
         safeFileName,
         selectionName,
     } from "$lib/mobileFlow";
+    import { t } from "$lib/i18n.svelte";
 
     interface MobileEpubMetadata {
         title: string;
@@ -56,7 +57,7 @@
     let loaded = false;
     let dirty = false;
     let busy = false;
-    let status = "选择 EPUB 后编辑元数据。";
+    let status = t("选择 EPUB 后编辑元数据。");
     let lastQueryLoadKey = "";
 
     function openPicker() {
@@ -159,7 +160,7 @@
             selectedPath = epubPath;
             selectedName = name || selectionName(epubPath);
             exportPath = "";
-            status = "正在读取元数据...";
+            status = t("正在读取元数据...");
             metadata = await invoke<MobileEpubMetadata>(
                 "mobile_read_epub_metadata",
                 { epubPath },
@@ -168,12 +169,12 @@
             tagsText = metadata.tags.join(", ");
             loaded = true;
             dirty = false;
-            status = "已读取元数据。";
+            status = t("已读取元数据。");
         } catch (err) {
             loaded = false;
-            status = "读取元数据失败";
-            await message(`读取元数据失败：${err}`, {
-                title: "编辑 EPUB",
+            status = t("读取元数据失败");
+            await message(t("读取元数据失败：{error}", { error: String(err) }), {
+                title: t("编辑 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -191,9 +192,9 @@
             const cachedPath = await cacheBrowserFileStable(file, "epub");
             await loadMetadata(cachedPath, file.name);
         } catch (err) {
-            status = "导入 EPUB 失败";
-            await message(`导入 EPUB 失败：${err}`, {
-                title: "编辑 EPUB",
+            status = t("导入 EPUB 失败");
+            await message(t("导入 EPUB 失败：{error}", { error: String(err) }), {
+                title: t("编辑 EPUB"),
                 kind: "error",
             });
         }
@@ -225,11 +226,11 @@
             }
             dirty = false;
             exportPath = "";
-            status = "封面已更新到应用缓存副本。";
+            status = t("封面已更新到应用缓存副本。");
         } catch (err) {
-            status = "更换封面失败";
-            await message(`更换封面失败：${err}`, {
-                title: "编辑 EPUB",
+            status = t("更换封面失败");
+            await message(t("更换封面失败：{error}", { error: String(err) }), {
+                title: t("编辑 EPUB"),
                 kind: "error",
             });
         } finally {
@@ -249,9 +250,9 @@
         metadata = saved;
         tagsText = saved.tags.join(", ");
         dirty = false;
-        status = "元数据已保存到应用缓存副本。";
+        status = t("元数据已保存到应用缓存副本。");
         if (showDialog)
-            await message(status, { title: "编辑 EPUB", kind: "info" });
+            await message(status, { title: t("编辑 EPUB"), kind: "info" });
     }
 
     async function openStructureEditor() {
@@ -261,10 +262,13 @@
             if (dirty) await saveMetadata(false);
             await goto(editRoute());
         } catch (err) {
-            await message(`进入 EPUB 文件结构失败：${err}`, {
-                title: "编辑 EPUB",
-                kind: "error",
-            });
+            await message(
+                t("进入 EPUB 文件结构失败：{error}", { error: String(err) }),
+                {
+                    title: t("编辑 EPUB"),
+                    kind: "error",
+                },
+            );
         } finally {
             busy = false;
         }
@@ -285,13 +289,16 @@
             if (dirty) await saveMetadata(false);
             const result = await exportEpubPath(selectedPath, exportName());
             exportPath = result.output_path;
-            status = result.message;
+            status = t(result.message);
         } catch (err) {
-            status = "保存并导出 EPUB 失败";
-            await message(`保存并导出 EPUB 失败：${err}`, {
-                title: "编辑 EPUB",
-                kind: "error",
-            });
+            status = t("保存并导出 EPUB 失败");
+            await message(
+                t("保存并导出 EPUB 失败：{error}", { error: String(err) }),
+                {
+                    title: t("编辑 EPUB"),
+                    kind: "error",
+                },
+            );
         } finally {
             busy = false;
         }
