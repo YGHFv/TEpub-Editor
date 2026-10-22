@@ -1,5 +1,7 @@
 # TEpub Editor
 
+**简体中文** | [繁體中文](docs/README.zh-TW.md) | [English](docs/README.en.md)
+
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-blue)
 ![Version](https://img.shields.io/badge/Version-1.4.0-orange)
 ![Stack](https://img.shields.io/badge/Stack-Tauri%202%20%2B%20Svelte%205%20%2B%20Rust-00a7d0)
